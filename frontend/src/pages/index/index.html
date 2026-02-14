@@ -1,324 +1,180 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <!-- Google tag (gtag.js) -->
-    <script
-      async
-      src="https://www.googletagmanager.com/gtag/js?id=G-78XPQCG150"
-    ></script>
-    <script>
-      window.dataLayer = window.dataLayer || [];
-      function gtag() {
-        dataLayer.push(arguments);
-      }
-      gtag("js", new Date());
-      gtag("config", "G-78XPQCG150");
-    </script>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Home | Sam Lux For Congress</title>
-    <link
-      rel="stylesheet"
-      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"
+    <meta
+      name="description"
+      content="Polis helps you discover and discuss what is happening locally through community posts, events, and civic tools."
     />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Gideon+Roman&display=swap"
-      rel="stylesheet"
-    />
+    <title>Polis | Local Civic Social App</title>
   </head>
   <body>
-    <!-- Placeholder for Header -->
     <div id="header-placeholder"></div>
 
-    <!-- Main Content -->
-    <main>
-      <!-- Hero -->
-      <section id="hero" class="hero">
-        <div class="ticker-wrapper">
-          <ul id="heroTicker" class="hero-ticker">
-            <li>❌ No wasteful television ads</li>
-            <li>✔️ Preserving our public lands</li>
-            <li>❌ No corporate PAC money</li>
-            <li>✔️ Advocating for affordable housing</li>
-            <li>❌ No lobbyist influence</li>
-            <li>✔️ Ensuring healthcare for all</li>
-            <li>❌ No big-money donors</li>
-            <li>✔️ Standing up for the working class</li>
-            <li>❌ No special interests</li>
-            <li>✔️ Advocating for education</li>
-            <li>❌ No negative campaigning</li>
-            <li>✔️ Supporting rural communities</li>
-            <li>❌ No partisan attacks</li>
-            <li>✔️ Investing in energy independence</li>
-            <li>❌ No fundraiser spam</li>
-            <li>✔️ Defending American values</li>
-            <li>❌ No capitulating to authoritarianism</li>
-            <li>✔️ Protecting personal freedoms</li>
-          </ul>
-        </div>
-        <div class="container hero-content">
-          <h1>Elect Sam Lux</h1>
-          <p>I Work For The Working Class—Because I Am Working Class</p>
-          <div class="hero-buttons">
-            <a href="volunteer.html" class="btn btn-primary">Volunteer</a>
-            <a href="https://secure.actblue.com/donate/luxformontana" class="btn btn-secondary">Donate</a>
-          </div>
-            <div class="social-links">
-              <a href="https://www.facebook.com/profile.php?id=61578387818006" aria-label="Facebook"><i class="fab fa-facebook-f"></i></a>
-              <a href="https://bsky.app/profile/luxformontana.bsky.social" aria-label="Bluesky"><i class="fab fa-bluesky"></i></a>
-              <a href="https://x.com/luxformontana" aria-label="Twitter"><i class="fab fa-twitter"></i></a>
-              <a href="https://www.instagram.com/luxformontana/" aria-label="Instagram"><i class="fab fa-instagram"></i></a>
-              <a href="https://discord.gg/rxKgJMhahs" aria-label="Discord" target="_blank" rel="noopener"><i class="fab fa-discord"></i></a>
-            </div>
-        </div>
-      </section>
-
-      <!-- Video Intro and Upcoming Events -->
-      <section id="video" class="section video-section">
-        <div class="container video-events">
-          <div class="video-wrapper">
-            <div class="video-responsive">
-              <iframe
-                src="https://www.youtube.com/embed/nyPqSXBII0Y?si=Jzmx1w_1ls_0ej1R" 
-                title="YouTube video player" 
-                frameborder="0" 
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" 
-                referrerpolicy="strict-origin-when-cross-origin" 
-                allowfullscreen>
-              </iframe>
+    <main class="home-main">
+      <section class="home-hero page-section">
+        <div class="container hero-layout">
+          <div>
+            <span class="badge">Now Building the Polis Community</span>
+            <h1>
+              Local conversations move faster when your community is in one
+              place.
+            </h1>
+            <p class="hero-copy">
+              Polis helps you discover and discuss what is happening locally
+              through community posts, events, and civic tools, while giving you
+              controls like reporting, blocking, and account deletion.
+            </p>
+            <div class="hero-actions">
+              <a href="features.html" class="btn btn-outline"
+                >Explore Features</a
+              >
+              <a href="delete-account.html" class="btn btn-secondary"
+                >Account Deletion</a
+              >
             </div>
           </div>
-          <div class="events-wrapper">
-            <h2>Upcoming Events</h2>
-            <ul id="eventsList" class="events-grid"></ul>
-              <div class="more-events">
-                <a href="events.html" class="btn btn-secondary"
-                  >View All Events</a
-                >
-              </div>
+          <div class="hero-preview surface">
+            <img
+              src="../../assets/images/polis/Banner.png"
+              alt="Polis banner preview"
+            />
+            <p class="preview-caption">
+              Preview image for Polis brand presentation.
+            </p>
           </div>
         </div>
       </section>
 
-      <!-- Recent News -->
-      <section id="news" class="section news-section">
+      <section class="page-section">
         <div class="container">
-          <h2>Recent News</h2>
-          <div class="news-carousel">
-            <button class="carousel-btn news-prev" aria-label="Previous news">
-              &#10094;
-            </button>
-            <ul class="news-list"></ul>
-            <button class="carousel-btn news-next" aria-label="Next news">
-              &#10095;
-            </button>
+          <h2>What Polis does today</h2>
+          <div class="grid-cards">
+            <article class="card">
+              <h3>Location-aware local feed</h3>
+              <p>
+                Users set a home area manually or opt into GPS to see relevant
+                local content.
+              </p>
+            </article>
+            <article class="card">
+              <h3>Posts, comments, and replies</h3>
+              <p>
+                Share image/video posts and discuss updates with thread-style
+                conversations.
+              </p>
+            </article>
+            <article class="card">
+              <h3>Events and signups</h3>
+              <p>
+                Create and join local events. Free event signup is available
+                now.
+              </p>
+            </article>
+            <article class="card">
+              <h3>Candidate access tools</h3>
+              <p>
+                Application and profile tools support candidates where role
+                access applies.
+              </p>
+            </article>
+            <article class="card">
+              <h3>Safety controls</h3>
+              <p>
+                In-app reporting, muting, blocking, and moderation workflows
+                help protect the community.
+              </p>
+            </article>
+            <article class="card">
+              <h3>Paid events</h3>
+              <p>
+                Paid event processing is not currently live in this release and
+                is marked as coming soon.
+              </p>
+            </article>
           </div>
         </div>
       </section>
 
-      <!-- Campaign Financial Snapshot -->
-      <section id="campaign-stats" class="section campaign-stats">
-        <div class="container">
-          <div class="campaign-stats__header">
-            <h2>Campaign Financial Snapshot</h2>
-            <p>From day one of this campaign, we promised radical transparency to keep our grassroots movement accountable to the people of Montana.</p>
+      <section class="page-section app-strip">
+        <div class="container app-strip-grid">
+          <img
+            src="../../assets/images/polis/Polis.png"
+            alt="Polis app feed preview"
+            class="surface"
+          />
+          <img
+            src="../../assets/images/polis/Banner.png"
+            alt="Polis events preview"
+            class="surface"
+          />
+          <img
+            src="../../assets/images/polis/Polis.png"
+            alt="Polis safety preview"
+            class="surface"
+          />
+        </div>
+      </section>
+
+      <section id="join-waitlist" class="page-section">
+        <div class="container waitlist-wrap surface">
+          <div>
+            <h2>Join the Polis launch waitlist</h2>
+            <p>
+              Sign up for release updates and launch timing. Provide email,
+              phone, or both.
+            </p>
+          </div>
+          <form id="waitlist-form" novalidate>
+            <label for="waitlist-email">Email (optional)</label>
+            <input
+              id="waitlist-email"
+              name="email"
+              type="email"
+              placeholder="you@example.com"
+            />
+
+            <label for="waitlist-phone">Phone (optional)</label>
+            <input
+              id="waitlist-phone"
+              name="phone"
+              type="tel"
+              placeholder="(555) 555-5555"
+            />
+
+            <button type="submit" class="btn btn-primary">Join Waitlist</button>
+            <p class="form-help">At least one contact field is required.</p>
             <p
-              class="campaign-stats__updated"
-              data-finance-summary-updated
+              id="waitlist-feedback"
+              class="form-feedback hidden"
+              role="status"
               aria-live="polite"
             ></p>
-          </div>
-          <div class="campaign-stats__grid">
-            <article class="campaign-stats__card" aria-label="Total Raised">
-              <h3>Total Raised</h3>
-              <p
-                class="campaign-stats__value"
-                data-summary-field="totalRaised"
-                data-target="0"
-              >
-                $0
-              </p>
-              <span class="campaign-stats__meta">Since day one of this run</span>
-            </article>
-            <article class="campaign-stats__card" aria-label="Self Financed">
-              <h3>Self Financed</h3>
-              <p
-                class="campaign-stats__value"
-                data-summary-field="selfFinanced"
-                data-target="0"
-              >
-                $0
-              </p>
-              <span class="campaign-stats__meta">Personal investment keeping us independent</span>
-            </article>
-            <article class="campaign-stats__card" aria-label="Total Spent">
-              <h3>Total Spent</h3>
-              <p
-                class="campaign-stats__value"
-                data-summary-field="totalSpent"
-                data-target="0"
-              >
-                $0
-              </p>
-              <span class="campaign-stats__meta">Every dollar goes to reaching more Montanans</span>
-            </article>
-            <article class="campaign-stats__card" aria-label="Cash On Hand">
-              <h3>Cash On Hand</h3>
-              <p
-                class="campaign-stats__value"
-                data-summary-field="cashOnHand"
-                data-target="0"
-              >
-                $0
-              </p>
-              <span class="campaign-stats__meta">To fuel the campaign</span>
-            </article>
-            <article class="campaign-stats__card" aria-label="Candidate Salary">
-              <h3>Candidate Salary</h3>
-              <p
-                class="campaign-stats__value"
-                data-summary-field="candidateSalary"
-                data-target="0"
-              >
-                $0
-              </p>
-              <span class="campaign-stats__meta">Taken to line the Lux's pocket</span>
-            </article>
-            <article class="campaign-stats__card campaign-stats__card--wide" aria-label="Raised From Super PACs">
-              <h3>Raised From Super PACs</h3>
-              <p
-                class="campaign-stats__value"
-                data-summary-field="superPacRaised"
-                data-target="0"
-              >
-                $0
-              </p>
-              <span class="campaign-stats__meta">Proud to owe nothing to political big money</span>
-            </article>
-            <article class="campaign-stats__card" aria-label="Staff Salaries">
-              <h3>Campaign Staff Salaries</h3>
-              <p
-                class="campaign-stats__value"
-                data-summary-field="staffSalaries"
-                data-target="0"
-              >
-                $0
-              </p>
-              <span class="campaign-stats__meta">Keeping our local teams employed</span>
-            </article>
-          </div>
-          <div class="campaign-stats__cta">
-            <a href="campaign-finances.html" class="btn btn-secondary">View Itemized Spending</a>
-          </div>
+          </form>
         </div>
       </section>
 
-      <!-- Issues -->
-      <section id="issues" class="section issues">
-        <div class="issues-container">
-          <h2>Key Issues</h2>
-          <ul class="issues-list">
-            <li id="economic" class="issue-card">
-              <a href="issues.html#economic">
-                <h3>Economic Stability &amp; Cost of Living</h3>
-                <p>Keeping prices down and wages fair for working families.</p>
-              </a>
-            </li>
-            <li id="housing" class="issue-card">
-              <a href="issues.html#housing">
-                <h3>Housing Affordability</h3>
-                <p>
-                  Making homeownership and rental housing accessible in rural &
-                  urban MT.
-                </p>
-              </a>
-            </li>
-            <li id="immigration" class="issue-card">
-              <a href="issues.html#immigration">
-                <h3>Immigration, Border Security &amp; Crime</h3>
-                <p>
-                  Balanced reform that secures our borders while supporting our
-                  workforce.
-                </p>
-              </a>
-            </li>
-            <li id="agriculture" class="issue-card">
-              <a href="issues.html#agriculture">
-                <h3>Agriculture &amp; Rural Livelihoods</h3>
-                <p>
-                  Supporting Montana’s farmers, ranchers, and rural communities.
-                </p>
-              </a>
-            </li>
-            <li id="energy" class="issue-card">
-              <a href="issues.html#energy">
-                <h3>Energy Independence &amp; Environmental Stewardship</h3>
-                <p>
-                  Investing in clean energy while protecting our public lands.
-                </p>
-              </a>
-            </li>
-            <li id="health" class="issue-card">
-              <a href="issues.html#health">
-                <h3>Health Care &amp; Social Services</h3>
-                <p>Affordable, accessible care for every Montanan.</p>
-              </a>
-            </li>
-            <li id="education" class="issue-card">
-              <a href="issues.html#education">
-                <h3>Education &amp; Community Values</h3>
-                <p>
-                  Strengthening schools, supporting teachers, and promoting
-                  civic engagement.
-                </p>
-              </a>
-            </li>
-            <!--
-            <li id="guns" class="issue-card">
-              <a href="issues.html#guns">
-                <h3>Gun Rights &amp; Second Amendment</h3>
-                <p>
-                  Protecting lawful ownership with sensible safety measures.
-                </p>
-              </a>
-            </li>
-            <li id="social" class="issue-card">
-              <a href="issues.html#social">
-                <h3>Social &amp; Cultural Issues</h3>
-                <p>
-                  Defending personal freedoms from abortion access to LGBTQIA+
-                  rights.
-                </p>
-              </a>
-            </li>
-            <li id="tribal" class="issue-card">
-              <a href="issues.html#tribal">
-                <h3>Tribal Community Support &amp; Infrastructure</h3>
-                <p>
-                  Partnering with Tribal Nations for economic opportunity and
-                  services.
-                </p>
-              </a>
-            </li>  -->
-          </ul>
-        </div>
-      </section>
-
-      <!-- Get Involved -->
-      <section id="get-involved" class="section get-involved">
-        <div class="container">
-          <h2>Get Involved</h2>
-          <div class="hero-buttons">
-            <a href="volunteer.html" class="btn btn-primary">Volunteer</a>
-            <a href="https://secure.actblue.com/donate/luxformontana" class="btn btn-secondary">Donate</a>
+      <section class="page-section compliance-strip">
+        <div class="container compliance-links">
+          <h2>Trust and compliance resources</h2>
+          <p>
+            Polis publishes policy pages to explain data use, safety standards,
+            and account controls.
+          </p>
+          <div class="compliance-link-list">
+            <a href="privacy-policy.html" class="btn btn-outline"
+              >Privacy Policy</a
+            >
+            <a href="data-safety.html" class="btn btn-outline">Data Safety</a>
+            <a href="child-safety.html" class="btn btn-outline"
+              >Child Safety Standards</a
+            >
           </div>
         </div>
       </section>
     </main>
 
-    <!-- Placeholder for Footer -->
     <div id="footer-placeholder"></div>
   </body>
 </html>

@@ -1,0 +1,21 @@
+.legal-main {
+  display: grid;
+}
+
+.legal-card {
+  padding: var(--space-lg);
+}
+
+.legal-card h2,
+.legal-card h3 {
+  margin-top: var(--space-lg);
+}
+
+.legal-card ul {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.legal-card li {
+  margin-bottom: 0;
+}

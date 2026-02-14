@@ -1,60 +1,69 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <!-- Google tag (gtag.js) -->
-    <script
-      async
-      src="https://www.googletagmanager.com/gtag/js?id=G-78XPQCG150"
-    ></script>
-    <script>
-      window.dataLayer = window.dataLayer || [];
-      function gtag() {
-        dataLayer.push(arguments);
-      }
-      gtag("js", new Date());
-      gtag("config", "G-78XPQCG150");
-    </script>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>About | Sam Lux For Congress</title>
-    <link
-      rel="stylesheet"
-      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"
+    <meta
+      name="description"
+      content="Learn about Polis, a location-aware civic social platform designed for local conversations, events, and trust tools."
     />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Gideon+Roman&display=swap"
-      rel="stylesheet"
-    />
-    <!-- Page specific styles -->
-    <link rel="stylesheet" href="./css/about.css" />
-    <script type="module" src="./about.js"></script>
+    <title>About | Polis</title>
   </head>
   <body>
-    <!-- Placeholder for Header -->
     <div id="header-placeholder"></div>
 
-    <main>
-      <!-- Hero section – displays a header image on desktop and will use the
-           first about image as a hero on mobile. The text inside will be hidden
-           on small screens in favour of a separate heading below. -->
-      <section id="about-hero" class="hero about-hero">
-        <div class="container hero-content">
-          <h1>Let Me Introduce myself</h1>
-        </div>
+    <main class="page-shell">
+      <section class="container about-intro">
+        <span class="badge">About Polis</span>
+        <h1>Built for local civic participation at neighborhood scale</h1>
+        <p>
+          Polis is a civic/social mobile app for iOS and Android designed to
+          help people discover what is happening in their local area and
+          participate in meaningful community discussions.
+        </p>
       </section>
 
-      <!-- This heading is only shown on mobile to provide a title beneath the
-           header image. It is hidden on larger viewports via CSS. -->
-      <h1 class="mobile-only-intro">Let Me Introduce myself</h1>
+      <section class="container about-grid">
+        <article class="card">
+          <h2>Mission</h2>
+          <p>
+            Make local information easier to discover and discuss with tools
+            that support safety, accountability, and user choice.
+          </p>
+        </article>
 
-      <!-- The biography content will be injected here via the importAbout.js
-           script. -->
-      <section id="bio"></section>
+        <article class="card">
+          <h2>Why local civic social</h2>
+          <p>
+            Most conversations about policy, services, and neighborhood issues
+            are geographically relevant. Polis prioritizes local context to
+            reduce noise and improve usefulness.
+          </p>
+        </article>
+      </section>
+
+      <section class="container card about-stack">
+        <h2>Service architecture and providers</h2>
+        <p>
+          Polis uses infrastructure and service providers that support
+          authentication, hosting, media workflows, and location-related
+          utilities.
+        </p>
+        <ul>
+          <li>
+            AWS services including Cognito, DynamoDB, S3, Lambda/API Gateway,
+            and CloudWatch
+          </li>
+          <li>Cloudflare Images/Stream for media processing and delivery</li>
+          <li>Google Places API for event address autocomplete in app flows</li>
+          <li>
+            AWS Location and U.S. Census geocoder support in address validation
+            workflows
+          </li>
+        </ul>
+      </section>
     </main>
 
-    <!-- Placeholder for Footer -->
     <div id="footer-placeholder"></div>
   </body>
 </html>

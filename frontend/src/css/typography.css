@@ -1,38 +1,50 @@
-/*────────────────────────────────────────────────────────────────────────*/
-/* 1) Headings & Paragraphs                                             */
-/*────────────────────────────────────────────────────────────────────────*/
+h1,
+h2,
+h3,
+h4 {
+  color: var(--text-main);
+  font-family: var(--font-heading);
+  letter-spacing: -0.02em;
+  margin: 0 0 var(--space-md);
+  line-height: 1.2;
+}
 
 h1 {
-  font-size: 2.5rem;
-  font-weight: bold;
-  margin-bottom: 1rem;
-  color: var(--text-main);
+  font-size: clamp(2rem, 6vw, 3.4rem);
 }
 
 h2 {
-  font-size: 2rem;
-  margin-bottom: 1rem;
-  color: var(--text-main);
+  font-size: clamp(1.6rem, 4vw, 2.45rem);
 }
 
 h3 {
-  font-size: 1.5rem;
-  margin-bottom: 0.5rem;
-  color: var(--text-main);
+  font-size: clamp(1.15rem, 3vw, 1.5rem);
 }
 
-p {
-  font-size: 1.3rem;
-  margin-bottom: 1rem;
+p,
+li {
   color: var(--text-main);
+  font-size: clamp(1rem, 2.1vw, 1.08rem);
+  margin: 0 0 var(--space-md);
 }
 
-/* Links */
+small,
+.text-muted {
+  color: var(--text-muted);
+}
+
 a {
-  color: var(--link-color);
-  transition: opacity 0.2s;
+  color: var(--color-ink-700);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
 }
+
 a:hover,
-a:focus {
-  opacity: 0.8;
+a:focus-visible {
+  color: var(--color-ink-900);
+}
+
+ul,
+ol {
+  padding-left: 1.25rem;
 }

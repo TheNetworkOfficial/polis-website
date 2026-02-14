@@ -5,14 +5,25 @@ html {
   box-sizing: border-box;
   font-size: 100%;
 }
-*, *::before, *::after {
+*,
+*::before,
+*::after {
   box-sizing: inherit;
   margin: 0;
   padding: 0;
 }
 
 /* Reset margins */
-body, h1, h2, h3, h4, h5, h6, p, ul, ol {
+body,
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+p,
+ul,
+ol {
   margin: 0;
   padding: 0;
 }
@@ -25,7 +36,8 @@ img {
 }
 
 /* Links & buttons */
-a, button {
+a,
+button {
   text-decoration: none;
   background: none;
   border: none;

@@ -1,63 +1,8 @@
-/* Normalize CSS */
+@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap");
+
 @import "css/normalize.css";
-
-/* Google Font Import */
-@import url("https://fonts.googleapis.com/css2?family=Gideon+Roman&display=swap");
-
-/* Modular CSS Files */
 @import "css/base.css";
 @import "css/typography.css";
 @import "css/utilities.css";
 @import "components/header/css/header.css";
 @import "components/footer/css/footer.css";
-
-/* Universal Styles */
-
-.universal-container {
-  background-color: var(--container-background);
-  padding: 20px; /* A common padding, adjust based on your design */
-  border-radius: var(--border-radius);
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2); /* A moderate shadow for depth */
-  margin: auto; /* Center the container */
-  box-sizing: border-box; /* Include padding in the container's total width */
-}
-
-/* Tab Styles */
-.tab-button {
-  background: none;
-  border: none;
-  padding: 1rem 1.5rem;
-  cursor: pointer;
-  font-weight: bold;
-  font-size: 1.1rem;
-  color: var(--heading-color);
-  text-align: left;
-  border-left: 4px solid transparent;
-  margin-bottom: 2px;
-  transition:
-    background-color 0.3s,
-    border-left 0.3s;
-  display: block;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 150px;
-  box-sizing: border-box;
-}
-
-.tab-button:not(:last-child) {
-  border-bottom: 1px solid #ffffff30; /* Specific color for this section */
-}
-
-.tab-button:hover,
-.tab-button.active {
-  background-color: var(--container-background);
-  border-left: 4px solid var(--heading-color);
-}
-
-.tab-button.active {
-  color: var(--text-color-main);
-  background: rgba(255, 255, 255, 0.2);
-  border-left: 4px solid var(--heading-color);
-  margin-left: -4px; /* Specific margin for this section */
-}

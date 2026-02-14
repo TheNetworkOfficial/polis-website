@@ -1,0 +1,33 @@
+.features-main {
+  display: grid;
+  gap: var(--space-lg);
+}
+
+.features-intro {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.feature-journeys {
+  display: grid;
+  gap: var(--space-md);
+}
+
+.feature-item h2 {
+  font-size: clamp(1.25rem, 2.8vw, 1.6rem);
+  margin-bottom: 0.5rem;
+}
+
+.feature-note {
+  margin-bottom: 0.7rem;
+}
+
+.claim-guardrail ul {
+  margin: 0;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.claim-guardrail li {
+  margin-bottom: 0;
+}

@@ -1,17 +1,14 @@
-// adjustHeaderPadding.js
 /**
- * Adjust the body's padding so content isn't hidden behind the
- * fixed header.
+ * Sets page top padding so fixed header never overlaps page content.
  */
-function updateHeaderPadding() {
+function updateHeaderOffset() {
   const header = document.querySelector(".site-header");
-  if (header) {
-    document.body.style.paddingTop = `${header.offsetHeight}px`;
+  if (!header) {
+    return;
   }
+
+  document.body.style.paddingTop = `${header.offsetHeight}px`;
 }
 
-// Run after dynamic header/footer content is loaded
-document.addEventListener("dynamicContentLoaded", updateHeaderPadding);
-
-// Update padding on resize
-window.addEventListener("resize", updateHeaderPadding);
+document.addEventListener("dynamicContentLoaded", updateHeaderOffset);
+window.addEventListener("resize", updateHeaderOffset);

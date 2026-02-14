@@ -1,94 +1,76 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <!-- Google tag (gtag.js) -->
-    <script
-      async
-      src="https://www.googletagmanager.com/gtag/js?id=G-78XPQCG150"
-    ></script>
-    <script>
-      window.dataLayer = window.dataLayer || [];
-      function gtag() {
-        dataLayer.push(arguments);
-      }
-      gtag("js", new Date());
-      gtag("config", "G-78XPQCG150");
-    </script>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Contact | Sam Lux For Congress</title>
-    <link
-      rel="stylesheet"
-      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"
+    <meta
+      name="description"
+      content="Contact Polis support and compliance at Lux Corp for help, safety reports, and policy questions."
     />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Gideon+Roman&display=swap"
-      rel="stylesheet"
-    />
+    <title>Contact | Polis</title>
   </head>
   <body>
     <div id="header-placeholder"></div>
 
-    <!-- Banner -->
-    <section class="banner-image"></section>
+    <main class="page-shell">
+      <section class="container contact-intro">
+        <span class="badge">Support</span>
+        <h1>Contact Polis support and compliance</h1>
+        <p>
+          For general support, privacy requests, and child safety questions,
+          contact
+          <a href="mailto:lux.corp.app@gmail.com">lux.corp.app@gmail.com</a>.
+        </p>
+      </section>
 
-    <!-- Two-column CTA + Form -->
-    <div class="content-wrapper">
-      <div class="cta">
-        <h3>Get In Touch</h3>
-        <h2>Have A Question? Concern? Just want to yell at Sam Directly?</h2>
-        <p>
-          <strong>Our job is to represent you</strong>, and we can't do that if
-          we don't hear from you. So please, no matter the reason, don't
-          hesitate to reach out.
-        </p>
-        <p>
-          We do our best to respond to every message, but due to the high volume
-          of emails we receive, It may take some time.
-        </p>
-        <p>
-          In the mean time, if you want to get involved, be part of our
-          community, and work with Sam Lux, we encourage you to
-          <strong
-            ><a href="https://discord.gg/rxKgJMhahs">join our Discord</a>.
-          </strong>
-          This is the best way to connect with the campaign team and other
-          supporters.
-        </p>
-        <p>
-          To donate to the campaign by mail, checks should be made out to "Lux
-          For Congress" and sent to
-          <strong>P.O. Box 6076 Great Falls, MT 59406</strong>.
-        </p>
-        <p>
-          Press inquiries should email
-          <strong
-            ><a href="mailto:press@samluxforcongress.com"
-              >press@samluxforcongress.com</a
-            >.
-          </strong>
-        </p>
-      </div>
+      <section class="container contact-grid">
+        <article class="card">
+          <h2>Support channels</h2>
+          <p><strong>General support:</strong> lux.corp.app@gmail.com</p>
+          <p><strong>Privacy contact:</strong> lux.corp.app@gmail.com</p>
+          <p><strong>Child safety support:</strong> lux.corp.app@gmail.com</p>
+          <p class="text-muted">
+            If someone is in immediate danger, contact local emergency services.
+          </p>
+        </article>
 
-      <div class="form-container">
-        <form id="contact-form">
-          <input type="text" id="name" placeholder="Name" required />
-          <input type="email" id="email" placeholder="Email" required />
-          <input type="tel" id="phone" placeholder="Phone" />
-          <input type="text" id="zip" placeholder="Zip Code" />
-          <input type="text" id="subject" placeholder="Subject" required />
-          <textarea
-            id="message"
-            placeholder="Message"
-            rows="5"
-            required
-          ></textarea>
-          <button type="submit">Send Message</button>
-        </form>
-      </div>
-    </div>
+        <article class="card">
+          <h2>Send us a message</h2>
+          <form id="contact-form" novalidate>
+            <label for="contact-name">Name</label>
+            <input id="contact-name" name="name" type="text" required />
+
+            <label for="contact-email">Email</label>
+            <input id="contact-email" name="email" type="email" required />
+
+            <label for="contact-phone">Phone (optional)</label>
+            <input id="contact-phone" name="phone" type="tel" />
+
+            <label for="contact-zip">ZIP (optional)</label>
+            <input id="contact-zip" name="zip" type="text" />
+
+            <label for="contact-subject">Subject (optional)</label>
+            <input id="contact-subject" name="subject" type="text" />
+
+            <label for="contact-message">Message</label>
+            <textarea
+              id="contact-message"
+              name="message"
+              rows="6"
+              required
+            ></textarea>
+
+            <button type="submit" class="btn btn-primary">Send Message</button>
+            <p
+              id="contact-feedback"
+              class="form-feedback hidden"
+              role="status"
+              aria-live="polite"
+            ></p>
+          </form>
+        </article>
+      </section>
+    </main>
 
     <div id="footer-placeholder"></div>
   </body>

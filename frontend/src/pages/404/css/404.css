@@ -1,0 +1,19 @@
+.not-found-main {
+  display: grid;
+  place-items: center;
+  min-height: 58vh;
+}
+
+.not-found-card {
+  width: min(100% - 2rem, 620px);
+  margin-inline: auto;
+  padding: var(--space-xl);
+  text-align: center;
+}
+
+.not-found-actions {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}

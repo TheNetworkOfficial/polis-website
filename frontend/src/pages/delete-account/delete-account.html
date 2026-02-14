@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Polis account deletion page with sign-in and email-code verification."
+    />
+    <title>Delete Account | Polis</title>
+  </head>
+  <body>
+    <div id="header-placeholder"></div>
+
+    <main class="page-shell delete-main">
+      <section class="container delete-shell surface">
+        <span class="badge">Compliance Resource</span>
+        <h1>Delete your Polis account</h1>
+        <p>
+          This action is irreversible once executed. For account protection, you
+          must sign in and complete an emailed verification code before deletion
+          is allowed.
+        </p>
+
+        <ol class="delete-steps" aria-label="Delete account steps">
+          <li data-step-index="1">1. Sign in</li>
+          <li data-step-index="2">2. Verify email code</li>
+          <li data-step-index="3">3. Confirm deletion</li>
+          <li data-step-index="4">4. Submit request</li>
+        </ol>
+
+        <p
+          id="delete-global-feedback"
+          class="form-feedback hidden"
+          role="status"
+          aria-live="polite"
+        ></p>
+
+        <section data-state-panel="unauthenticated" class="delete-panel">
+          <h2>Step 1: Sign in</h2>
+          <p>
+            Sign in on the Cognito page to continue. You can use your existing
+            Polis credentials there, or create an account if needed.
+          </p>
+
+          <form id="delete-login-form" novalidate>
+            <label for="delete-identifier">Email or username</label>
+            <input
+              id="delete-identifier"
+              name="identifier"
+              type="text"
+              autocomplete="username"
+              required
+            />
+
+            <label for="delete-password">Password</label>
+            <input
+              id="delete-password"
+              name="password"
+              type="password"
+              autocomplete="current-password"
+              required
+            />
+
+            <button
+              id="delete-login-submit"
+              type="submit"
+              class="btn btn-primary"
+            >
+              Sign In with Password
+            </button>
+
+            <p
+              id="delete-login-feedback"
+              class="form-feedback hidden"
+              role="status"
+              aria-live="polite"
+            ></p>
+          </form>
+
+          <div class="delete-divider" aria-hidden="true"><span>or</span></div>
+
+          <div class="delete-actions-inline">
+            <button
+              id="delete-google-signin"
+              class="btn btn-outline"
+              type="button"
+            >
+              Continue with Google
+            </button>
+            <button
+              id="delete-hosted-signin"
+              class="btn btn-outline"
+              type="button"
+            >
+              Sign in on Cognito page
+            </button>
+          </div>
+
+          <p class="form-help">
+            Recommended: use the Cognito page above for sign-in/sign-up, then
+            return here to complete deletion verification.
+          </p>
+
+          <p class="form-help">
+            If you no longer have access to your sign-in methods, contact
+            <a href="mailto:lux.corp.app@gmail.com">lux.corp.app@gmail.com</a>
+            for assisted deletion support.
+          </p>
+        </section>
+
+        <section data-state-panel="authenticating" class="delete-panel" hidden>
+          <h2>Authenticating</h2>
+          <p>Please wait while we verify your sign-in session.</p>
+        </section>
+
+        <section data-state-panel="authenticated" class="delete-panel" hidden>
+          <h2>Step 2: Send verification code</h2>
+          <p>
+            Signed in as:
+            <strong id="delete-authenticated-user">Authenticated user</strong>
+          </p>
+          <p>
+            Send a one-time code to your account email. You must verify that
+            code before deletion is allowed.
+          </p>
+
+          <div class="delete-actions-inline">
+            <button
+              id="send-email-code-button"
+              class="btn btn-primary"
+              type="button"
+            >
+              Send Verification Code
+            </button>
+            <button
+              id="restart-from-authenticated"
+              class="btn btn-outline"
+              type="button"
+            >
+              Start Over
+            </button>
+          </div>
+        </section>
+
+        <section data-state-panel="sendingCode" class="delete-panel" hidden>
+          <h2>Sending code</h2>
+          <p>Please wait while we send your verification code.</p>
+        </section>
+
+        <section data-state-panel="codeSent" class="delete-panel" hidden>
+          <h2>Step 2: Verify emailed code</h2>
+          <p>
+            We sent a code to
+            <strong id="delete-code-destination">your email</strong>. Enter the
+            code below.
+          </p>
+
+          <form id="delete-code-form" novalidate>
+            <label for="delete-email-code">Verification code</label>
+            <input
+              id="delete-email-code"
+              name="code"
+              type="text"
+              inputmode="numeric"
+              autocomplete="one-time-code"
+              spellcheck="false"
+              required
+            />
+
+            <div class="delete-actions-inline">
+              <button
+                id="verify-email-code-button"
+                class="btn btn-primary"
+                type="submit"
+              >
+                Verify Code
+              </button>
+              <button
+                id="resend-email-code-button"
+                class="btn btn-outline"
+                type="button"
+              >
+                Resend Code
+              </button>
+              <button
+                id="back-to-authenticated"
+                class="btn btn-outline"
+                type="button"
+              >
+                Back
+              </button>
+            </div>
+
+            <p
+              id="delete-code-feedback"
+              class="form-feedback hidden"
+              role="status"
+              aria-live="polite"
+            ></p>
+          </form>
+        </section>
+
+        <section data-state-panel="verifyingCode" class="delete-panel" hidden>
+          <h2>Verifying code</h2>
+          <p>Please wait while we validate your verification code.</p>
+        </section>
+
+        <section data-state-panel="confirming" class="delete-panel" hidden>
+          <h2>Step 3: Confirm deletion</h2>
+          <p>
+            This request will call the same account-deletion function used by
+            the app settings page.
+          </p>
+
+          <form id="delete-confirm-form" novalidate>
+            <label class="checkbox-row" for="delete-irreversible-check">
+              <input
+                id="delete-irreversible-check"
+                name="irreversibleCheck"
+                type="checkbox"
+              />
+              I understand this request is irreversible once executed.
+            </label>
+
+            <label for="delete-confirm-phrase">Type DELETE to confirm</label>
+            <input
+              id="delete-confirm-phrase"
+              name="confirmationText"
+              type="text"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="DELETE"
+            />
+
+            <div class="delete-actions-inline">
+              <button
+                id="submit-delete-request"
+                class="btn btn-secondary"
+                type="submit"
+                disabled
+              >
+                Submit Deletion Request
+              </button>
+              <button
+                id="back-to-code-panel"
+                class="btn btn-outline"
+                type="button"
+              >
+                Back
+              </button>
+            </div>
+          </form>
+        </section>
+
+        <section data-state-panel="submitting" class="delete-panel" hidden>
+          <h2>Step 4: Submitting request</h2>
+          <p>Submitting your account deletion request.</p>
+        </section>
+
+        <section data-state-panel="success" class="delete-panel" hidden>
+          <h2>Request status</h2>
+          <p id="delete-success-message"></p>
+          <button
+            id="success-reset-button"
+            class="btn btn-outline"
+            type="button"
+          >
+            Submit Another Request
+          </button>
+        </section>
+
+        <section data-state-panel="error" class="delete-panel" hidden>
+          <h2>We could not complete that step</h2>
+          <p id="delete-error-message"></p>
+          <button id="delete-error-back" class="btn btn-outline" type="button">
+            Go Back
+          </button>
+        </section>
+      </section>
+    </main>
+
+    <div id="footer-placeholder"></div>
+  </body>
+</html>

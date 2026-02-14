@@ -1,612 +1,87 @@
-/* ────────────────────────────────────────────────────────────────────────
-   index.css — page-specific styles for a high-impact, voter-friendly homepage
-   ──────────────────────────────────────────────────────────────────────── */
+.home-hero {
+  padding-top: calc(var(--space-2xl) + 0.5rem);
+}
 
-/* 1) Hero Section — Full-bleed background + gradient overlay */
-#hero {
-  position: relative;
-  height: 90vh;
-  background: url("../../../assets/images/hero/hero.jpg") center/cover no-repeat;
-  display: flex;
+.hero-layout {
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr;
+  gap: var(--space-lg);
   align-items: center;
-  justify-content: center;
-  padding: 0 var(--padding-side);
 }
-#hero::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(
-    135deg,
-    rgba(0, 86, 166, 0.7),
-    rgba(0, 0, 0, 0.3)
-  );
-}
-.hero-content {
-  position: relative;
-  max-width: 700px;
-  text-align: center;
-  color: #fff;
-}
-/* ─── Hero ticker marquee ─────────────────────────────────────────── */
 
-.ticker-wrapper {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
+.hero-copy {
+  max-width: 58ch;
+  color: var(--text-muted);
+}
+
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+.hero-preview {
   overflow: hidden;
-  background: rgba(0, 0, 0, 0.6);
-  z-index: 5;
+  padding: 0.7rem;
 }
 
-.hero-ticker {
-  display: inline-block;
-  white-space: nowrap;
-  padding: 0.5rem 0;
-  margin: 0;
-  /* start the text off to the right */
-  transform: translateX(100%);
-  /* animate it moving left */
-  animation: marquee 200s linear infinite;
-  font-weight: 600;
-  color: #fff;
-  list-style: none;
-}
-
-.hero-ticker li {
-  display: inline-block;
-  font-size: 20px;
-  margin: 0 8rem;
-}
-
-/* loop it */
-@keyframes marquee {
-  from {
-    transform: translateX(0%);
-  }
-  to {
-    transform: translateX(-50%);
-  }
-}
-
-.hero-content h1 {
-  font-size: clamp(2.5rem, 5vw, 4rem);
-  margin-bottom: 1rem;
-  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
-  color:#ffffff;
-}
-.hero-content p {
-  font-size: clamp(1rem, 2.5vw, 1.5rem);
-  margin-bottom: 2rem;
-  color:#ffffff;
-}
-.hero-buttons {
-  margin-bottom: 20px;
-}
-.hero-buttons .btn {
-  margin: 0 0.5rem;
-  min-width: 140px;
-}
-
-/* ─── Video Section ───────────────────────────────────────────────────── */
-.video-section {
-  max-height: 900px;
-  padding: var(--section-vertical) 0;
-  background: var(--background-main);
-  text-align: center;
-}
-.video-section video {
+.hero-preview img {
+  border-radius: var(--radius-md);
   width: 100%;
-  height: 100%;
   object-fit: cover;
-  border-radius: var(--radius);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
-/* layout for video and events side by side */
-.video-events {
-  display: flex;
-  gap: 2rem;
-  align-items: stretch;
-}
-.video-wrapper {
-  flex: 1.2;
-  margin-left: -1rem;
-  display: flex;
-}
-/* Portrait video at 9:16 */
-.video-responsive {
-  position: relative;
-  min-height: 700px;
-  aspect-ratio: 9 / 16;
-}
-
-.video-responsive iframe {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  border-radius: var(--radius);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-}
-.events-wrapper {
-  flex: 1;
-}
-.events-grid {
-  list-style: none;
-  padding: 0;
-  margin-top: 1rem;
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 1rem;
-}
-.events-grid li {
-  background: var(--background-main);
-  border-left: 4px solid var(--primary-color);
-  padding: 1rem;
-  border-radius: var(--radius);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-  transition:
-    transform 0.2s,
-    box-shadow 0.2s;
-}
-.events-grid img {
-  width: 200px;
-  height: 150px;  
-  display: block;
-  margin-bottom: 0.5rem;
-}
-.events-grid li:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.1);
-}
-.events-grid a {
-  display: block;
-  color: var(--text-main);
-}
-.more-events {
-  padding-top: 20px;
-  text-align: center;
-  margin-bottom: 1rem;
-}
-
-/* ─── News Section ─────────────────────────────────────────────────────── */
-.news-section {
-  padding: var(--section-vertical) 0;
-  background: var(--primary-color);
-}
-.news-section h2 {
-  text-align: center;
-  color:#ffffff;
-}
-.news-carousel {
-  position: relative;
-  max-width: 100%;
-  margin: 0 auto;
-}
-.news-list {
-  list-style: none;
-  padding: 0;
-  margin-top: 1rem;
-  display: flex;
-  justify-content: center;
-  gap: 1rem;
-}
-.news-list li {
-  flex: 0 0 30%;
-  height: 200px;
-  display: none;
-  background-size: cover;
-  background-position: center;
-  border-radius: var(--radius);
-  color: #fff;
-  position: relative;
-  overflow: hidden;
-  order: 0;
-}
-.news-item {
-  background-image: url("../../../assets/images/hero/hero.jpg");
-}
-.news-list li::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  border-radius: var(--radius);
-}
-.news-list li.active,
-.news-list li.prev,
-.news-list li.next {
-  display: block;
-}
-.news-list li.prev {
-  order: 1;
-}
-.news-list li.active {
-  order: 2;
-}
-.news-list li.next {
-  order: 3;
-}
-.news-list a {
-  position: relative;
-  z-index: 1;
-  display: block;
-  padding: 1rem;
-  height: 100%;
-  color: #fff;
-}
-.news-list h3 {
-  margin-bottom: 0.5rem;
-}
-.news-list time {
-  font-size: 0.85rem;
-}
-.carousel-btn {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  background: var(--secondary-color);
-  color: #fff;
-  border: none;
-  border-radius: 50%;
-  width: 2rem;
-  height: 2rem;
-  cursor: pointer;
-}
-.news-prev {
-  left: -2rem;
-}
-.news-next {
-  right: -2rem;
-}
-
-/* ─── Campaign Financial Snapshot ─────────────────────────────────────── */
-.campaign-stats {
-  position: relative;
-  padding: var(--section-vertical) 0;
-  background: linear-gradient(
-    135deg,
-    rgba(57, 98, 137, 0.12),
-    rgba(141, 35, 43, 0.08)
-  );
-  overflow: hidden;
-}
-.campaign-stats::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(
-    circle at top right,
-    rgba(255, 255, 255, 0.45),
-    transparent 60%
-  );
-  pointer-events: none;
-}
-.campaign-stats .container {
-  position: relative;
-  z-index: 1;
-}
-.campaign-stats__header {
-  text-align: center;
-  max-width: 720px;
-  margin: 0 auto 2.5rem;
-}
-.campaign-stats__header h2 {
-  margin-bottom: 0.75rem;
-}
-.campaign-stats__header p {
-  color: rgba(0, 0, 0, 0.7);
-}
-.campaign-stats__updated {
+.preview-caption {
+  margin: 0.55rem 0 0;
+  color: var(--text-muted);
   font-size: 0.9rem;
-  margin-top: 0.75rem;
-  color: rgba(0, 0, 0, 0.55);
 }
-@media (prefers-color-scheme: dark) {
-  .campaign-stats__header p {
-    color: rgba(255, 255, 255, 0.8);
-  }
-  .campaign-stats__updated {
-    color: rgba(255, 255, 255, 0.7);
-  }
+
+.app-strip {
+  padding-top: 0;
 }
-.campaign-stats__grid {
+
+.app-strip-grid {
   display: grid;
-  gap: 1.5rem;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-}
-.campaign-stats__card--wide {
-  grid-column: auto;
-}
-.campaign-stats__card {
-  background: rgba(255, 255, 255, 0.8);
-  border-radius: var(--radius);
-  padding: 1.75rem 1.5rem;
-  box-shadow: 0 18px 45px rgba(0, 0, 0, 0.08);
-  backdrop-filter: blur(6px);
-  transition:
-    transform 0.3s ease,
-    box-shadow 0.3s ease;
-  text-align: center;
-}
-@media (prefers-color-scheme: dark) {
-  .campaign-stats__card {
-    background: rgba(18, 18, 18, 0.7);
-    box-shadow: 0 18px 45px rgba(0, 0, 0, 0.45);
-  }
-}
-.campaign-stats__card:hover {
-  transform: translateY(-6px);
-  box-shadow: 0 30px 60px rgba(0, 0, 0, 0.12);
-}
-.campaign-stats__card h3 {
-  font-size: 1rem;
-  letter-spacing: 0.05em;
-  margin-bottom: 0.75rem;
-  text-transform: uppercase;
-  color: var(--primary-color);
-}
-.campaign-stats__value {
-  font-size: clamp(2rem, 5vw, 2.8rem);
-  font-weight: 700;
-  margin: 0 0 0.5rem;
-  color: var(--text-main);
-}
-@media (prefers-color-scheme: dark) {
-  .campaign-stats__value {
-    color: #fff;
-  }
-}
-.campaign-stats__meta {
-  font-size: 0.9rem;
-  color: rgba(0, 0, 0, 0.6);
-}
-@media (prefers-color-scheme: dark) {
-  .campaign-stats__meta {
-    color: rgba(255, 255, 255, 0.75);
-  }
-}
-.campaign-stats__cta {
-  margin-top: 2.5rem;
-  text-align: center;
-}
-.campaign-stats__cta .btn {
-  min-width: 220px;
-}
-@media (max-width: 768px) {
-  .campaign-stats__header {
-    margin-bottom: 2rem;
-  }
-  .campaign-stats__card {
-    padding: 1.5rem;
-  }
-  .campaign-stats__cta .btn {
-    width: 100%;
-  }
-}
-@media (min-width: 1024px) {
-  .campaign-stats__grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-  .campaign-stats__card--wide {
-    grid-column: span 2;
-  }
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-md);
 }
 
-/* ─── Issues Section — Use theme colors instead of images ─── */
-.issues-list {
+.app-strip-grid img {
+  border-radius: var(--radius-md);
+  aspect-ratio: 5 / 8;
+  object-fit: cover;
+}
+
+.waitlist-wrap {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(325px, 1fr));
-  gap: 2rem;
-  margin-top: 2rem;
-  /* ensure every row is exactly as tall as the tallest item */
-  grid-auto-rows: 1fr;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-lg);
+  padding: var(--space-lg);
 }
 
-.issues-container {
-  max-width: 100%;
-  margin: 0;
-  padding: 0 1rem;
+.compliance-strip {
+  padding-top: 0;
 }
 
-.issues-list li {
-  background-image: none;
-  background-color: var(--primary-color);
-  border: 10px double var(--secondary-color);
-  border-radius: var(--radius);
-  padding: 1.5rem;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
-  position: relative;
-  overflow: hidden;
-  transition:
-    transform 0.3s,
-    box-shadow 0.3s;
-  aspect-ratio: 1 / 1; /* perfect square */
+.compliance-links {
+  display: grid;
+  gap: 0.5rem;
 }
 
-/* disable the dark overlay */
-.issues-list li::after {
-  display: none;
-}
-
-/* if you have a separate .issue-card background-image rule, turn it off */
-.issue-card {
-  background-image: none;
-}
-.issues-list li::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.4);
-  border-radius: var(--radius);
-  z-index: 0;
-  pointer-events: none;
-}
-.issues-list li::before {
-  content: "\f0a9";
-  font-family: "Font Awesome 5 Free";
-  font-weight: 900;
-  position: absolute;
-  top: 1rem;
-  right: 1rem;
-  color: var(--secondary-color);
-  opacity: 0.2;
-  z-index: 1;
-  pointer-events: none;
-}
-.issues-list li:hover {
-  transform: translateY(-5px);
-  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.1);
-}
-
-.section.issues h2 {
-  text-align: center;
-  color: var(--text-main);
-}
-.issues-list li h3 {
-  color: #fff;
-  font-size: 1.65rem;
-  margin-bottom: 0.75rem;
-  position: relative;
-  z-index: 1;
-}
-.issues-list li p {
-  color: #fff;
-  font-size: 1.4rem;
-  line-height: 1.6;
-  position: relative;
-  z-index: 1;
-}
-
-.issues-list li a {
+.compliance-link-list {
   display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  height: 100%;
+  flex-wrap: wrap;
+  gap: 0.6rem;
 }
 
-/* 4) Get Involved — Accent-color banner */
-.section.get-involved {
-  background: var(--secondary-color);
-  color: #fff;
-  text-align: center;
-  padding: var(--section-vertical) 0;
-}
-.section.get-involved h2 {
-  margin-bottom: 1rem;
-  color:#ffffff;;
-}
-.section.get-involved .btn-primary {
-  background: #fff;
-  color: var(--secondary-color);
-}
-.section.get-involved .btn-primary:hover {
-  color: #fff;
-  background: var(--primary-color);
-}
-.section.get-involved .btn-secondary {
-  background: var(--primary-color);
-  color: #fff;
-}
-.section.get-involved .btn-secondary:hover {
-  background: #fff;
-  color: var(--primary-color);
-}
-
-/* 6) Contact Section — Centered card */
-.section.contact .container {
-  display: flex;
-  justify-content: center;
-}
-.section.contact p {
-  max-width: 600px;
-  text-align: center;
-  font-size: 1.1rem;
-  line-height: 1.6;
-}
-
-.btn-events {
-  background: var(--secondary-color);
-  width: 110%;
-  height: 50px;
-}
-
-/* 7) Responsive tweaks */
-@media (max-width: 768px) {
-  #hero {
-    height: 70vh;
-  }
-  .section.about .container {
+@media (max-width: 980px) {
+  .hero-layout,
+  .waitlist-wrap {
     grid-template-columns: 1fr;
   }
-  .video-section {
-    padding-top: 0.5rem;
-    max-height: none;
-  }
-  .video-responsive {
-    width: 100%;
-  }
-  .video-events {
-    display: flex;
-    flex-direction: column;
-  }
 
-  /* withdraw the negative offset on the video */
-  .video-wrapper {
-    display: flex;
-    margin-left: 0;
-  }
-
-  /* force both panels to use full width */
-  .video-wrapper,
-  .events-wrapper {
-    width: 100%;
-  }
-
-  /* give the events some breathing room under the video */
-  .events-wrapper {
-    margin-top: 2rem;
-  }
-
-
-  /* Mobile layout for news carousel */
-  .news-carousel {
-    overflow: visible;
-    height: 220px;
-  }
-  .news-list {
-    position: relative;
-    display: block;
-    height: 100%;
-  }
-  .news-list li {
-    position: absolute;
-    top: 0;
-    left: 50%;
-    width: 80%;
-    transition: transform 0.3s;
-  }
-  .news-list li.prev {
-    transform: translateX(-120%) scale(0.8);
-    z-index: 1;
-  }
-  .news-list li.next {
-    transform: translateX(20%) scale(0.8);
-    z-index: 1;
-  }
-  .news-list li.active {
-    transform: translateX(-50%) scale(1);
-    z-index: 2;
-  }
-  .carousel-btn {
-    z-index: 3;
-  }
-  .news-prev {
-    left: 0;
-  }
-  .news-next {
-    right: 0;
+  .app-strip-grid {
+    grid-template-columns: 1fr;
   }
 }

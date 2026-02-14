@@ -1,8 +1,8 @@
-const { Sequelize } = require('sequelize');
-require('dotenv').config();
+const { Sequelize } = require("sequelize");
+require("dotenv").config();
 
- const isProduction = process.env.NODE_ENV === 'production';
- let sequelize;
+const isProduction = process.env.NODE_ENV === "production";
+let sequelize;
 
 // If a dialect is supplied via environment variables, use the provided
 // database connection details. Otherwise fall back to an in-memory SQLite
@@ -25,12 +25,12 @@ if (process.env.DB_DIALECT) {
       host: process.env.DB_HOST,
       port: process.env.DB_PORT,
       dialect: process.env.DB_DIALECT,
-    logging: false,
-    dialectOptions: dialectOpts
-    }
+      logging: false,
+      dialectOptions: dialectOpts,
+    },
   );
 } else {
-  sequelize = new Sequelize('sqlite::memory:', { logging: false });
+  sequelize = new Sequelize("sqlite::memory:", { logging: false });
 }
 
 module.exports = sequelize;

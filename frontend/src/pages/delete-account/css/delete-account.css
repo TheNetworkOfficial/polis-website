@@ -1,0 +1,104 @@
+.delete-main {
+  display: grid;
+}
+
+.delete-shell {
+  width: min(100% - 2rem, 760px);
+  margin-inline: auto;
+  padding: var(--space-lg);
+  display: grid;
+  gap: 1rem;
+}
+
+.delete-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.delete-steps li {
+  margin: 0;
+  border: 1px solid var(--surface-border);
+  border-radius: 999px;
+  padding: 0.45rem 0.7rem;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.delete-steps li.is-current {
+  border-color: var(--color-ink-500);
+  color: var(--color-ink-900);
+  background: rgba(36, 66, 101, 0.08);
+}
+
+.delete-steps li.is-complete {
+  border-color: rgba(47, 143, 99, 0.35);
+  color: #206545;
+  background: rgba(47, 143, 99, 0.1);
+}
+
+.delete-panel {
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-md);
+  background: var(--surface-soft);
+}
+
+.delete-panel h2 {
+  margin-top: 0;
+  font-size: 1.2rem;
+}
+
+.delete-actions-inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.delete-divider {
+  display: grid;
+  align-items: center;
+  margin: 0.25rem 0;
+}
+
+.delete-divider span {
+  justify-self: center;
+  padding: 0.1rem 0.6rem;
+  border: 1px solid var(--surface-border);
+  border-radius: 999px;
+  background: var(--surface-soft);
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.checkbox-row {
+  display: flex;
+  gap: 0.55rem;
+  align-items: flex-start;
+}
+
+.checkbox-row input {
+  width: auto;
+  margin-top: 0.15rem;
+}
+
+input[name="code"] {
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+@media (max-width: 760px) {
+  .delete-steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .delete-steps {
+    grid-template-columns: 1fr;
+  }
+}

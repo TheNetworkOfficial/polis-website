@@ -1,74 +1,97 @@
-/*────────────────────────────────────────────────────────────────────────*/
-/* 1) Theme & Layout Variables                                          */
-/*────────────────────────────────────────────────────────────────────────*/
-
 :root {
-  --font-family:       "Gideon Roman", serif;
-  --background-main:   #ffffff;
-  --text-main:         #333333;
+  --font-heading: "Space Grotesk", sans-serif;
+  --font-body: "Manrope", sans-serif;
 
-  --primary-color:     #396289;   /* Campaign blue */
-  --secondary-color:   #8d232b;   /* Accent red */
+  --color-ink-900: #11233b;
+  --color-ink-700: #244265;
+  --color-ink-500: #3d5f89;
+  --color-slate-100: #edf3fb;
+  --color-slate-200: #d5e2f3;
+  --color-slate-300: #bed1ea;
+  --color-white: #ffffff;
+  --color-accent-500: #f08d49;
+  --color-accent-600: #d66f2d;
+  --color-success-500: #2f8f63;
+  --color-danger-500: #b23a48;
 
-  --button-bg:         var(--primary-color);
-  --button-hover:      #004080;
-  --link-color:        var(--primary-color);
+  --page-bg: linear-gradient(180deg, #f7fbff 0%, #eaf2fc 100%);
+  --text-main: var(--color-ink-900);
+  --text-muted: #4f617a;
+  --surface-main: rgba(255, 255, 255, 0.86);
+  --surface-soft: rgba(237, 243, 251, 0.92);
+  --surface-border: rgba(36, 66, 101, 0.2);
 
-  --form-background-color: #c5c5c5;
-  --form-input-color:     #cccccc;
-  --form-input-placeholder:   #838383;
+  --shadow-soft: 0 12px 30px rgba(17, 35, 59, 0.08);
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 22px;
 
-  --radius:            5px;
-
-  --container-max:     1200px;
-  --padding-side:      1rem;
-  --section-vertical:  4rem;
+  --container-max: 1120px;
+  --space-xs: 0.5rem;
+  --space-sm: 0.875rem;
+  --space-md: 1.25rem;
+  --space-lg: 2rem;
+  --space-xl: 3rem;
+  --space-2xl: 5rem;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background-main: #121212;
-    --text-main:       #ffffff;
-    --button-hover:    #003064;
-
-    --form-background-color: #2a2a2a;
-    --form-input-color:     #1a1a1a;
-    --form-input-placeholder:   #aaa;
-  }
+* {
+  box-sizing: border-box;
 }
 
 html,
 body {
   margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-  overflow-x: hidden;
+  min-height: 100%;
 }
 
 body {
-  font-family: var(--font-family);
-  background-color: var(--background-main);
+  background: var(--page-bg);
   color: var(--text-main);
-  line-height: 1.6;
+  font-family: var(--font-body);
+  line-height: 1.55;
   min-height: 100vh;
-  display: flex;
-  flex-direction: column;
+}
+
+img {
+  max-width: 100%;
+  display: block;
 }
 
 main {
-  flex: 1;
+  min-height: calc(100vh - 230px);
 }
 
 .container {
-  max-width: var(--container-max);
-  margin: 0 auto;
-  padding: 0 var(--padding-side);
+  width: min(100% - 2rem, var(--container-max));
+  margin-inline: auto;
 }
 
-/*────────────────────────────────────────────────────────────────────────*/
-/* 2) Flex helper                                                     */
-/*────────────────────────────────────────────────────────────────────────*/
-.flex {
-  display: flex;
-  gap: 1rem;
+.page-section {
+  padding: var(--space-2xl) 0;
+}
+
+.page-shell {
+  padding: var(--space-lg) 0 var(--space-2xl);
+}
+
+.surface {
+  background: var(--surface-main);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-soft);
+}
+
+.hidden {
+  display: none !important;
+}
+
+@media (max-width: 900px) {
+  :root {
+    --space-2xl: 3.5rem;
+  }
+
+  .page-shell {
+    padding: var(--space-md) 0 var(--space-xl);
+  }
 }

@@ -3,30 +3,41 @@ const MiniCssExtractPlugin = require("mini-css-extract-plugin");
 const { CleanWebpackPlugin } = require("clean-webpack-plugin");
 const webpack = require("webpack");
 const path = require("path");
-const dotenv = require("dotenv");
 
-dotenv.config({ path: path.resolve(__dirname, "../.env") });
+const deleteAccountUrl = process.env.DELETE_ACCOUNT_PUBLIC_URL || "";
+const deleteAccountDefineEnv = {
+  __DELETE_ACCOUNT_API_BASE_URL__: JSON.stringify(
+    process.env.DELETE_ACCOUNT_API_BASE_URL || "",
+  ),
+  __COGNITO_REGION__: JSON.stringify(process.env.COGNITO_REGION || ""),
+  __COGNITO_APP_CLIENT_ID__: JSON.stringify(
+    process.env.COGNITO_APP_CLIENT_ID || "",
+  ),
+  __COGNITO_DOMAIN__: JSON.stringify(process.env.COGNITO_DOMAIN || ""),
+  __COGNITO_REDIRECT_URI__: JSON.stringify(
+    process.env.COGNITO_REDIRECT_URI || "",
+  ),
+  __COGNITO_SCOPES__: JSON.stringify(process.env.COGNITO_SCOPES || ""),
+  __COGNITO_ENABLE_PASSWORD_FLOW__: JSON.stringify(
+    process.env.COGNITO_ENABLE_PASSWORD_FLOW || "false",
+  ),
+};
 
 module.exports = {
   mode: "production",
   entry: {
     main: "./src/main.js",
     index: "./src/pages/index/index.js",
-    issues: "./src/pages/issues/issues.js",
-    forgotPassword: "./src/pages/forgotPassword/forgotPassword.js",
-    forgotUsername: "./src/pages/forgotUsername/forgotUsername.js",
-    login: "./src/pages/login/login.js",
-    registration: "./src/pages/registration/registration.js",
-    resetPassword: "./src/pages/resetPassword/resetPassword.js",
+    features: "./src/pages/features/features.js",
     about: "./src/pages/about/about.js",
-    volunteer: "./src/pages/volunteer/volunteer.js",
+    faq: "./src/pages/faq/faq.js",
     contact: "./src/pages/contact/contact.js",
-    events: "./src/pages/events/events.js",
-    event: "./src/pages/event/event.js",
-    admin: "./src/pages/admin/admin.js",
-    campaignFinances: "./src/pages/campaign-finances/campaign-finances.js",
-    coalition: "./src/pages/coalition/coalition.js",
-    suggestCandidate: "./src/pages/suggest-candidate/suggestCandidate.js",
+    terms: "./src/pages/terms/terms.js",
+    privacyPolicy: "./src/pages/privacy-policy/privacy-policy.js",
+    dataSafety: "./src/pages/data-safety/data-safety.js",
+    childSafety: "./src/pages/child-safety/child-safety.js",
+    deleteAccount: "./src/pages/delete-account/delete-account.js",
+    notFound: "./src/pages/404/404.js",
   },
   output: {
     path: path.resolve(__dirname, "dist"),
@@ -50,31 +61,34 @@ module.exports = {
       },
       {
         test: /\.(png|jpg|gif|mp4)$/,
-        type: "asset/resource", // Use Webpack's built-in asset handling
+        type: "asset/resource",
         generator: {
-          filename: "assets/[name][ext]", // Output files to 'assets' folder
+          filename: "assets/[name][ext]",
         },
       },
       {
         test: /\.html$/,
+        exclude: [
+          path.resolve(
+            __dirname,
+            "src/pages/privacy-policy/privacy-policy.html",
+          ),
+          path.resolve(__dirname, "src/pages/data-safety/data-safety.html"),
+        ],
         use: ["html-loader"],
       },
       {
         test: /\.md$/,
-        use: "raw-loader"
+        use: "raw-loader",
       },
     ],
   },
   plugins: [
     new CleanWebpackPlugin(),
-    new webpack.DefinePlugin({
-      "process.env.FRONTEND_FINANCE_SHEET_ID_REVERSED": JSON.stringify(
-        process.env.FRONTEND_FINANCE_SHEET_ID_REVERSED || "",
-      ),
-    }),
     new MiniCssExtractPlugin({
       filename: "css/[name].[contenthash].css",
     }),
+    new webpack.DefinePlugin(deleteAccountDefineEnv),
     new HtmlWebpackPlugin({
       template: "./src/components/header/header.html",
       filename: "header.html",
@@ -87,114 +101,82 @@ module.exports = {
       template: "./src/pages/index/index.html",
       filename: "index.html",
       chunks: ["main", "index"],
-      favicon: "./src/assets/images/icons/montanaStarState.png",
+      favicon: "./src/assets/images/polis/Polis.png",
     }),
     new HtmlWebpackPlugin({
-      template: "./src/pages/issues/issues.html",
-      filename: "issues.html",
-      chunks: ["main", "issues"],
-      favicon: "./src/assets/images/icons/montanaStarState.png",
-    }),
-    new HtmlWebpackPlugin({
-      template: "./src/pages/forgotPassword/forgotPassword.html",
-      filename: "forgotPassword.html",
-      chunks: ["main", "forgotPassword"],
-      favicon: "./src/assets/images/icons/montanaStarState.png",
-    }),
-    new HtmlWebpackPlugin({
-      template: "./src/pages/forgotUsername/forgotUsername.html",
-      filename: "forgotUsername.html",
-      chunks: ["main", "forgotUsername"],
-      favicon: "./src/assets/images/icons/montanaStarState.png",
-    }),
-    new HtmlWebpackPlugin({
-      template: "./src/pages/login/login.html",
-      filename: "login.html",
-      chunks: ["main", "login"],
-      favicon: "./src/assets/images/icons/montanaStarState.png",
-    }),
-    new HtmlWebpackPlugin({
-      template: "./src/pages/registration/registration.html",
-      filename: "registration.html",
-      chunks: ["main", "registration"],
-      favicon: "./src/assets/images/icons/montanaStarState.png",
-    }),
-    new HtmlWebpackPlugin({
-      template: "./src/pages/resetPassword/resetPassword.html",
-      filename: "resetPassword.html",
-      chunks: ["main", "resetPassword"],
-      favicon: "./src/assets/images/icons/montanaStarState.png",
+      template: "./src/pages/features/features.html",
+      filename: "features.html",
+      chunks: ["main", "features"],
+      favicon: "./src/assets/images/polis/Polis.png",
     }),
     new HtmlWebpackPlugin({
       template: "./src/pages/about/about.html",
       filename: "about.html",
       chunks: ["main", "about"],
-      favicon: "./src/assets/images/icons/montanaStarState.png",
+      favicon: "./src/assets/images/polis/Polis.png",
     }),
     new HtmlWebpackPlugin({
-      template: "./src/pages/volunteer/volunteer.html",
-      filename: "volunteer.html",
-      chunks: ["main", "volunteer"],
-      favicon: "./src/assets/images/icons/montanaStarState.png",
+      template: "./src/pages/faq/faq.html",
+      filename: "faq.html",
+      chunks: ["main", "faq"],
+      favicon: "./src/assets/images/polis/Polis.png",
     }),
     new HtmlWebpackPlugin({
       template: "./src/pages/contact/contact.html",
       filename: "contact.html",
       chunks: ["main", "contact"],
-      favicon: "./src/assets/images/icons/montanaStarState.png",
+      favicon: "./src/assets/images/polis/Polis.png",
     }),
     new HtmlWebpackPlugin({
-      template: "./src/pages/events/events.html",
-      filename: "events.html",
-      chunks: ["main", "events"],
-      favicon: "./src/assets/images/icons/montanaStarState.png",
+      template: "./src/pages/terms/terms.html",
+      filename: "terms.html",
+      chunks: ["main", "terms"],
+      favicon: "./src/assets/images/polis/Polis.png",
     }),
     new HtmlWebpackPlugin({
-      template: "./src/pages/event/event.html",
-      filename: "event.html",
-      chunks: ["main", "event"],
-      favicon: "./src/assets/images/icons/montanaStarState.png",
+      template: "./src/pages/privacy-policy/privacy-policy.html",
+      filename: "privacy-policy.html",
+      chunks: ["main", "privacyPolicy"],
+      favicon: "./src/assets/images/polis/Polis.png",
+      templateParameters: {
+        deleteAccountUrl,
+      },
     }),
     new HtmlWebpackPlugin({
-      template: "./src/pages/coalition/coalition.html",
-      filename: "coalition.html",
-      chunks: ["main", "coalition"],
-      favicon: "./src/assets/images/icons/montanaStarState.png",
+      template: "./src/pages/data-safety/data-safety.html",
+      filename: "data-safety.html",
+      chunks: ["main", "dataSafety"],
+      favicon: "./src/assets/images/polis/Polis.png",
+      templateParameters: {
+        deleteAccountUrl,
+      },
     }),
     new HtmlWebpackPlugin({
-      template: "./src/pages/suggest-candidate/suggest-candidate.html",
-      filename: "suggest-candidate.html",
-      chunks: ["main", "suggestCandidate"],
-      favicon: "./src/assets/images/icons/montanaStarState.png",
+      template: "./src/pages/child-safety/child-safety.html",
+      filename: "child-safety.html",
+      chunks: ["main", "childSafety"],
+      favicon: "./src/assets/images/polis/Polis.png",
     }),
     new HtmlWebpackPlugin({
-      template: "./src/pages/campaign-finances/campaign-finances.html",
-      filename: "campaign-finances.html",
-      chunks: ["main", "campaignFinances"],
-      favicon: "./src/assets/images/icons/montanaStarState.png",
+      template: "./src/pages/delete-account/delete-account.html",
+      filename: "delete-account.html",
+      chunks: ["main", "deleteAccount"],
+      favicon: "./src/assets/images/polis/Polis.png",
     }),
     new HtmlWebpackPlugin({
-      template: "./src/pages/admin/admin.html",
-      filename: "admin.html",
-      chunks: ["main", "admin"],
-      favicon: "./src/assets/images/icons/montanaStarState.png",
-    }),
-    new HtmlWebpackPlugin({
-      template: './src/pages/popups/workInProgressPopup.html',
-      filename: 'workInProgressPopup.html',
-    }),
-    new HtmlWebpackPlugin({
-      template: './src/pages/popups/coalitionVisionPopup.html',
-      filename: 'coalitionVisionPopup.html',
+      template: "./src/pages/404/404.html",
+      filename: "404.html",
+      chunks: ["main", "notFound"],
+      favicon: "./src/assets/images/polis/Polis.png",
     }),
   ],
   devServer: {
     proxy: [
       {
-        context: ["/api", "/graphql", "/uploads"], // URLs to forward
-        target: "http://localhost:3000", // your backend
-        changeOrigin: true, // host header rewrite
-        secure: false, // if you're using self-signed certs
+        context: ["/api", "/graphql", "/uploads"],
+        target: "http://localhost:3000",
+        changeOrigin: true,
+        secure: false,
       },
     ],
     static: {
@@ -202,7 +184,7 @@ module.exports = {
     },
     compress: true,
     port: 9000,
-    allowedHosts: "all", // ⬅️ this lets any hostname (including ngrok) through
+    allowedHosts: "all",
   },
 };
 

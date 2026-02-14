@@ -1,0 +1,15 @@
+.legal-main {
+  display: grid;
+}
+
+.legal-card {
+  padding: var(--space-lg);
+}
+
+.legal-card h2 {
+  margin-top: var(--space-lg);
+}
+
+.legal-card ul {
+  margin-bottom: 0;
+}

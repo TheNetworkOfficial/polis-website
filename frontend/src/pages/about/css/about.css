@@ -1,195 +1,25 @@
-/* Styles specific to the About page */
-
-/*
-  The hero section initially uses the default hero image for desktop. A
-  mobile-specific override below will swap this out for the first about
-  section image when viewed on smaller screens. The positioning and
-  gradient remain the same across breakpoints.
-*/
-#about-hero {
-  position: relative;
-  height: 50vh;
-  /* Use the default hero image on desktop. On mobile this image will be
-     overridden via a media query below to use the first section image instead. */
-  background: url("../../../assets/images/hero/hero.jpg") center/cover no-repeat;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 var(--padding-side);
-}
-
-
-/* Container for hero text */
-.about-hero-content {
-  position: relative;
-  max-width: 700px;
-  text-align: center;
-  color: #fff;
-}
-.about-hero-content h1 {
-  font-size: clamp(2.5rem, 5vw, 4rem);
-  margin-bottom: 1rem;
-  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
-}
-.about-hero-content p {
-  font-size: clamp(1rem, 2.5vw, 1.5rem);
-  margin-bottom: 2rem;
-}
-.about-hero-buttons .btn {
-  margin: 0 0.5rem;
-  min-width: 140px;
-}
-
-/* Generic layout for each about section */
-.about-section {
+.about-intro {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 2rem;
-  align-items: center;
-  margin-bottom: 4rem;
+  gap: 0.5rem;
 }
 
-/* Odd sections: image left, text centered */
-.about-section.odd .about-image {
-  order: 0;
-}
-.about-section.odd .about-text {
-  order: 1;
-  text-align: center;
+.about-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-md);
+  margin-top: var(--space-lg);
 }
 
-/* Even sections: text left, image right */
-.about-section.even .about-image {
-  order: 1;
-}
-.about-section.even .about-text {
-  order: 0;
-  text-align: left;
+.about-stack {
+  margin-top: var(--space-lg);
 }
 
-/* Image styling inside sections */
-.about-section .about-image img {
-  height: 100%;
-  width: 100%;
-  max-width: 600px;
-  max-height: 600px;
-  border-radius: var(--radius);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+.about-stack ul {
+  margin-bottom: 0;
 }
 
-/* ─────────────────────────────────────────────────────────────────────────────
-   First section: square image inset into the text, centered heading
-   ───────────────────────────────────────────────────────────────────────────── */
-.about-section:first-of-type {
-  /* drop the two-column grid so text wraps around the float */
-  display: block;
-}
-
-.about-section:first-of-type .about-image {
-  float: left;
-  margin: 0 2rem 2rem 0;        /* space between image and text */
-  box-shadow: 0 0 0 4px #0D3570;/* inner blue “border” */
-  overflow: hidden;
-  border-radius: var(--radius);
-}
-
-.about-section:first-of-type .about-image img {
-  height: 100%;
-  width: 100%;
-  max-width: 350px;                /* fixed width for the image */
-  max-height: 350px;
-  object-fit: cover;
-}
-
-/* clear the float at the end so the section encloses it */
-.about-section:first-of-type::after {
-  content: "";
-  display: table;
-  clear: both;
-}
-.about-section:first-of-type .about-text h2 {
-  display: none;
-}
-
-.about-section:first-of-type .about-text p {
-  text-align: left;
-}
-
-/* Add horizontal padding & center all sections */
-#bio {
-  padding: 2rem;
-}
-
-.about-section {
-  max-width: 1200px;
-  margin: 0 auto 4rem; /* auto-center + bottom spacing */
-  padding: 0;           /* reset if you had any default padding */
-}
-
-/* 2. Special styling for the last “about-section” */
-.about-section:last-of-type {
-  display: grid;                /* keep single-col grid */
-  grid-template-columns: 1fr;   /* one column only */
-  padding: 4rem 2rem;           /* extra top/bottom padding */
-  color: #fff;                  /* ensure text shows over the image */
-}
-
-/* hide the left-side img div in the last section */
-.about-section:last-of-type .about-image {
-  display: none;
-}
-
-/* bump up & center the text in that last section */
-.about-section:last-of-type .about-text p {
-  text-align: center;
-  font-size: 1.75rem;
-  font-weight: bold;
-  line-height: 1.4;
-}
-
-/* Base styling for the mobile heading – hidden by default */
-.mobile-only-intro {
-  display: none;
-}
-
-@media (max-width: 768px) {
-  /* Make the about sections single column on small screens */
-  .about-section {
+@media (max-width: 900px) {
+  .about-grid {
     grid-template-columns: 1fr;
-    text-align: center;
-  }
-  .about-section .about-image {
-    margin-bottom: 1.5rem;
-  }
-
-  /* Use the first about section image as the hero background on mobile */
-  #about-hero {
-    background-image: url("../../../assets/images/about/section0.png");
-  }
-
-  /* Hide the default hero heading inside the hero content on mobile */
-  #about-hero .hero-content h1 {
-    display: none;
-  }
-
-  /* Reveal the mobile-only introduction heading below the hero */
-  .mobile-only-intro {
-    display: block;
-    text-align: center;
-    margin: 1.5rem auto;
-    font-size: 2rem;
-    font-weight: bold;
-    color: inherit;
-  }
-
-  /* Hide images in the second and third about sections on mobile */
-  #bio .about-section:nth-of-type(1) .about-image,
-  #bio .about-section:nth-of-type(2) .about-image,
-  #bio .about-section:nth-of-type(3) .about-image {
-    display: none;
-  }
-
-  .about-section.odd .about-text {
-    text-align: left;
   }
 }
