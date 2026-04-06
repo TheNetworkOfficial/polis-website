@@ -21,6 +21,14 @@ const deleteAccountDefineEnv = {
   __COGNITO_ENABLE_PASSWORD_FLOW__: JSON.stringify(
     process.env.COGNITO_ENABLE_PASSWORD_FLOW || "false",
   ),
+  __CTA_API_BASE_URL__: JSON.stringify(process.env.CTA_API_BASE_URL || ""),
+  __CTA_IOS_STORE_URL__: JSON.stringify(process.env.CTA_IOS_STORE_URL || ""),
+  __CTA_ANDROID_STORE_URL__: JSON.stringify(
+    process.env.CTA_ANDROID_STORE_URL || "",
+  ),
+  __CTA_APP_DEEP_LINK_BASE_URL__: JSON.stringify(
+    process.env.CTA_APP_DEEP_LINK_BASE_URL || "",
+  ),
 };
 
 module.exports = {
@@ -37,6 +45,7 @@ module.exports = {
     dataSafety: "./src/pages/data-safety/data-safety.js",
     childSafety: "./src/pages/child-safety/child-safety.js",
     deleteAccount: "./src/pages/delete-account/delete-account.js",
+    ctaInvite: "./src/pages/cta-invite/cta-invite.js",
     notFound: "./src/pages/404/404.js",
   },
   output: {
@@ -161,6 +170,12 @@ module.exports = {
       template: "./src/pages/delete-account/delete-account.html",
       filename: "delete-account.html",
       chunks: ["main", "deleteAccount"],
+      favicon: "./src/assets/images/polis/Polis.png",
+    }),
+    new HtmlWebpackPlugin({
+      template: "./src/pages/cta-invite/cta-invite.html",
+      filename: "cta-invite/index.html",
+      chunks: ["main", "ctaInvite"],
       favicon: "./src/assets/images/polis/Polis.png",
     }),
     new HtmlWebpackPlugin({

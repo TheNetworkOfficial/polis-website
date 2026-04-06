@@ -1,0 +1,111 @@
+body {
+  margin: 0;
+  font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+  background:
+    radial-gradient(circle at top, rgba(15, 118, 110, 0.16), transparent 38%),
+    linear-gradient(160deg, #f8fafc 0%, #e2e8f0 100%);
+  color: #0f172a;
+}
+
+.cta-invite {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 32px 16px;
+}
+
+.cta-card {
+  width: min(720px, 100%);
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(14px);
+  border-radius: 28px;
+  box-shadow: 0 28px 60px rgba(15, 23, 42, 0.16);
+  padding: 28px;
+}
+
+.cta-card__eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #0f766e;
+}
+
+.cta-card h1 {
+  margin: 10px 0 8px;
+  font-size: clamp(2rem, 4vw, 3.25rem);
+  line-height: 1.02;
+}
+
+.cta-card__subtitle,
+.cta-card__description,
+.cta-card__footnote,
+.cta-details dd {
+  color: #334155;
+}
+
+.cta-card__image {
+  width: 100%;
+  margin: 18px 0;
+  border-radius: 20px;
+  object-fit: cover;
+  max-height: 300px;
+}
+
+.cta-details {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+  margin: 0 0 18px;
+}
+
+.cta-details dt {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: #475569;
+  margin-bottom: 6px;
+}
+
+.cta-details dd {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+.cta-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 22px;
+}
+
+.cta-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  padding: 0 20px;
+  border-radius: 999px;
+  text-decoration: none;
+  font-weight: 700;
+  color: #0f172a;
+  background: #e2e8f0;
+}
+
+.cta-button--primary {
+  background: #0f766e;
+  color: #fff;
+}
+
+@media (max-width: 640px) {
+  .cta-card {
+    padding: 22px;
+  }
+
+  .cta-actions {
+    flex-direction: column;
+  }
+}
+
