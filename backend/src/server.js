@@ -108,8 +108,12 @@ const { RedisStore } = require("connect-redis");
   const mailingListRoutes = require("./routes/mailingList");
   const adminRoutes = require("./routes/admin");
   const newsRoutes = require("./routes/news");
+  const postShareRoutes = require("./routes/postShares");
+  const socialOAuthRoutes = require("./routes/socialOAuth");
   const recoveryRoutes = require("./routes/accountRecovery");
 
+  app.use(postShareRoutes);
+  app.use(socialOAuthRoutes);
   app.use("/api/auth", authLimiter, authRoutes);
   app.use("/api/volunteers", volunteerRoutes);
   app.use("/api/contact", contactRoutes);
