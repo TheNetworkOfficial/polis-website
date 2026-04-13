@@ -147,12 +147,16 @@ At minimum set:
 ```bash
 NODE_ENV=production
 PORT=3000
-PUBLIC_WEB_BASE_URL=https://www.NEW-DOMAIN.com
+PUBLIC_WEB_BASE_URL=https://polisapp.io
 VIDEO_BACKEND_BASE_URL=https://YOUR-VIDEO-BACKEND-ID.execute-api.us-west-2.amazonaws.com/prod
 ANDROID_APP_PACKAGE=com.luxcorp.polis
 ANDROID_SHA256_CERT_FINGERPRINTS=...
 IOS_APP_ID=...
 ```
+
+For Polis production, set `PUBLIC_WEB_BASE_URL` to `https://polisapp.io`.
+Do not point that variable at `https://www.polisapp.io` if shared post links
+are expected to resolve on the apex domain.
 
 If you are not ready to move app links yet, you can still use the new domain for web previews only. In that case the site preview will work, but direct app-opening from the new domain will not be trusted by the installed app until you ship a mobile update.
 
@@ -257,10 +261,10 @@ curl -I https://www.NEW-DOMAIN.com
 Test a real public post:
 
 ```bash
-curl -I https://www.NEW-DOMAIN.com/posts/REAL_POST_ID
-curl -I https://www.NEW-DOMAIN.com/posts/REAL_POST_ID/social-card.png
-curl https://www.NEW-DOMAIN.com/.well-known/assetlinks.json
-curl https://www.NEW-DOMAIN.com/.well-known/apple-app-site-association
+curl -I https://polisapp.io/posts/REAL_POST_ID
+curl -I https://polisapp.io/posts/REAL_POST_ID/social-card.png
+curl https://polisapp.io/.well-known/assetlinks.json
+curl https://polisapp.io/.well-known/apple-app-site-association
 ```
 
 You should see:
@@ -271,7 +275,8 @@ You should see:
 
 ## Step 11: Update app and backend to the new website domain
 
-These all need to point to the new public website domain:
+These all need to point to the same public website host used for sharing.
+For Polis production, that host is `https://polisapp.io`:
 
 - app runtime `PUBLIC_WEB_BASE_URL`
 - video backend `PUBLIC_WEB_BASE_URL` or `WEB_BASE_URL`
