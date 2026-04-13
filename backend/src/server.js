@@ -46,7 +46,14 @@ const { RedisStore } = require("connect-redis");
   app.set("trust proxy", 1);
 
   // 4) Security & parsing middleware
-  app.use(helmet());
+  // Match the public website server so share pages can render remote media
+  // previews and frontend pages can call external services when configured.
+  app.use(
+    helmet({
+      contentSecurityPolicy: false,
+      crossOriginEmbedderPolicy: false,
+    }),
+  );
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
