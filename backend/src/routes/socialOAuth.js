@@ -217,7 +217,7 @@ function parseJsonEnv(value, fallback) {
   }
   try {
     return JSON.parse(normalized);
-  } catch (_error) {
+  } catch {
     return fallback;
   }
 }

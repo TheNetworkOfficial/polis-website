@@ -46,11 +46,15 @@ module.exports = {
     childSafety: "./src/pages/child-safety/child-safety.js",
     deleteAccount: "./src/pages/delete-account/delete-account.js",
     ctaInvite: "./src/pages/cta-invite/cta-invite.js",
+    "shared-feed": "./src/pages/shared-feed/shared-feed.js",
     notFound: "./src/pages/404/404.js",
   },
   output: {
     path: path.resolve(__dirname, "dist"),
-    filename: "scripts/[name].[contenthash].js",
+    filename: (pathData) =>
+      pathData.chunk?.name === "shared-feed"
+        ? "scripts/shared-feed.js"
+        : "scripts/[name].[contenthash].js",
   },
   module: {
     rules: [
@@ -95,7 +99,10 @@ module.exports = {
   plugins: [
     new CleanWebpackPlugin(),
     new MiniCssExtractPlugin({
-      filename: "css/[name].[contenthash].css",
+      filename: (pathData) =>
+        pathData.chunk?.name === "shared-feed"
+          ? "css/shared-feed.css"
+          : "css/[name].[contenthash].css",
     }),
     new webpack.DefinePlugin(deleteAccountDefineEnv),
     new HtmlWebpackPlugin({
