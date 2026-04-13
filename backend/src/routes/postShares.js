@@ -529,9 +529,15 @@ function renderSharePage({
     canonicalUrl,
     requestUrl,
     postId,
+    shareText: description,
     openAppUrl,
     iosStoreUrl,
     androidStoreUrl,
+    shareMedia: {
+      kind: shareMedia.kind,
+      posterUrl: shareMedia.posterUrl,
+      hlsUrl: shareMedia.hlsUrl,
+    },
   });
 
   return `<!DOCTYPE html>
@@ -557,6 +563,11 @@ function renderSharePage({
     <meta name="twitter:image" content="${escapeAttribute(metaImage)}" />
     <meta name="twitter:image:alt" content="${escapeAttribute(`${brandName} post preview for ${authorDisplayName}`)}" />
     <link rel="canonical" href="${escapeAttribute(canonicalUrl)}" />
+    ${
+      shareMedia.kind === "video" && shareMedia.hlsUrl
+        ? '<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>'
+        : ""
+    }
     <style>
       :root {
         color-scheme: dark;
@@ -1113,10 +1124,8 @@ function renderSharePage({
           <div class="phone-shell">
             <article class="player">
               ${
-                shareMedia.kind === "video" && shareMedia.mp4Url
-                  ? `<video id="share-video" playsinline loop autoplay muted poster="${escapeAttribute(shareMedia.posterUrl || imageUrl || metaImage)}">
-                  <source src="${escapeAttribute(shareMedia.mp4Url)}" type="video/mp4" />
-                </video>`
+                shareMedia.kind === "video" && shareMedia.hlsUrl
+                  ? `<video id="share-video" playsinline loop autoplay muted preload="metadata" poster="${escapeAttribute(shareMedia.posterUrl || imageUrl || metaImage)}"></video>`
                   : imageUrl
                     ? `<img src="${escapeAttribute(imageUrl)}" alt="${escapeAttribute(title)}" />`
                     : `<div class="player__fallback">This post is available in the Polis app. Install the app to keep watching and join the conversation.</div>`
@@ -1124,7 +1133,7 @@ function renderSharePage({
               <div class="player__scrim"></div>
               <div class="player__badge">${escapeHtml(mediaType)}</div>
               ${
-                shareMedia.kind === "video" && shareMedia.mp4Url
+                shareMedia.kind === "video" && shareMedia.hlsUrl
                   ? `<div class="player__controls">
                   <button class="player__control" id="playback-toggle" type="button">Pause</button>
                   <button class="player__control" id="mute-toggle" type="button">Unmute</button>
@@ -1136,7 +1145,7 @@ function renderSharePage({
                 <p class="player__copy">${escapeHtml(description)}</p>
               </div>
               ${
-                shareMedia.kind === "video" && shareMedia.mp4Url
+                shareMedia.kind === "video" && shareMedia.hlsUrl
                   ? `<div class="player__progress" aria-hidden="true"><div class="player__progress-fill" id="progress-fill"></div></div>`
                   : ""
               }
@@ -1257,7 +1266,11 @@ function renderSharePage({
         }
         try {
           if (navigator.share) {
-            await navigator.share({ title: document.title, text: "${escapeAttribute(description)}", url });
+            await navigator.share({
+              title: document.title,
+              text: shareState.shareText || document.title,
+              url,
+            });
             setFeedback("Share sheet opened.");
             return;
           }
@@ -1273,7 +1286,7 @@ function renderSharePage({
         setFeedback("Copy the URL from the browser bar to share this post.");
       }
 
-      document.querySelectorAll("[data-open-app-button=\"1\"], [data-open-app-link=\"1\"]").forEach((element) => {
+      document.querySelectorAll('[data-open-app-button="1"], [data-open-app-link="1"]').forEach((element) => {
         element.addEventListener("click", (event) => {
           event.preventDefault();
           openInApp();
@@ -1294,6 +1307,47 @@ function renderSharePage({
       const muteToggle = document.getElementById("mute-toggle");
       const playbackToggle = document.getElementById("playback-toggle");
       const progressFill = document.getElementById("progress-fill");
+      const videoMedia = shareState.shareMedia || null;
+
+      function configureVideoSource() {
+        if (!video || !videoMedia || videoMedia.kind !== "video") {
+          return false;
+        }
+        const hlsUrl = typeof videoMedia.hlsUrl === "string" ? videoMedia.hlsUrl : "";
+        if (!hlsUrl) {
+          return false;
+        }
+        const supportsNativeHls =
+          video.canPlayType("application/vnd.apple.mpegurl") ||
+          video.canPlayType("application/x-mpegURL");
+        if (supportsNativeHls) {
+          video.src = hlsUrl;
+          return true;
+        }
+        if (window.Hls && typeof window.Hls.isSupported === "function" && window.Hls.isSupported()) {
+          const hls = new window.Hls({
+            enableWorker: true,
+            lowLatencyMode: true,
+          });
+          hls.loadSource(hlsUrl);
+          hls.attachMedia(video);
+          hls.on(window.Hls.Events.ERROR, (_event, data) => {
+            if (data && data.fatal) {
+              setFeedback("Video playback failed in this browser. Open in app to keep watching.");
+            }
+          });
+          window.addEventListener(
+            "beforeunload",
+            () => {
+              hls.destroy();
+            },
+            { once: true },
+          );
+          return true;
+        }
+        setFeedback("This browser cannot play the shared video yet. Open in app to keep watching.");
+        return false;
+      }
 
       function syncPlaybackState() {
         if (!video) {
@@ -1322,11 +1376,20 @@ function renderSharePage({
       }
 
       if (video) {
+        const hasVideoSource = configureVideoSource();
         video.addEventListener("timeupdate", syncProgress);
         video.addEventListener("play", syncPlaybackState);
         video.addEventListener("pause", syncPlaybackState);
         video.addEventListener("volumechange", syncPlaybackState);
         video.addEventListener("loadedmetadata", syncProgress);
+        video.addEventListener("canplay", () => {
+          video.play().catch(() => {
+            syncPlaybackState();
+          });
+        });
+        video.addEventListener("error", () => {
+          setFeedback("Video playback failed in this browser. Open in app to keep watching.");
+        });
         video.addEventListener("click", () => {
           if (video.paused) {
             video.play().catch(() => {});
@@ -1334,9 +1397,9 @@ function renderSharePage({
             video.pause();
           }
         });
-        video.play().catch(() => {
-          syncPlaybackState();
-        });
+        if (!hasVideoSource) {
+          setFeedback("Video playback is unavailable right now. Open in app to keep watching.");
+        }
         syncPlaybackState();
         syncProgress();
       }
