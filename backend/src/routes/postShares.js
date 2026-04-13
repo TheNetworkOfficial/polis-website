@@ -107,10 +107,7 @@ function initialsFromName(value) {
   return initials || normalized.slice(0, 1).toUpperCase();
 }
 
-function wrapSvgText(value, {
-  maxCharsPerLine = 32,
-  maxLines = 3,
-} = {}) {
+function wrapSvgText(value, { maxCharsPerLine = 32, maxLines = 3 } = {}) {
   const normalized = trimToLength(value, maxCharsPerLine * maxLines + 24);
   if (!normalized) {
     return [];
@@ -167,7 +164,8 @@ async function fetchImageDataUri(url) {
     if (!response.ok) {
       return "";
     }
-    const contentType = normalizeString(response.headers.get("content-type")) || "image/png";
+    const contentType =
+      normalizeString(response.headers.get("content-type")) || "image/png";
     const bytes = Buffer.from(await response.arrayBuffer());
     if (!bytes.length || bytes.length > SOCIAL_CARD_MAX_IMAGE_BYTES) {
       return "";
@@ -191,10 +189,13 @@ function renderSocialCardSvg({
   mediaImage = "",
   authorAvatar = "",
 }) {
-  const brandName = trimToLength(shareCard?.brandName, 30) || DEFAULT_BRAND_NAME;
-  const title = trimToLength(shareCard?.previewTitle, 120) || `${brandName} post`;
+  const brandName =
+    trimToLength(shareCard?.brandName, 30) || DEFAULT_BRAND_NAME;
+  const title =
+    trimToLength(shareCard?.previewTitle, 120) || `${brandName} post`;
   const description =
-    trimToLength(shareCard?.previewText, 220) || `Open this post in ${brandName}.`;
+    trimToLength(shareCard?.previewText, 220) ||
+    `Open this post in ${brandName}.`;
   const authorDisplayName =
     trimToLength(shareCard?.authorDisplayName, 48) || "Post author";
   const authorUsername = trimToLength(shareCard?.authorUsername, 32);
@@ -311,10 +312,102 @@ async function fetchShareCard(postId) {
   }
 }
 
-function renderActionLinks({ canonicalUrl, iosStoreUrl, androidStoreUrl }) {
-  const links = [
-    `<a class="share-button share-button--primary" href="${escapeAttribute(canonicalUrl)}">Open in app</a>`,
-  ];
+function serializeForInlineScript(value) {
+  return JSON.stringify(value)
+    .replaceAll("<", "\\u003c")
+    .replaceAll(">", "\\u003e")
+    .replaceAll("&", "\\u0026");
+}
+
+function resolveAppUrlScheme() {
+  return (
+    normalizeString(
+      process.env.MOBILE_APP_URL_SCHEME ||
+        process.env.APP_URL_SCHEME ||
+        process.env.STRIPE_RETURN_URL_SCHEME,
+    ) || "myapp"
+  );
+}
+
+function buildAppOpenUrl(postId, commentId = "") {
+  const normalizedPostId = normalizeString(postId);
+  const scheme = resolveAppUrlScheme();
+  if (!normalizedPostId || !scheme) {
+    return "";
+  }
+  const path = `/posts/${encodeURIComponent(normalizedPostId)}`;
+  const commentQuery = normalizeString(commentId)
+    ? `?commentId=${encodeURIComponent(normalizeString(commentId))}`
+    : "";
+  return `${scheme}://auth/?path=${encodeURIComponent(`${path}${commentQuery}`)}`;
+}
+
+function extractVideoDeliveryId(url) {
+  const normalized = normalizeString(url);
+  if (!normalized) {
+    return "";
+  }
+  try {
+    const parsed = new URL(normalized);
+    const host = normalizeString(parsed.hostname)?.toLowerCase() || "";
+    const pathSegments = parsed.pathname.split("/").filter(Boolean);
+    if (!pathSegments.length) {
+      return "";
+    }
+    if (host === "videodelivery.net" || host.endsWith(".videodelivery.net")) {
+      return normalizeString(pathSegments[0]) || "";
+    }
+    return "";
+  } catch (_error) {
+    return "";
+  }
+}
+
+function buildPublicVideoUrls(deliveryId) {
+  const normalized = normalizeString(deliveryId);
+  if (!normalized) {
+    return null;
+  }
+  const encoded = encodeURIComponent(normalized);
+  const base = `https://videodelivery.net/${encoded}`;
+  return {
+    hlsUrl: `${base}/manifest/video.m3u8`,
+    mp4Url: `${base}/downloads/default.mp4`,
+    posterUrl: `${base}/thumbnails/thumbnail.jpg?time=1s&height=960`,
+  };
+}
+
+function resolveShareMedia(shareCard) {
+  const mediaType =
+    normalizeString(shareCard?.mediaType).toLowerCase() || "post";
+  const previewImage = normalizeString(shareCard?.previewMediaThumbnail);
+  if (mediaType === "video") {
+    const deliveryId = extractVideoDeliveryId(previewImage);
+    const publicUrls = buildPublicVideoUrls(deliveryId);
+    if (publicUrls) {
+      return {
+        kind: "video",
+        posterUrl: publicUrls.posterUrl || previewImage || "",
+        hlsUrl: publicUrls.hlsUrl || "",
+        mp4Url: publicUrls.mp4Url || "",
+      };
+    }
+  }
+  return {
+    kind: "image",
+    posterUrl: previewImage || "",
+    hlsUrl: "",
+    mp4Url: "",
+  };
+}
+
+function renderActionLinks({ openAppUrl, iosStoreUrl, androidStoreUrl }) {
+  const links = [];
+  if (openAppUrl) {
+    links.push(
+      `<a class="share-button share-button--primary" href="${escapeAttribute(openAppUrl)}" data-open-app-link="1">Open in app</a>`,
+    );
+  }
   if (iosStoreUrl) {
     links.push(
       `<a class="share-button" href="${escapeAttribute(iosStoreUrl)}" target="_blank" rel="noopener noreferrer">Download on iPhone</a>`,
@@ -323,6 +416,11 @@ function renderActionLinks({ canonicalUrl, iosStoreUrl, androidStoreUrl }) {
   if (androidStoreUrl) {
     links.push(
       `<a class="share-button" href="${escapeAttribute(androidStoreUrl)}" target="_blank" rel="noopener noreferrer">Download on Android</a>`,
+    );
+  }
+  if (!links.length) {
+    links.push(
+      `<a class="share-button share-button--primary" href="${escapeAttribute(openAppUrl || "")}" data-open-app-link="1">Open in app</a>`,
     );
   }
   return links.join("");
@@ -424,6 +522,17 @@ function renderSharePage({
   const imageUrl = normalizeString(shareCard.previewMediaThumbnail);
   const mediaType = normalizeString(shareCard.mediaType) || "post";
   const metaImage = normalizeString(socialCardImageUrl) || imageUrl || "";
+  const shareMedia = resolveShareMedia(shareCard);
+  const postId = normalizeString(shareCard.postId);
+  const openAppUrl = buildAppOpenUrl(postId);
+  const inlineShareState = serializeForInlineScript({
+    canonicalUrl,
+    requestUrl,
+    postId,
+    openAppUrl,
+    iosStoreUrl,
+    androidStoreUrl,
+  });
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -450,87 +559,92 @@ function renderSharePage({
     <link rel="canonical" href="${escapeAttribute(canonicalUrl)}" />
     <style>
       :root {
-        color-scheme: light;
-        --bg: #f4f1e8;
-        --card: rgba(255, 255, 255, 0.94);
-        --ink: #18212d;
-        --muted: #536072;
-        --line: #d5dbe4;
-        --brand: #0d7c66;
-        --brand-soft: rgba(13, 124, 102, 0.12);
-        --shadow: 0 28px 80px rgba(19, 31, 46, 0.12);
+        color-scheme: dark;
+        --bg: #080b10;
+        --surface: rgba(17, 22, 31, 0.9);
+        --surface-soft: rgba(255, 255, 255, 0.06);
+        --line: rgba(255, 255, 255, 0.12);
+        --ink: #f8fafc;
+        --muted: rgba(223, 229, 240, 0.76);
+        --brand: #ff355d;
+        --accent: #25f4ee;
+        --shadow: 0 40px 90px rgba(0, 0, 0, 0.42);
       }
-      * {
-        box-sizing: border-box;
-      }
+      * { box-sizing: border-box; }
       body {
         margin: 0;
         min-height: 100vh;
         background:
-          radial-gradient(circle at top left, rgba(13, 124, 102, 0.18), transparent 34%),
-          radial-gradient(circle at bottom right, rgba(24, 33, 45, 0.1), transparent 28%),
-          linear-gradient(180deg, #fbfaf5 0%, var(--bg) 100%);
+          radial-gradient(circle at 14% 12%, rgba(255, 53, 93, 0.16), transparent 28%),
+          radial-gradient(circle at 84% 20%, rgba(37, 244, 238, 0.14), transparent 24%),
+          linear-gradient(180deg, #0b0f15 0%, var(--bg) 100%);
         color: var(--ink);
         font-family: "Segoe UI", Arial, sans-serif;
       }
+      a { color: inherit; }
       main {
-        width: min(94vw, 1080px);
+        width: min(1480px, calc(100vw - 36px));
+        min-height: 100vh;
         margin: 0 auto;
-        padding: 32px 0 48px;
+        padding: 20px 0 28px;
+        display: grid;
+        gap: 24px;
+        grid-template-columns: minmax(260px, 320px) minmax(0, 1fr) minmax(250px, 300px);
+        align-items: stretch;
+      }
+      .panel {
+        border: 1px solid var(--line);
+        border-radius: 28px;
+        background: var(--surface);
+        backdrop-filter: blur(18px);
+        box-shadow: var(--shadow);
+        overflow: hidden;
+      }
+      .panel__inner {
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+        padding: 26px 24px;
+        height: 100%;
       }
       .brand {
         display: inline-flex;
         align-items: center;
         gap: 10px;
-        padding: 8px 12px;
+        width: fit-content;
+        padding: 8px 14px;
         border-radius: 999px;
-        background: var(--brand-soft);
-        color: var(--brand);
-        font-size: 13px;
+        background: rgba(255, 53, 93, 0.18);
+        color: #fff;
+        font-size: 12px;
         font-weight: 700;
-        letter-spacing: 0.08em;
+        letter-spacing: 0.1em;
         text-transform: uppercase;
       }
       .brand__dot {
         width: 10px;
         height: 10px;
         border-radius: 50%;
-        background: var(--brand);
-      }
-      .hero {
-        display: grid;
-        gap: 24px;
-        grid-template-columns: minmax(0, 1.2fr) minmax(280px, 360px);
-        margin-top: 20px;
-      }
-      .card {
-        border: 1px solid var(--line);
-        border-radius: 30px;
-        background: var(--card);
-        box-shadow: var(--shadow);
-        overflow: hidden;
-      }
-      .content {
-        padding: 28px;
+        background: linear-gradient(135deg, var(--brand), var(--accent));
       }
       .eyebrow {
-        color: var(--brand);
-        font-size: 13px;
+        margin: 0;
+        color: var(--accent);
+        font-size: 12px;
         font-weight: 700;
-        letter-spacing: 0.08em;
+        letter-spacing: 0.16em;
         text-transform: uppercase;
       }
       h1 {
-        margin: 14px 0 16px;
-        font-size: clamp(2.2rem, 5vw, 4.4rem);
+        margin: 12px 0 0;
+        font-size: clamp(2rem, 3vw, 3.4rem);
         line-height: 0.96;
         letter-spacing: -0.04em;
       }
       .summary {
-        margin: 0;
-        max-width: 56ch;
+        margin: 16px 0 0;
         color: var(--muted);
-        font-size: 1.05rem;
+        font-size: 1rem;
         line-height: 1.65;
       }
       .author {
@@ -538,120 +652,432 @@ function renderSharePage({
         grid-template-columns: auto 1fr;
         gap: 14px;
         align-items: center;
-        margin-top: 24px;
-        padding: 14px 16px;
+        padding: 16px;
         border: 1px solid var(--line);
-        border-radius: 22px;
-        background: rgba(255, 255, 255, 0.92);
+        border-radius: 24px;
+        background: var(--surface-soft);
       }
       .author__avatar,
       .author__avatar-fallback {
-        width: 52px;
-        height: 52px;
-        border-radius: 16px;
+        width: 58px;
+        height: 58px;
+        border-radius: 18px;
       }
       .author__avatar {
+        display: block;
         object-fit: cover;
       }
       .author__avatar-fallback {
         display: grid;
         place-items: center;
-        background: var(--brand-soft);
-        color: var(--brand);
+        background: linear-gradient(135deg, rgba(255, 53, 93, 0.26), rgba(37, 244, 238, 0.18));
+        color: #fff;
+        font-size: 1.12rem;
         font-weight: 800;
-        font-size: 1.1rem;
       }
       .author__name {
         font-weight: 700;
-        font-size: 1.02rem;
+        font-size: 1rem;
       }
       .author__username {
         color: var(--muted);
-        font-size: 0.92rem;
-        margin-top: 3px;
+        font-size: 0.94rem;
+        margin-top: 4px;
       }
       .actions {
         display: flex;
         flex-wrap: wrap;
         gap: 12px;
-        margin-top: 24px;
+      }
+      .share-button,
+      .rail__button {
+        appearance: none;
+        border: 1px solid var(--line);
+        background: var(--surface-soft);
+        color: var(--ink);
+        text-decoration: none;
+        cursor: pointer;
       }
       .share-button {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        min-height: 48px;
+        min-height: 50px;
         padding: 0 18px;
-        border-radius: 16px;
-        border: 1px solid var(--line);
-        background: #fff;
-        color: var(--ink);
-        text-decoration: none;
+        border-radius: 18px;
         font-weight: 700;
       }
       .share-button--primary {
         border-color: transparent;
-        background: var(--brand);
+        background: linear-gradient(135deg, var(--brand), #ff6e7f);
         color: #fff;
+        box-shadow: 0 18px 36px rgba(255, 53, 93, 0.28);
       }
-      .meta {
-        margin-top: 18px;
+      .helper,
+      .meta-card p,
+      .meta-card li {
+        margin: 0;
         color: var(--muted);
-        font-size: 0.92rem;
+        line-height: 1.6;
       }
-      .media {
-        padding: 18px;
+      .status-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        width: fit-content;
+        padding: 8px 12px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: var(--surface-soft);
+        font-size: 0.88rem;
+        font-weight: 600;
       }
-      .media__frame {
+      .status-pill::before {
+        content: "";
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, var(--brand), var(--accent));
+      }
+      .feedback {
+        min-height: 1.2em;
+        color: var(--muted);
+        font-size: 0.84rem;
+      }
+      .stage {
         position: relative;
-        aspect-ratio: 9 / 16;
-        border-radius: 22px;
-        overflow: hidden;
-        background: #e6ebf2;
+        display: grid;
+        place-items: center;
       }
-      .media__frame img {
+      .stage::before,
+      .stage::after {
+        content: "";
+        position: absolute;
+        width: 240px;
+        height: 240px;
+        border-radius: 50%;
+        filter: blur(70px);
+      }
+      .stage::before {
+        top: 4%;
+        left: 8%;
+        background: rgba(255, 53, 93, 0.18);
+      }
+      .stage::after {
+        right: 10%;
+        bottom: 10%;
+        background: rgba(37, 244, 238, 0.14);
+      }
+      .viewer {
+        position: relative;
+        z-index: 1;
+        width: min(100%, 920px);
+        display: grid;
+        gap: 18px;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: end;
+      }
+      .phone-shell {
+        border-radius: 34px;
+        padding: 14px;
+        background:
+          linear-gradient(160deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.02)),
+          rgba(7, 10, 15, 0.96);
+        box-shadow:
+          0 0 0 1px rgba(255, 255, 255, 0.08),
+          0 44px 100px rgba(0, 0, 0, 0.48);
+      }
+      .player {
+        position: relative;
+        width: min(100%, 420px);
+        aspect-ratio: 9 / 16;
+        border-radius: 26px;
+        overflow: hidden;
+        background:
+          radial-gradient(circle at top, rgba(255, 255, 255, 0.08), transparent 32%),
+          #030508;
+      }
+      .player video,
+      .player img,
+      .player__fallback {
         width: 100%;
         height: 100%;
         object-fit: cover;
         display: block;
       }
-      .media__badge {
+      .player__fallback {
+        display: grid;
+        place-items: center;
+        padding: 28px;
+        text-align: center;
+        line-height: 1.6;
+        color: var(--muted);
+      }
+      .player__scrim {
         position: absolute;
-        left: 12px;
-        top: 12px;
-        padding: 6px 10px;
+        inset: 0;
+        pointer-events: none;
+      }
+      .player__scrim::before,
+      .player__scrim::after {
+        content: "";
+        position: absolute;
+        left: 0;
+        right: 0;
+      }
+      .player__scrim::before {
+        top: 0;
+        height: 24%;
+        background: linear-gradient(180deg, rgba(0, 0, 0, 0.56), transparent);
+      }
+      .player__scrim::after {
+        bottom: 0;
+        height: 42%;
+        background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.72));
+      }
+      .player__badge {
+        position: absolute;
+        top: 16px;
+        left: 16px;
+        padding: 7px 12px;
         border-radius: 999px;
-        background: rgba(24, 33, 45, 0.74);
+        background: rgba(9, 12, 18, 0.58);
+        border: 1px solid rgba(255, 255, 255, 0.12);
         color: #fff;
         font-size: 12px;
         font-weight: 700;
-        letter-spacing: 0.06em;
+        letter-spacing: 0.1em;
         text-transform: uppercase;
       }
-      .media__footer {
-        margin-top: 14px;
-        color: var(--muted);
-        font-size: 0.92rem;
-        line-height: 1.55;
+      .player__controls {
+        position: absolute;
+        top: 16px;
+        right: 16px;
+        display: flex;
+        gap: 10px;
       }
-      @media (max-width: 880px) {
-        .hero {
+      .player__control {
+        appearance: none;
+        min-width: 44px;
+        height: 44px;
+        padding: 0 14px;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 999px;
+        background: rgba(9, 12, 18, 0.58);
+        color: #fff;
+        font-size: 0.84rem;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      .player__caption {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        padding: 0 18px 20px;
+      }
+      .player__author {
+        display: inline-block;
+        margin-bottom: 10px;
+        font-weight: 700;
+        text-decoration: none;
+      }
+      .player__copy {
+        margin: 0;
+        max-width: 28ch;
+        color: rgba(255, 255, 255, 0.9);
+        line-height: 1.55;
+        text-shadow: 0 4px 18px rgba(0, 0, 0, 0.42);
+      }
+      .player__progress {
+        position: absolute;
+        left: 16px;
+        right: 16px;
+        bottom: 8px;
+        height: 3px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.18);
+        overflow: hidden;
+      }
+      .player__progress-fill {
+        width: 0%;
+        height: 100%;
+        background: linear-gradient(90deg, var(--brand), var(--accent));
+        transition: width 120ms linear;
+      }
+      .rail {
+        display: grid;
+        gap: 12px;
+        align-items: end;
+      }
+      .rail__avatar {
+        width: 60px;
+        height: 60px;
+        border-radius: 20px;
+        overflow: hidden;
+        border: 2px solid rgba(255, 255, 255, 0.16);
+        box-shadow: 0 18px 36px rgba(0, 0, 0, 0.28);
+      }
+      .rail__avatar img,
+      .rail__avatar-fallback {
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
+      .rail__avatar img {
+        object-fit: cover;
+      }
+      .rail__avatar-fallback {
+        display: grid;
+        place-items: center;
+        background: linear-gradient(135deg, rgba(255, 53, 93, 0.3), rgba(37, 244, 238, 0.24));
+        font-weight: 800;
+      }
+      .rail__button {
+        display: grid;
+        justify-items: center;
+        gap: 8px;
+        width: 82px;
+        padding: 14px 10px;
+        border-radius: 24px;
+      }
+      .rail__button--accent {
+        background: linear-gradient(135deg, rgba(255, 53, 93, 0.92), rgba(255, 110, 127, 0.88));
+        border-color: transparent;
+        color: #fff;
+      }
+      .rail__button svg {
+        width: 24px;
+        height: 24px;
+      }
+      .rail__label {
+        font-size: 0.88rem;
+        font-weight: 700;
+        line-height: 1;
+      }
+      .rail__meta {
+        color: var(--muted);
+        font-size: 0.74rem;
+        text-align: center;
+      }
+      .meta-card {
+        border: 1px solid var(--line);
+        border-radius: 22px;
+        background: var(--surface-soft);
+        padding: 18px;
+      }
+      .meta-card h2 {
+        margin: 0 0 12px;
+        font-size: 1rem;
+      }
+      .meta-list {
+        display: grid;
+        gap: 10px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+      .meta-list strong,
+      .meta-list a {
+        display: block;
+        margin-top: 2px;
+        color: var(--ink);
+        font-weight: 600;
+        text-decoration: none;
+        word-break: break-word;
+      }
+      @media (max-width: 1180px) {
+        main {
+          grid-template-columns: minmax(260px, 300px) minmax(0, 1fr);
+        }
+        .panel--meta {
+          grid-column: 1 / -1;
+        }
+        .panel--meta .panel__inner {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+      @media (max-width: 860px) {
+        main {
+          width: min(100vw, calc(100vw - 20px));
+          padding: 12px 0 18px;
           grid-template-columns: 1fr;
+          gap: 16px;
+        }
+        .viewer {
+          grid-template-columns: 1fr;
+          justify-items: center;
+        }
+        .rail {
+          width: min(100%, 420px);
+          grid-template-columns: repeat(5, minmax(0, 1fr));
+        }
+        .rail__button,
+        .rail__avatar {
+          width: 100%;
+        }
+        .rail__avatar {
+          height: 84px;
+        }
+        .panel--meta .panel__inner {
+          grid-template-columns: 1fr;
+        }
+      }
+      @media (max-width: 520px) {
+        main {
+          width: 100vw;
+          padding: 0 0 16px;
+        }
+        .panel--lead,
+        .panel--meta {
+          display: none;
+        }
+        .stage {
+          min-height: 100vh;
+        }
+        .phone-shell {
+          width: 100vw;
+          padding: 0;
+          border-radius: 0;
+          background: transparent;
+          box-shadow: none;
+        }
+        .player {
+          width: 100vw;
+          min-height: 100vh;
+          border-radius: 0;
+        }
+        .rail {
+          position: absolute;
+          right: 12px;
+          bottom: 92px;
+          width: auto;
+          grid-template-columns: 1fr;
+        }
+        .rail__avatar {
+          width: 64px;
+          height: 64px;
+        }
+        .rail__button {
+          width: 78px;
         }
       }
     </style>
   </head>
   <body>
     <main>
-      <div class="brand">
-        <span class="brand__dot"></span>
-        <span>${escapeHtml(brandName)}</span>
-      </div>
-      <section class="hero">
-        <article class="card content">
-          <div class="eyebrow">${escapeHtml(brandName)} Public Post</div>
-          <h1>${escapeHtml(title)}</h1>
-          <p class="summary">${escapeHtml(description)}</p>
+      <aside class="panel panel--lead">
+        <div class="panel__inner">
+          <div class="brand">
+            <span class="brand__dot"></span>
+            <span>${escapeHtml(brandName)}</span>
+          </div>
+          <section>
+            <p class="eyebrow">${escapeHtml(brandName)} public post</p>
+            <h1>${escapeHtml(title)}</h1>
+            <p class="summary">${escapeHtml(description)}</p>
+          </section>
           <section class="author">
             ${
               authorAvatarUrl
@@ -669,30 +1095,270 @@ function renderSharePage({
           </section>
           <div class="actions">
             ${renderActionLinks({
-              canonicalUrl,
+              openAppUrl,
               iosStoreUrl,
               androidStoreUrl,
             })}
           </div>
-          <div class="meta">
-            Share URL: <a href="${escapeAttribute(requestUrl)}">${escapeHtml(requestUrl)}</a>
+          <p class="helper">
+            The shared post now stays watchable on the web. Likes, comments,
+            follows, and the full community context still happen inside the Polis app.
+          </p>
+          <div class="status-pill">Browser playback enabled</div>
+          <div class="feedback" id="share-feedback"></div>
+        </div>
+      </aside>
+      <section class="stage">
+        <div class="viewer">
+          <div class="phone-shell">
+            <article class="player">
+              ${
+                shareMedia.kind === "video" && shareMedia.mp4Url
+                  ? `<video id="share-video" playsinline loop autoplay muted poster="${escapeAttribute(shareMedia.posterUrl || imageUrl || metaImage)}">
+                  <source src="${escapeAttribute(shareMedia.mp4Url)}" type="video/mp4" />
+                </video>`
+                  : imageUrl
+                    ? `<img src="${escapeAttribute(imageUrl)}" alt="${escapeAttribute(title)}" />`
+                    : `<div class="player__fallback">This post is available in the Polis app. Install the app to keep watching and join the conversation.</div>`
+              }
+              <div class="player__scrim"></div>
+              <div class="player__badge">${escapeHtml(mediaType)}</div>
+              ${
+                shareMedia.kind === "video" && shareMedia.mp4Url
+                  ? `<div class="player__controls">
+                  <button class="player__control" id="playback-toggle" type="button">Pause</button>
+                  <button class="player__control" id="mute-toggle" type="button">Unmute</button>
+                </div>`
+                  : ""
+              }
+              <div class="player__caption">
+                <a class="player__author" href="${escapeAttribute(canonicalUrl)}">${escapeHtml(authorUsername ? `@${authorUsername}` : authorDisplayName)}</a>
+                <p class="player__copy">${escapeHtml(description)}</p>
+              </div>
+              ${
+                shareMedia.kind === "video" && shareMedia.mp4Url
+                  ? `<div class="player__progress" aria-hidden="true"><div class="player__progress-fill" id="progress-fill"></div></div>`
+                  : ""
+              }
+            </article>
           </div>
-        </article>
-        <aside class="card media">
-          <div class="media__frame">
-            ${
-              imageUrl
-                ? `<img src="${escapeAttribute(imageUrl)}" alt="${escapeAttribute(title)}" />`
-                : ""
-            }
-            <div class="media__badge">${escapeHtml(mediaType)}</div>
-          </div>
-          <div class="media__footer">
-            If the ${escapeHtml(brandName)} app is installed, opening this public link should route into the app. Otherwise this browser page remains available.
-          </div>
-        </aside>
+          <aside class="rail">
+            <div class="rail__avatar">
+              ${
+                authorAvatarUrl
+                  ? `<img src="${escapeAttribute(authorAvatarUrl)}" alt="${escapeAttribute(authorDisplayName)}" />`
+                  : `<div class="rail__avatar-fallback">${escapeHtml(authorDisplayName.slice(0, 1).toUpperCase() || "P")}</div>`
+              }
+            </div>
+            <button class="rail__button" type="button" data-open-app-button="1">
+              <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 20s-7-4.35-7-10a4 4 0 0 1 7-2.53A4 4 0 0 1 19 10c0 5.65-7 10-7 10Z"/></svg>
+              <span class="rail__label">Like</span>
+              <span class="rail__meta">In app</span>
+            </button>
+            <button class="rail__button" type="button" data-open-app-button="1">
+              <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 18.5A8.38 8.38 0 0 1 3 11.5 8.5 8.5 0 0 1 11.5 3h1A8.5 8.5 0 0 1 21 11.5 8.5 8.5 0 0 1 12.5 20H7l-4 3.5Z"/></svg>
+              <span class="rail__label">Comment</span>
+              <span class="rail__meta">Reply</span>
+            </button>
+            <button class="rail__button" type="button" id="share-button">
+              <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m7 12 10-6v12L7 12Z"/><path d="M3 12h4"/></svg>
+              <span class="rail__label">Share</span>
+              <span class="rail__meta">Send link</span>
+            </button>
+            <button class="rail__button rail__button--accent" type="button" id="open-app-button">
+              <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+              <span class="rail__label">Open</span>
+              <span class="rail__meta">Polis app</span>
+            </button>
+          </aside>
+        </div>
       </section>
+      <aside class="panel panel--meta">
+        <div class="panel__inner">
+          <section class="meta-card">
+            <h2>Share details</h2>
+            <ul class="meta-list">
+              <li>Author<strong>${escapeHtml(authorDisplayName)}</strong></li>
+              <li>Media<strong>${escapeHtml(mediaType)}</strong></li>
+              <li>Canonical URL<strong><a href="${escapeAttribute(canonicalUrl)}">${escapeHtml(canonicalUrl)}</a></strong></li>
+            </ul>
+          </section>
+          <section class="meta-card">
+            <h2>Open in app</h2>
+            <p>
+              The app handoff target for shared posts is the focused post player at
+              <code>/posts/:postId</code>. That is the closest current in-app surface
+              to a TikTok-style signed-out viewer.
+            </p>
+          </section>
+          <section class="meta-card">
+            <h2>Shared link</h2>
+            <p>${escapeHtml(requestUrl)}</p>
+          </section>
+        </div>
+      </aside>
     </main>
+    <script>
+      const shareState = ${inlineShareState};
+      const feedback = document.getElementById("share-feedback");
+
+      function setFeedback(message) {
+        if (feedback) {
+          feedback.textContent = message;
+        }
+      }
+
+      function isLikelyMobileDevice() {
+        return /android|iphone|ipad|ipod/i.test(window.navigator.userAgent || "");
+      }
+
+      function preferredFallbackUrl() {
+        const agent = (window.navigator.userAgent || "").toLowerCase();
+        if (agent.includes("iphone") || agent.includes("ipad") || agent.includes("ipod")) {
+          return shareState.iosStoreUrl || shareState.canonicalUrl;
+        }
+        if (agent.includes("android")) {
+          return shareState.androidStoreUrl || shareState.canonicalUrl;
+        }
+        return shareState.canonicalUrl;
+      }
+
+      function openInApp() {
+        if (!shareState.openAppUrl) {
+          setFeedback("App handoff is not configured yet.");
+          return;
+        }
+        if (!isLikelyMobileDevice()) {
+          setFeedback("Open this link on a phone with Polis installed to hand off into the app.");
+          return;
+        }
+        let hidden = false;
+        const handleVisibility = () => {
+          if (document.visibilityState === "hidden") {
+            hidden = true;
+          }
+        };
+        document.addEventListener("visibilitychange", handleVisibility, { once: true });
+        window.location.assign(shareState.openAppUrl);
+        window.setTimeout(() => {
+          document.removeEventListener("visibilitychange", handleVisibility);
+          const fallbackUrl = preferredFallbackUrl();
+          if (!hidden && fallbackUrl && fallbackUrl !== window.location.href) {
+            window.location.assign(fallbackUrl);
+          }
+        }, 1200);
+      }
+
+      async function shareLink() {
+        const url = shareState.canonicalUrl || shareState.requestUrl;
+        if (!url) {
+          setFeedback("Share link unavailable right now.");
+          return;
+        }
+        try {
+          if (navigator.share) {
+            await navigator.share({ title: document.title, text: "${escapeAttribute(description)}", url });
+            setFeedback("Share sheet opened.");
+            return;
+          }
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(url);
+            setFeedback("Share link copied.");
+            return;
+          }
+        } catch (_error) {
+          setFeedback("Sharing failed. Copy the URL from the browser bar.");
+          return;
+        }
+        setFeedback("Copy the URL from the browser bar to share this post.");
+      }
+
+      document.querySelectorAll("[data-open-app-button=\"1\"], [data-open-app-link=\"1\"]").forEach((element) => {
+        element.addEventListener("click", (event) => {
+          event.preventDefault();
+          openInApp();
+        });
+      });
+
+      const shareButton = document.getElementById("share-button");
+      if (shareButton) {
+        shareButton.addEventListener("click", shareLink);
+      }
+
+      const openAppButton = document.getElementById("open-app-button");
+      if (openAppButton) {
+        openAppButton.addEventListener("click", openInApp);
+      }
+
+      const video = document.getElementById("share-video");
+      const muteToggle = document.getElementById("mute-toggle");
+      const playbackToggle = document.getElementById("playback-toggle");
+      const progressFill = document.getElementById("progress-fill");
+
+      function syncPlaybackState() {
+        if (!video) {
+          return;
+        }
+        if (muteToggle) {
+          muteToggle.textContent = video.muted ? "Unmute" : "Mute";
+        }
+        if (playbackToggle) {
+          playbackToggle.textContent = video.paused ? "Play" : "Pause";
+        }
+      }
+
+      function syncProgress() {
+        if (!video || !progressFill) {
+          return;
+        }
+        const duration = Number(video.duration);
+        const currentTime = Number(video.currentTime);
+        if (!duration || !Number.isFinite(duration)) {
+          progressFill.style.width = "0%";
+          return;
+        }
+        const progress = Math.max(0, Math.min(100, (currentTime / duration) * 100));
+        progressFill.style.width = progress.toFixed(2) + "%";
+      }
+
+      if (video) {
+        video.addEventListener("timeupdate", syncProgress);
+        video.addEventListener("play", syncPlaybackState);
+        video.addEventListener("pause", syncPlaybackState);
+        video.addEventListener("volumechange", syncPlaybackState);
+        video.addEventListener("loadedmetadata", syncProgress);
+        video.addEventListener("click", () => {
+          if (video.paused) {
+            video.play().catch(() => {});
+          } else {
+            video.pause();
+          }
+        });
+        video.play().catch(() => {
+          syncPlaybackState();
+        });
+        syncPlaybackState();
+        syncProgress();
+      }
+
+      if (muteToggle && video) {
+        muteToggle.addEventListener("click", () => {
+          video.muted = !video.muted;
+          syncPlaybackState();
+        });
+      }
+
+      if (playbackToggle && video) {
+        playbackToggle.addEventListener("click", () => {
+          if (video.paused) {
+            video.play().catch(() => {});
+          } else {
+            video.pause();
+          }
+          syncPlaybackState();
+        });
+      }
+    </script>
   </body>
 </html>`;
 }
