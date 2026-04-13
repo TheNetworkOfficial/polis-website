@@ -4,6 +4,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node src/server.js",
+    "start:public": "node src/publicServer.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -12,6 +13,7 @@
   "description": "",
   "dependencies": {
     "@apollo/server": "^4.11.2",
+    "@resvg/resvg-js": "^2.6.2",
     "bcrypt": "^6.0.0",
     "body-parser": "^1.20.3",
     "connect-redis": "^8.1.0",

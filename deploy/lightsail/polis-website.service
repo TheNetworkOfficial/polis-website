@@ -1,0 +1,15 @@
+[Unit]
+Description=Polis Public Website
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/var/www/polis-website/backend
+EnvironmentFile=/etc/polis-website/backend.env
+ExecStart=/usr/bin/node /var/www/polis-website/backend/src/publicServer.js
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
