@@ -2,11 +2,14 @@ const DEFAULT_COGNITO_REGION = "us-west-2";
 const DEFAULT_COGNITO_SCOPES =
   "openid email profile aws.cognito.signin.user.admin";
 const PASSWORD_SIGNIN_FLOW = "USER_PASSWORD_AUTH";
+const REFRESH_TOKEN_FLOW = "REFRESH_TOKEN_AUTH";
 
 const SESSION_STORAGE_KEY = "sharedFeedSession.v1";
+const LOCAL_STORAGE_KEY = "sharedFeedSessionPersisted.v1";
 const OAUTH_STATE_STORAGE_KEY = "sharedFeedOauthState.v1";
 const OAUTH_VERIFIER_STORAGE_KEY = "sharedFeedOauthVerifier.v1";
 const POST_AUTH_PATH_STORAGE_KEY = "sharedFeedPostAuthPath.v1";
+const SESSION_REFRESH_LEEWAY_MS = 60 * 1000;
 
 export class SharedFeedAuthError extends Error {
   constructor(
@@ -79,13 +82,59 @@ function decodeJwtClaims(token) {
   }
 }
 
-function buildSessionFromTokens(tokens = {}) {
+function getSafeStorage(kind) {
+  try {
+    return window?.[kind] || null;
+  } catch {
+    return null;
+  }
+}
+
+function readStoredValue(kind, key) {
+  const storage = getSafeStorage(kind);
+  if (!storage) {
+    return "";
+  }
+  try {
+    return storage.getItem(key) || "";
+  } catch {
+    return "";
+  }
+}
+
+function writeStoredValue(kind, key, value) {
+  const storage = getSafeStorage(kind);
+  if (!storage) {
+    return;
+  }
+  try {
+    storage.setItem(key, value);
+  } catch {
+    // Ignore storage quota/privacy mode errors and continue in-memory.
+  }
+}
+
+function removeStoredValue(kind, key) {
+  const storage = getSafeStorage(kind);
+  if (!storage) {
+    return;
+  }
+  try {
+    storage.removeItem(key);
+  } catch {
+    // Ignore storage quota/privacy mode errors and continue in-memory.
+  }
+}
+
+function buildSessionFromTokens(tokens = {}, { refreshToken = "" } = {}) {
   const accessToken = normalizeString(
     tokens.AccessToken || tokens.access_token,
   );
   const idToken = normalizeString(tokens.IdToken || tokens.id_token);
-  const refreshToken =
-    normalizeString(tokens.RefreshToken || tokens.refresh_token) || null;
+  const resolvedRefreshToken =
+    normalizeString(tokens.RefreshToken || tokens.refresh_token) ||
+    normalizeString(refreshToken) ||
+    null;
   const expiresInSeconds = Number(
     tokens.ExpiresIn || tokens.expires_in || 3600,
   );
@@ -99,7 +148,7 @@ function buildSessionFromTokens(tokens = {}) {
   return {
     accessToken,
     idToken,
-    refreshToken,
+    refreshToken: resolvedRefreshToken,
     expiresAt:
       Date.now() +
       (Number.isFinite(expiresInSeconds)
@@ -110,16 +159,19 @@ function buildSessionFromTokens(tokens = {}) {
 }
 
 function persistSession(session) {
-  window.sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+  const serialized = JSON.stringify(session);
+  writeStoredValue("sessionStorage", SESSION_STORAGE_KEY, serialized);
+  writeStoredValue("localStorage", LOCAL_STORAGE_KEY, serialized);
 }
 
 function clearStoredSessionOnly() {
-  window.sessionStorage.removeItem(SESSION_STORAGE_KEY);
+  removeStoredValue("sessionStorage", SESSION_STORAGE_KEY);
+  removeStoredValue("localStorage", LOCAL_STORAGE_KEY);
 }
 
 function clearOAuthState() {
-  window.sessionStorage.removeItem(OAUTH_STATE_STORAGE_KEY);
-  window.sessionStorage.removeItem(OAUTH_VERIFIER_STORAGE_KEY);
+  removeStoredValue("sessionStorage", OAUTH_STATE_STORAGE_KEY);
+  removeStoredValue("sessionStorage", OAUTH_VERIFIER_STORAGE_KEY);
 }
 
 function clearOAuthParamsFromUrl() {
@@ -143,9 +195,8 @@ function clearOAuthParamsFromUrl() {
   window.history.replaceState({}, document.title, next);
 }
 
-function getStoredSession() {
-  const raw = window.sessionStorage.getItem(SESSION_STORAGE_KEY);
-  if (!raw) {
+function parseStoredSession(raw) {
+  if (!normalizeString(raw)) {
     return null;
   }
 
@@ -160,10 +211,6 @@ function getStoredSession() {
     if (!accessToken || !idToken || !Number.isFinite(expiresAt)) {
       return null;
     }
-    if (Date.now() >= expiresAt) {
-      clearStoredSessionOnly();
-      return null;
-    }
     return {
       accessToken,
       idToken,
@@ -173,6 +220,37 @@ function getStoredSession() {
   } catch {
     return null;
   }
+}
+
+function isSessionValid(session, leewayMs = SESSION_REFRESH_LEEWAY_MS) {
+  const expiresAt = Number(session?.expiresAt || 0);
+  return Boolean(
+    Number.isFinite(expiresAt) && Date.now() + leewayMs < expiresAt,
+  );
+}
+
+function getStoredSession({ allowExpired = false } = {}) {
+  const candidates = [
+    parseStoredSession(readStoredValue("sessionStorage", SESSION_STORAGE_KEY)),
+    parseStoredSession(readStoredValue("localStorage", LOCAL_STORAGE_KEY)),
+  ].filter(Boolean);
+
+  if (!candidates.length) {
+    return null;
+  }
+
+  const session = candidates.sort(
+    (left, right) =>
+      Number(right?.expiresAt || 0) - Number(left?.expiresAt || 0),
+  )[0];
+
+  if (!allowExpired && !isSessionValid(session, 0)) {
+    clearStoredSessionOnly();
+    return null;
+  }
+
+  persistSession(session);
+  return session;
 }
 
 function deriveSessionUser(session) {
@@ -261,6 +339,12 @@ function hasDirectSignUpConfig(config = {}) {
   );
 }
 
+function hasRefreshSessionConfig(config = {}) {
+  return Boolean(
+    resolveCognitoRegion(config) && resolveCognitoClientId(config),
+  );
+}
+
 export function getSharedFeedAuthCapabilities(config = {}) {
   return {
     direct: hasDirectSignUpConfig(config),
@@ -284,6 +368,52 @@ export function buildAuthorizedHeaders(session, extra = {}, options = {}) {
     headers["X-Cognito-Access-Token"] = accessToken;
   }
   return headers;
+}
+
+async function refreshSharedFeedSession(config = {}, session) {
+  if (
+    !hasRefreshSessionConfig(config) ||
+    !normalizeString(session?.refreshToken)
+  ) {
+    return null;
+  }
+
+  const response = await fetch(getCognitoIdpEndpoint(config), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-amz-json-1.1",
+      "X-Amz-Target": "AWSCognitoIdentityProviderService.InitiateAuth",
+    },
+    body: JSON.stringify({
+      AuthFlow: REFRESH_TOKEN_FLOW,
+      ClientId: resolveCognitoClientId(config),
+      AuthParameters: {
+        REFRESH_TOKEN: normalizeString(session.refreshToken),
+      },
+    }),
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const mapped = mapAuthFailure(payload, response.status, {
+      message: "Your session expired. Please sign in again.",
+      errorCode: "session_refresh_failed",
+    });
+    throw new SharedFeedAuthError(mapped.message, {
+      statusCode: mapped.statusCode,
+      errorCode: mapped.errorCode,
+      payload,
+    });
+  }
+
+  const refreshedSession = buildSessionFromTokens(
+    payload?.AuthenticationResult || {},
+    {
+      refreshToken: session.refreshToken,
+    },
+  );
+  persistSession(refreshedSession);
+  return refreshedSession;
 }
 
 function sanitizeUsername(value) {
@@ -438,10 +568,14 @@ async function resolveCognitoUsername(identifier, config = {}) {
 function persistPostAuthPath(path) {
   const normalizedPath = normalizeString(path);
   if (!normalizedPath) {
-    window.sessionStorage.removeItem(POST_AUTH_PATH_STORAGE_KEY);
+    removeStoredValue("sessionStorage", POST_AUTH_PATH_STORAGE_KEY);
     return;
   }
-  window.sessionStorage.setItem(POST_AUTH_PATH_STORAGE_KEY, normalizedPath);
+  writeStoredValue(
+    "sessionStorage",
+    POST_AUTH_PATH_STORAGE_KEY,
+    normalizedPath,
+  );
 }
 
 export function setSharedFeedPostAuthPath(path) {
@@ -450,9 +584,9 @@ export function setSharedFeedPostAuthPath(path) {
 
 export function consumeSharedFeedPostAuthPath() {
   const value = normalizeString(
-    window.sessionStorage.getItem(POST_AUTH_PATH_STORAGE_KEY),
+    readStoredValue("sessionStorage", POST_AUTH_PATH_STORAGE_KEY),
   );
-  window.sessionStorage.removeItem(POST_AUTH_PATH_STORAGE_KEY);
+  removeStoredValue("sessionStorage", POST_AUTH_PATH_STORAGE_KEY);
   return value;
 }
 
@@ -472,8 +606,8 @@ async function startHostedAuth(
   const verifier = createRandomToken(64);
   const challenge = await buildPkceChallenge(verifier);
 
-  window.sessionStorage.setItem(OAUTH_STATE_STORAGE_KEY, state);
-  window.sessionStorage.setItem(OAUTH_VERIFIER_STORAGE_KEY, verifier);
+  writeStoredValue("sessionStorage", OAUTH_STATE_STORAGE_KEY, state);
+  writeStoredValue("sessionStorage", OAUTH_VERIFIER_STORAGE_KEY, verifier);
 
   const params = new URLSearchParams({
     client_id: normalizeString(config.clientId),
@@ -768,21 +902,20 @@ export async function completeHostedSignIn(config = {}) {
 
   const code = normalizeString(url.searchParams.get("code"));
   if (!code) {
-    const session = getStoredSession();
     return {
       handled: false,
-      session,
-      user: deriveSessionUser(session),
+      session: null,
+      user: null,
       error: null,
     };
   }
 
   const returnedState = normalizeString(url.searchParams.get("state"));
   const expectedState = normalizeString(
-    window.sessionStorage.getItem(OAUTH_STATE_STORAGE_KEY),
+    readStoredValue("sessionStorage", OAUTH_STATE_STORAGE_KEY),
   );
   const verifier = normalizeString(
-    window.sessionStorage.getItem(OAUTH_VERIFIER_STORAGE_KEY),
+    readStoredValue("sessionStorage", OAUTH_VERIFIER_STORAGE_KEY),
   );
 
   clearOAuthState();
@@ -840,11 +973,29 @@ export async function completeHostedSignIn(config = {}) {
 export function clearSharedFeedSession() {
   clearStoredSessionOnly();
   clearOAuthState();
-  window.sessionStorage.removeItem(POST_AUTH_PATH_STORAGE_KEY);
+  removeStoredValue("sessionStorage", POST_AUTH_PATH_STORAGE_KEY);
 }
 
 export function getStoredSharedFeedSession() {
   return getStoredSession();
+}
+
+export async function restoreSharedFeedSession(config = {}) {
+  const storedSession = getStoredSession({ allowExpired: true });
+  if (!storedSession) {
+    return null;
+  }
+
+  if (isSessionValid(storedSession)) {
+    return storedSession;
+  }
+
+  try {
+    return await refreshSharedFeedSession(config, storedSession);
+  } catch {
+    clearStoredSessionOnly();
+    return null;
+  }
 }
 
 export function getAuthenticatedUser(session) {

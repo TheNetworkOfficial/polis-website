@@ -10,9 +10,9 @@ import {
   completeHostedSignIn,
   getAuthenticatedUser,
   getSharedFeedAuthCapabilities,
-  getStoredSharedFeedSession,
   hasHostedSignInConfig,
   resendSharedFeedSignUpCode,
+  restoreSharedFeedSession,
   setSharedFeedPostAuthPath,
   signInSharedFeedWithPassword,
   signUpSharedFeedWithEmail,
@@ -32,6 +32,8 @@ const initialCommentId =
 
 const FEED_MODE_FOR_YOU = "for_you";
 const FEED_MODE_FOLLOWING = "following";
+const IMMERSIVE_FEED_PAGE_LIMIT = 6;
+const GRID_FEED_PAGE_LIMIT = 25;
 const ROUTE_KEY_SHARE_POST = "share-post";
 const ROUTE_KEY_FEED = "feed";
 const ROUTE_KEY_CANDIDATES = "candidates";
@@ -351,6 +353,7 @@ const state = {
       loadingMore: false,
       error: "",
       bootstrapped: false,
+      requestLimit: 0,
     },
     [FEED_MODE_FOLLOWING]: {
       items: [],
@@ -361,6 +364,7 @@ const state = {
       error: "",
       bootstrapped: false,
       unauthorized: false,
+      requestLimit: 0,
     },
   },
   activeIndex: 0,
@@ -1201,6 +1205,8 @@ function normalizeFeedItem(raw = {}, index = 0) {
       hostDisplayName: normalizeString(raw.hostDisplayName),
       startAt: Number(raw.startAt) || null,
       address: normalizeString(raw.address),
+      attendeeCount:
+        Number(raw.attendeeCount || raw.goingCount || raw.rsvpCount) || 0,
     };
   }
 
@@ -1271,6 +1277,10 @@ function getCurrentFeedState() {
 
 function getCurrentItems() {
   return getCurrentFeedState().items;
+}
+
+function getFeedRequestLimit(route = state.route) {
+  return isShareRoute(route) ? IMMERSIVE_FEED_PAGE_LIMIT : GRID_FEED_PAGE_LIMIT;
 }
 
 function ensureActiveIndexInBounds() {
@@ -1366,11 +1376,13 @@ async function refreshPostEngagement(postId) {
 
 async function loadInitialFeed({ refresh = false } = {}) {
   const feed = state.feeds[FEED_MODE_FOR_YOU];
+  const limit = getFeedRequestLimit();
   if (refresh) {
     feed.items = [];
     feed.nextCursor = null;
     feed.sessionId = null;
     feed.bootstrapped = false;
+    feed.requestLimit = 0;
   }
   feed.loading = true;
   feed.error = "";
@@ -1381,14 +1393,15 @@ async function loadInitialFeed({ refresh = false } = {}) {
     const anchorPostId = normalizeString(state.feedContext.anchorPostId);
     const payload = isShare
       ? await fetchJson(
-          `/api/public/posts/${encodeURIComponent(anchorPostId)}/web-feed?limit=6`,
+          `/api/public/posts/${encodeURIComponent(anchorPostId)}/web-feed?limit=${limit}`,
         )
-      : await fetchJson("/api/feed/for-you?limit=6", {
+      : await fetchJson(`/api/feed/for-you?limit=${limit}`, {
           auth: true,
         });
     feed.items = (payload.items || []).map(normalizeFeedItem);
     feed.nextCursor = normalizeString(payload.nextCursor) || null;
     feed.sessionId = normalizeString(payload.sessionId) || null;
+    feed.requestLimit = limit;
     feed.loading = false;
     feed.bootstrapped = true;
     ensureActiveIndexInBounds();
@@ -1411,6 +1424,7 @@ async function loadInitialFeed({ refresh = false } = {}) {
 
 async function loadFollowingFeed({ refresh = false } = {}) {
   const feed = state.feeds[FEED_MODE_FOLLOWING];
+  const limit = getFeedRequestLimit();
   if (!state.auth.session) {
     feed.unauthorized = true;
     openAuthModal("following");
@@ -1421,7 +1435,7 @@ async function loadFollowingFeed({ refresh = false } = {}) {
     return;
   }
 
-  if (!refresh && feed.bootstrapped) {
+  if (!refresh && feed.bootstrapped && feed.requestLimit === limit) {
     state.mode = FEED_MODE_FOLLOWING;
     ensureActiveIndexInBounds();
     scheduleRender();
@@ -1433,12 +1447,13 @@ async function loadFollowingFeed({ refresh = false } = {}) {
   scheduleRender();
 
   try {
-    const payload = await fetchJson("/api/feed/following?limit=6", {
+    const payload = await fetchJson(`/api/feed/following?limit=${limit}`, {
       auth: true,
     });
     feed.items = (payload.items || []).map(normalizeFeedItem);
     feed.nextCursor = normalizeString(payload.nextCursor) || null;
     feed.sessionId = normalizeString(payload.sessionId) || null;
+    feed.requestLimit = limit;
     feed.loading = false;
     feed.bootstrapped = true;
     feed.unauthorized = false;
@@ -1461,6 +1476,7 @@ async function loadFollowingFeed({ refresh = false } = {}) {
 
 async function loadMoreFeed(mode = state.mode) {
   const feed = state.feeds[mode];
+  const limit = getFeedRequestLimit();
   if (!feed.nextCursor || feed.loadingMore) {
     return;
   }
@@ -1472,13 +1488,13 @@ async function loadMoreFeed(mode = state.mode) {
     let payload;
     if (mode === FEED_MODE_FOLLOWING) {
       payload = await fetchJson(
-        `/api/feed/following?limit=6&cursor=${encodeURIComponent(feed.nextCursor)}`,
+        `/api/feed/following?limit=${limit}&cursor=${encodeURIComponent(feed.nextCursor)}`,
         { auth: true },
       );
     } else {
       const isShare = state.feedContext.kind === "share";
       const query = new URLSearchParams({
-        limit: "6",
+        limit: String(limit),
         cursor: feed.nextCursor,
       });
       if (feed.sessionId) {
@@ -4275,6 +4291,9 @@ async function loadCurrentRoute({ refresh = false } = {}) {
   }
 
   if (isFeedRoute(route)) {
+    if (isShareRoute(route)) {
+      state.mode = FEED_MODE_FOR_YOU;
+    }
     state.feedContext = isShareRoute(route)
       ? {
           kind: "share",
@@ -4286,6 +4305,13 @@ async function loadCurrentRoute({ refresh = false } = {}) {
           kind: "app",
           anchorPostId: "",
         };
+    if (
+      normalizeString(route.routeKey) === ROUTE_KEY_FEED &&
+      state.mode === FEED_MODE_FOLLOWING
+    ) {
+      await loadFollowingFeed({ refresh });
+      return;
+    }
     await loadInitialFeed({ refresh });
     return;
   }
@@ -4964,26 +4990,34 @@ function renderMediaThumbnailGrid(
   items = [],
   {
     emptyMessage = "Nothing here yet.",
+    gridClassName = "",
     getRoute,
     getMediaUrl,
     getAltText,
     getOverlayText,
     getPlaceholderLabel,
     overlayBare = false,
+    isOverlayBare,
   } = {},
 ) {
   if (!items.length) {
     return `<div class="shared-page__empty">${escapeHtml(emptyMessage)}</div>`;
   }
 
-  return `<div class="shared-media-grid">${items
+  const normalizedGridClassName = normalizeString(gridClassName);
+
+  return `<div class="shared-media-grid${normalizedGridClassName ? ` ${escapeHtml(normalizedGridClassName)}` : ""}">${items
     .map((item) => {
       const route = normalizeString(getRoute?.(item));
       const mediaUrl = normalizeUrl(getMediaUrl?.(item));
       const overlayText = normalizeString(getOverlayText?.(item));
       const altText = normalizeString(getAltText?.(item)) || "Media item";
+      const overlayIsBare =
+        typeof isOverlayBare === "function" ? isOverlayBare(item) : overlayBare;
       const placeholderLabel =
-        normalizeString(getPlaceholderLabel?.(item)).slice(0, 1).toUpperCase() ||
+        normalizeString(getPlaceholderLabel?.(item))
+          .slice(0, 1)
+          .toUpperCase() ||
         altText.slice(0, 1).toUpperCase() ||
         "M";
 
@@ -4995,12 +5029,124 @@ function renderMediaThumbnailGrid(
         }
         ${
           overlayText
-            ? `<span class="shared-media-tile__overlay${overlayBare ? " shared-media-tile__overlay--bare" : ""}">${escapeHtml(overlayText)}</span>`
+            ? `<span class="shared-media-tile__overlay${overlayIsBare ? " shared-media-tile__overlay--bare" : ""}">${escapeHtml(overlayText)}</span>`
             : ""
         }
       </button>`;
     })
     .join("")}</div>`;
+}
+
+function getFeedGridItems(items = []) {
+  return items.filter(
+    (item) => item?.kind === "post" || item?.kind === "event",
+  );
+}
+
+function getFeedPromptItems(items = []) {
+  return items.filter((item) => item?.kind === "prompt");
+}
+
+function renderFeedPromptCards(items = []) {
+  if (!items.length) {
+    return "";
+  }
+
+  return `<div>
+    <h2>More from Polis</h2>
+    <div class="shared-card-grid shared-card-grid--detail">
+      ${items
+        .map(
+          (item) => `<article class="shared-card">
+            <div class="shared-card__body">
+              <p class="shared-page__eyebrow">Prompt</p>
+              <h3>${escapeHtml(item.title || "Continue in Polis")}</h3>
+              <p class="shared-card__summary">${escapeHtml(item.description || "Open the app to continue this feed step.")}</p>
+              <div class="shared-card__actions">
+                <button class="shared-feed-chip shared-feed-chip--primary" data-action="open-app-shell">Open app</button>
+              </div>
+            </div>
+          </article>`,
+        )
+        .join("")}
+    </div>
+  </div>`;
+}
+
+function renderFeedOverviewPage() {
+  const feed = getCurrentFeedState();
+  const items = getCurrentItems();
+  const mediaItems = getFeedGridItems(items);
+  const promptItems = getFeedPromptItems(items);
+  const modeLabel =
+    state.mode === FEED_MODE_FOLLOWING ? "Following" : "For You";
+
+  return `<section class="shared-page">
+    ${renderTopChrome()}
+    <div class="shared-page__content">
+      <div class="shared-page__header">
+        <div>
+          <p class="shared-page__eyebrow">Feed</p>
+          <h1>${escapeHtml(modeLabel)}</h1>
+          <p>Browse the latest Polis posts and events in a compact web grid.</p>
+        </div>
+        <div class="shared-card__actions">
+          ${
+            feed.nextCursor
+              ? `<button class="shared-feed-chip" data-action="load-more-feed-grid"${feed.loadingMore ? " disabled" : ""}>${feed.loadingMore ? "Loading…" : "Load more"}</button>`
+              : ""
+          }
+          <button class="shared-feed-chip shared-feed-chip--primary" data-action="refresh-feed-grid"${feed.loading ? " disabled" : ""}>${feed.loading ? "Refreshing…" : "Refresh"}</button>
+        </div>
+      </div>
+      ${
+        feed.loading && !items.length
+          ? '<div class="shared-page__loading">Loading feed…</div>'
+          : ""
+      }
+      ${feed.error ? `<div class="shared-page__error">${escapeHtml(feed.error)}</div>` : ""}
+      ${renderMediaThumbnailGrid(mediaItems, {
+        emptyMessage: "No feed items yet.",
+        gridClassName: "shared-media-grid--five-wide",
+        getRoute: (item) => {
+          if (item.kind === "event" && item.eventId) {
+            return `/events/${encodeURIComponent(item.eventId)}`;
+          }
+          return item.postId ? `/posts/${encodeURIComponent(item.postId)}` : "";
+        },
+        getMediaUrl: (item) =>
+          item.kind === "event"
+            ? item.imageUrl
+            : item.posterUrl || item.imageUrl,
+        getAltText: (item) =>
+          item.kind === "event"
+            ? item.title || "Event"
+            : item.previewTitle ||
+              item.caption ||
+              item.authorDisplayName ||
+              "Post",
+        getOverlayText: (item) => {
+          if (item.kind === "event") {
+            if (Number(item.attendeeCount) > 0) {
+              return `${formatCount(item.attendeeCount)} going`;
+            }
+            return item.startAt
+              ? formatAbsoluteDateTime(item.startAt)
+              : item.hostDisplayName || "Event";
+          }
+          return `${formatCount(item.likesCount)} like${Number(item.likesCount) === 1 ? "" : "s"}`;
+        },
+        getPlaceholderLabel: (item) => (item.kind === "event" ? "E" : "P"),
+        isOverlayBare: (item) => item.kind === "post",
+      })}
+      ${
+        feed.loadingMore
+          ? '<div class="shared-page__hint">Loading more feed items…</div>'
+          : ""
+      }
+      ${renderFeedPromptCards(promptItems)}
+    </div>
+  </section>`;
 }
 
 function renderCandidateListPage() {
@@ -5031,7 +5177,9 @@ function renderCandidateListPage() {
       <div class="shared-card-grid shared-card-grid--candidates">
         ${list.items
           .map(
-            (candidate) => `<article class="shared-card shared-card--candidate-preview">
+            (
+              candidate,
+            ) => `<article class="shared-card shared-card--candidate-preview">
               ${
                 candidate.avatarUrl
                   ? `<img class="shared-card__avatar" src="${escapeHtml(candidate.avatarUrl)}" alt="${escapeHtml(candidate.displayName)}" />`
@@ -5159,7 +5307,10 @@ function renderCandidateDetailPage() {
               item.postId ? `/posts/${encodeURIComponent(item.postId)}` : "",
             getMediaUrl: (item) => item.posterUrl || item.imageUrl,
             getAltText: (item) =>
-              item.previewTitle || item.caption || item.authorDisplayName || "Post",
+              item.previewTitle ||
+              item.caption ||
+              item.authorDisplayName ||
+              "Post",
             getOverlayText: (item) =>
               `${formatCount(item.likesCount)} like${Number(item.likesCount) === 1 ? "" : "s"}`,
             getPlaceholderLabel: () => "P",
@@ -5213,8 +5364,11 @@ function renderEventsListPage() {
           ? '<div class="shared-events-map" id="shared-events-map"></div>'
           : renderMediaThumbnailGrid(list.items, {
               emptyMessage: "No events found.",
+              gridClassName: "shared-media-grid--five-wide",
               getRoute: (item) =>
-                item.eventId ? `/events/${encodeURIComponent(item.eventId)}` : "",
+                item.eventId
+                  ? `/events/${encodeURIComponent(item.eventId)}`
+                  : "",
               getMediaUrl: (item) => item.imageUrl,
               getAltText: (item) => item.title || "Event",
               getOverlayText: (item) =>
@@ -6183,8 +6337,11 @@ function renderRouteStage() {
     </section>`;
   }
   const routeKey = getCurrentRoute().routeKey;
-  if (isFeedRoute()) {
+  if (isShareRoute()) {
     return renderFeedStage();
+  }
+  if (routeKey === ROUTE_KEY_FEED) {
+    return renderFeedOverviewPage();
   }
   if (routeKey === ROUTE_KEY_CANDIDATES) {
     return renderCandidateListPage();
@@ -6519,7 +6676,7 @@ function renderApp() {
     ${renderRail()}
     ${renderRouteStage()}
   </div>
-  ${isFeedRoute() ? renderCommentsPanel() : ""}
+  ${isShareRoute() ? renderCommentsPanel() : ""}
   ${renderAuthModal()}
   ${renderToast()}`;
   root.innerHTML = shell;
@@ -7118,6 +7275,20 @@ function handleRootClick(event) {
     return;
   }
 
+  if (action === "load-more-feed-grid") {
+    loadMoreFeed(state.mode).catch(() => {});
+    return;
+  }
+
+  if (action === "refresh-feed-grid") {
+    if (state.mode === FEED_MODE_FOLLOWING) {
+      loadFollowingFeed({ refresh: true }).catch(() => {});
+      return;
+    }
+    loadInitialFeed({ refresh: true }).catch(() => {});
+    return;
+  }
+
   if (action === "toggle-like") {
     handlePostLike(target.getAttribute("data-post-id")).catch(() => {});
     return;
@@ -7253,6 +7424,7 @@ function handleRootClick(event) {
       error: "",
       bootstrapped: false,
       unauthorized: false,
+      requestLimit: 0,
     };
     state.pages.messaging.initialized = false;
     state.pages.messaging.bootstrap = null;
@@ -7782,7 +7954,10 @@ function handleCommentSubmit(event) {
 
 async function bootstrapAuth() {
   const completed = await completeHostedSignIn(state.auth.config);
-  const session = completed.session || getStoredSharedFeedSession();
+  const session =
+    completed.handled && completed.session
+      ? completed.session
+      : await restoreSharedFeedSession(state.auth.config);
   state.auth.session = session;
   state.auth.user = getAuthenticatedUser(session);
   const postAuthPath = completed.handled ? consumeSharedFeedPostAuthPath() : "";

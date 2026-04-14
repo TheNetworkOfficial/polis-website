@@ -76,6 +76,10 @@
   gap: 0.65rem;
 }
 
+.header-launch-link {
+  box-shadow: none;
+}
+
 .mobile-nav-toggle {
   display: none;
   border: 1px solid var(--surface-border);
@@ -149,6 +153,7 @@ body.mobile-menu-open {
 @media (max-width: 980px) {
   .site-nav,
   .header-link,
+  .header-launch-link,
   .header-actions .btn-primary {
     display: none;
   }
