@@ -218,6 +218,12 @@ block from the Nginx config. That small server is only for:
 
 - website pages
 - `/posts/*`
+- `/feed`
+- `/candidates*`
+- `/events*`
+- `/manage-events*`
+- `/profile*`
+- `/messages*`
 - `/oauth/*`
 - `/.well-known/*`
 

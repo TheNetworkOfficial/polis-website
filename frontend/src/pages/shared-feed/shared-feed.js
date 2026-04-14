@@ -211,6 +211,7 @@ const state = {
   ui: {
     toast: "",
     authModal: null,
+    expandedPostId: "",
     comments: {
       open: false,
       loading: false,
@@ -1256,6 +1257,7 @@ function normalizeFeedItem(raw = {}, index = 0) {
     playbackId: normalizeString(raw.playbackId),
     durationMs: Number(raw.durationMs) || null,
     caption,
+    tags: normalizeTagList(raw.tags || raw.hashtags || raw.hashTags),
     previewTitle: normalizeString(raw.previewTitle),
     createdAt: Number(raw.createdAt) || null,
     likesCount: Number(raw.likesCount) || 0,
@@ -1277,6 +1279,10 @@ function getCurrentFeedState() {
 
 function getCurrentItems() {
   return getCurrentFeedState().items;
+}
+
+function hasExpandablePostCopy(item) {
+  return Boolean(normalizeString(item?.caption) || item?.tags?.length);
 }
 
 function getFeedRequestLimit(route = state.route) {
@@ -1790,11 +1796,19 @@ function readCurrentSearchParams() {
   return new URLSearchParams(window.location.search);
 }
 
+/**
+ * Normalizes tag payloads that may arrive as arrays, comma-separated strings, or hashtag lists.
+ */
 function normalizeTagList(value) {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return value.map((entry) => normalizeString(entry)).filter(Boolean);
+  const normalized = normalizeString(value);
+  const entries = Array.isArray(value)
+    ? value
+    : normalized.includes(",") || normalized.includes("\n")
+      ? normalized.split(/[,\n]/u)
+      : normalized.match(/#[^\s#,]+/gu) || [];
+  return entries
+    .map((entry) => normalizeString(entry).replace(/^#+/u, ""))
+    .filter(Boolean);
 }
 
 function normalizeCandidate(raw = {}) {
@@ -4765,6 +4779,9 @@ function renderTopChrome() {
 
 function renderPostItem(item, index) {
   const active = index === state.activeIndex;
+  const hasExpandableCopy = hasExpandablePostCopy(item);
+  const isExpanded =
+    normalizeString(state.ui.expandedPostId) === normalizeString(item.postId);
   const avatarInitial = escapeHtml(
     item.authorDisplayName.slice(0, 1).toUpperCase() || "P",
   );
@@ -4784,9 +4801,39 @@ function renderPostItem(item, index) {
         data-video-url="${escapeHtml(item.videoUrl)}"
         data-mp4-url="${escapeHtml(item.mp4Url)}"
       ></video>`;
-  const captionLine = item.caption
-    ? `<p class="shared-feed-post__caption">${escapeHtml(item.caption)}</p>`
+  const previewCopy =
+    item.caption ||
+    item.tags.map((tag) => `#${normalizeString(tag)}`).join(" ");
+  const captionText = isExpanded ? item.caption : previewCopy;
+  const captionLine = captionText
+    ? `<p class="shared-feed-post__caption">${escapeHtml(captionText)}</p>`
     : "";
+  const authorMeta = [
+    item.authorUsername
+      ? `<span class="shared-feed-post__handle">@${escapeHtml(item.authorUsername)}</span>`
+      : "",
+    item.createdAt
+      ? `<span class="shared-feed-post__time">${escapeHtml(formatRelativeTime(item.createdAt))}</span>`
+      : "",
+  ]
+    .filter(Boolean)
+    .join('<span class="shared-feed-post__meta-separator">•</span>');
+  const tagMarkup =
+    isExpanded && item.tags.length
+      ? `<div class="shared-feed-post__tags">${item.tags
+          .map(
+            (tag) =>
+              `<span class="shared-feed-post__tag">#${escapeHtml(tag)}</span>`,
+          )
+          .join("")}</div>`
+      : "";
+  const copyMarkup = hasExpandableCopy
+    ? `<button class="shared-feed-post__copy-toggle${isExpanded ? " is-expanded" : ""}" data-action="toggle-description" data-post-id="${escapeHtml(item.postId)}" aria-expanded="${isExpanded ? "true" : "false"}">
+        ${captionLine}
+        ${tagMarkup}
+        <span class="shared-feed-post__copy-hint">${isExpanded ? "Show less" : "Show more"}</span>
+      </button>`
+    : captionLine;
   const duration =
     isVideoItem(item) && item.durationMs
       ? `<div class="shared-feed-post__duration">${escapeHtml(formatDuration(item.durationMs))}</div>`
@@ -4796,12 +4843,30 @@ function renderPostItem(item, index) {
     <div class="shared-feed-post">
       <div class="shared-feed-post__frame" data-action="toggle-play" data-post-id="${escapeHtml(item.postId)}">
         ${mediaMarkup}
-        <div class="shared-feed-post__overlay shared-feed-post__overlay--gradient"></div>
+        <div class="shared-feed-post__overlay shared-feed-post__overlay--gradient${isExpanded ? " is-expanded" : ""}"></div>
         <div class="shared-feed-post__overlay shared-feed-post__overlay--chrome">
-          <button class="shared-feed-post__volume" data-action="toggle-volume" data-playback-control="1" aria-label="${state.userHasInteracted ? "Toggle sound" : "Enable sound"}">
-            ${renderIcon(state.userHasInteracted ? "soundOn" : "soundOff")}
-          </button>
           ${duration}
+          <div class="shared-feed-post__content">
+            <div class="shared-feed-post__copy" data-playback-control="1">
+              <div class="shared-feed-post__author-block">
+                <button class="shared-feed-post__author" data-action="profile" data-user-id="${escapeHtml(item.authorUserId)}">${escapeHtml(item.authorDisplayName)}</button>
+                ${
+                  authorMeta
+                    ? `<div class="shared-feed-post__author-meta">${authorMeta}</div>`
+                    : ""
+                }
+              </div>
+              ${copyMarkup}
+            </div>
+            ${
+              isVideoItem(item)
+                ? `<div class="shared-feed-scrubber" data-scrubber="${escapeHtml(item.postId)}" data-playback-control="1">
+                    <div class="shared-feed-scrubber__time" data-scrubber-time="${escapeHtml(item.postId)}">00:00 / ${escapeHtml(formatDuration(item.durationMs || 0))}</div>
+                    <input class="shared-feed-scrubber__slider" type="range" min="0" max="1000" value="0" step="1" data-scrubber-input="${escapeHtml(item.postId)}" />
+                  </div>`
+                : ""
+            }
+          </div>
           <div class="shared-feed-post__actions" data-playback-control="1">
             <div class="shared-feed-avatar">
               <button class="shared-feed-avatar__button" data-action="profile" data-user-id="${escapeHtml(item.authorUserId)}">
@@ -4827,31 +4892,10 @@ function renderPostItem(item, index) {
             <button class="shared-feed-action shared-feed-action--icon-only" data-action="share" data-post-id="${escapeHtml(item.postId)}" aria-label="Share post">
               <span class="shared-feed-action__icon">${renderIcon("share")}</span>
             </button>
+            <button class="shared-feed-post__volume" data-action="toggle-volume" aria-label="${state.userHasInteracted ? "Toggle sound" : "Enable sound"}">
+              ${renderIcon(state.userHasInteracted ? "soundOn" : "soundOff")}
+            </button>
           </div>
-          <div class="shared-feed-post__copy" data-playback-control="1">
-            <div class="shared-feed-post__author-row">
-              <button class="shared-feed-post__author" data-action="profile" data-user-id="${escapeHtml(item.authorUserId)}">${escapeHtml(item.authorDisplayName)}</button>
-              ${
-                item.authorUsername
-                  ? `<span class="shared-feed-post__handle">@${escapeHtml(item.authorUsername)}</span>`
-                  : ""
-              }
-              ${
-                item.createdAt
-                  ? `<span class="shared-feed-post__time">${escapeHtml(formatRelativeTime(item.createdAt))}</span>`
-                  : ""
-              }
-            </div>
-            ${captionLine}
-          </div>
-          ${
-            isVideoItem(item)
-              ? `<div class="shared-feed-scrubber" data-scrubber="${escapeHtml(item.postId)}" data-playback-control="1">
-                  <div class="shared-feed-scrubber__time" data-scrubber-time="${escapeHtml(item.postId)}">00:00 / ${escapeHtml(formatDuration(item.durationMs || 0))}</div>
-                  <input class="shared-feed-scrubber__slider" type="range" min="0" max="1000" value="0" step="1" data-scrubber-input="${escapeHtml(item.postId)}" />
-                </div>`
-              : ""
-          }
         </div>
         <button class="shared-feed-post__playback-indicator${active ? "" : " is-visible"}" data-playback-indicator="${escapeHtml(item.postId)}" aria-hidden="true">
           ${renderIcon("play")}
@@ -7333,6 +7377,20 @@ function handleRootClick(event) {
 
   if (action === "share") {
     handleShare(target.getAttribute("data-post-id")).catch(() => {});
+    return;
+  }
+
+  if (action === "toggle-description") {
+    const postId = normalizeString(target.getAttribute("data-post-id"));
+    const item = getCurrentItems().find(
+      (candidate) => candidate.postId === postId,
+    );
+    if (!item || !hasExpandablePostCopy(item)) {
+      return;
+    }
+    state.ui.expandedPostId =
+      normalizeString(state.ui.expandedPostId) === postId ? "" : postId;
+    scheduleRender();
     return;
   }
 
