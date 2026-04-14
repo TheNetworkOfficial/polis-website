@@ -1195,8 +1195,9 @@ a {
 
 .shared-media-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 16px;
+  align-items: start;
 }
 
 .shared-media-tile {
@@ -1270,6 +1271,17 @@ a {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.shared-media-tile__overlay--bare {
+  left: 8px;
+  bottom: 6px;
+  max-width: calc(100% - 16px);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  backdrop-filter: none;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.92);
 }
 
 .shared-form {

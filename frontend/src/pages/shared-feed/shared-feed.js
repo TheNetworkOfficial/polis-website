@@ -5002,6 +5002,7 @@ function renderMediaThumbnailGrid(
     getAltText,
     getOverlayText,
     getPlaceholderLabel,
+    overlayBare = false,
   } = {},
 ) {
   if (!items.length) {
@@ -5027,7 +5028,7 @@ function renderMediaThumbnailGrid(
         }
         ${
           overlayText
-            ? `<span class="shared-media-tile__overlay">${escapeHtml(overlayText)}</span>`
+            ? `<span class="shared-media-tile__overlay${overlayBare ? " shared-media-tile__overlay--bare" : ""}">${escapeHtml(overlayText)}</span>`
             : ""
         }
       </button>`;
@@ -5195,6 +5196,7 @@ function renderCandidateDetailPage() {
             getOverlayText: (item) =>
               `${formatCount(item.likesCount)} like${Number(item.likesCount) === 1 ? "" : "s"}`,
             getPlaceholderLabel: () => "P",
+            overlayBare: true,
           })}
         </div>
         <div>
