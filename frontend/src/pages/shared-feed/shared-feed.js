@@ -1,4 +1,5 @@
 import "./css/shared-feed.css";
+import polisLogoUrl from "../../assets/images/polis/Polis.png";
 
 import {
   buildAuthorizedHeaders,
@@ -73,6 +74,7 @@ let toastTimer = null;
 let observer = null;
 let hlsLoaderPromise = null;
 let hlsControllers = [];
+let mediaPreconnectInitialized = false;
 
 function normalizeString(value) {
   if (value === undefined || value === null) {
@@ -84,6 +86,26 @@ function normalizeString(value) {
 function normalizeUrl(value) {
   const normalized = normalizeString(value);
   return normalized || "";
+}
+
+function upgradePosterUrl(value) {
+  const normalized = normalizeUrl(value);
+  if (!normalized) {
+    return "";
+  }
+  try {
+    const url = new URL(normalized);
+    if (url.hostname !== "videodelivery.net") {
+      return url.toString();
+    }
+    const requestedHeight = Number(url.searchParams.get("height"));
+    if (!Number.isFinite(requestedHeight) || requestedHeight < 960) {
+      url.searchParams.set("height", "960");
+    }
+    return url.toString();
+  } catch {
+    return normalized;
+  }
 }
 
 function escapeHtml(value) {
@@ -272,6 +294,23 @@ function ensureHlsLoader() {
   return hlsLoaderPromise;
 }
 
+function ensureMediaPreconnect() {
+  if (mediaPreconnectInitialized) {
+    return;
+  }
+  mediaPreconnectInitialized = true;
+  ["https://videodelivery.net", "https://imagedelivery.net"].forEach((href) => {
+    if (document.head.querySelector(`link[rel="preconnect"][href="${href}"]`)) {
+      return;
+    }
+    const link = document.createElement("link");
+    link.rel = "preconnect";
+    link.href = href;
+    link.crossOrigin = "anonymous";
+    document.head.append(link);
+  });
+}
+
 function normalizeComment(raw = {}) {
   return {
     commentId: normalizeString(raw.commentId),
@@ -322,11 +361,13 @@ function normalizeFeedItem(raw = {}, index = 0) {
     normalizeString(raw.text) ||
     normalizeString(raw.previewText) ||
     normalizeString(raw.previewTitle);
-  const posterUrl =
+  const rawPosterUrl =
     normalizeUrl(raw.thumbUrl) ||
     normalizeUrl(raw.previewUrl) ||
     normalizeUrl(raw.imageUrl) ||
     normalizeUrl(raw.previewMediaThumbnail);
+  const posterUrl =
+    mediaType === "video" ? upgradePosterUrl(rawPosterUrl) : rawPosterUrl;
   const imageUrl = normalizeUrl(raw.imageUrl) || posterUrl;
 
   return {
@@ -917,7 +958,9 @@ function renderRail() {
 
   return `<aside class="shared-feed-rail">
     <div class="shared-feed-rail__brand">
-      <span class="shared-feed-rail__brand-mark">P</span>
+      <span class="shared-feed-rail__brand-mark">
+        <img class="shared-feed-rail__brand-logo" src="${escapeHtml(polisLogoUrl)}" alt="Polis" />
+      </span>
       <div>
         <div class="shared-feed-rail__brand-name">Polis</div>
         <div class="shared-feed-rail__brand-copy">Public feed view</div>
@@ -925,7 +968,6 @@ function renderRail() {
     </div>
     <nav class="shared-feed-rail__nav-list">${navItems}</nav>
     <div class="shared-feed-rail__footer">
-      <p class="shared-feed-rail__helper">Shared posts open into a live For You feed. Everything else continues in the app.</p>
       <button class="shared-feed-rail__primary" data-action="open-app-shell">Open app</button>
       ${authButtons}
     </div>
@@ -965,7 +1007,7 @@ function renderPostItem(item, index) {
         class="shared-feed-post__video"
         playsinline
         loop
-        preload="metadata"
+        preload="${index <= 1 ? "auto" : "metadata"}"
         poster="${escapeHtml(item.posterUrl)}"
         data-video-post-id="${escapeHtml(item.postId)}"
         data-video-url="${escapeHtml(item.videoUrl)}"
@@ -984,11 +1026,11 @@ function renderPostItem(item, index) {
         ${mediaMarkup}
         <div class="shared-feed-post__overlay shared-feed-post__overlay--gradient"></div>
         <div class="shared-feed-post__overlay shared-feed-post__overlay--chrome">
-          <button class="shared-feed-post__volume" data-action="toggle-volume" aria-label="${state.userHasInteracted ? "Toggle sound" : "Enable sound"}">
+          <button class="shared-feed-post__volume" data-action="toggle-volume" data-playback-control="1" aria-label="${state.userHasInteracted ? "Toggle sound" : "Enable sound"}">
             ${renderIcon(state.userHasInteracted ? "soundOn" : "soundOff")}
           </button>
           ${duration}
-          <div class="shared-feed-post__actions">
+          <div class="shared-feed-post__actions" data-playback-control="1">
             <div class="shared-feed-avatar">
               <button class="shared-feed-avatar__button" data-action="profile" data-user-id="${escapeHtml(item.authorUserId)}">
                 ${
@@ -999,24 +1041,22 @@ function renderPostItem(item, index) {
               </button>
               ${followBadge}
             </div>
-            <button class="shared-feed-action${item.likedByMe ? " is-active" : ""}" data-action="toggle-like" data-post-id="${escapeHtml(item.postId)}">
+            <button class="shared-feed-action shared-feed-action--counted${item.likedByMe ? " is-active" : ""}" data-action="toggle-like" data-post-id="${escapeHtml(item.postId)}">
               <span class="shared-feed-action__icon">${renderIcon(item.likedByMe ? "heart" : "heartOutline")}</span>
               <span class="shared-feed-action__label">${escapeHtml(formatCount(item.likesCount))}</span>
             </button>
-            <button class="shared-feed-action" data-action="open-comments" data-post-id="${escapeHtml(item.postId)}">
+            <button class="shared-feed-action shared-feed-action--counted" data-action="open-comments" data-post-id="${escapeHtml(item.postId)}">
               <span class="shared-feed-action__icon">${renderIcon("comment")}</span>
               <span class="shared-feed-action__label">${escapeHtml(formatCount(item.commentsCount))}</span>
             </button>
-            <button class="shared-feed-action${item.savedByMe ? " is-active" : ""}" data-action="toggle-save" data-post-id="${escapeHtml(item.postId)}">
+            <button class="shared-feed-action shared-feed-action--icon-only${item.savedByMe ? " is-active" : ""}" data-action="toggle-save" data-post-id="${escapeHtml(item.postId)}" aria-label="${item.savedByMe ? "Unsave post" : "Save post"}">
               <span class="shared-feed-action__icon">${renderIcon(item.savedByMe ? "saveFilled" : "save")}</span>
-              <span class="shared-feed-action__label">Save</span>
             </button>
-            <button class="shared-feed-action" data-action="share" data-post-id="${escapeHtml(item.postId)}">
+            <button class="shared-feed-action shared-feed-action--icon-only" data-action="share" data-post-id="${escapeHtml(item.postId)}" aria-label="Share post">
               <span class="shared-feed-action__icon">${renderIcon("share")}</span>
-              <span class="shared-feed-action__label">Share</span>
             </button>
           </div>
-          <div class="shared-feed-post__copy">
+          <div class="shared-feed-post__copy" data-playback-control="1">
             <div class="shared-feed-post__author-row">
               <button class="shared-feed-post__author" data-action="profile" data-user-id="${escapeHtml(item.authorUserId)}">${escapeHtml(item.authorDisplayName)}</button>
               ${
@@ -1031,14 +1071,10 @@ function renderPostItem(item, index) {
               }
             </div>
             ${captionLine}
-            <div class="shared-feed-post__cta-row">
-              <button class="shared-feed-chip shared-feed-chip--primary" data-action="open-app" data-post-id="${escapeHtml(item.postId)}">Open in app</button>
-              <button class="shared-feed-chip" data-action="share" data-post-id="${escapeHtml(item.postId)}">Copy link</button>
-            </div>
           </div>
           ${
             isVideoItem(item)
-              ? `<div class="shared-feed-scrubber" data-scrubber="${escapeHtml(item.postId)}">
+              ? `<div class="shared-feed-scrubber" data-scrubber="${escapeHtml(item.postId)}" data-playback-control="1">
                   <div class="shared-feed-scrubber__time" data-scrubber-time="${escapeHtml(item.postId)}">00:00 / ${escapeHtml(formatDuration(item.durationMs || 0))}</div>
                   <input class="shared-feed-scrubber__slider" type="range" min="0" max="1000" value="0" step="1" data-scrubber-input="${escapeHtml(item.postId)}" />
                 </div>`
@@ -1354,7 +1390,117 @@ function bindObservers() {
   }
 }
 
+function getVideoCardIndex(video) {
+  return Number(
+    video.closest(".shared-feed-item")?.getAttribute("data-index") || -1,
+  );
+}
+
+function resolvePreferredHlsLevel(levels = [], video) {
+  if (!Array.isArray(levels) || !levels.length) {
+    return -1;
+  }
+  const targetHeight = Math.max(video.clientHeight || 0, 720);
+  const levelsWithIndex = levels
+    .map((level, index) => ({
+      index,
+      height: Number(level?.height) || 0,
+    }))
+    .filter((level) => level.height > 0)
+    .sort((left, right) => left.height - right.height);
+  if (!levelsWithIndex.length) {
+    return -1;
+  }
+  const match =
+    levelsWithIndex.find((level) => level.height >= targetHeight) ||
+    levelsWithIndex[Math.max(0, levelsWithIndex.length - 1)];
+  return match?.index ?? -1;
+}
+
+function hydrateVideo(video) {
+  if (!video || video.dataset.mediaHydrated === "1") {
+    return;
+  }
+  const hlsUrl = normalizeString(video.dataset.videoUrl);
+  const mp4Url = normalizeString(video.dataset.mp4Url);
+  if (!hlsUrl && !mp4Url) {
+    return;
+  }
+
+  video.dataset.mediaHydrated = "1";
+  video.muted = !state.userHasInteracted;
+  video.playsInline = true;
+  video.loop = true;
+
+  if (video.canPlayType("application/vnd.apple.mpegurl") && hlsUrl) {
+    video.src = hlsUrl;
+    return;
+  }
+
+  if (hlsUrl) {
+    ensureHlsLoader()
+      .then((Hls) => {
+        if (!Hls?.isSupported || !Hls.isSupported()) {
+          if (mp4Url) {
+            video.src = mp4Url;
+          }
+          return;
+        }
+        const controller = new Hls({
+          enableWorker: true,
+          lowLatencyMode: true,
+          capLevelToPlayerSize: true,
+          startFragPrefetch: true,
+        });
+        controller.on(Hls.Events.MANIFEST_PARSED, (_event, data) => {
+          const preferredLevel = resolvePreferredHlsLevel(data?.levels, video);
+          if (preferredLevel >= 0) {
+            controller.startLevel = preferredLevel;
+            controller.nextLevel = preferredLevel;
+          }
+        });
+        controller.on(Hls.Events.ERROR, (_event, data) => {
+          if (data?.fatal && mp4Url) {
+            controller.destroy();
+            video.src = mp4Url;
+          }
+        });
+        controller.loadSource(hlsUrl);
+        controller.attachMedia(video);
+        video.__polisHlsController = controller;
+        hlsControllers.push(controller);
+      })
+      .catch(() => {
+        if (mp4Url) {
+          video.src = mp4Url;
+        }
+      });
+    return;
+  }
+
+  if (mp4Url) {
+    video.src = mp4Url;
+  }
+}
+
+function syncVideoLoadingStrategy() {
+  Array.from(root?.querySelectorAll("video[data-video-post-id]") || []).forEach(
+    (video) => {
+      const index = getVideoCardIndex(video);
+      const distance = Number.isFinite(index)
+        ? Math.abs(index - state.activeIndex)
+        : Number.POSITIVE_INFINITY;
+      const shouldWarm = distance <= 1;
+      video.preload = shouldWarm ? "auto" : "metadata";
+      if (shouldWarm) {
+        hydrateVideo(video);
+      }
+    },
+  );
+}
+
 function syncPlayback() {
+  syncVideoLoadingStrategy();
   const cards = Array.from(root.querySelectorAll(".shared-feed-item--post"));
   cards.forEach((card) => {
     const index = Number(card.getAttribute("data-index") || -1);
@@ -1393,43 +1539,9 @@ function bindVideos() {
   const videos = Array.from(root.querySelectorAll("video[data-video-post-id]"));
   for (const video of videos) {
     const postId = normalizeString(video.dataset.videoPostId);
-    const hlsUrl = normalizeString(video.dataset.videoUrl);
-    const mp4Url = normalizeString(video.dataset.mp4Url);
-    if (!hlsUrl && !mp4Url) {
-      continue;
-    }
-
     video.muted = !state.userHasInteracted;
     video.playsInline = true;
     video.loop = true;
-
-    if (video.canPlayType("application/vnd.apple.mpegurl") && hlsUrl) {
-      video.src = hlsUrl;
-    } else if (hlsUrl) {
-      ensureHlsLoader()
-        .then((Hls) => {
-          if (!Hls?.isSupported || !Hls.isSupported()) {
-            if (mp4Url) {
-              video.src = mp4Url;
-            }
-            return;
-          }
-          const controller = new Hls({
-            enableWorker: true,
-            lowLatencyMode: true,
-          });
-          controller.loadSource(hlsUrl);
-          controller.attachMedia(video);
-          hlsControllers.push(controller);
-        })
-        .catch(() => {
-          if (mp4Url) {
-            video.src = mp4Url;
-          }
-        });
-    } else if (mp4Url) {
-      video.src = mp4Url;
-    }
 
     video.addEventListener("timeupdate", () => updateScrubber(postId, video));
     video.addEventListener("loadedmetadata", () => updateScrubber(postId, video));
@@ -1489,7 +1601,11 @@ function restorePlaybackState(snapshot = {}) {
         }
       }
       video.muted = value.muted;
-      if (!value.paused && !state.ui.comments.open) {
+      if (value.paused) {
+        video.pause();
+        return;
+      }
+      if (!state.ui.comments.open) {
         video.play().catch(() => {});
       }
     };
@@ -1561,6 +1677,12 @@ function handleRootClick(event) {
     return;
   }
   const action = target.getAttribute("data-action");
+  if (
+    target.classList.contains("shared-feed-post__frame") &&
+    event.target.closest("[data-playback-control='1']")
+  ) {
+    return;
+  }
 
   if (action === "toggle-mode") {
     const nextMode = target.getAttribute("data-mode");
@@ -1788,6 +1910,7 @@ async function init() {
     return;
   }
 
+  ensureMediaPreconnect();
   attachGlobalListeners();
   await bootstrapAuth();
   await loadInitialFeed();
