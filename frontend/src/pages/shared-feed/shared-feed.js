@@ -154,6 +154,7 @@ function createPagedState() {
     items: [],
     nextCursor: null,
     loading: false,
+    loadingMore: false,
     error: "",
     loaded: false,
   };
@@ -374,6 +375,7 @@ const state = {
 let renderScheduled = false;
 let toastTimer = null;
 let observer = null;
+let routeEndObserver = null;
 let hlsLoaderPromise = null;
 let hlsControllers = [];
 let mediaPreconnectInitialized = false;
@@ -2105,7 +2107,7 @@ function normalizeConnectionEntry(raw = {}) {
 
 async function loadCandidateList({ refresh = false } = {}) {
   const list = state.pages.candidates.list;
-  if (list.loading) {
+  if (list.loading || list.loadingMore) {
     return;
   }
   const params = readCurrentSearchParams();
@@ -2139,6 +2141,72 @@ async function loadCandidateList({ refresh = false } = {}) {
       normalizeString(error?.message) || "Candidates could not be loaded.";
   } finally {
     list.loading = false;
+    scheduleRender();
+  }
+}
+
+/**
+ * Appends the next candidate page while deduplicating repeated cursor results.
+ */
+async function loadMoreCandidateList() {
+  const list = state.pages.candidates.list;
+  if (!list.nextCursor || list.loading || list.loadingMore) {
+    return;
+  }
+
+  const params = readCurrentSearchParams();
+  const previousCursor = list.nextCursor;
+  list.filters = Object.fromEntries(params.entries());
+  list.loadingMore = true;
+  list.error = "";
+  scheduleRender();
+
+  try {
+    const query = new URLSearchParams({
+      limit: "24",
+      cursor: previousCursor,
+      ...(params.get("q") ? { q: params.get("q") } : {}),
+      ...(params.get("level") ? { level: params.get("level") } : {}),
+      ...(params.get("district") ? { district: params.get("district") } : {}),
+      ...(params.get("tags") ? { tags: params.get("tags") } : {}),
+    });
+    const payload = await fetchJson(`/api/candidates?${query.toString()}`, {
+      auth: true,
+    });
+    const incoming = (payload.items || []).map(normalizeCandidate);
+    const seenKeys = new Set(
+      list.items.map(
+        (item) =>
+          normalizeString(item.candidateId) ||
+          normalizeString(item.username) ||
+          normalizeString(item.displayName),
+      ),
+    );
+    const nextItems = incoming.filter((item) => {
+      const candidateKey =
+        normalizeString(item.candidateId) ||
+        normalizeString(item.username) ||
+        normalizeString(item.displayName);
+      if (!candidateKey || seenKeys.has(candidateKey)) {
+        return false;
+      }
+      seenKeys.add(candidateKey);
+      return true;
+    });
+    const nextCursor =
+      normalizeString(payload.cursor || payload.nextCursor) || null;
+
+    list.items = list.items.concat(nextItems);
+    list.nextCursor =
+      nextCursor === previousCursor && nextItems.length === 0
+        ? null
+        : nextCursor;
+    list.loaded = true;
+  } catch (error) {
+    list.error =
+      normalizeString(error?.message) || "More candidates could not be loaded.";
+  } finally {
+    list.loadingMore = false;
     scheduleRender();
   }
 }
@@ -5262,6 +5330,16 @@ function renderCandidateListPage() {
           )
           .join("")}
       </div>
+      ${
+        list.loadingMore
+          ? '<div class="shared-page__hint">Loading more candidates…</div>'
+          : ""
+      }
+      ${
+        list.nextCursor
+          ? '<div class="shared-page__pagination-sentinel" data-candidate-list-sentinel aria-hidden="true"></div>'
+          : ""
+      }
     </div>
   </section>`;
 }
@@ -6787,39 +6865,65 @@ function bindObservers() {
   if (observer) {
     observer.disconnect();
   }
+  if (routeEndObserver) {
+    routeEndObserver.disconnect();
+  }
   const items = Array.from(root.querySelectorAll(".shared-feed-item"));
-  if (!items.length) {
+  if (items.length) {
+    observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort(
+            (left, right) => right.intersectionRatio - left.intersectionRatio,
+          )[0];
+        if (!visible) {
+          return;
+        }
+        const nextIndex = Number(
+          visible.target.getAttribute("data-index") || 0,
+        );
+        if (Number.isFinite(nextIndex) && nextIndex !== state.activeIndex) {
+          state.activeIndex = nextIndex;
+          syncPlayback();
+          if (nextIndex >= getCurrentItems().length - 2) {
+            loadMoreFeed(state.mode).catch(() => {});
+          }
+        }
+      },
+      {
+        threshold: [0.35, 0.55, 0.75],
+        root: root.querySelector("#shared-feed-scroll"),
+        rootMargin: "0px",
+      },
+    );
+
+    for (const item of items) {
+      observer.observe(item);
+    }
+  }
+
+  const candidateListSentinel = root.querySelector(
+    "[data-candidate-list-sentinel]",
+  );
+  if (!candidateListSentinel || typeof IntersectionObserver !== "function") {
     return;
   }
-  observer = new IntersectionObserver(
+
+  routeEndObserver = new IntersectionObserver(
     (entries) => {
-      const visible = entries
-        .filter((entry) => entry.isIntersecting)
-        .sort(
-          (left, right) => right.intersectionRatio - left.intersectionRatio,
-        )[0];
-      if (!visible) {
+      if (!entries.some((entry) => entry.isIntersecting)) {
         return;
       }
-      const nextIndex = Number(visible.target.getAttribute("data-index") || 0);
-      if (Number.isFinite(nextIndex) && nextIndex !== state.activeIndex) {
-        state.activeIndex = nextIndex;
-        syncPlayback();
-        if (nextIndex >= getCurrentItems().length - 2) {
-          loadMoreFeed(state.mode).catch(() => {});
-        }
-      }
+      loadMoreCandidateList().catch(() => {});
     },
     {
-      threshold: [0.35, 0.55, 0.75],
-      root: root.querySelector("#shared-feed-scroll"),
-      rootMargin: "0px",
+      root: null,
+      rootMargin: "0px 0px 320px 0px",
+      threshold: 0,
     },
   );
-
-  for (const item of items) {
-    observer.observe(item);
-  }
+  routeEndObserver.observe(candidateListSentinel);
 }
 
 function getVideoCardIndex(video) {

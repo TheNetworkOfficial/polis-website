@@ -1186,6 +1186,10 @@ a {
   border-color: rgba(255, 51, 95, 0.24);
 }
 
+.shared-page__pagination-sentinel {
+  height: 1px;
+}
+
 .shared-card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
