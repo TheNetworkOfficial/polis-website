@@ -37,6 +37,9 @@ const GRID_FEED_PAGE_LIMIT = 25;
 const ROUTE_KEY_SHARE_POST = "share-post";
 const ROUTE_KEY_FEED = "feed";
 const ROUTE_KEY_CANDIDATES = "candidates";
+const ROUTE_KEY_OFFICIAL_DETAIL = "official-detail";
+const ROUTE_KEY_OFFICIAL_REPORT_CARD = "official-report-card";
+const ROUTE_KEY_AUTO_CANDIDATE_DETAIL = "auto-candidate-detail";
 const ROUTE_KEY_CANDIDATE_DETAIL = "candidate-detail";
 const ROUTE_KEY_CANDIDATE_EDIT = "candidate-edit";
 const ROUTE_KEY_EVENTS = "events";
@@ -88,6 +91,17 @@ function parseRouteFromLocation(pathname = window.location.pathname) {
     [ROUTE_KEY_SHARE_POST, /^\/posts\/([^/]+)$/u, ["postId"]],
     [ROUTE_KEY_FEED, /^\/feed$/u, []],
     [ROUTE_KEY_CANDIDATES, /^\/candidates$/u, []],
+    [
+      ROUTE_KEY_OFFICIAL_REPORT_CARD,
+      /^\/officials\/([^/]+)\/report-card$/u,
+      ["officialId"],
+    ],
+    [ROUTE_KEY_OFFICIAL_DETAIL, /^\/officials\/([^/]+)$/u, ["officialId"]],
+    [
+      ROUTE_KEY_AUTO_CANDIDATE_DETAIL,
+      /^\/auto-candidates\/([^/]+)$/u,
+      ["entityId"],
+    ],
     [
       ROUTE_KEY_CANDIDATE_EDIT,
       /^\/candidates\/([^/]+)\/edit$/u,
@@ -235,6 +249,24 @@ const state = {
         loading: false,
         error: "",
         saving: false,
+      },
+      officialDetail: {
+        item: null,
+        loading: false,
+        error: "",
+      },
+      autoDetail: {
+        item: null,
+        loading: false,
+        error: "",
+      },
+      reportCard: {
+        ...createPagedState(),
+        officialId: "",
+        congress: null,
+        refreshedAt: null,
+        fromCache: false,
+        total: null,
       },
     },
     events: {
@@ -443,6 +475,9 @@ function getRouteSection(route = state.route) {
   const routeKey = normalizeString(route?.routeKey);
   if (
     routeKey === ROUTE_KEY_CANDIDATES ||
+    routeKey === ROUTE_KEY_OFFICIAL_DETAIL ||
+    routeKey === ROUTE_KEY_OFFICIAL_REPORT_CARD ||
+    routeKey === ROUTE_KEY_AUTO_CANDIDATE_DETAIL ||
     routeKey === ROUTE_KEY_CANDIDATE_DETAIL ||
     routeKey === ROUTE_KEY_CANDIDATE_EDIT
   ) {
@@ -1798,6 +1833,217 @@ function readCurrentSearchParams() {
   return new URLSearchParams(window.location.search);
 }
 
+function buildRouteWithQuery(path, query = {}) {
+  const search = new URLSearchParams();
+  Object.entries(query).forEach(([key, value]) => {
+    if (value === undefined || value === null) {
+      return;
+    }
+    const normalized = normalizeString(value);
+    if (!normalized) {
+      return;
+    }
+    search.set(key, normalized);
+  });
+  const queryString = search.toString();
+  return queryString ? `${path}?${queryString}` : path;
+}
+
+function extractOfficialIdFromCandidateRouteId(value) {
+  const normalized = decodeRouteSegment(value);
+  if (!normalized.startsWith("official:")) {
+    return "";
+  }
+  return normalized.slice("official:".length);
+}
+
+function extractAutoCandidateEntityId(value) {
+  const normalized = decodeRouteSegment(value);
+  if (!normalized.startsWith("auto-candidate:")) {
+    return "";
+  }
+  return normalized.slice("auto-candidate:".length);
+}
+
+function buildOfficialProfileRoute(officialId, returnTo = "") {
+  const normalizedOfficialId = normalizeString(officialId);
+  if (!normalizedOfficialId) {
+    return "/candidates";
+  }
+  return buildRouteWithQuery(
+    `/officials/${encodeURIComponent(normalizedOfficialId)}`,
+    { returnTo },
+  );
+}
+
+function buildOfficialReportCardRoute(
+  officialId,
+  { returnTo = "", congress = null } = {},
+) {
+  const normalizedOfficialId = normalizeString(officialId);
+  if (!normalizedOfficialId) {
+    return "/candidates";
+  }
+  return buildRouteWithQuery(
+    `/officials/${encodeURIComponent(normalizedOfficialId)}/report-card`,
+    { returnTo, congress },
+  );
+}
+
+function buildAutoCandidateRoute(entityId, returnTo = "") {
+  const normalizedEntityId = normalizeString(entityId);
+  if (!normalizedEntityId) {
+    return "/candidates";
+  }
+  return buildRouteWithQuery(
+    `/auto-candidates/${encodeURIComponent(normalizedEntityId)}`,
+    { returnTo },
+  );
+}
+
+function normalizeCandidateKind(raw = {}) {
+  const normalizedKind = normalizeString(raw.kind).toLowerCase();
+  if (normalizedKind === "official") {
+    return "official";
+  }
+  if (
+    normalizedKind === "racecandidate" ||
+    normalizedKind === "race_candidate"
+  ) {
+    return "raceCandidate";
+  }
+  if (normalizedKind === "candidate") {
+    return "candidate";
+  }
+  if (extractOfficialIdFromCandidateRouteId(raw.id)) {
+    return "official";
+  }
+  if (extractAutoCandidateEntityId(raw.id)) {
+    return "raceCandidate";
+  }
+  if (
+    normalizeString(raw.officialId) &&
+    !normalizeString(raw.candidateId) &&
+    !normalizeString(raw.userId)
+  ) {
+    return "official";
+  }
+  if (normalizeString(raw.entityId) && !normalizeString(raw.candidateId)) {
+    return "raceCandidate";
+  }
+  return "candidate";
+}
+
+function resolveCandidateOfficialId(candidate = {}) {
+  return (
+    normalizeString(candidate.officialId) ||
+    extractOfficialIdFromCandidateRouteId(candidate.candidateId) ||
+    extractOfficialIdFromCandidateRouteId(candidate.itemId)
+  );
+}
+
+function resolveCandidateEntityId(candidate = {}) {
+  return (
+    normalizeString(candidate.entityId) ||
+    extractAutoCandidateEntityId(candidate.candidateId) ||
+    extractAutoCandidateEntityId(candidate.itemId)
+  );
+}
+
+function resolveCandidateOpenRoute(candidate = {}, returnTo = "") {
+  const kind = normalizeString(candidate.kind);
+  const officialId = resolveCandidateOfficialId(candidate);
+  const entityId = resolveCandidateEntityId(candidate);
+  if (kind === "official" && officialId) {
+    return buildOfficialProfileRoute(officialId, returnTo);
+  }
+  if (kind === "raceCandidate" && entityId) {
+    return buildAutoCandidateRoute(entityId, returnTo);
+  }
+  const candidateId = normalizeString(candidate.candidateId);
+  if (!candidateId) {
+    return "/candidates";
+  }
+  return `/candidates/${encodeURIComponent(candidateId)}`;
+}
+
+function resolveCandidateEditRoute(candidate = {}) {
+  const candidateId = normalizeString(candidate.candidateId);
+  if (!candidateId) {
+    return "/candidates";
+  }
+  return `/candidates/${encodeURIComponent(candidateId)}/edit`;
+}
+
+function resolveCandidateFollowTarget(candidate = {}) {
+  const officialId = resolveCandidateOfficialId(candidate);
+  if (officialId) {
+    return { candidateId: "", officialId };
+  }
+  if (normalizeString(candidate.kind) === "raceCandidate") {
+    return { candidateId: "", officialId: "" };
+  }
+  return {
+    candidateId: normalizeString(candidate.candidateId),
+    officialId: "",
+  };
+}
+
+function applyResolvedFollowState(currentItem, nextFollowing, followersCount) {
+  if (!currentItem) {
+    return currentItem;
+  }
+  const numericFollowers = Number(followersCount);
+  if (Number.isFinite(numericFollowers) && numericFollowers >= 0) {
+    return {
+      ...currentItem,
+      isFollowing: nextFollowing,
+      followersCount: numericFollowers,
+    };
+  }
+  const previousCount = Number(currentItem.followersCount) || 0;
+  const delta =
+    currentItem.isFollowing === nextFollowing ? 0 : nextFollowing ? 1 : -1;
+  return {
+    ...currentItem,
+    isFollowing: nextFollowing,
+    followersCount: Math.max(0, previousCount + delta),
+  };
+}
+
+function formatCalendarDate(value) {
+  const normalized = normalizeString(value);
+  if (!normalized) {
+    return "";
+  }
+  const date = new Date(normalized);
+  if (Number.isNaN(date.getTime())) {
+    return normalized;
+  }
+  return date.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function formatTermRange(startAt, endAt) {
+  const startLabel = formatCalendarDate(startAt);
+  const endLabel = formatCalendarDate(endAt);
+  if (startLabel && endLabel) {
+    return `${startLabel} to ${endLabel}`;
+  }
+  return startLabel || endLabel || "";
+}
+
+function formatApprovalRating(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return "";
+  }
+  return `${numeric.toFixed(numeric % 1 === 0 ? 0 : 1)}% approval`;
+}
+
 /**
  * Normalizes tag payloads that may arrive as arrays, comma-separated strings, or hashtag lists.
  */
@@ -1814,23 +2060,42 @@ function normalizeTagList(value) {
 }
 
 function normalizeCandidate(raw = {}) {
+  const kind = normalizeCandidateKind(raw);
   const socials =
     raw.socials && typeof raw.socials === "object" ? raw.socials : {};
   return {
+    itemId: normalizeString(raw.id),
+    kind,
     candidateId: normalizeString(raw.candidateId || raw.id || raw.userId) || "",
+    officialId:
+      normalizeString(raw.officialId) ||
+      extractOfficialIdFromCandidateRouteId(raw.id),
+    entityId:
+      normalizeString(raw.entityId) || extractAutoCandidateEntityId(raw.id),
     displayName:
       normalizeString(raw.displayName || raw.name || raw.hostDisplayName) ||
       "Candidate",
     username: normalizeString(raw.username || raw.hostUsername),
-    avatarUrl: normalizeUrl(raw.avatarUrl || raw.imageUrl),
+    avatarUrl: normalizeUrl(raw.avatarUrl || raw.imageUrl || raw.photoUrl),
     bio: normalizeString(raw.bio || raw.description),
     district: normalizeString(raw.district),
     levelOfOffice: normalizeString(raw.levelOfOffice || raw.level),
+    officeTitle: normalizeString(raw.officeTitle || raw.office),
+    partyLabel: normalizeString(raw.partyLabel || raw.party),
+    chamber: normalizeString(raw.chamber),
+    officialUrl: normalizeUrl(raw.officialUrl),
     followersCount:
       Number(raw.followersCount || raw.followerCount || raw.followCount) || 0,
     isFollowing: raw.isFollowing === true,
     tags: normalizeTagList(raw.priorityTags || raw.tags),
     socials,
+    autoGenerated: raw.autoGenerated === true,
+    autoGeneratedMessage: normalizeString(raw.autoGeneratedMessage),
+    hasAccount: raw.hasAccount === true,
+    linkedCandidateId: normalizeString(raw.linkedCandidateId),
+    electionName: normalizeString(raw.electionName),
+    electionDay: normalizeString(raw.electionDay),
+    electionStatus: normalizeString(raw.electionStatus),
     donationsEnabled: raw.donationsEnabled === true,
     donationsAvailable: raw.donationsAvailable === true,
     donationDisabledReason: normalizeString(raw.donationDisabledReason),
@@ -1838,6 +2103,102 @@ function normalizeCandidate(raw = {}) {
       state.auth.user?.userId &&
       state.auth.user.userId ===
         normalizeString(raw.userId || raw.ownerUserId || raw.candidateId),
+  };
+}
+
+function normalizeOfficialProfile(raw = {}) {
+  return {
+    officialId: normalizeString(raw.officialId),
+    displayName: normalizeString(raw.displayName || raw.name) || "Official",
+    partyLabel: normalizeString(raw.partyLabel),
+    partyCode: normalizeString(raw.partyCode),
+    chamber: normalizeString(raw.chamber),
+    officeTitle: normalizeString(raw.officeTitle) || "Official",
+    state: normalizeString(raw.state),
+    district: normalizeString(raw.district),
+    avatarUrl: normalizeUrl(raw.avatarUrl || raw.photoUrl || raw.imageUrl),
+    officialUrl: normalizeUrl(raw.officialUrl),
+    termStart: normalizeString(raw.termStart),
+    termEnd: normalizeString(raw.termEnd),
+    followersCount: Number(raw.followersCount) || 0,
+    isFollowing: raw.isFollowing === true,
+    autoGenerated: raw.autoGenerated === true,
+    autoGeneratedMessage: normalizeString(raw.autoGeneratedMessage),
+    hasAccount: raw.hasAccount === true,
+  };
+}
+
+function normalizeAutoCandidateProfile(raw = {}) {
+  return {
+    entityId: normalizeString(raw.entityId),
+    displayName: normalizeString(raw.displayName || raw.name) || "Candidate",
+    partyLabel: normalizeString(raw.partyLabel),
+    partyToken: normalizeString(raw.partyToken),
+    officeTitle: normalizeString(raw.officeTitle) || "Candidate",
+    levelOfOffice: normalizeString(raw.levelOfOffice || raw.level),
+    state: normalizeString(raw.state),
+    district: normalizeString(raw.district),
+    avatarUrl: normalizeUrl(raw.avatarUrl || raw.photoUrl || raw.imageUrl),
+    autoGenerated: raw.autoGenerated === true,
+    autoGeneratedMessage: normalizeString(raw.autoGeneratedMessage),
+    hasAccount: raw.hasAccount === true,
+    linkedCandidateId: normalizeString(raw.linkedCandidateId),
+    electionId: normalizeString(raw.electionId),
+    electionName: normalizeString(raw.electionName),
+    electionDay: normalizeString(raw.electionDay),
+    electionStatus: normalizeString(raw.electionStatus),
+    followersCount: Number(raw.followersCount) || 0,
+    isFollowing: raw.isFollowing === true,
+  };
+}
+
+function normalizeOfficialVoteRecord(raw = {}) {
+  const bill = raw.bill && typeof raw.bill === "object" ? raw.bill : {};
+  const opinion =
+    raw.opinion && typeof raw.opinion === "object" ? raw.opinion : {};
+  const aggregate =
+    opinion.aggregate && typeof opinion.aggregate === "object"
+      ? opinion.aggregate
+      : null;
+  return {
+    voteId: normalizeString(raw.voteId),
+    chamber: normalizeString(raw.chamber),
+    congress: Number.isFinite(Number(raw.congress))
+      ? Number(raw.congress)
+      : null,
+    session: Number.isFinite(Number(raw.session)) ? Number(raw.session) : null,
+    voteNumber: Number.isFinite(Number(raw.voteNumber))
+      ? Number(raw.voteNumber)
+      : null,
+    voteQuestion: normalizeString(raw.voteQuestion),
+    voteResult: normalizeString(raw.voteResult),
+    votePosition: normalizeString(raw.votePosition),
+    votedAt: normalizeString(raw.votedAt),
+    billId: normalizeString(bill.billId),
+    billCongress: Number.isFinite(Number(bill.congress))
+      ? Number(bill.congress)
+      : null,
+    billType: normalizeString(bill.type),
+    billNumber: normalizeString(bill.number),
+    billTitle: normalizeString(bill.title),
+    billSummary: normalizeString(bill.summary),
+    billLatestActionText: normalizeString(bill.latestActionText),
+    billLatestActionDate: normalizeString(bill.latestActionDate),
+    roles: Array.isArray(raw.roles)
+      ? raw.roles.map((role) => normalizeString(role)).filter(Boolean)
+      : [],
+    myOpinion: normalizeString(opinion.myOpinion),
+    hasVoted:
+      opinion.hasVoted === true || Boolean(normalizeString(opinion.myOpinion)),
+    aggregate: aggregate
+      ? {
+          upCount: Number(aggregate.upCount) || 0,
+          downCount: Number(aggregate.downCount) || 0,
+          approvalRating: Number.isFinite(Number(aggregate.approvalRating))
+            ? Number(aggregate.approvalRating)
+            : null,
+        }
+      : null,
   };
 }
 
@@ -2178,6 +2539,8 @@ async function loadMoreCandidateList() {
       list.items.map(
         (item) =>
           normalizeString(item.candidateId) ||
+          normalizeString(item.officialId) ||
+          normalizeString(item.entityId) ||
           normalizeString(item.username) ||
           normalizeString(item.displayName),
       ),
@@ -2185,6 +2548,8 @@ async function loadMoreCandidateList() {
     const nextItems = incoming.filter((item) => {
       const candidateKey =
         normalizeString(item.candidateId) ||
+        normalizeString(item.officialId) ||
+        normalizeString(item.entityId) ||
         normalizeString(item.username) ||
         normalizeString(item.displayName);
       if (!candidateKey || seenKeys.has(candidateKey)) {
@@ -2213,7 +2578,7 @@ async function loadMoreCandidateList() {
 
 async function loadCandidateDetail(candidateId, { refresh = false } = {}) {
   const detail = state.pages.candidates.detail;
-  const normalizedCandidateId = normalizeString(candidateId);
+  const normalizedCandidateId = decodeRouteSegment(candidateId);
   if (!normalizedCandidateId) {
     return;
   }
@@ -2260,49 +2625,229 @@ async function loadCandidateDetail(candidateId, { refresh = false } = {}) {
   }
 }
 
-async function toggleCandidateFollow(candidateId) {
-  const normalizedCandidateId = normalizeString(candidateId);
-  if (!normalizedCandidateId) {
+async function loadOfficialDetail(officialId, { refresh = false } = {}) {
+  const detail = state.pages.candidates.officialDetail;
+  const normalizedOfficialId = decodeRouteSegment(officialId);
+  if (!normalizedOfficialId) {
+    return;
+  }
+  if (detail.loading) {
+    return;
+  }
+  if (
+    refresh ||
+    normalizeString(detail.item?.officialId) !== normalizedOfficialId
+  ) {
+    detail.item = null;
+  }
+  detail.loading = true;
+  detail.error = "";
+  scheduleRender();
+
+  try {
+    const payload = await fetchJson(
+      `/api/officials/${encodeURIComponent(normalizedOfficialId)}/profile`,
+      {
+        auth: true,
+      },
+    );
+    detail.item = normalizeOfficialProfile(payload.profile || payload);
+  } catch (error) {
+    detail.error =
+      normalizeString(error?.message) || "Official profile unavailable.";
+  } finally {
+    detail.loading = false;
+    scheduleRender();
+  }
+}
+
+async function loadAutoCandidateDetail(entityId, { refresh = false } = {}) {
+  const detail = state.pages.candidates.autoDetail;
+  const normalizedEntityId = decodeRouteSegment(entityId);
+  if (!normalizedEntityId) {
+    return;
+  }
+  if (detail.loading) {
+    return;
+  }
+  if (
+    refresh ||
+    normalizeString(detail.item?.entityId) !== normalizedEntityId
+  ) {
+    detail.item = null;
+  }
+  detail.loading = true;
+  detail.error = "";
+  scheduleRender();
+
+  try {
+    const payload = await fetchJson(
+      `/api/auto-candidates/${encodeURIComponent(normalizedEntityId)}/profile`,
+      {
+        auth: true,
+      },
+    );
+    detail.item = normalizeAutoCandidateProfile(payload.profile || payload);
+  } catch (error) {
+    detail.error =
+      normalizeString(error?.message) || "Candidate profile unavailable.";
+  } finally {
+    detail.loading = false;
+    scheduleRender();
+  }
+}
+
+async function loadOfficialReportCard(
+  officialId,
+  { refresh = false, append = false } = {},
+) {
+  const detail = state.pages.candidates.reportCard;
+  const normalizedOfficialId = decodeRouteSegment(officialId);
+  if (!normalizedOfficialId) {
+    return;
+  }
+  if ((append && detail.loadingMore) || (!append && detail.loading)) {
+    return;
+  }
+
+  const requestedCongress = Number.parseInt(
+    normalizeString(readCurrentSearchParams().get("congress")),
+    10,
+  );
+  const congress =
+    Number.isFinite(requestedCongress) && requestedCongress > 0
+      ? requestedCongress
+      : null;
+  const isNewContext =
+    detail.officialId !== normalizedOfficialId || detail.congress !== congress;
+
+  if (!append || refresh || isNewContext) {
+    detail.items = [];
+    detail.nextCursor = null;
+    detail.error = "";
+    detail.loaded = false;
+    if (refresh || isNewContext) {
+      detail.refreshedAt = null;
+      detail.fromCache = false;
+      detail.total = null;
+    }
+  }
+
+  if (append) {
+    detail.loadingMore = true;
+  } else {
+    detail.loading = true;
+  }
+  detail.officialId = normalizedOfficialId;
+  detail.congress = congress;
+  scheduleRender();
+
+  try {
+    const query = new URLSearchParams({ limit: "20" });
+    if (congress) {
+      query.set("congress", String(congress));
+    }
+    if (append && detail.nextCursor) {
+      query.set("cursor", detail.nextCursor);
+    }
+    if (refresh) {
+      query.set("refresh", "1");
+    }
+    const payload = await fetchJson(
+      `/api/officials/${encodeURIComponent(normalizedOfficialId)}/report-card?${query.toString()}`,
+      {
+        auth: true,
+      },
+    );
+    const incoming = (payload.items || []).map(normalizeOfficialVoteRecord);
+    const seenVoteIds = new Set(
+      append ? detail.items.map((item) => normalizeString(item.voteId)) : [],
+    );
+    const nextItems = append
+      ? incoming.filter((item) => {
+          const voteId = normalizeString(item.voteId);
+          if (!voteId || seenVoteIds.has(voteId)) {
+            return false;
+          }
+          seenVoteIds.add(voteId);
+          return true;
+        })
+      : incoming;
+    detail.items = append ? detail.items.concat(nextItems) : nextItems;
+    detail.nextCursor = normalizeString(payload.nextCursor) || null;
+    detail.refreshedAt = Number(payload.refreshedAt) || null;
+    detail.fromCache = payload.fromCache === true;
+    detail.total = Number.isFinite(Number(payload.total))
+      ? Number(payload.total)
+      : null;
+    detail.loaded = true;
+    detail.error = "";
+  } catch (error) {
+    detail.error =
+      normalizeString(error?.message) || "Report card unavailable.";
+  } finally {
+    detail.loading = false;
+    detail.loadingMore = false;
+    scheduleRender();
+  }
+}
+
+async function toggleCandidateFollow(candidateId, officialId = "") {
+  const normalizedCandidateId = decodeRouteSegment(candidateId);
+  const normalizedOfficialId = decodeRouteSegment(officialId);
+  if (!normalizedCandidateId && !normalizedOfficialId) {
     return;
   }
   if (!state.auth.session) {
     await requireAuthForRoute(getCurrentRoute());
     return;
   }
-  const payload = await fetchJson(
-    `/api/candidates/${encodeURIComponent(normalizedCandidateId)}/follow`,
-    {
-      auth: true,
-      method: "POST",
-      body: {},
+  const path = normalizedOfficialId
+    ? `/api/officials/${encodeURIComponent(normalizedOfficialId)}/follow`
+    : `/api/candidates/${encodeURIComponent(normalizedCandidateId)}/follow`;
+  const payload = await fetchJson(path, {
+    auth: true,
+    method: "POST",
+    body: {},
+  });
+  const nextFollowing =
+    payload.following === true || payload.isFollowing === true;
+  const nextFollowersCount = Number(payload.followersCount);
+  state.pages.candidates.list.items = state.pages.candidates.list.items.map(
+    (item) => {
+      const itemOfficialId = resolveCandidateOfficialId(item);
+      const matches = normalizedOfficialId
+        ? itemOfficialId === normalizedOfficialId
+        : item.candidateId === normalizedCandidateId;
+      return matches
+        ? applyResolvedFollowState(item, nextFollowing, nextFollowersCount)
+        : item;
     },
   );
-  const nextFollowing = payload.following === true;
-  state.pages.candidates.list.items = state.pages.candidates.list.items.map(
-    (item) =>
-      item.candidateId === normalizedCandidateId
-        ? {
-            ...item,
-            isFollowing: nextFollowing,
-            followersCount: Math.max(
-              0,
-              item.followersCount + (nextFollowing ? 1 : -1),
-            ),
-          }
-        : item,
-  );
+  const candidateDetail = state.pages.candidates.detail.item;
   if (
-    state.pages.candidates.detail.item?.candidateId === normalizedCandidateId
+    candidateDetail &&
+    (normalizedOfficialId
+      ? resolveCandidateOfficialId(candidateDetail) === normalizedOfficialId
+      : candidateDetail.candidateId === normalizedCandidateId)
   ) {
-    state.pages.candidates.detail.item = {
-      ...state.pages.candidates.detail.item,
-      isFollowing: nextFollowing,
-      followersCount: Math.max(
-        0,
-        state.pages.candidates.detail.item.followersCount +
-          (nextFollowing ? 1 : -1),
-      ),
-    };
+    state.pages.candidates.detail.item = applyResolvedFollowState(
+      candidateDetail,
+      nextFollowing,
+      nextFollowersCount,
+    );
+  }
+  const officialDetail = state.pages.candidates.officialDetail.item;
+  if (
+    officialDetail &&
+    normalizedOfficialId &&
+    normalizeString(officialDetail.officialId) === normalizedOfficialId
+  ) {
+    state.pages.candidates.officialDetail.item = applyResolvedFollowState(
+      officialDetail,
+      nextFollowing,
+      nextFollowersCount,
+    );
   }
   scheduleRender();
 }
@@ -4403,10 +4948,41 @@ async function loadCurrentRoute({ refresh = false } = {}) {
     await loadCandidateList({ refresh });
     return;
   }
+  if (routeKey === ROUTE_KEY_OFFICIAL_DETAIL) {
+    await loadOfficialDetail(route.routeParams.officialId, { refresh });
+    return;
+  }
+  if (routeKey === ROUTE_KEY_AUTO_CANDIDATE_DETAIL) {
+    await loadAutoCandidateDetail(route.routeParams.entityId, { refresh });
+    return;
+  }
+  if (routeKey === ROUTE_KEY_OFFICIAL_REPORT_CARD) {
+    await Promise.all([
+      loadOfficialDetail(route.routeParams.officialId, { refresh }),
+      loadOfficialReportCard(route.routeParams.officialId, { refresh }),
+    ]);
+    return;
+  }
   if (
     routeKey === ROUTE_KEY_CANDIDATE_DETAIL ||
     routeKey === ROUTE_KEY_CANDIDATE_EDIT
   ) {
+    const legacyOfficialId = extractOfficialIdFromCandidateRouteId(
+      route.routeParams.candidateId,
+    );
+    if (legacyOfficialId) {
+      navigateTo(buildOfficialProfileRoute(legacyOfficialId), {
+        replace: true,
+      });
+      return;
+    }
+    const legacyEntityId = extractAutoCandidateEntityId(
+      route.routeParams.candidateId,
+    );
+    if (legacyEntityId) {
+      navigateTo(buildAutoCandidateRoute(legacyEntityId), { replace: true });
+      return;
+    }
     await loadCandidateDetail(route.routeParams.candidateId, { refresh });
     return;
   }
@@ -5263,6 +5839,7 @@ function renderFeedOverviewPage() {
 
 function renderCandidateListPage() {
   const list = state.pages.candidates.list;
+  const currentPath = getCurrentPathWithQuery();
   return `<section class="shared-page">
     ${renderTopChrome()}
     <div class="shared-page__content">
@@ -5299,7 +5876,7 @@ function renderCandidateListPage() {
               }
               <div class="shared-card__body shared-card__body--candidate-preview">
                 <div class="shared-card__meta">
-                  <span>${escapeHtml(candidate.levelOfOffice || "Candidate")}</span>
+                  <span>${escapeHtml(candidate.officeTitle || candidate.levelOfOffice || "Candidate")}</span>
                   ${
                     candidate.district
                       ? `<span>${escapeHtml(candidate.district)}</span>`
@@ -5307,7 +5884,7 @@ function renderCandidateListPage() {
                   }
                 </div>
                 <h3>${escapeHtml(candidate.displayName)}</h3>
-                <p class="shared-card__summary">${escapeHtml(candidate.bio || "Open the candidate page to see recent posts, events, and campaign details.")}</p>
+                <p class="shared-card__summary">${escapeHtml(candidate.bio || (candidate.kind === "official" ? "Open the official profile to see office details and the report card." : candidate.kind === "raceCandidate" ? "Open the auto-generated profile to see election details and any linked Polis profile." : "Open the candidate page to see recent posts, events, and campaign details."))}</p>
                 <div class="shared-card__meta shared-card__meta--candidate-preview">
                   <span>${escapeHtml(formatCount(candidate.followersCount))} followers</span>
                   ${
@@ -5317,11 +5894,16 @@ function renderCandidateListPage() {
                   }
                 </div>
                 <div class="shared-card__actions">
-                  <button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="/candidates/${escapeHtml(candidate.candidateId)}">Open</button>
-                  <button class="shared-feed-chip" data-action="candidate-follow" data-candidate-id="${escapeHtml(candidate.candidateId)}">${candidate.isFollowing ? "Following" : "Follow"}</button>
+                  <button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="${escapeHtml(resolveCandidateOpenRoute(candidate, currentPath))}">Open</button>
+                  ${
+                    resolveCandidateFollowTarget(candidate).candidateId ||
+                    resolveCandidateFollowTarget(candidate).officialId
+                      ? `<button class="shared-feed-chip" data-action="candidate-follow" data-candidate-id="${escapeHtml(resolveCandidateFollowTarget(candidate).candidateId)}" data-official-id="${escapeHtml(resolveCandidateFollowTarget(candidate).officialId)}">${candidate.isFollowing ? "Following" : "Follow"}</button>`
+                      : ""
+                  }
                   ${
                     candidate.canEdit
-                      ? `<button class="shared-feed-chip" data-action="navigate" data-route="/candidates/${escapeHtml(candidate.candidateId)}/edit">Edit</button>`
+                      ? `<button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(resolveCandidateEditRoute(candidate))}">Edit</button>`
                       : ""
                   }
                 </div>
@@ -5355,6 +5937,7 @@ function renderCandidateDetailPage() {
     return `<section class="shared-page">${renderTopChrome()}<div class="shared-page__content"><div class="shared-page__error">${escapeHtml(detail.error || "Candidate unavailable.")}</div></div></section>`;
   }
   const socials = candidate.socials || {};
+  const officialId = resolveCandidateOfficialId(candidate);
   return `<section class="shared-page">
     ${renderTopChrome()}
     <div class="shared-page__content">
@@ -5384,15 +5967,20 @@ function renderCandidateDetailPage() {
           </div>
         </div>
         <div class="shared-card__actions">
-          <button class="shared-feed-chip shared-feed-chip--primary" data-action="candidate-follow" data-candidate-id="${escapeHtml(candidate.candidateId)}">${candidate.isFollowing ? "Following" : "Follow"}</button>
+          <button class="shared-feed-chip shared-feed-chip--primary" data-action="candidate-follow" data-candidate-id="${escapeHtml(candidate.candidateId)}" data-official-id="${escapeHtml(officialId)}">${candidate.isFollowing ? "Following" : "Follow"}</button>
           ${
             candidate.canEdit
-              ? `<button class="shared-feed-chip" data-action="navigate" data-route="/candidates/${escapeHtml(candidate.candidateId)}/edit">${isEditRoute ? "Editing" : "Edit page"}</button>`
+              ? `<button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(resolveCandidateEditRoute(candidate))}">${isEditRoute ? "Editing" : "Edit page"}</button>`
               : ""
           }
           ${
             normalizeString(socials.website)
               ? `<a class="shared-feed-chip" href="${escapeHtml(socials.website)}" target="_blank" rel="noopener noreferrer">${candidate.donationsAvailable ? "Donate" : "Website"}</a>`
+              : ""
+          }
+          ${
+            officialId
+              ? `<button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(buildOfficialReportCardRoute(officialId, { returnTo: getCurrentPathWithQuery() }))}">Official Report Card</button>`
               : ""
           }
           <button class="shared-feed-chip" data-action="navigate" data-route="/events?q=${encodeURIComponent(candidate.displayName)}">Related events</button>
@@ -5414,7 +6002,7 @@ function renderCandidateDetailPage() {
               <label><span>Facebook</span><input name="facebook" value="${escapeHtml(socials.facebook || "")}" /></label>
               <div class="shared-card__actions">
                 <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${detail.saving ? " disabled" : ""}>${detail.saving ? "Saving…" : "Save candidate page"}</button>
-                <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/candidates/${escapeHtml(candidate.candidateId)}">Cancel</button>
+                <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(resolveCandidateOpenRoute(candidate))}">Cancel</button>
               </div>
             </form>`
           : ""
@@ -5453,6 +6041,287 @@ function renderCandidateDetailPage() {
           })}
         </div>
       </div>
+    </div>
+  </section>`;
+}
+
+function renderOfficialDetailPage() {
+  const detail = state.pages.candidates.officialDetail;
+  const official = detail.item;
+  const returnTo = normalizeString(readCurrentSearchParams().get("returnTo"));
+  if (detail.loading && !official) {
+    return `<section class="shared-page">${renderTopChrome()}<div class="shared-page__content"><div class="shared-page__loading">Loading official profile…</div></div></section>`;
+  }
+  if (!official) {
+    return `<section class="shared-page">${renderTopChrome()}<div class="shared-page__content"><div class="shared-page__error">${escapeHtml(detail.error || "Official profile unavailable.")}</div></div></section>`;
+  }
+  const termRange = formatTermRange(official.termStart, official.termEnd);
+  return `<section class="shared-page">
+    ${renderTopChrome()}
+    <div class="shared-page__content">
+      <div class="shared-page__back-row">
+        <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(returnTo || "/candidates")}">Back</button>
+      </div>
+      ${
+        official.autoGeneratedMessage
+          ? `<div class="shared-page__hint shared-page__banner">${escapeHtml(official.autoGeneratedMessage)}</div>`
+          : ""
+      }
+      <div class="shared-page__header shared-page__header--hero">
+        <div class="shared-page__hero">
+          ${
+            official.avatarUrl
+              ? `<img class="shared-page__hero-avatar" src="${escapeHtml(official.avatarUrl)}" alt="${escapeHtml(official.displayName)}" />`
+              : `<div class="shared-page__hero-avatar shared-page__hero-avatar--placeholder">${escapeHtml(official.displayName.slice(0, 1).toUpperCase() || "O")}</div>`
+          }
+          <div>
+            <p class="shared-page__eyebrow">${escapeHtml(official.officeTitle)}</p>
+            <h1>${escapeHtml(official.displayName)}</h1>
+            <p>${escapeHtml(official.partyLabel || "Elected official")}</p>
+            <div class="shared-card__meta">
+              ${official.chamber ? `<span>${escapeHtml(humanizeLabel(official.chamber))}</span>` : ""}
+              ${official.state ? `<span>${escapeHtml(official.state)}</span>` : ""}
+              ${official.district ? `<span>${escapeHtml(official.district)}</span>` : ""}
+              ${termRange ? `<span>${escapeHtml(termRange)}</span>` : ""}
+              <span>${escapeHtml(formatCount(official.followersCount))} followers</span>
+            </div>
+          </div>
+        </div>
+        <div class="shared-card__actions">
+          <button class="shared-feed-chip shared-feed-chip--primary" data-action="candidate-follow" data-candidate-id="" data-official-id="${escapeHtml(official.officialId)}">${official.isFollowing ? "Following" : "Follow"}</button>
+          <button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(buildOfficialReportCardRoute(official.officialId, { returnTo: getCurrentPathWithQuery() }))}">Report Card</button>
+          ${
+            official.officialUrl
+              ? `<a class="shared-feed-chip" href="${escapeHtml(official.officialUrl)}" target="_blank" rel="noopener noreferrer">Official Website</a>`
+              : ""
+          }
+        </div>
+      </div>
+      <article class="shared-card">
+        <div class="shared-card__body">
+          <h3>Account status</h3>
+          <p>${escapeHtml(official.hasAccount ? "This official already has an in-app account." : "This is an auto-generated profile until the official creates or claims an in-app account.")}</p>
+        </div>
+      </article>
+    </div>
+  </section>`;
+}
+
+function renderAutoCandidateDetailPage() {
+  const detail = state.pages.candidates.autoDetail;
+  const candidate = detail.item;
+  const returnTo = normalizeString(readCurrentSearchParams().get("returnTo"));
+  if (detail.loading && !candidate) {
+    return `<section class="shared-page">${renderTopChrome()}<div class="shared-page__content"><div class="shared-page__loading">Loading candidate profile…</div></div></section>`;
+  }
+  if (!candidate) {
+    return `<section class="shared-page">${renderTopChrome()}<div class="shared-page__content"><div class="shared-page__error">${escapeHtml(detail.error || "Candidate profile unavailable.")}</div></div></section>`;
+  }
+  return `<section class="shared-page">
+    ${renderTopChrome()}
+    <div class="shared-page__content">
+      <div class="shared-page__back-row">
+        <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(returnTo || "/candidates")}">Back</button>
+      </div>
+      ${
+        candidate.autoGeneratedMessage
+          ? `<div class="shared-page__hint shared-page__banner">${escapeHtml(candidate.autoGeneratedMessage)}</div>`
+          : ""
+      }
+      <div class="shared-page__header shared-page__header--hero">
+        <div class="shared-page__hero">
+          ${
+            candidate.avatarUrl
+              ? `<img class="shared-page__hero-avatar" src="${escapeHtml(candidate.avatarUrl)}" alt="${escapeHtml(candidate.displayName)}" />`
+              : `<div class="shared-page__hero-avatar shared-page__hero-avatar--placeholder">${escapeHtml(candidate.displayName.slice(0, 1).toUpperCase() || "C")}</div>`
+          }
+          <div>
+            <p class="shared-page__eyebrow">${escapeHtml(candidate.officeTitle || candidate.levelOfOffice || "Candidate")}</p>
+            <h1>${escapeHtml(candidate.displayName)}</h1>
+            <p>${escapeHtml(candidate.partyLabel || "Auto-generated candidate profile")}</p>
+            <div class="shared-card__meta">
+              ${candidate.levelOfOffice ? `<span>${escapeHtml(candidate.levelOfOffice)}</span>` : ""}
+              ${candidate.state ? `<span>${escapeHtml(candidate.state)}</span>` : ""}
+              ${candidate.district ? `<span>${escapeHtml(candidate.district)}</span>` : ""}
+              ${
+                candidate.electionStatus
+                  ? `<span>${escapeHtml(humanizeLabel(candidate.electionStatus))}</span>`
+                  : ""
+              }
+            </div>
+          </div>
+        </div>
+        <div class="shared-card__actions">
+          ${
+            candidate.hasAccount && candidate.linkedCandidateId
+              ? `<button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="/candidates/${escapeHtml(encodeURIComponent(candidate.linkedCandidateId))}">Open Claimed Polis Profile</button>`
+              : ""
+          }
+        </div>
+      </div>
+      <div class="shared-stack">
+        <article class="shared-card">
+          <div class="shared-card__body">
+            <h3>Election</h3>
+            <p>${escapeHtml(candidate.electionName || "Election details unavailable.")}</p>
+            ${
+              candidate.electionDay
+                ? `<div class="shared-card__meta"><span>${escapeHtml(formatCalendarDate(candidate.electionDay))}</span></div>`
+                : ""
+            }
+          </div>
+        </article>
+        <article class="shared-card">
+          <div class="shared-card__body">
+            <h3>Account status</h3>
+            <p>${escapeHtml(candidate.hasAccount && candidate.linkedCandidateId ? "This auto-generated profile links to a claimed Polis candidate page." : "This is an auto-generated profile until a Polis account is created or linked.")}</p>
+          </div>
+        </article>
+      </div>
+    </div>
+  </section>`;
+}
+
+function renderOfficialReportCardPage() {
+  const detail = state.pages.candidates.reportCard;
+  const official = state.pages.candidates.officialDetail.item;
+  const routeOfficialId = decodeRouteSegment(
+    getCurrentRoute().routeParams.officialId,
+  );
+  const resolvedOfficialId =
+    normalizeString(official?.officialId) || routeOfficialId;
+  const returnTo = normalizeString(readCurrentSearchParams().get("returnTo"));
+  const backRoute =
+    returnTo ||
+    buildOfficialProfileRoute(resolvedOfficialId || routeOfficialId);
+  const headline =
+    normalizeString(official?.displayName) || "Official Report Card";
+  if (detail.loading && !detail.items.length) {
+    return `<section class="shared-page">${renderTopChrome()}<div class="shared-page__content"><div class="shared-page__loading">Loading report card…</div></div></section>`;
+  }
+  if (detail.error && !detail.items.length) {
+    return `<section class="shared-page">${renderTopChrome()}<div class="shared-page__content"><div class="shared-page__error">${escapeHtml(detail.error)}</div></div></section>`;
+  }
+  return `<section class="shared-page">
+    ${renderTopChrome()}
+    <div class="shared-page__content">
+      <div class="shared-page__back-row">
+        <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(backRoute)}">Back</button>
+      </div>
+      <div class="shared-page__header shared-page__header--hero">
+        <div>
+          <p class="shared-page__eyebrow">Report Card</p>
+          <h1>${escapeHtml(headline)}</h1>
+          <p>${escapeHtml(detail.congress ? `Congress ${detail.congress}` : "Current Congress")}</p>
+          <div class="shared-card__meta">
+            ${
+              detail.refreshedAt
+                ? `<span>Updated ${escapeHtml(formatAbsoluteDateTime(detail.refreshedAt))}</span>`
+                : ""
+            }
+            ${
+              detail.total !== null
+                ? `<span>${escapeHtml(formatCount(detail.total))} votes</span>`
+                : ""
+            }
+            <span>${detail.fromCache ? "Cached results" : "Latest results"}</span>
+          </div>
+        </div>
+        <div class="shared-card__actions">
+          ${
+            resolvedOfficialId
+              ? `<button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(buildOfficialProfileRoute(resolvedOfficialId))}">Official Profile</button>`
+              : ""
+          }
+        </div>
+      </div>
+      ${
+        detail.items.length
+          ? `<div class="shared-stack">${detail.items
+              .map((item) => {
+                const billLabel =
+                  normalizeString(item.billType) &&
+                  normalizeString(item.billNumber)
+                    ? `${item.billType.toUpperCase()} ${item.billNumber}`
+                    : normalizeString(item.billId);
+                const aggregateText =
+                  item.aggregate &&
+                  (item.aggregate.upCount > 0 || item.aggregate.downCount > 0)
+                    ? `${formatApprovalRating(item.aggregate.approvalRating)} • ${formatCount(item.aggregate.upCount)} up • ${formatCount(item.aggregate.downCount)} down`
+                    : "";
+                const title =
+                  item.billTitle || item.voteQuestion || billLabel || "Vote";
+                const secondary =
+                  item.billTitle &&
+                  item.voteQuestion &&
+                  item.voteQuestion !== item.billTitle
+                    ? item.voteQuestion
+                    : item.billSummary || item.voteResult || "";
+                const latestAction = [item.billLatestActionText];
+                if (item.billLatestActionDate) {
+                  latestAction.push(
+                    formatCalendarDate(item.billLatestActionDate),
+                  );
+                }
+                return `<article class="shared-card">
+                  <div class="shared-card__body">
+                    <div class="shared-card__meta">
+                      ${item.votedAt ? `<span>${escapeHtml(formatCalendarDate(item.votedAt))}</span>` : ""}
+                      ${item.chamber ? `<span>${escapeHtml(humanizeLabel(item.chamber))}</span>` : ""}
+                      ${item.voteNumber !== null ? `<span>Vote ${escapeHtml(String(item.voteNumber))}</span>` : ""}
+                      ${billLabel ? `<span>${escapeHtml(billLabel)}</span>` : ""}
+                    </div>
+                    <h3>${escapeHtml(title)}</h3>
+                    ${
+                      secondary
+                        ? `<p class="shared-card__summary">${escapeHtml(secondary)}</p>`
+                        : ""
+                    }
+                    <div class="shared-card__meta">
+                      ${
+                        item.votePosition
+                          ? `<span>Position: ${escapeHtml(item.votePosition)}</span>`
+                          : ""
+                      }
+                      ${
+                        item.voteResult
+                          ? `<span>Result: ${escapeHtml(item.voteResult)}</span>`
+                          : ""
+                      }
+                      ${
+                        item.myOpinion
+                          ? `<span>You voted: ${escapeHtml(humanizeLabel(item.myOpinion))}</span>`
+                          : ""
+                      }
+                      ${
+                        aggregateText
+                          ? `<span>${escapeHtml(aggregateText)}</span>`
+                          : ""
+                      }
+                    </div>
+                    ${
+                      latestAction.filter(Boolean).length
+                        ? `<p>${escapeHtml(latestAction.filter(Boolean).join(" • "))}</p>`
+                        : ""
+                    }
+                  </div>
+                </article>`;
+              })
+              .join("")}</div>`
+          : '<div class="shared-page__empty">No report card items are available yet.</div>'
+      }
+      ${
+        detail.error && detail.items.length
+          ? `<div class="shared-page__error">${escapeHtml(detail.error)}</div>`
+          : ""
+      }
+      ${
+        detail.loadingMore
+          ? '<div class="shared-page__hint">Loading more report card items…</div>'
+          : detail.nextCursor
+            ? '<div class="shared-card__actions"><button class="shared-feed-chip shared-feed-chip--primary" data-action="official-report-card-load-more">Load more</button></div>'
+            : ""
+      }
     </div>
   </section>`;
 }
@@ -6467,6 +7336,15 @@ function renderRouteStage() {
   }
   if (routeKey === ROUTE_KEY_CANDIDATES) {
     return renderCandidateListPage();
+  }
+  if (routeKey === ROUTE_KEY_OFFICIAL_DETAIL) {
+    return renderOfficialDetailPage();
+  }
+  if (routeKey === ROUTE_KEY_AUTO_CANDIDATE_DETAIL) {
+    return renderAutoCandidateDetailPage();
+  }
+  if (routeKey === ROUTE_KEY_OFFICIAL_REPORT_CARD) {
+    return renderOfficialReportCardPage();
   }
   if (
     routeKey === ROUTE_KEY_CANDIDATE_DETAIL ||
@@ -7692,11 +8570,22 @@ function handleRootClick(event) {
   }
 
   if (action === "candidate-follow") {
-    toggleCandidateFollow(target.getAttribute("data-candidate-id")).catch(
-      () => {
-        showToast("Candidate follow failed.");
-      },
-    );
+    toggleCandidateFollow(
+      target.getAttribute("data-candidate-id"),
+      target.getAttribute("data-official-id"),
+    ).catch(() => {
+      showToast("Candidate follow failed.");
+    });
+    return;
+  }
+
+  if (action === "official-report-card-load-more") {
+    const officialId =
+      normalizeString(state.pages.candidates.reportCard.officialId) ||
+      normalizeString(getCurrentRoute().routeParams.officialId);
+    loadOfficialReportCard(officialId, { append: true }).catch(() => {
+      showToast("Report card load failed.");
+    });
     return;
   }
 

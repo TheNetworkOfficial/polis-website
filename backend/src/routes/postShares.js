@@ -13,6 +13,21 @@ const APP_SHELL_ROUTE_DEFINITIONS = [
   { routeKey: "feed", pattern: /^\/feed$/u, params: [] },
   { routeKey: "candidates", pattern: /^\/candidates$/u, params: [] },
   {
+    routeKey: "official-report-card",
+    pattern: /^\/officials\/([^/]+)\/report-card$/u,
+    params: ["officialId"],
+  },
+  {
+    routeKey: "official-detail",
+    pattern: /^\/officials\/([^/]+)$/u,
+    params: ["officialId"],
+  },
+  {
+    routeKey: "auto-candidate-detail",
+    pattern: /^\/auto-candidates\/([^/]+)$/u,
+    params: ["entityId"],
+  },
+  {
     routeKey: "candidate-edit",
     pattern: /^\/candidates\/([^/]+)\/edit$/u,
     params: ["candidateId"],
@@ -808,6 +823,9 @@ function getAppShellPageMeta(routeMatch) {
           "Sign in to continue into the full Polis experience from the browser.",
       };
     case "candidates":
+    case "official-detail":
+    case "official-report-card":
+    case "auto-candidate-detail":
     case "candidate-detail":
     case "candidate-edit":
       return {
@@ -908,6 +926,9 @@ router.get(
   [
     "/feed",
     "/candidates",
+    "/officials/:officialId",
+    "/officials/:officialId/report-card",
+    "/auto-candidates/:entityId",
     "/candidates/:candidateId",
     "/candidates/:candidateId/edit",
     "/events",
@@ -1056,6 +1077,8 @@ router.get("/.well-known/apple-app-site-association", (_req, res) => {
               { "/": "/feed" },
               { "/": "/candidates" },
               { "/": "/candidates/*" },
+              { "/": "/officials/*" },
+              { "/": "/auto-candidates/*" },
               { "/": "/cta-invite/*" },
               { "/": "/events/*" },
               { "/": "/manage-events/*" },

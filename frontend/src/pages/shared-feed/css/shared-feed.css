@@ -1186,6 +1186,12 @@ a {
   border-color: rgba(255, 51, 95, 0.24);
 }
 
+.shared-page__banner {
+  color: var(--sf-ink);
+  border-color: rgba(38, 244, 238, 0.24);
+  background: rgba(38, 244, 238, 0.08);
+}
+
 .shared-page__pagination-sentinel {
   height: 1px;
 }
