@@ -4960,39 +4960,6 @@ function formatDateTimeInputValue(value) {
   return `${year}-${month}-${day}T${hours}:${minutes}`;
 }
 
-function renderCompactPostCards(items = []) {
-  if (!items.length) {
-    return '<div class="shared-page__empty">No posts yet.</div>';
-  }
-  return `<div class="shared-card-grid shared-card-grid--posts">${items
-    .map((item) => {
-      const mediaUrl = normalizeUrl(item.imageUrl || item.posterUrl);
-      return `<article class="shared-card shared-card--post">
-        ${
-          mediaUrl
-            ? `<img class="shared-card__image" src="${escapeHtml(mediaUrl)}" alt="${escapeHtml(item.previewTitle || item.caption || item.authorDisplayName)}" loading="lazy" />`
-            : ""
-        }
-        <div class="shared-card__body">
-          <div class="shared-card__meta">
-            <span>${escapeHtml(item.authorDisplayName || "Post")}</span>
-            ${
-              item.createdAt
-                ? `<span>${escapeHtml(formatRelativeTime(item.createdAt))}</span>`
-                : ""
-            }
-          </div>
-          <h3>${escapeHtml(item.previewTitle || item.caption || "Shared post")}</h3>
-          <p>${escapeHtml(item.caption || item.previewTitle || "Open the shared post page to see the full feed context.")}</p>
-          <div class="shared-card__actions">
-            <button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="/posts/${escapeHtml(item.postId)}">Open post</button>
-          </div>
-        </div>
-      </article>`;
-    })
-    .join("")}</div>`;
-}
-
 function renderMediaThumbnailGrid(
   items = [],
   {
@@ -5244,34 +5211,16 @@ function renderEventsListPage() {
       ${
         list.mapMode
           ? '<div class="shared-events-map" id="shared-events-map"></div>'
-          : `<div class="shared-card-grid">${list.items
-              .map(
-                (event) => `<article class="shared-card">
-                  ${
-                    event.imageUrl
-                      ? `<img class="shared-card__image" src="${escapeHtml(event.imageUrl)}" alt="${escapeHtml(event.title)}" loading="lazy" />`
-                      : ""
-                  }
-                  <div class="shared-card__body">
-                    <div class="shared-card__meta">
-                      <span>${escapeHtml(formatAbsoluteDateTime(event.startAt))}</span>
-                      ${event.locationTown ? `<span>${escapeHtml(event.locationTown)}</span>` : ""}
-                    </div>
-                    <h3>${escapeHtml(event.title)}</h3>
-                    <p>${escapeHtml(event.description || event.address || "Open the event page for details.")}</p>
-                    <div class="shared-card__meta">
-                      <span>${escapeHtml(formatCount(event.attendeeCount))} going</span>
-                      <span>${escapeHtml(formatCount(event.interestedCount))} interested</span>
-                    </div>
-                    <div class="shared-card__actions">
-                      <button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="/events/${escapeHtml(event.eventId)}">Open</button>
-                      <button class="shared-feed-chip" data-action="event-interest" data-event-id="${escapeHtml(event.eventId)}">${event.isInterested ? "Interested" : "Interested?"}</button>
-                      <button class="shared-feed-chip" data-action="event-attend" data-event-id="${escapeHtml(event.eventId)}">${event.isAttending ? "Going" : "RSVP"}</button>
-                    </div>
-                  </div>
-                </article>`,
-              )
-              .join("")}</div>`
+          : renderMediaThumbnailGrid(list.items, {
+              emptyMessage: "No events found.",
+              getRoute: (item) =>
+                item.eventId ? `/events/${encodeURIComponent(item.eventId)}` : "",
+              getMediaUrl: (item) => item.imageUrl,
+              getAltText: (item) => item.title || "Event",
+              getOverlayText: (item) =>
+                `${formatCount(item.attendeeCount)} going`,
+              getPlaceholderLabel: () => "E",
+            })
       }
       ${
         list.loading
@@ -5337,6 +5286,12 @@ function renderEventDetailPage() {
   const isCreateRoute = routeKey === ROUTE_KEY_MANAGE_EVENTS_NEW;
   const isEditRoute = routeKey === ROUTE_KEY_MANAGE_EVENTS_EDIT;
   const formEvent = event || {};
+  const backRoute = isCreateRoute
+    ? "/manage-events"
+    : isEditRoute && formEvent.eventId
+      ? `/events/${encodeURIComponent(formEvent.eventId)}`
+      : "/events";
+  const backLabel = isCreateRoute ? "Back to manage events" : "Back to events";
   if (!isCreateRoute && detail.loading && !event) {
     return `<section class="shared-page">${renderTopChrome()}<div class="shared-page__content"><div class="shared-page__loading">Loading event…</div></div></section>`;
   }
@@ -5346,6 +5301,9 @@ function renderEventDetailPage() {
   return `<section class="shared-page">
     ${renderTopChrome()}
     <div class="shared-page__content">
+      <div class="shared-page__back-row">
+        <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(backRoute)}">${escapeHtml(backLabel)}</button>
+      </div>
       <div class="shared-page__header">
         <div>
           <p class="shared-page__eyebrow">${isCreateRoute ? "Create event" : "Event"}</p>
@@ -5485,7 +5443,18 @@ function renderProfilePage() {
       }
       ${profileState.error ? `<div class="shared-page__error">${escapeHtml(profileState.error)}</div>` : ""}
       <h2>Posts</h2>
-      ${renderCompactPostCards(profileState.posts.items)}
+      ${renderMediaThumbnailGrid(profileState.posts.items, {
+        emptyMessage: "No posts yet.",
+        getRoute: (item) =>
+          item.postId ? `/posts/${encodeURIComponent(item.postId)}` : "",
+        getMediaUrl: (item) => item.posterUrl || item.imageUrl,
+        getAltText: (item) =>
+          item.previewTitle || item.caption || item.authorDisplayName || "Post",
+        getOverlayText: (item) =>
+          `${formatCount(item.likesCount)} like${Number(item.likesCount) === 1 ? "" : "s"}`,
+        getPlaceholderLabel: () => "P",
+        overlayBare: true,
+      })}
     </div>
   </section>`;
 }
