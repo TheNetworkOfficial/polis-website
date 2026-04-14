@@ -6709,6 +6709,46 @@ function renderToast() {
     : "";
 }
 
+/**
+ * Preserves immersive feed position across full rerenders by anchoring to the
+ * active card instead of relying only on raw scrollTop.
+ */
+function snapshotFeedScrollState() {
+  const scrollRoot = root?.querySelector("#shared-feed-scroll");
+  if (!scrollRoot) {
+    return null;
+  }
+  const activeCard = scrollRoot.querySelector(
+    `[data-index="${String(state.activeIndex)}"]`,
+  );
+  return {
+    scrollTop: scrollRoot.scrollTop,
+    activeIndex: state.activeIndex,
+    activeOffset: activeCard ? activeCard.offsetTop - scrollRoot.scrollTop : 0,
+  };
+}
+
+function restoreFeedScrollState(snapshot = null) {
+  if (!snapshot) {
+    return;
+  }
+  const scrollRoot = root?.querySelector("#shared-feed-scroll");
+  if (!scrollRoot) {
+    return;
+  }
+  const activeCard = scrollRoot.querySelector(
+    `[data-index="${String(snapshot.activeIndex)}"]`,
+  );
+  if (activeCard) {
+    scrollRoot.scrollTop = Math.max(
+      0,
+      activeCard.offsetTop - (Number(snapshot.activeOffset) || 0),
+    );
+    return;
+  }
+  scrollRoot.scrollTop = Math.max(0, Number(snapshot.scrollTop) || 0);
+}
+
 function renderApp() {
   if (!root) {
     return;
@@ -6716,6 +6756,7 @@ function renderApp() {
 
   ensureActiveIndexInBounds();
   const playbackSnapshot = snapshotPlaybackState();
+  const scrollSnapshot = snapshotFeedScrollState();
   const shell = `<div class="shared-feed-shell">
     ${renderRail()}
     ${renderRouteStage()}
@@ -6724,6 +6765,7 @@ function renderApp() {
   ${renderAuthModal()}
   ${renderToast()}`;
   root.innerHTML = shell;
+  restoreFeedScrollState(scrollSnapshot);
   bindObservers();
   bindVideos();
   bindEventsMap().catch(() => {});
