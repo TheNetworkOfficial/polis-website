@@ -53,11 +53,15 @@ function decodeJwtClaims(token) {
 }
 
 function buildSessionFromTokens(tokens = {}) {
-  const accessToken = normalizeString(tokens.AccessToken || tokens.access_token);
+  const accessToken = normalizeString(
+    tokens.AccessToken || tokens.access_token,
+  );
   const idToken = normalizeString(tokens.IdToken || tokens.id_token);
   const refreshToken =
     normalizeString(tokens.RefreshToken || tokens.refresh_token) || null;
-  const expiresInSeconds = Number(tokens.ExpiresIn || tokens.expires_in || 3600);
+  const expiresInSeconds = Number(
+    tokens.ExpiresIn || tokens.expires_in || 3600,
+  );
 
   if (!accessToken || !idToken) {
     throw new Error("invalid_auth_response");
@@ -68,7 +72,8 @@ function buildSessionFromTokens(tokens = {}) {
     idToken,
     refreshToken,
     expiresAt:
-      Date.now() + (Number.isFinite(expiresInSeconds) ? expiresInSeconds : 3600) * 1000,
+      Date.now() +
+      (Number.isFinite(expiresInSeconds) ? expiresInSeconds : 3600) * 1000,
   };
 }
 
@@ -179,21 +184,26 @@ function resolveScopes(config = {}) {
 }
 
 export function hasHostedSignInConfig(config = {}) {
-  return Boolean(normalizeString(config.clientId) && normalizeString(config.domain));
+  return Boolean(
+    normalizeString(config.clientId) && normalizeString(config.domain),
+  );
 }
 
-export function buildAuthorizedHeaders(session, extra = {}) {
+export function buildAuthorizedHeaders(session, extra = {}, options = {}) {
   const authToken = normalizeString(session?.idToken || session?.accessToken);
   const accessToken = normalizeString(session?.accessToken);
   if (!authToken || !accessToken) {
     throw new Error("unauthorized");
   }
 
-  return {
+  const headers = {
     Authorization: `Bearer ${authToken}`,
-    "X-Cognito-Access-Token": accessToken,
     ...extra,
   };
+  if (options.includeAccessToken === true) {
+    headers["X-Cognito-Access-Token"] = accessToken;
+  }
+  return headers;
 }
 
 async function startHostedAuth(config = {}, { mode = "login" } = {}) {
@@ -284,17 +294,20 @@ export async function completeHostedSignIn(config = {}) {
     };
   }
 
-  const response = await fetch(`${resolveHostedUiBaseUrl(config)}/oauth2/token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "authorization_code",
-      client_id: normalizeString(config.clientId),
-      code,
-      redirect_uri: resolveRedirectUri(config),
-      code_verifier: verifier,
-    }).toString(),
-  });
+  const response = await fetch(
+    `${resolveHostedUiBaseUrl(config)}/oauth2/token`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        client_id: normalizeString(config.clientId),
+        code,
+        redirect_uri: resolveRedirectUri(config),
+        code_verifier: verifier,
+      }).toString(),
+    },
+  );
 
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {

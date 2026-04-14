@@ -9,6 +9,64 @@ const SOCIAL_CARD_WIDTH = 1200;
 const SOCIAL_CARD_HEIGHT = 630;
 const SOCIAL_CARD_FETCH_TIMEOUT_MS = 5000;
 const SOCIAL_CARD_MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const APP_SHELL_ROUTE_DEFINITIONS = [
+  { routeKey: "feed", pattern: /^\/feed$/u, params: [] },
+  { routeKey: "candidates", pattern: /^\/candidates$/u, params: [] },
+  {
+    routeKey: "candidate-edit",
+    pattern: /^\/candidates\/([^/]+)\/edit$/u,
+    params: ["candidateId"],
+  },
+  {
+    routeKey: "candidate-detail",
+    pattern: /^\/candidates\/([^/]+)$/u,
+    params: ["candidateId"],
+  },
+  { routeKey: "events", pattern: /^\/events$/u, params: [] },
+  {
+    routeKey: "event-detail",
+    pattern: /^\/events\/([^/]+)$/u,
+    params: ["eventId"],
+  },
+  { routeKey: "manage-events", pattern: /^\/manage-events$/u, params: [] },
+  {
+    routeKey: "manage-events-new",
+    pattern: /^\/manage-events\/new$/u,
+    params: [],
+  },
+  {
+    routeKey: "manage-events-edit",
+    pattern: /^\/manage-events\/([^/]+)\/edit$/u,
+    params: ["eventId"],
+  },
+  { routeKey: "profile-self", pattern: /^\/profile$/u, params: [] },
+  {
+    routeKey: "profile-edit",
+    pattern: /^\/profile\/edit$/u,
+    params: [],
+  },
+  {
+    routeKey: "profile-connections",
+    pattern: /^\/profile\/connections$/u,
+    params: [],
+  },
+  {
+    routeKey: "profile-notifications",
+    pattern: /^\/profile\/notifications$/u,
+    params: [],
+  },
+  {
+    routeKey: "profile-user",
+    pattern: /^\/profile\/([^/]+)$/u,
+    params: ["userId"],
+  },
+  { routeKey: "messages-root", pattern: /^\/messages$/u, params: [] },
+  {
+    routeKey: "messages-wildcard",
+    pattern: /^\/messages\/(.+)$/u,
+    params: ["messagePath"],
+  },
+];
 
 function normalizeString(value) {
   if (value === undefined || value === null) {
@@ -342,6 +400,95 @@ function buildAppOpenUrl(postId, commentId = "") {
   return `${scheme}://auth/?path=${encodeURIComponent(`${path}${commentQuery}`)}`;
 }
 
+/**
+ * Match a request pathname against the authenticated web app route set so the
+ * backend can serve one shell for deep links and hard refreshes.
+ */
+function matchAppShellRoute(pathname) {
+  const normalizedPath = normalizeString(pathname) || "/";
+  for (const definition of APP_SHELL_ROUTE_DEFINITIONS) {
+    const match = definition.pattern.exec(normalizedPath);
+    if (!match) {
+      continue;
+    }
+    const routeParams = {};
+    definition.params.forEach((paramName, index) => {
+      routeParams[paramName] = normalizeString(match[index + 1]);
+    });
+    return {
+      routeKey: definition.routeKey,
+      routePath: normalizedPath,
+      routeParams,
+    };
+  }
+  return null;
+}
+
+function getSharedRuntimeBase(req, { requestUrl, canonicalUrl } = {}) {
+  const resolvedRequestUrl =
+    normalizeString(requestUrl) || `${requestOrigin(req)}${req.originalUrl}`;
+  const resolvedCanonicalUrl =
+    normalizeString(canonicalUrl) || resolvedRequestUrl;
+  const publicWebBaseUrl =
+    normalizeBaseUrl(process.env.PUBLIC_WEB_BASE_URL) || requestOrigin(req);
+  const storeUrls = resolveStoreUrls();
+
+  return {
+    brandName: DEFAULT_BRAND_NAME,
+    requestUrl: resolvedRequestUrl,
+    canonicalUrl: resolvedCanonicalUrl,
+    publicWebBaseUrl,
+    apiBaseUrl: normalizeBaseUrl(process.env.VIDEO_BACKEND_BASE_URL),
+    appUrlScheme: resolveAppUrlScheme(),
+    iosStoreUrl: storeUrls.ios,
+    androidStoreUrl: storeUrls.android,
+    auth: {
+      clientId: normalizeString(process.env.COGNITO_APP_CLIENT_ID),
+      domain: normalizeString(process.env.COGNITO_DOMAIN),
+      scopes: normalizeString(process.env.COGNITO_SCOPES),
+      redirectUri:
+        normalizeString(process.env.COGNITO_REDIRECT_URI) || resolvedRequestUrl,
+    },
+    map: {
+      styleUrl: normalizeString(process.env.VOTER_MAP_STYLE_URL),
+      maptilerApiKey: normalizeString(process.env.MAPTILER_API_KEY),
+    },
+    messaging: {
+      wsUrl:
+        normalizeString(process.env.MESSAGING_WS_URL) ||
+        normalizeString(process.env.MESSAGING_GATEWAY_URL),
+    },
+  };
+}
+
+function buildWebRuntimeConfig(req, options = {}) {
+  const routePath =
+    normalizeString(options.routePath) || normalizeString(req.path) || "/";
+  const routeMatch = matchAppShellRoute(routePath);
+  const routeParams =
+    options.routeParams && typeof options.routeParams === "object"
+      ? options.routeParams
+      : routeMatch?.routeParams || {};
+  const shareContext =
+    options.shareContext && typeof options.shareContext === "object"
+      ? options.shareContext
+      : null;
+
+  return {
+    ...getSharedRuntimeBase(req, {
+      requestUrl: options.requestUrl,
+      canonicalUrl: options.canonicalUrl,
+    }),
+    route: routePath,
+    routeKey:
+      normalizeString(options.routeKey) ||
+      normalizeString(routeMatch?.routeKey),
+    routeParams,
+    requiresAuth: options.requiresAuth === true,
+    shareContext,
+  };
+}
+
 function renderUnavailablePage({ title, subtitle, statusCode }) {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -410,80 +557,54 @@ function renderUnavailablePage({ title, subtitle, statusCode }) {
 </html>`;
 }
 
-function renderSharePage({
-  shareCard,
+function renderWebShellPage({
+  pageTitle,
+  description,
   canonicalUrl,
-  requestUrl,
-  socialCardImageUrl,
-  iosStoreUrl,
-  androidStoreUrl,
+  metaImage = "",
+  brandName = DEFAULT_BRAND_NAME,
+  runtimeConfig,
+  eyebrow = DEFAULT_BRAND_NAME,
+  headline,
+  supportingCopy,
+  primaryAction = "",
+  secondaryActions = "",
+  extraMeta = "",
 }) {
-  const brandName = normalizeString(shareCard.brandName) || DEFAULT_BRAND_NAME;
-  const title =
-    normalizeString(shareCard.previewTitle) ||
-    normalizeString(shareCard.authorDisplayName) ||
-    `${brandName} post`;
-  const description =
-    normalizeString(shareCard.previewText) || `Open this post in ${brandName}.`;
-  const authorDisplayName =
-    normalizeString(shareCard.authorDisplayName) || "Post author";
-  const imageUrl = normalizeString(shareCard.previewMediaThumbnail);
-  const metaImage = normalizeString(socialCardImageUrl) || imageUrl || "";
-  const postId = normalizeString(shareCard.postId);
-  const openAppUrl = buildAppOpenUrl(postId);
-  const inlineShareState = serializeForInlineScript({
-    postId,
-    title,
-    description,
-    brandName,
-    canonicalUrl,
-    requestUrl,
-    publicWebBaseUrl:
-      normalizeBaseUrl(process.env.PUBLIC_WEB_BASE_URL) ||
-      (() => {
-        try {
-          return new URL(canonicalUrl).origin;
-        } catch {
-          return "";
-        }
-      })(),
-    apiBaseUrl: normalizeBaseUrl(process.env.VIDEO_BACKEND_BASE_URL),
-    openAppUrl,
-    appUrlScheme: resolveAppUrlScheme(),
-    iosStoreUrl,
-    androidStoreUrl,
-    auth: {
-      clientId: normalizeString(process.env.COGNITO_APP_CLIENT_ID),
-      domain: normalizeString(process.env.COGNITO_DOMAIN),
-      scopes: normalizeString(process.env.COGNITO_SCOPES),
-      redirectUri: normalizeString(process.env.COGNITO_REDIRECT_URI) || requestUrl,
-    },
-  });
+  const safeTitle = normalizeString(pageTitle) || brandName;
+  const safeDescription =
+    normalizeString(description) || `Open ${brandName} on the web.`;
+  const safeHeadline = normalizeString(headline) || safeTitle;
+  const safeSupportingCopy = normalizeString(supportingCopy) || safeDescription;
+  const inlineConfig = serializeForInlineScript(runtimeConfig || {});
 
   return `<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>${escapeHtml(title)} | ${escapeHtml(brandName)}</title>
-    <meta name="description" content="${escapeAttribute(description)}" />
+    <title>${escapeHtml(safeTitle)}</title>
+    <meta name="description" content="${escapeAttribute(safeDescription)}" />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="${escapeAttribute(canonicalUrl)}" />
-    <meta property="og:title" content="${escapeAttribute(title)}" />
-    <meta property="og:description" content="${escapeAttribute(description)}" />
-    <meta property="og:image" content="${escapeAttribute(metaImage)}" />
+    <meta property="og:title" content="${escapeAttribute(safeTitle)}" />
+    <meta property="og:description" content="${escapeAttribute(safeDescription)}" />
+    ${
+      metaImage
+        ? `<meta property="og:image" content="${escapeAttribute(metaImage)}" />
     <meta property="og:image:secure_url" content="${escapeAttribute(metaImage)}" />
     <meta property="og:image:width" content="${String(SOCIAL_CARD_WIDTH)}" />
     <meta property="og:image:height" content="${String(SOCIAL_CARD_HEIGHT)}" />
-    <meta property="og:image:alt" content="${escapeAttribute(`${brandName} post preview for ${authorDisplayName}`)}" />
+    <meta name="twitter:image" content="${escapeAttribute(metaImage)}" />`
+        : ""
+    }
     <meta property="og:site_name" content="${escapeAttribute(brandName)}" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="${escapeAttribute(title)}" />
-    <meta name="twitter:description" content="${escapeAttribute(description)}" />
-    <meta name="twitter:image" content="${escapeAttribute(metaImage)}" />
-    <meta name="twitter:image:alt" content="${escapeAttribute(`${brandName} post preview for ${authorDisplayName}`)}" />
+    <meta name="twitter:title" content="${escapeAttribute(safeTitle)}" />
+    <meta name="twitter:description" content="${escapeAttribute(safeDescription)}" />
     <link rel="canonical" href="${escapeAttribute(canonicalUrl)}" />
     <link rel="stylesheet" href="/css/shared-feed.css" />
+    ${extraMeta}
     <style>
       :root {
         color-scheme: dark;
@@ -566,45 +687,254 @@ function renderSharePage({
     <div id="shared-feed-app">
       <div class="shared-feed-shell-fallback">
         <div class="shared-feed-shell-fallback__card">
-          <p class="shared-feed-shell-fallback__eyebrow">${escapeHtml(brandName)}</p>
-          <h1>${escapeHtml(title)}</h1>
-          <p>${escapeHtml(description)}</p>
+          <p class="shared-feed-shell-fallback__eyebrow">${escapeHtml(eyebrow)}</p>
+          <h1>${escapeHtml(safeHeadline)}</h1>
+          <p>${escapeHtml(safeSupportingCopy)}</p>
           <div class="shared-feed-shell-fallback__actions">
-            ${
-              openAppUrl
-                ? `<a class="shared-feed-shell-fallback__button shared-feed-shell-fallback__button--primary" href="${escapeAttribute(openAppUrl)}">Open in app</a>`
-                : ""
-            }
-            ${
-              androidStoreUrl
-                ? `<a class="shared-feed-shell-fallback__button" href="${escapeAttribute(androidStoreUrl)}" target="_blank" rel="noopener noreferrer">Android</a>`
-                : ""
-            }
-            ${
-              iosStoreUrl
-                ? `<a class="shared-feed-shell-fallback__button" href="${escapeAttribute(iosStoreUrl)}" target="_blank" rel="noopener noreferrer">iPhone</a>`
-                : ""
-            }
+            ${primaryAction}
+            ${secondaryActions}
           </div>
         </div>
       </div>
     </div>
     <script>
-      window.__POLIS_SHARED_FEED__ = ${inlineShareState};
+      window.__POLIS_WEB_APP__ = ${inlineConfig};
+      window.__POLIS_SHARED_FEED__ = window.__POLIS_WEB_APP__;
     </script>
     <script defer src="/scripts/shared-feed.js"></script>
     <noscript>
       <div class="shared-feed-shell-fallback">
         <div class="shared-feed-shell-fallback__card">
-          <p class="shared-feed-shell-fallback__eyebrow">${escapeHtml(brandName)}</p>
-          <h1>${escapeHtml(title)}</h1>
-          <p>${escapeHtml(description)}</p>
+          <p class="shared-feed-shell-fallback__eyebrow">${escapeHtml(eyebrow)}</p>
+          <h1>${escapeHtml(safeHeadline)}</h1>
+          <p>${escapeHtml(safeSupportingCopy)}</p>
         </div>
       </div>
     </noscript>
   </body>
 </html>`;
 }
+
+function renderSharePage({
+  req,
+  shareCard,
+  canonicalUrl,
+  requestUrl,
+  socialCardImageUrl,
+  iosStoreUrl,
+  androidStoreUrl,
+}) {
+  const brandName = normalizeString(shareCard.brandName) || DEFAULT_BRAND_NAME;
+  const title =
+    normalizeString(shareCard.previewTitle) ||
+    normalizeString(shareCard.authorDisplayName) ||
+    `${brandName} post`;
+  const description =
+    normalizeString(shareCard.previewText) || `Open this post in ${brandName}.`;
+  const authorDisplayName =
+    normalizeString(shareCard.authorDisplayName) || "Post author";
+  const imageUrl = normalizeString(shareCard.previewMediaThumbnail);
+  const metaImage = normalizeString(socialCardImageUrl) || imageUrl || "";
+  const postId = normalizeString(shareCard.postId);
+  const openAppUrl = buildAppOpenUrl(postId);
+  const runtimeConfig = buildWebRuntimeConfig(req, {
+    routePath: `/posts/${postId}`,
+    routeKey: "share-post",
+    canonicalUrl,
+    requestUrl,
+    requiresAuth: false,
+    shareContext: {
+      postId,
+      title,
+      description,
+      brandName,
+      canonicalUrl,
+      requestUrl,
+      openAppUrl,
+      authorDisplayName,
+    },
+  });
+  runtimeConfig.iosStoreUrl = iosStoreUrl;
+  runtimeConfig.androidStoreUrl = androidStoreUrl;
+
+  return renderWebShellPage({
+    pageTitle: `${title} | ${brandName}`,
+    description,
+    canonicalUrl,
+    metaImage,
+    brandName,
+    runtimeConfig,
+    eyebrow: brandName,
+    headline: title,
+    supportingCopy: description,
+    primaryAction: openAppUrl
+      ? `<a class="shared-feed-shell-fallback__button shared-feed-shell-fallback__button--primary" href="${escapeAttribute(openAppUrl)}">Open in app</a>`
+      : "",
+    secondaryActions: `
+      ${
+        androidStoreUrl
+          ? `<a class="shared-feed-shell-fallback__button" href="${escapeAttribute(androidStoreUrl)}" target="_blank" rel="noopener noreferrer">Android</a>`
+          : ""
+      }
+      ${
+        iosStoreUrl
+          ? `<a class="shared-feed-shell-fallback__button" href="${escapeAttribute(iosStoreUrl)}" target="_blank" rel="noopener noreferrer">iPhone</a>`
+          : ""
+      }
+    `,
+    extraMeta: `
+      <meta property="og:image:alt" content="${escapeAttribute(`${brandName} post preview for ${authorDisplayName}`)}" />
+      <meta name="twitter:image:alt" content="${escapeAttribute(`${brandName} post preview for ${authorDisplayName}`)}" />
+    `,
+  });
+}
+
+function getAppShellPageMeta(routeMatch) {
+  const routeKey = normalizeString(routeMatch?.routeKey);
+  const routeParams = routeMatch?.routeParams || {};
+
+  switch (routeKey) {
+    case "feed":
+      return {
+        title: "Feed | Polis",
+        description: "Your Polis feed on the web.",
+        eyebrow: "Polis web",
+        headline: "Your Polis feed",
+        supportingCopy:
+          "Sign in to continue into the full Polis experience from the browser.",
+      };
+    case "candidates":
+    case "candidate-detail":
+    case "candidate-edit":
+      return {
+        title: "Candidates | Polis",
+        description: "Browse candidates and campaign activity in Polis.",
+        eyebrow: "Candidates",
+        headline: "Candidate pages on the web",
+        supportingCopy:
+          "Sign in to browse candidates, follow campaigns, and manage your candidate page.",
+      };
+    case "events":
+    case "event-detail":
+    case "manage-events":
+    case "manage-events-new":
+    case "manage-events-edit":
+      return {
+        title: "Events | Polis",
+        description: "Discover and manage local Polis events from the browser.",
+        eyebrow: "Events",
+        headline: "Events in Polis",
+        supportingCopy:
+          "Sign in to browse events, RSVP, and manage your own event pages.",
+      };
+    case "profile-self":
+    case "profile-user":
+    case "profile-edit":
+    case "profile-connections":
+    case "profile-notifications":
+      return {
+        title: "Profile | Polis",
+        description:
+          "Open your Polis profile, posts, connections, and notifications.",
+        eyebrow: "Profile",
+        headline:
+          routeKey === "profile-user" && routeParams.userId
+            ? `Profile ${routeParams.userId}`
+            : "Your Polis profile",
+        supportingCopy:
+          "Sign in to view your profile, connections, notifications, and edit your public page.",
+      };
+    case "messages-root":
+    case "messages-wildcard":
+      return {
+        title: "Messages | Polis",
+        description: "Open Polis messaging in the browser.",
+        eyebrow: "Messages",
+        headline: "Messaging on the web",
+        supportingCopy:
+          "Sign in to open your inbox, requests, conversations, device security, and server spaces.",
+      };
+    default:
+      return {
+        title: "Polis",
+        description: "Open Polis on the web.",
+        eyebrow: "Polis",
+        headline: "Polis on the web",
+        supportingCopy:
+          "Sign in to continue into the authenticated Polis web experience.",
+      };
+  }
+}
+
+function renderAppShellPage(req, routeMatch) {
+  const requestUrl = `${requestOrigin(req)}${req.originalUrl}`;
+  const canonicalUrl = `${requestOrigin(req)}${req.path}`;
+  const meta = getAppShellPageMeta(routeMatch);
+  const runtimeConfig = buildWebRuntimeConfig(req, {
+    routePath: routeMatch.routePath,
+    routeKey: routeMatch.routeKey,
+    routeParams: routeMatch.routeParams,
+    canonicalUrl,
+    requestUrl,
+    requiresAuth: true,
+  });
+
+  return renderWebShellPage({
+    pageTitle: meta.title,
+    description: meta.description,
+    canonicalUrl,
+    brandName: runtimeConfig.brandName || DEFAULT_BRAND_NAME,
+    runtimeConfig,
+    eyebrow: meta.eyebrow,
+    headline: meta.headline,
+    supportingCopy: meta.supportingCopy,
+    primaryAction:
+      '<button class="shared-feed-shell-fallback__button shared-feed-shell-fallback__button--primary" type="button">Loading…</button>',
+  });
+}
+
+router.get("/profile-tab", (req, res) => {
+  const query = req.url.includes("?")
+    ? req.url.slice(req.url.indexOf("?"))
+    : "";
+  res.redirect(302, `/profile${query}`);
+});
+
+router.get(
+  [
+    "/feed",
+    "/candidates",
+    "/candidates/:candidateId",
+    "/candidates/:candidateId/edit",
+    "/events",
+    "/events/:eventId",
+    "/manage-events",
+    "/manage-events/new",
+    "/manage-events/:eventId/edit",
+    "/profile",
+    "/profile/edit",
+    "/profile/connections",
+    "/profile/notifications",
+    "/profile/:userId",
+    "/messages",
+    "/messages/*",
+  ],
+  (req, res) => {
+    const routeMatch = matchAppShellRoute(req.path);
+    if (!routeMatch) {
+      res.status(404).send(
+        renderUnavailablePage({
+          title: "Page unavailable",
+          subtitle: "This app route could not be resolved.",
+          statusCode: 404,
+        }),
+      );
+      return;
+    }
+
+    res.status(200).type("html").send(renderAppShellPage(req, routeMatch));
+  },
+);
 
 router.get("/posts/:postId", async (req, res) => {
   const postId = normalizeString(req.params.postId);
@@ -648,6 +978,7 @@ router.get("/posts/:postId", async (req, res) => {
     .type("html")
     .send(
       renderSharePage({
+        req,
         shareCard,
         canonicalUrl,
         requestUrl,
@@ -718,9 +1049,16 @@ router.get("/.well-known/apple-app-site-association", (_req, res) => {
           {
             appIDs: appIds,
             components: [
+              { "/": "/feed" },
+              { "/": "/candidates" },
+              { "/": "/candidates/*" },
               { "/": "/cta-invite/*" },
               { "/": "/events/*" },
+              { "/": "/manage-events/*" },
               { "/": "/posts/*" },
+              { "/": "/profile" },
+              { "/": "/profile/*" },
+              { "/": "/messages/*" },
               { "/": "/settings/*" },
             ],
           },
