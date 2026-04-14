@@ -4993,6 +4993,48 @@ function renderCompactPostCards(items = []) {
     .join("")}</div>`;
 }
 
+function renderMediaThumbnailGrid(
+  items = [],
+  {
+    emptyMessage = "Nothing here yet.",
+    getRoute,
+    getMediaUrl,
+    getAltText,
+    getOverlayText,
+    getPlaceholderLabel,
+  } = {},
+) {
+  if (!items.length) {
+    return `<div class="shared-page__empty">${escapeHtml(emptyMessage)}</div>`;
+  }
+
+  return `<div class="shared-media-grid">${items
+    .map((item) => {
+      const route = normalizeString(getRoute?.(item));
+      const mediaUrl = normalizeUrl(getMediaUrl?.(item));
+      const overlayText = normalizeString(getOverlayText?.(item));
+      const altText = normalizeString(getAltText?.(item)) || "Media item";
+      const placeholderLabel =
+        normalizeString(getPlaceholderLabel?.(item)).slice(0, 1).toUpperCase() ||
+        altText.slice(0, 1).toUpperCase() ||
+        "M";
+
+      return `<button class="shared-media-tile" type="button" data-action="navigate" data-route="${escapeHtml(route)}" aria-label="${escapeHtml(altText)}">
+        ${
+          mediaUrl
+            ? `<img class="shared-media-tile__image" src="${escapeHtml(mediaUrl)}" alt="${escapeHtml(altText)}" loading="lazy" />`
+            : `<div class="shared-media-tile__placeholder" aria-hidden="true">${escapeHtml(placeholderLabel)}</div>`
+        }
+        ${
+          overlayText
+            ? `<span class="shared-media-tile__overlay">${escapeHtml(overlayText)}</span>`
+            : ""
+        }
+      </button>`;
+    })
+    .join("")}</div>`;
+}
+
 function renderCandidateListPage() {
   const list = state.pages.candidates.list;
   return `<section class="shared-page">
@@ -5018,16 +5060,16 @@ function renderCandidateListPage() {
           : ""
       }
       ${list.error ? `<div class="shared-page__error">${escapeHtml(list.error)}</div>` : ""}
-      <div class="shared-card-grid">
+      <div class="shared-card-grid shared-card-grid--candidates">
         ${list.items
           .map(
-            (candidate) => `<article class="shared-card">
+            (candidate) => `<article class="shared-card shared-card--candidate-preview">
               ${
                 candidate.avatarUrl
                   ? `<img class="shared-card__avatar" src="${escapeHtml(candidate.avatarUrl)}" alt="${escapeHtml(candidate.displayName)}" />`
                   : `<div class="shared-card__avatar shared-card__avatar--placeholder">${escapeHtml(candidate.displayName.slice(0, 1).toUpperCase() || "C")}</div>`
               }
-              <div class="shared-card__body">
+              <div class="shared-card__body shared-card__body--candidate-preview">
                 <div class="shared-card__meta">
                   <span>${escapeHtml(candidate.levelOfOffice || "Candidate")}</span>
                   ${
@@ -5037,8 +5079,8 @@ function renderCandidateListPage() {
                   }
                 </div>
                 <h3>${escapeHtml(candidate.displayName)}</h3>
-                <p>${escapeHtml(candidate.bio || "Open the candidate page to see recent posts, events, and campaign details.")}</p>
-                <div class="shared-card__meta">
+                <p class="shared-card__summary">${escapeHtml(candidate.bio || "Open the candidate page to see recent posts, events, and campaign details.")}</p>
+                <div class="shared-card__meta shared-card__meta--candidate-preview">
                   <span>${escapeHtml(formatCount(candidate.followersCount))} followers</span>
                   ${
                     candidate.tags.length
@@ -5078,6 +5120,9 @@ function renderCandidateDetailPage() {
   return `<section class="shared-page">
     ${renderTopChrome()}
     <div class="shared-page__content">
+      <div class="shared-page__back-row">
+        <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/candidates">Back to candidates</button>
+      </div>
       <div class="shared-page__header shared-page__header--hero">
         <div class="shared-page__hero">
           ${
@@ -5140,28 +5185,30 @@ function renderCandidateDetailPage() {
       <div class="shared-page__split">
         <div>
           <h2>Posts</h2>
-          ${renderCompactPostCards(detail.posts)}
+          ${renderMediaThumbnailGrid(detail.posts, {
+            emptyMessage: "No posts yet.",
+            getRoute: (item) =>
+              item.postId ? `/posts/${encodeURIComponent(item.postId)}` : "",
+            getMediaUrl: (item) => item.posterUrl || item.imageUrl,
+            getAltText: (item) =>
+              item.previewTitle || item.caption || item.authorDisplayName || "Post",
+            getOverlayText: (item) =>
+              `${formatCount(item.likesCount)} like${Number(item.likesCount) === 1 ? "" : "s"}`,
+            getPlaceholderLabel: () => "P",
+          })}
         </div>
         <div>
           <h2>Upcoming events</h2>
-          <div class="shared-card-grid">
-            ${detail.relatedEvents
-              .map(
-                (event) => `<article class="shared-card">
-                  <div class="shared-card__body">
-                    <div class="shared-card__meta">
-                      <span>${escapeHtml(formatAbsoluteDateTime(event.startAt))}</span>
-                    </div>
-                    <h3>${escapeHtml(event.title)}</h3>
-                    <p>${escapeHtml(event.description || event.address || "Open the event page for details.")}</p>
-                    <div class="shared-card__actions">
-                      <button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="/events/${escapeHtml(event.eventId)}">Open event</button>
-                    </div>
-                  </div>
-                </article>`,
-              )
-              .join("")}
-          </div>
+          ${renderMediaThumbnailGrid(detail.relatedEvents, {
+            emptyMessage: "No upcoming events yet.",
+            getRoute: (item) =>
+              item.eventId ? `/events/${encodeURIComponent(item.eventId)}` : "",
+            getMediaUrl: (item) => item.imageUrl,
+            getAltText: (item) => item.title || "Event",
+            getOverlayText: (item) =>
+              `${formatCount(item.attendeeCount)} going`,
+            getPlaceholderLabel: () => "E",
+          })}
         </div>
       </div>
     </div>
