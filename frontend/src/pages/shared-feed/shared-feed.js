@@ -7596,15 +7596,12 @@ function handleRootInput(event) {
       authField.getAttribute("data-auth-field"),
     );
     if (fieldName) {
-      patchAuthModal((modal) => ({
-        ...modal,
-        error: "",
-        notice: "",
-        fields: {
-          ...modal.fields,
-          [fieldName]: authField.value,
-        },
-      }));
+      // Keep auth form state in sync without rerendering the whole shell on
+      // every keystroke, which would recreate the input and drop focus.
+      state.ui.authModal.fields = {
+        ...state.ui.authModal.fields,
+        [fieldName]: authField.value,
+      };
     }
     return;
   }
