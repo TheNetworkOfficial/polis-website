@@ -1,12 +1,39 @@
+const DEFAULT_COGNITO_REGION = "us-west-2";
+const DEFAULT_COGNITO_SCOPES =
+  "openid email profile aws.cognito.signin.user.admin";
+const PASSWORD_SIGNIN_FLOW = "USER_PASSWORD_AUTH";
+
 const SESSION_STORAGE_KEY = "sharedFeedSession.v1";
 const OAUTH_STATE_STORAGE_KEY = "sharedFeedOauthState.v1";
 const OAUTH_VERIFIER_STORAGE_KEY = "sharedFeedOauthVerifier.v1";
+const POST_AUTH_PATH_STORAGE_KEY = "sharedFeedPostAuthPath.v1";
+
+export class SharedFeedAuthError extends Error {
+  constructor(
+    message,
+    { statusCode = 0, errorCode = "request_failed", payload = null } = {},
+  ) {
+    super(message);
+    this.name = "SharedFeedAuthError";
+    this.statusCode = statusCode;
+    this.errorCode = errorCode;
+    this.payload = payload;
+  }
+}
 
 function normalizeString(value) {
   if (value === undefined || value === null) {
     return "";
   }
   return String(value).trim();
+}
+
+function normalizeBaseUrl(value) {
+  const normalized = normalizeString(value);
+  if (!normalized) {
+    return "";
+  }
+  return normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
 }
 
 function toBase64Url(input) {
@@ -64,7 +91,9 @@ function buildSessionFromTokens(tokens = {}) {
   );
 
   if (!accessToken || !idToken) {
-    throw new Error("invalid_auth_response");
+    throw new SharedFeedAuthError("Sign-in did not return required tokens.", {
+      errorCode: "invalid_auth_response",
+    });
   }
 
   return {
@@ -73,7 +102,10 @@ function buildSessionFromTokens(tokens = {}) {
     refreshToken,
     expiresAt:
       Date.now() +
-      (Number.isFinite(expiresInSeconds) ? expiresInSeconds : 3600) * 1000,
+      (Number.isFinite(expiresInSeconds)
+        ? Math.max(60, expiresInSeconds)
+        : 3600) *
+        1000,
   };
 }
 
@@ -163,19 +195,37 @@ function deriveSessionUser(session) {
   };
 }
 
+function resolveApiBaseUrl(config = {}) {
+  return normalizeBaseUrl(config.apiBaseUrl);
+}
+
+function buildApiUrl(config = {}, path) {
+  const baseUrl = resolveApiBaseUrl(config);
+  return baseUrl ? `${baseUrl}${path}` : path;
+}
+
+function resolveCognitoRegion(config = {}) {
+  return normalizeString(config.region) || DEFAULT_COGNITO_REGION;
+}
+
+function resolveCognitoClientId(config = {}) {
+  return normalizeString(config.clientId);
+}
+
 function resolveHostedUiBaseUrl(config = {}) {
   const domain = normalizeString(config.domain).replace(/^https?:\/\//i, "");
   return domain ? `https://${domain}` : "";
 }
 
 function resolveRedirectUri(config = {}) {
-  return normalizeString(config.redirectUri) || window.location.href;
+  return (
+    normalizeString(config.redirectUri) ||
+    `${window.location.origin}${window.location.pathname}`
+  );
 }
 
 function resolveScopes(config = {}) {
-  const raw =
-    normalizeString(config.scopes) ||
-    "openid email profile aws.cognito.signin.user.admin";
+  const raw = normalizeString(config.scopes) || DEFAULT_COGNITO_SCOPES;
   return raw
     .split(/[\s,]+/)
     .map((part) => part.trim())
@@ -183,10 +233,40 @@ function resolveScopes(config = {}) {
     .join(" ");
 }
 
+function getCognitoIdpEndpoint(config = {}) {
+  return `https://cognito-idp.${resolveCognitoRegion(config)}.amazonaws.com/`;
+}
+
+function resolvePasswordSignInEnabled(config = {}) {
+  return normalizeString(config.enablePasswordFlow).toLowerCase() === "true";
+}
+
 export function hasHostedSignInConfig(config = {}) {
   return Boolean(
     normalizeString(config.clientId) && normalizeString(config.domain),
   );
+}
+
+export function hasPasswordSignInConfig(config = {}) {
+  return Boolean(
+    resolvePasswordSignInEnabled(config) &&
+      resolveCognitoRegion(config) &&
+      resolveCognitoClientId(config),
+  );
+}
+
+function hasDirectSignUpConfig(config = {}) {
+  return Boolean(
+    resolveCognitoRegion(config) && resolveCognitoClientId(config),
+  );
+}
+
+export function getSharedFeedAuthCapabilities(config = {}) {
+  return {
+    direct: hasDirectSignUpConfig(config),
+    password: hasPasswordSignInConfig(config),
+    hosted: hasHostedSignInConfig(config),
+  };
 }
 
 export function buildAuthorizedHeaders(session, extra = {}, options = {}) {
@@ -206,10 +286,187 @@ export function buildAuthorizedHeaders(session, extra = {}, options = {}) {
   return headers;
 }
 
-async function startHostedAuth(config = {}, { mode = "login" } = {}) {
-  if (!hasHostedSignInConfig(config)) {
-    throw new Error("auth_not_configured");
+function sanitizeUsername(value) {
+  let sanitized = normalizeString(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "")
+    .replace(/[.-]+/g, "_");
+  sanitized = sanitized.replace(/^_+|_+$/g, "");
+  return sanitized;
+}
+
+function generateUsernameFromEmail(email) {
+  const baseSource = normalizeString(email).split("@")[0];
+  let base = sanitizeUsername(baseSource);
+  if (base.length < 3) {
+    base = "user";
   }
+  const suffix = Date.now().toString(36);
+  let candidate = `${base}_${suffix}`;
+  if (candidate.length > 20) {
+    candidate = candidate.slice(0, 20);
+  }
+  if (candidate.length < 3) {
+    candidate = `user_${suffix.slice(0, 6)}`;
+  }
+  return candidate;
+}
+
+function mapAuthFailure(payload = {}, statusCode = 0, fallbacks = {}) {
+  const rawType = normalizeString(payload?.__type || payload?.name);
+  const errorCode = rawType.includes("#")
+    ? rawType.slice(rawType.lastIndexOf("#") + 1)
+    : rawType || normalizeString(fallbacks.errorCode) || "request_failed";
+  const message = normalizeString(payload?.message);
+  const messageLower = message.toLowerCase();
+
+  if (
+    errorCode === "NotAuthorizedException" ||
+    errorCode === "UserNotFoundException"
+  ) {
+    return {
+      message: "Incorrect username/email or password.",
+      errorCode: "invalid_credentials",
+      statusCode,
+    };
+  }
+
+  if (errorCode === "UserNotConfirmedException") {
+    return {
+      message:
+        "Your account is not confirmed yet. Enter the verification code to finish signing up.",
+      errorCode: "user_not_confirmed",
+      statusCode,
+    };
+  }
+
+  if (
+    errorCode === "InvalidParameterException" &&
+    messageLower.includes("user_password_auth")
+  ) {
+    return {
+      message:
+        "Direct password sign-in is unavailable for this client. Use the Cognito sign-in page instead.",
+      errorCode: "password_flow_unavailable",
+      statusCode,
+    };
+  }
+
+  if (errorCode === "PasswordResetRequiredException") {
+    return {
+      message: "Password reset is required before sign-in.",
+      errorCode: "password_reset_required",
+      statusCode,
+    };
+  }
+
+  if (
+    errorCode === "UsernameExistsException" ||
+    errorCode === "AliasExistsException"
+  ) {
+    return {
+      message: "An account with that email already exists.",
+      errorCode: "account_exists",
+      statusCode,
+    };
+  }
+
+  if (errorCode === "InvalidPasswordException") {
+    return {
+      message:
+        message ||
+        "Password must be at least 8 characters and meet Cognito requirements.",
+      errorCode: "invalid_password",
+      statusCode,
+    };
+  }
+
+  if (errorCode === "CodeMismatchException") {
+    return {
+      message: "That code is invalid. Check the email and try again.",
+      errorCode: "invalid_code",
+      statusCode,
+    };
+  }
+
+  if (errorCode === "ExpiredCodeException") {
+    return {
+      message: "That code expired. Request a new code and try again.",
+      errorCode: "expired_code",
+      statusCode,
+    };
+  }
+
+  if (errorCode === "LimitExceededException") {
+    return {
+      message: "Too many attempts. Wait a moment and try again.",
+      errorCode: "rate_limited",
+      statusCode,
+    };
+  }
+
+  return {
+    message:
+      message ||
+      normalizeString(fallbacks.message) ||
+      "Authentication failed. Try again.",
+    errorCode,
+    statusCode,
+  };
+}
+
+async function resolveCognitoUsername(identifier, config = {}) {
+  const normalizedIdentifier = normalizeString(identifier);
+  if (!normalizedIdentifier || !normalizedIdentifier.includes("@")) {
+    return null;
+  }
+
+  const response = await fetch(buildApiUrl(config, "/api/auth/resolve"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ identifier: normalizedIdentifier }),
+  }).catch(() => null);
+
+  if (!response?.ok) {
+    return null;
+  }
+
+  const payload = await response.json().catch(() => ({}));
+  return normalizeString(payload?.cognitoUsername) || null;
+}
+
+function persistPostAuthPath(path) {
+  const normalizedPath = normalizeString(path);
+  if (!normalizedPath) {
+    window.sessionStorage.removeItem(POST_AUTH_PATH_STORAGE_KEY);
+    return;
+  }
+  window.sessionStorage.setItem(POST_AUTH_PATH_STORAGE_KEY, normalizedPath);
+}
+
+export function setSharedFeedPostAuthPath(path) {
+  persistPostAuthPath(path);
+}
+
+export function consumeSharedFeedPostAuthPath() {
+  const value = normalizeString(
+    window.sessionStorage.getItem(POST_AUTH_PATH_STORAGE_KEY),
+  );
+  window.sessionStorage.removeItem(POST_AUTH_PATH_STORAGE_KEY);
+  return value;
+}
+
+async function startHostedAuth(
+  config = {},
+  { mode = "login", postAuthPath = "" } = {},
+) {
+  if (!hasHostedSignInConfig(config)) {
+    throw new SharedFeedAuthError("Hosted sign-in is not configured.", {
+      errorCode: "auth_not_configured",
+    });
+  }
+
+  persistPostAuthPath(postAuthPath);
 
   const state = createRandomToken(32);
   const verifier = createRandomToken(64);
@@ -233,12 +490,262 @@ async function startHostedAuth(config = {}, { mode = "login" } = {}) {
   window.location.assign(`${hostedUiBaseUrl}${route}?${params.toString()}`);
 }
 
-export async function startHostedSignIn(config = {}) {
-  await startHostedAuth(config, { mode: "login" });
+export async function startHostedSignIn(config = {}, options = {}) {
+  await startHostedAuth(config, { ...options, mode: "login" });
 }
 
-export async function startHostedSignUp(config = {}) {
-  await startHostedAuth(config, { mode: "signup" });
+export async function startHostedSignUp(config = {}, options = {}) {
+  await startHostedAuth(config, { ...options, mode: "signup" });
+}
+
+export async function signInSharedFeedWithPassword(
+  config = {},
+  { identifier = "", password = "" } = {},
+) {
+  if (!hasPasswordSignInConfig(config)) {
+    throw new SharedFeedAuthError(
+      "Password sign-in is not configured for this environment.",
+      {
+        errorCode: "auth_not_configured",
+      },
+    );
+  }
+
+  const normalizedIdentifier = normalizeString(identifier);
+  const normalizedPassword = String(password || "");
+  if (!normalizedIdentifier || !normalizedPassword) {
+    throw new SharedFeedAuthError("Username/email and password are required.", {
+      errorCode: "missing_credentials",
+    });
+  }
+
+  let cognitoIdentifier = normalizedIdentifier;
+  if (normalizedIdentifier.includes("@")) {
+    const resolvedUsername = await resolveCognitoUsername(
+      normalizedIdentifier,
+      config,
+    );
+    if (resolvedUsername) {
+      cognitoIdentifier = resolvedUsername;
+    }
+  }
+
+  const response = await fetch(getCognitoIdpEndpoint(config), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-amz-json-1.1",
+      "X-Amz-Target": "AWSCognitoIdentityProviderService.InitiateAuth",
+    },
+    body: JSON.stringify({
+      AuthFlow: PASSWORD_SIGNIN_FLOW,
+      ClientId: resolveCognitoClientId(config),
+      AuthParameters: {
+        USERNAME: cognitoIdentifier,
+        PASSWORD: normalizedPassword,
+      },
+    }),
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const mapped = mapAuthFailure(payload, response.status, {
+      message: "Sign-in failed. Try again.",
+      errorCode: "signin_failed",
+    });
+    throw new SharedFeedAuthError(mapped.message, {
+      statusCode: mapped.statusCode,
+      errorCode: mapped.errorCode,
+      payload: {
+        ...payload,
+        cognitoUsername: cognitoIdentifier,
+        email: normalizedIdentifier.includes("@") ? normalizedIdentifier : "",
+      },
+    });
+  }
+
+  const session = buildSessionFromTokens(payload?.AuthenticationResult || {});
+  persistSession(session);
+
+  return {
+    session,
+    user: deriveSessionUser(session),
+  };
+}
+
+export async function signUpSharedFeedWithEmail(
+  config = {},
+  { email = "", password = "" } = {},
+) {
+  if (!hasDirectSignUpConfig(config)) {
+    throw new SharedFeedAuthError(
+      "Direct sign-up is not configured for this environment.",
+      {
+        errorCode: "auth_not_configured",
+      },
+    );
+  }
+
+  const normalizedEmail = normalizeString(email).toLowerCase();
+  const normalizedPassword = String(password || "");
+  if (!normalizedEmail || !normalizedEmail.includes("@")) {
+    throw new SharedFeedAuthError("Enter a valid email address.", {
+      errorCode: "invalid_email",
+    });
+  }
+  if (normalizedPassword.length < 8) {
+    throw new SharedFeedAuthError("Password must be at least 8 characters.", {
+      errorCode: "invalid_password",
+    });
+  }
+
+  const username = generateUsernameFromEmail(normalizedEmail);
+  const response = await fetch(getCognitoIdpEndpoint(config), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-amz-json-1.1",
+      "X-Amz-Target": "AWSCognitoIdentityProviderService.SignUp",
+    },
+    body: JSON.stringify({
+      ClientId: resolveCognitoClientId(config),
+      Username: username,
+      Password: normalizedPassword,
+      UserAttributes: [{ Name: "email", Value: normalizedEmail }],
+    }),
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const mapped = mapAuthFailure(payload, response.status, {
+      message: "Sign-up failed. Try again.",
+      errorCode: "signup_failed",
+    });
+    throw new SharedFeedAuthError(mapped.message, {
+      statusCode: mapped.statusCode,
+      errorCode: mapped.errorCode,
+      payload,
+    });
+  }
+
+  const deliveryDetails = payload?.CodeDeliveryDetails || {};
+  const deliveryDestination = normalizeString(deliveryDetails?.Destination);
+  const deliveryMedium = normalizeString(deliveryDetails?.DeliveryMedium);
+  const userSub = normalizeString(payload?.UserSub);
+  const isComplete = payload?.UserConfirmed === true || !deliveryDestination;
+
+  return {
+    isComplete,
+    nextStep: isComplete ? "none" : "confirmCode",
+    username,
+    deliveryDestination: deliveryDestination || null,
+    deliveryMedium: deliveryMedium || null,
+    userSub: userSub || null,
+  };
+}
+
+export async function confirmSharedFeedSignUp(
+  config = {},
+  { username = "", code = "" } = {},
+) {
+  if (!hasDirectSignUpConfig(config)) {
+    throw new SharedFeedAuthError(
+      "Direct confirmation is not configured for this environment.",
+      {
+        errorCode: "auth_not_configured",
+      },
+    );
+  }
+
+  const normalizedUsername = normalizeString(username);
+  const normalizedCode = normalizeString(code);
+  if (!normalizedUsername || !normalizedCode) {
+    throw new SharedFeedAuthError(
+      "Username and confirmation code are required.",
+      {
+        errorCode: "missing_confirmation_details",
+      },
+    );
+  }
+
+  const response = await fetch(getCognitoIdpEndpoint(config), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-amz-json-1.1",
+      "X-Amz-Target": "AWSCognitoIdentityProviderService.ConfirmSignUp",
+    },
+    body: JSON.stringify({
+      ClientId: resolveCognitoClientId(config),
+      Username: normalizedUsername,
+      ConfirmationCode: normalizedCode,
+    }),
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const mapped = mapAuthFailure(payload, response.status, {
+      message: "We could not confirm that code. Try again.",
+      errorCode: "confirm_failed",
+    });
+    throw new SharedFeedAuthError(mapped.message, {
+      statusCode: mapped.statusCode,
+      errorCode: mapped.errorCode,
+      payload,
+    });
+  }
+
+  return true;
+}
+
+export async function resendSharedFeedSignUpCode(
+  config = {},
+  { username = "" } = {},
+) {
+  if (!hasDirectSignUpConfig(config)) {
+    throw new SharedFeedAuthError(
+      "Direct confirmation is not configured for this environment.",
+      {
+        errorCode: "auth_not_configured",
+      },
+    );
+  }
+
+  const normalizedUsername = normalizeString(username);
+  if (!normalizedUsername) {
+    throw new SharedFeedAuthError("Username is required to resend a code.", {
+      errorCode: "missing_username",
+    });
+  }
+
+  const response = await fetch(getCognitoIdpEndpoint(config), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-amz-json-1.1",
+      "X-Amz-Target":
+        "AWSCognitoIdentityProviderService.ResendConfirmationCode",
+    },
+    body: JSON.stringify({
+      ClientId: resolveCognitoClientId(config),
+      Username: normalizedUsername,
+    }),
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const mapped = mapAuthFailure(payload, response.status, {
+      message: "We could not resend the verification code.",
+      errorCode: "resend_failed",
+    });
+    throw new SharedFeedAuthError(mapped.message, {
+      statusCode: mapped.statusCode,
+      errorCode: mapped.errorCode,
+      payload,
+    });
+  }
+
+  const deliveryDetails = payload?.CodeDeliveryDetails || {};
+  return {
+    deliveryDestination: normalizeString(deliveryDetails?.Destination) || null,
+    deliveryMedium: normalizeString(deliveryDetails?.DeliveryMedium) || null,
+  };
 }
 
 export async function completeHostedSignIn(config = {}) {
@@ -261,10 +768,11 @@ export async function completeHostedSignIn(config = {}) {
 
   const code = normalizeString(url.searchParams.get("code"));
   if (!code) {
+    const session = getStoredSession();
     return {
       handled: false,
-      session: getStoredSession(),
-      user: deriveSessionUser(getStoredSession()),
+      session,
+      user: deriveSessionUser(session),
       error: null,
     };
   }
@@ -332,6 +840,7 @@ export async function completeHostedSignIn(config = {}) {
 export function clearSharedFeedSession() {
   clearStoredSessionOnly();
   clearOAuthState();
+  window.sessionStorage.removeItem(POST_AUTH_PATH_STORAGE_KEY);
 }
 
 export function getStoredSharedFeedSession() {

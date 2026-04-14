@@ -443,9 +443,13 @@ function getSharedRuntimeBase(req, { requestUrl, canonicalUrl } = {}) {
     iosStoreUrl: storeUrls.ios,
     androidStoreUrl: storeUrls.android,
     auth: {
+      region: normalizeString(process.env.COGNITO_REGION),
       clientId: normalizeString(process.env.COGNITO_APP_CLIENT_ID),
       domain: normalizeString(process.env.COGNITO_DOMAIN),
       scopes: normalizeString(process.env.COGNITO_SCOPES),
+      enablePasswordFlow: normalizeString(
+        process.env.COGNITO_ENABLE_PASSWORD_FLOW,
+      ),
       redirectUri:
         normalizeString(process.env.COGNITO_REDIRECT_URI) || resolvedRequestUrl,
     },

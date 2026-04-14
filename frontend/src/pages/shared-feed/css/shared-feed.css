@@ -917,6 +917,60 @@ a {
   line-height: 1.7;
 }
 
+.shared-auth-modal__modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.shared-auth-modal__status {
+  padding: 12px 14px;
+  border-radius: 18px;
+  font-size: 0.94rem;
+  line-height: 1.5;
+}
+
+.shared-auth-modal__status--error {
+  background: rgba(255, 51, 95, 0.14);
+  color: #ff9daf;
+}
+
+.shared-auth-modal__status--notice {
+  background: rgba(38, 244, 238, 0.12);
+  color: #9df6f3;
+}
+
+.shared-auth-modal__form {
+  display: grid;
+  gap: 14px;
+}
+
+.shared-auth-modal__form label {
+  display: grid;
+  gap: 8px;
+}
+
+.shared-auth-modal__form span {
+  color: var(--sf-ink);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.shared-auth-modal__form input {
+  width: 100%;
+  padding: 14px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--sf-ink);
+}
+
+.shared-auth-modal__fallback,
+.shared-auth-modal__confirm-copy {
+  display: grid;
+  gap: 12px;
+}
+
 .shared-auth-modal__actions,
 .shared-auth-modal__secondary,
 .shared-auth-modal__stores {
@@ -924,6 +978,11 @@ a {
   flex-wrap: wrap;
   gap: 10px;
   align-items: center;
+}
+
+.shared-auth-modal__hint {
+  color: var(--sf-muted);
+  font-size: 0.88rem;
 }
 
 .shared-auth-modal__stores a {

@@ -2,12 +2,20 @@ import "./css/shared-feed.css";
 import polisLogoUrl from "../../assets/images/polis/Polis.png";
 
 import {
+  SharedFeedAuthError,
   buildAuthorizedHeaders,
   clearSharedFeedSession,
+  confirmSharedFeedSignUp,
+  consumeSharedFeedPostAuthPath,
   completeHostedSignIn,
   getAuthenticatedUser,
+  getSharedFeedAuthCapabilities,
   getStoredSharedFeedSession,
   hasHostedSignInConfig,
+  resendSharedFeedSignUpCode,
+  setSharedFeedPostAuthPath,
+  signInSharedFeedWithPassword,
+  signUpSharedFeedWithEmail,
   startHostedSignIn,
   startHostedSignUp,
 } from "./scripts/sharedFeedAuth.js";
@@ -190,7 +198,10 @@ const state = {
       normalizeString(runtimeConfig.postId),
   },
   auth: {
-    config: runtimeConfig.auth || {},
+    config: {
+      ...(runtimeConfig.auth || {}),
+      apiBaseUrl: runtimeConfig.apiBaseUrl,
+    },
     session: null,
     user: null,
     message: "",
@@ -461,6 +472,18 @@ function getCurrentPathWithQuery() {
   return `${window.location.pathname}${window.location.search}`;
 }
 
+function getPathnameFromRouteTarget(value) {
+  const normalized = normalizeString(value);
+  if (!normalized) {
+    return "/";
+  }
+  try {
+    return new URL(normalized, window.location.origin).pathname;
+  } catch {
+    return normalized.split("?")[0] || "/";
+  }
+}
+
 function navigateTo(path, { replace = false } = {}) {
   const normalizedPath = normalizeString(path);
   if (!normalizedPath) {
@@ -615,24 +638,277 @@ function getStoreUrls() {
   };
 }
 
-function openAuthModal(kind, context = {}) {
-  state.ui.authModal = {
-    kind,
-    title:
-      context.title ||
-      (kind === "following"
-        ? "Log in to unlock Following"
-        : "Join Polis to keep going"),
-    message:
-      context.message ||
-      "Sign in or create an account to like posts, join conversations, and open this feed inside the app.",
-    postId: normalizeString(context.postId),
+function normalizeAuthModalMode(value) {
+  const normalized = normalizeString(value).toLowerCase();
+  if (normalized === "signup" || normalized === "confirm") {
+    return normalized;
+  }
+  return "login";
+}
+
+function buildEmptyAuthFields(seed = {}) {
+  return {
+    identifier: normalizeString(seed.identifier),
+    password: String(seed.password ?? ""),
+    email: normalizeString(seed.email),
+    signupPassword: String(seed.signupPassword ?? ""),
+    confirmPassword: String(seed.confirmPassword ?? ""),
+    code: normalizeString(seed.code),
   };
+}
+
+function cloneAwaitingConfirmation(value) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  return {
+    username: normalizeString(value.username),
+    email: normalizeString(value.email),
+    password: String(value.password ?? ""),
+    deliveryDestination: normalizeString(value.deliveryDestination) || null,
+  };
+}
+
+function getAuthModalDefaultTitle(kind, context = {}) {
+  if (normalizeString(context.title)) {
+    return normalizeString(context.title);
+  }
+  if (kind === "following") {
+    return "Log in to unlock Following";
+  }
+  if (kind === "route-protected") {
+    const section = getRouteSection(
+      parseRouteFromLocation(getPathnameFromRouteTarget(context.targetPath)),
+    );
+    if (section === "candidates") {
+      return "Log in to open Candidates";
+    }
+    if (section === "events") {
+      return "Log in to open Events";
+    }
+    if (section === "profile") {
+      return "Log in to open Profile";
+    }
+    if (section === "messages") {
+      return "Log in to open Messages";
+    }
+    return "Log in to continue";
+  }
+  if (kind === "signup") {
+    return "Create your Polis account";
+  }
+  if (kind === "auth_unavailable") {
+    return "Web sign-in is not configured yet";
+  }
+  return "Join Polis to keep going";
+}
+
+function getAuthModalDefaultMessage(kind, context = {}) {
+  if (normalizeString(context.message)) {
+    return normalizeString(context.message);
+  }
+  if (kind === "route-protected") {
+    return "Sign in or create an account to use this feature in the browser, or open the Polis app instead.";
+  }
+  if (kind === "following") {
+    return "Sign in to unlock your Following feed and the rest of the Polis web app.";
+  }
+  if (kind === "auth_unavailable") {
+    return "Open the Polis app for now, or finish the website Cognito configuration and try again.";
+  }
+  return "Sign in or create an account to like posts, join conversations, and open this feed inside the app.";
+}
+
+function buildAuthModalState(kind, context = {}) {
+  const previous = state.ui.authModal;
+  const targetPath =
+    normalizeString(context.targetPath) ||
+    normalizeString(previous?.targetPath) ||
+    getCurrentPathWithQuery();
+  const mode = normalizeAuthModalMode(
+    context.mode ||
+      (context.awaitingConfirmation ? "confirm" : "") ||
+      previous?.mode ||
+      (kind === "signup" ? "signup" : "login"),
+  );
+  const previousFields = previous?.fields || {};
+  const nextFields = buildEmptyAuthFields({
+    ...previousFields,
+    ...context.fields,
+  });
+
+  if (!nextFields.email && nextFields.identifier.includes("@")) {
+    nextFields.email = nextFields.identifier;
+  }
+  if (
+    !nextFields.identifier &&
+    normalizeAuthModalMode(mode) === "login" &&
+    nextFields.email
+  ) {
+    nextFields.identifier = nextFields.email;
+  }
+
+  return {
+    kind,
+    mode,
+    title: getAuthModalDefaultTitle(kind, context),
+    message: getAuthModalDefaultMessage(kind, context),
+    postId:
+      normalizeString(context.postId) || normalizeString(previous?.postId),
+    targetPath,
+    pending: false,
+    error: "",
+    notice: normalizeString(context.notice),
+    fields: nextFields,
+    awaitingConfirmation:
+      cloneAwaitingConfirmation(context.awaitingConfirmation) ||
+      (mode === "confirm"
+        ? cloneAwaitingConfirmation(previous?.awaitingConfirmation)
+        : null),
+    capabilities: getSharedFeedAuthCapabilities(state.auth.config),
+  };
+}
+
+function openAuthModal(kind, context = {}) {
+  state.ui.authModal = buildAuthModalState(kind, context);
   scheduleRender();
 }
 
 function closeAuthModal() {
   state.ui.authModal = null;
+  scheduleRender();
+}
+
+function patchAuthModal(patcher) {
+  if (!state.ui.authModal) {
+    return;
+  }
+  const nextValue = patcher(state.ui.authModal);
+  if (!nextValue) {
+    return;
+  }
+  state.ui.authModal = nextValue;
+  scheduleRender();
+}
+
+function setAuthModalMode(mode) {
+  patchAuthModal((modal) => {
+    const nextMode = normalizeAuthModalMode(mode);
+    const nextFields = { ...modal.fields };
+    if (nextMode === "signup" && !nextFields.email && nextFields.identifier) {
+      nextFields.email = nextFields.identifier;
+    }
+    if (nextMode === "login" && !nextFields.identifier && nextFields.email) {
+      nextFields.identifier = nextFields.email;
+    }
+    return {
+      ...modal,
+      mode: nextMode,
+      error: "",
+      notice: "",
+      pending: false,
+      fields: nextFields,
+      awaitingConfirmation:
+        nextMode === "confirm" ? modal.awaitingConfirmation : null,
+      capabilities: getSharedFeedAuthCapabilities(state.auth.config),
+    };
+  });
+}
+
+function setAuthModalError(message) {
+  patchAuthModal((modal) => ({
+    ...modal,
+    pending: false,
+    error: normalizeString(message),
+    notice: "",
+  }));
+}
+
+function setAuthModalNotice(message) {
+  patchAuthModal((modal) => ({
+    ...modal,
+    pending: false,
+    error: "",
+    notice: normalizeString(message),
+  }));
+}
+
+function setAuthModalPending(isPending) {
+  patchAuthModal((modal) => ({
+    ...modal,
+    pending: isPending === true,
+  }));
+}
+
+function setAuthModalAwaitingConfirmation(awaitingConfirmation) {
+  patchAuthModal((modal) => ({
+    ...modal,
+    mode: "confirm",
+    title: "Confirm your account",
+    message:
+      "Enter the verification code we sent to your email to finish signing up.",
+    pending: false,
+    error: "",
+    notice: "",
+    awaitingConfirmation: cloneAwaitingConfirmation(awaitingConfirmation),
+    fields: {
+      ...modal.fields,
+      code: "",
+    },
+  }));
+}
+
+function buildProtectedRouteContext(path) {
+  const normalizedPath = normalizeString(path) || getCurrentPathWithQuery();
+  return {
+    targetPath: normalizedPath,
+    title: getAuthModalDefaultTitle("route-protected", {
+      targetPath: normalizedPath,
+    }),
+    message: getAuthModalDefaultMessage("route-protected", {
+      targetPath: normalizedPath,
+    }),
+  };
+}
+
+function promptForProtectedRoute(path) {
+  openAuthModal("route-protected", buildProtectedRouteContext(path));
+}
+
+function navigateWithAuthGate(path, options = {}) {
+  const normalizedPath = normalizeString(path);
+  if (!normalizedPath) {
+    return;
+  }
+  if (
+    !state.auth.session &&
+    isProtectedRoute(parseRouteFromLocation(getPathnameFromRouteTarget(path)))
+  ) {
+    promptForProtectedRoute(normalizedPath);
+    return;
+  }
+  navigateTo(normalizedPath, options);
+}
+
+async function finalizeAuthSuccess({
+  session,
+  user,
+  targetPath = "",
+  toastMessage = "",
+} = {}) {
+  state.auth.session = session;
+  state.auth.user = user || getAuthenticatedUser(session);
+  state.auth.message = "";
+  closeAuthModal();
+  if (toastMessage) {
+    showToast(toastMessage);
+  }
+  const nextPath = normalizeString(targetPath);
+  if (nextPath && nextPath !== getCurrentPathWithQuery()) {
+    navigateTo(nextPath);
+    return;
+  }
+  await loadCurrentRoute({ refresh: true });
   scheduleRender();
 }
 
@@ -3971,15 +4247,13 @@ async function requireAuthForRoute(route = state.route) {
   if (state.auth.session) {
     return true;
   }
-  if (!hasHostedSignInConfig(state.auth.config)) {
+  const capabilities = getSharedFeedAuthCapabilities(state.auth.config);
+  if (!capabilities.direct && !capabilities.hosted) {
     state.renderError = "Web sign-in is not configured for this environment.";
     scheduleRender();
     return false;
   }
-  await startHostedSignIn({
-    ...state.auth.config,
-    redirectUri: window.location.href,
-  });
+  promptForProtectedRoute(`${route.routePath}${window.location.search}`);
   return false;
 }
 
@@ -5875,6 +6149,21 @@ function renderMessagingPage() {
 }
 
 function renderRouteStage() {
+  if (isProtectedRoute() && !state.auth.session) {
+    return `<section class="shared-page">
+      ${renderTopChrome()}
+      <div class="shared-page__content">
+        <div class="shared-page__empty">
+          Sign in or create an account to use ${escapeHtml(humanizeLabel(getRouteSection()) || "this feature")} in the browser.
+        </div>
+        <div class="shared-auth-modal__actions">
+          <button class="shared-feed-chip shared-feed-chip--primary" data-action="auth-login-inline">Sign in</button>
+          <button class="shared-feed-chip" data-action="auth-signup-inline">Create account</button>
+          <button class="shared-feed-chip" data-action="open-app-shell">Open app</button>
+        </div>
+      </div>
+    </section>`;
+  }
   const routeKey = getCurrentRoute().routeKey;
   if (isFeedRoute()) {
     return renderFeedStage();
@@ -6017,21 +6306,163 @@ function renderCommentsPanel() {
   </div>`;
 }
 
+function renderAuthModalModeControls(modal) {
+  if (!modal) {
+    return "";
+  }
+  const isConfirm = modal.mode === "confirm";
+  return `<div class="shared-auth-modal__modes">
+    <button class="shared-feed-chip${modal.mode === "login" ? " shared-feed-chip--primary" : ""}" data-action="auth-switch-mode" data-auth-mode="login">Sign in</button>
+    <button class="shared-feed-chip${modal.mode === "signup" || isConfirm ? " shared-feed-chip--primary" : ""}" data-action="auth-switch-mode" data-auth-mode="signup">Create account</button>
+    ${
+      isConfirm
+        ? '<button class="shared-feed-chip" data-action="auth-switch-mode" data-auth-mode="confirm" disabled>Confirm code</button>'
+        : ""
+    }
+  </div>`;
+}
+
+function renderAuthModalStatus(modal) {
+  if (!modal) {
+    return "";
+  }
+  const errorMarkup = modal.error
+    ? `<div class="shared-auth-modal__status shared-auth-modal__status--error">${escapeHtml(modal.error)}</div>`
+    : "";
+  const noticeMarkup = modal.notice
+    ? `<div class="shared-auth-modal__status shared-auth-modal__status--notice">${escapeHtml(modal.notice)}</div>`
+    : "";
+  return `${errorMarkup}${noticeMarkup}`;
+}
+
+function renderAuthModalLogin(modal) {
+  const capabilities =
+    modal?.capabilities || getSharedFeedAuthCapabilities(state.auth.config);
+  if (!capabilities.password) {
+    return `<div class="shared-auth-modal__fallback">
+      <p>Password sign-in is not available for this web client right now.</p>
+      ${
+        capabilities.hosted
+          ? `<div class="shared-auth-modal__actions">
+              <button class="shared-feed-chip shared-feed-chip--primary" data-action="auth-start-hosted-login"${modal.pending ? " disabled" : ""}>Continue in browser</button>
+            </div>`
+          : ""
+      }
+    </div>`;
+  }
+
+  return `<form class="shared-auth-modal__form" data-route-form="auth-login">
+    <label>
+      <span>Username or email</span>
+      <input data-auth-field="identifier" name="identifier" autocomplete="username" value="${escapeHtml(modal.fields.identifier)}" placeholder="you@example.com" />
+    </label>
+    <label>
+      <span>Password</span>
+      <input data-auth-field="password" type="password" name="password" autocomplete="current-password" value="${escapeHtml(modal.fields.password)}" placeholder="Password" />
+    </label>
+    <div class="shared-auth-modal__actions">
+      <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${modal.pending ? " disabled" : ""}>${modal.pending ? "Signing in…" : "Sign in"}</button>
+      ${
+        capabilities.hosted
+          ? `<button class="shared-feed-chip" type="button" data-action="auth-start-hosted-login"${modal.pending ? " disabled" : ""}>Use browser sign-in</button>`
+          : ""
+      }
+    </div>
+  </form>`;
+}
+
+function renderAuthModalSignup(modal) {
+  const capabilities =
+    modal?.capabilities || getSharedFeedAuthCapabilities(state.auth.config);
+  if (!capabilities.direct) {
+    return `<div class="shared-auth-modal__fallback">
+      <p>Direct sign-up is not available for this web client right now.</p>
+      ${
+        capabilities.hosted
+          ? `<div class="shared-auth-modal__actions">
+              <button class="shared-feed-chip shared-feed-chip--primary" data-action="auth-start-hosted-signup"${modal.pending ? " disabled" : ""}>Use browser sign-up</button>
+            </div>`
+          : ""
+      }
+    </div>`;
+  }
+
+  return `<form class="shared-auth-modal__form" data-route-form="auth-signup">
+    <label>
+      <span>Email</span>
+      <input data-auth-field="email" type="email" name="email" autocomplete="email" value="${escapeHtml(modal.fields.email)}" placeholder="you@example.com" />
+    </label>
+    <label>
+      <span>Password</span>
+      <input data-auth-field="signupPassword" type="password" name="password" autocomplete="new-password" value="${escapeHtml(modal.fields.signupPassword)}" placeholder="Use at least 8 characters" />
+    </label>
+    <label>
+      <span>Confirm password</span>
+      <input data-auth-field="confirmPassword" type="password" name="confirmPassword" autocomplete="new-password" value="${escapeHtml(modal.fields.confirmPassword)}" placeholder="Confirm password" />
+    </label>
+    <div class="shared-auth-modal__actions">
+      <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${modal.pending ? " disabled" : ""}>${modal.pending ? "Creating…" : "Create account"}</button>
+      ${
+        capabilities.hosted
+          ? `<button class="shared-feed-chip" type="button" data-action="auth-start-hosted-signup"${modal.pending ? " disabled" : ""}>Use browser sign-up</button>`
+          : ""
+      }
+    </div>
+  </form>`;
+}
+
+function renderAuthModalConfirm(modal) {
+  const awaitingConfirmation = modal?.awaitingConfirmation || {};
+  const destination =
+    awaitingConfirmation.deliveryDestination ||
+    awaitingConfirmation.email ||
+    "your email";
+  return `<div class="shared-auth-modal__confirm-copy">
+      <p>We sent a 6-digit verification code to ${escapeHtml(destination)}. Enter it to finish signing up.</p>
+    </div>
+    <form class="shared-auth-modal__form" data-route-form="auth-confirm">
+      <label>
+        <span>6-digit code</span>
+        <input data-auth-field="code" name="code" inputmode="numeric" autocomplete="one-time-code" value="${escapeHtml(modal.fields.code)}" placeholder="123456" />
+      </label>
+      <div class="shared-auth-modal__actions">
+        <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${modal.pending ? " disabled" : ""}>${modal.pending ? "Confirming…" : "Confirm"}</button>
+        <button class="shared-feed-chip" type="button" data-action="auth-resend-code"${modal.pending ? " disabled" : ""}>Resend code</button>
+      </div>
+    </form>`;
+}
+
 function renderAuthModal() {
   const modal = state.ui.authModal;
   const stores = getStoreUrls();
+  const capabilities =
+    modal?.capabilities || getSharedFeedAuthCapabilities(state.auth.config);
+  let bodyMarkup = "";
+
+  if (modal?.mode === "confirm") {
+    bodyMarkup = renderAuthModalConfirm(modal);
+  } else if (modal?.mode === "signup") {
+    bodyMarkup = renderAuthModalSignup(modal);
+  } else if (modal) {
+    bodyMarkup = renderAuthModalLogin(modal);
+  }
+
   return `<div class="shared-auth-modal${modal ? " is-open" : ""}">
     <button class="shared-auth-modal__backdrop" data-action="close-auth-modal" aria-label="Close sign-in modal"></button>
     <section class="shared-auth-modal__dialog" aria-hidden="${modal ? "false" : "true"}">
       <p class="shared-auth-modal__eyebrow">Polis account</p>
       <h2>${escapeHtml(modal?.title || "Join Polis")}</h2>
       <p>${escapeHtml(modal?.message || "Sign in to unlock the full feed.")}</p>
-      <div class="shared-auth-modal__actions">
-        <button class="shared-feed-chip shared-feed-chip--primary" data-action="auth-login-inline">Log in</button>
-        <button class="shared-feed-chip" data-action="auth-signup-inline">Sign up</button>
-      </div>
+      ${renderAuthModalModeControls(modal)}
+      ${renderAuthModalStatus(modal)}
+      ${bodyMarkup}
       <div class="shared-auth-modal__secondary">
-        <button class="shared-feed-chip" data-action="auth-open-app" data-post-id="${escapeHtml(modal?.postId || runtimeConfig.shareContext?.postId || runtimeConfig.postId || "")}">Open app instead</button>
+        <button class="shared-feed-chip" data-action="auth-open-app" data-route="${escapeHtml(modal?.targetPath || "")}" data-post-id="${escapeHtml(modal?.postId || runtimeConfig.shareContext?.postId || runtimeConfig.postId || "")}">Open app instead</button>
+        ${
+          !capabilities.direct && !capabilities.hosted
+            ? '<span class="shared-auth-modal__hint">Web auth is unavailable in this environment.</span>'
+            : ""
+        }
         ${
           stores.ios || stores.android
             ? `<div class="shared-auth-modal__stores">
@@ -6402,22 +6833,237 @@ function updateScrubber(postId, video) {
 }
 
 async function handleInlineAuth(action) {
-  if (!hasHostedSignInConfig(state.auth.config)) {
+  const capabilities = getSharedFeedAuthCapabilities(state.auth.config);
+  if (!capabilities.direct && !capabilities.hosted) {
     openAuthModal("auth_unavailable", {
-      title: "Web sign-in is not configured yet",
-      message:
-        "Open the Polis app for now, or finish the website Cognito configuration and try again.",
+      mode: action === "signup" ? "signup" : "login",
     });
     return;
   }
+  openAuthModal(action === "signup" ? "signup" : "login", {
+    mode: action === "signup" ? "signup" : "login",
+  });
+}
+
+function normalizeAuthErrorMessage(error, fallbackMessage) {
+  if (error instanceof SharedFeedAuthError) {
+    return normalizeString(error.message) || fallbackMessage;
+  }
+  return normalizeString(error?.message) || fallbackMessage;
+}
+
+async function startHostedModalAuth(mode) {
+  const modal = state.ui.authModal;
+  if (!modal) {
+    return;
+  }
+  if (!hasHostedSignInConfig(state.auth.config)) {
+    setAuthModalError("Hosted sign-in is not configured for this environment.");
+    return;
+  }
+  setAuthModalPending(true);
   try {
-    if (action === "login") {
-      await startHostedSignIn(state.auth.config);
+    setSharedFeedPostAuthPath(modal.targetPath || getCurrentPathWithQuery());
+    if (mode === "signup") {
+      await startHostedSignUp(state.auth.config, {
+        postAuthPath: modal.targetPath,
+      });
     } else {
-      await startHostedSignUp(state.auth.config);
+      await startHostedSignIn(state.auth.config, {
+        postAuthPath: modal.targetPath,
+      });
     }
-  } catch {
-    showToast("Sign-in could not be started.");
+  } catch (error) {
+    setAuthModalError(
+      normalizeAuthErrorMessage(error, "Sign-in could not be started."),
+    );
+  }
+}
+
+async function submitAuthLoginForm(formData) {
+  const modal = state.ui.authModal;
+  if (!modal) {
+    return;
+  }
+  const identifier = normalizeString(formData.get("identifier"));
+  const password = String(formData.get("password") || "");
+  if (!identifier || !password) {
+    setAuthModalError("Username/email and password are required.");
+    return;
+  }
+
+  setAuthModalPending(true);
+  try {
+    const { session, user } = await signInSharedFeedWithPassword(
+      state.auth.config,
+      {
+        identifier,
+        password,
+      },
+    );
+    await finalizeAuthSuccess({
+      session,
+      user,
+      targetPath: modal.targetPath,
+      toastMessage: `Signed in as ${user?.displayName || "your account"}.`,
+    });
+  } catch (error) {
+    if (
+      error instanceof SharedFeedAuthError &&
+      error.errorCode === "user_not_confirmed"
+    ) {
+      setAuthModalAwaitingConfirmation({
+        username: normalizeString(error.payload?.cognitoUsername) || identifier,
+        email: identifier.includes("@") ? identifier : "",
+        password,
+        deliveryDestination: identifier.includes("@") ? identifier : "",
+      });
+      setAuthModalNotice(
+        "Your account still needs verification. Enter the code from your email to finish signing up.",
+      );
+      return;
+    }
+    setAuthModalError(normalizeAuthErrorMessage(error, "Sign-in failed."));
+  }
+}
+
+async function submitAuthSignupForm(formData) {
+  const modal = state.ui.authModal;
+  if (!modal) {
+    return;
+  }
+  const email = normalizeString(formData.get("email")).toLowerCase();
+  const password = String(formData.get("password") || "");
+  const confirmPassword = String(formData.get("confirmPassword") || "");
+
+  if (!email || !email.includes("@")) {
+    setAuthModalError("Enter a valid email address.");
+    return;
+  }
+  if (password.length < 8) {
+    setAuthModalError("Password must be at least 8 characters.");
+    return;
+  }
+  if (password !== confirmPassword) {
+    setAuthModalError("Passwords do not match.");
+    return;
+  }
+
+  setAuthModalPending(true);
+  try {
+    const result = await signUpSharedFeedWithEmail(state.auth.config, {
+      email,
+      password,
+    });
+    if (result.nextStep === "confirmCode" || result.isComplete !== true) {
+      setAuthModalAwaitingConfirmation({
+        username: result.username,
+        email,
+        password,
+        deliveryDestination: result.deliveryDestination,
+      });
+      setAuthModalNotice(
+        `We sent a code to ${result.deliveryDestination || email}.`,
+      );
+      return;
+    }
+
+    const { session, user } = await signInSharedFeedWithPassword(
+      state.auth.config,
+      {
+        identifier: result.username || email,
+        password,
+      },
+    );
+    await finalizeAuthSuccess({
+      session,
+      user,
+      targetPath: modal.targetPath,
+      toastMessage: `Signed in as ${user?.displayName || "your account"}.`,
+    });
+  } catch (error) {
+    setAuthModalError(normalizeAuthErrorMessage(error, "Sign-up failed."));
+  }
+}
+
+async function submitAuthConfirmForm(formData) {
+  const modal = state.ui.authModal;
+  const awaitingConfirmation = modal?.awaitingConfirmation;
+  if (!modal || !awaitingConfirmation?.username) {
+    setAuthModalError(
+      "Start sign-up again to request a new verification code.",
+    );
+    return;
+  }
+  const code = normalizeString(formData.get("code"));
+  if (code.length !== 6) {
+    setAuthModalError("Enter the 6-digit code.");
+    return;
+  }
+
+  setAuthModalPending(true);
+  try {
+    await confirmSharedFeedSignUp(state.auth.config, {
+      username: awaitingConfirmation.username,
+      code,
+    });
+    const { session, user } = await signInSharedFeedWithPassword(
+      state.auth.config,
+      {
+        identifier: awaitingConfirmation.username || awaitingConfirmation.email,
+        password: awaitingConfirmation.password,
+      },
+    );
+    await finalizeAuthSuccess({
+      session,
+      user,
+      targetPath: modal.targetPath,
+      toastMessage: `Signed in as ${user?.displayName || "your account"}.`,
+    });
+  } catch (error) {
+    setAuthModalError(
+      normalizeAuthErrorMessage(error, "Account confirmation failed."),
+    );
+  }
+}
+
+async function resendAuthConfirmationCode() {
+  const awaitingConfirmation = state.ui.authModal?.awaitingConfirmation;
+  if (!awaitingConfirmation?.username) {
+    setAuthModalError(
+      "Start sign-up again to request a new verification code.",
+    );
+    return;
+  }
+  setAuthModalPending(true);
+  try {
+    const result = await resendSharedFeedSignUpCode(state.auth.config, {
+      username: awaitingConfirmation.username,
+    });
+    patchAuthModal((modal) => ({
+      ...modal,
+      pending: false,
+      error: "",
+      notice: `We sent a fresh code to ${result.deliveryDestination || awaitingConfirmation.email || "your email"}.`,
+      awaitingConfirmation: {
+        ...modal.awaitingConfirmation,
+        deliveryDestination:
+          normalizeString(result.deliveryDestination) ||
+          modal.awaitingConfirmation?.deliveryDestination ||
+          null,
+      },
+      fields: {
+        ...modal.fields,
+        code: "",
+      },
+    }));
+  } catch (error) {
+    setAuthModalError(
+      normalizeAuthErrorMessage(
+        error,
+        "Could not resend the verification code.",
+      ),
+    );
   }
 }
 
@@ -6435,7 +7081,7 @@ function handleRootClick(event) {
   }
 
   if (action === "navigate") {
-    navigateTo(target.getAttribute("data-route"));
+    navigateWithAuthGate(target.getAttribute("data-route"));
     return;
   }
 
@@ -6532,12 +7178,40 @@ function handleRootClick(event) {
     return;
   }
 
+  if (action === "auth-switch-mode") {
+    setAuthModalMode(target.getAttribute("data-auth-mode"));
+    return;
+  }
+
+  if (action === "auth-start-hosted-login") {
+    startHostedModalAuth("login").catch(() => {});
+    return;
+  }
+
+  if (action === "auth-start-hosted-signup") {
+    startHostedModalAuth("signup").catch(() => {});
+    return;
+  }
+
+  if (action === "auth-resend-code") {
+    resendAuthConfirmationCode().catch(() => {});
+    return;
+  }
+
   if (action === "close-auth-modal") {
     closeAuthModal();
     return;
   }
 
   if (action === "auth-open-app") {
+    const targetRoute = normalizeString(target.getAttribute("data-route"));
+    if (targetRoute) {
+      const deepLinkTarget = buildDeepLinkOpenUrl(targetRoute);
+      if (deepLinkTarget) {
+        window.location.assign(deepLinkTarget);
+        return;
+      }
+    }
     requestAppOpen(
       target.getAttribute("data-post-id") ||
         runtimeConfig.shareContext?.postId ||
@@ -6680,7 +7354,7 @@ function handleRootClick(event) {
   if (action === "profile") {
     const userId = normalizeString(target.getAttribute("data-user-id"));
     if (userId) {
-      navigateTo(`/profile/${encodeURIComponent(userId)}`);
+      navigateWithAuthGate(`/profile/${encodeURIComponent(userId)}`);
     }
     return;
   }
@@ -6695,14 +7369,16 @@ function handleRootClick(event) {
   if (action === "manage-events-status") {
     const status =
       normalizeString(target.getAttribute("data-status")) || "active";
-    navigateTo(`/manage-events?status=${encodeURIComponent(status)}`);
+    navigateWithAuthGate(`/manage-events?status=${encodeURIComponent(status)}`);
     return;
   }
 
   if (action === "profile-connections-kind") {
     const kind =
       normalizeString(target.getAttribute("data-kind")) || "followers";
-    navigateTo(`/profile/connections?kind=${encodeURIComponent(kind)}`);
+    navigateWithAuthGate(
+      `/profile/connections?kind=${encodeURIComponent(kind)}`,
+    );
     return;
   }
 
@@ -6864,7 +7540,7 @@ function handleRootClick(event) {
     const path = normalizeString(target.getAttribute("data-route"));
     const key = normalizeString(target.getAttribute("data-top-key"));
     if (path) {
-      navigateTo(path);
+      navigateWithAuthGate(path);
       return;
     }
     if (key === "search") {
@@ -6875,10 +7551,10 @@ function handleRootClick(event) {
         return;
       }
       if (getRouteSection() === "events") {
-        navigateTo(`/events?q=${encodeURIComponent(query)}`);
+        navigateWithAuthGate(`/events?q=${encodeURIComponent(query)}`);
         return;
       }
-      navigateTo(`/candidates?q=${encodeURIComponent(query)}`);
+      navigateWithAuthGate(`/candidates?q=${encodeURIComponent(query)}`);
     }
     return;
   }
@@ -6914,6 +7590,25 @@ function handleRootClick(event) {
 }
 
 function handleRootInput(event) {
+  const authField = event.target.closest("[data-auth-field]");
+  if (authField && state.ui.authModal) {
+    const fieldName = normalizeString(
+      authField.getAttribute("data-auth-field"),
+    );
+    if (fieldName) {
+      patchAuthModal((modal) => ({
+        ...modal,
+        error: "",
+        notice: "",
+        fields: {
+          ...modal.fields,
+          [fieldName]: authField.value,
+        },
+      }));
+    }
+    return;
+  }
+
   const messageInput = event.target.closest(
     '[data-route-form="messaging-send"] input[name="text"]',
   );
@@ -6954,6 +7649,18 @@ function handleCommentSubmit(event) {
     event.preventDefault();
     const formData = new FormData(routeForm);
     const formKind = normalizeString(routeForm.getAttribute("data-route-form"));
+    if (formKind === "auth-login") {
+      submitAuthLoginForm(formData).catch(() => {});
+      return;
+    }
+    if (formKind === "auth-signup") {
+      submitAuthSignupForm(formData).catch(() => {});
+      return;
+    }
+    if (formKind === "auth-confirm") {
+      submitAuthConfirmForm(formData).catch(() => {});
+      return;
+    }
     if (formKind === "candidates-filter") {
       const query = new URLSearchParams();
       ["q", "level", "district", "tags"].forEach((key) => {
@@ -7063,6 +7770,7 @@ async function bootstrapAuth() {
   const session = completed.session || getStoredSharedFeedSession();
   state.auth.session = session;
   state.auth.user = getAuthenticatedUser(session);
+  const postAuthPath = completed.handled ? consumeSharedFeedPostAuthPath() : "";
   if (completed.error) {
     state.auth.message = completed.error;
     showToast(completed.error);
@@ -7070,6 +7778,9 @@ async function bootstrapAuth() {
     showToast(
       `Signed in as ${state.auth.user?.displayName || "your account"}.`,
     );
+    if (postAuthPath && postAuthPath !== getCurrentPathWithQuery()) {
+      navigateTo(postAuthPath, { replace: true });
+    }
   }
 }
 
