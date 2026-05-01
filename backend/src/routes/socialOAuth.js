@@ -82,6 +82,65 @@ function buildCompletionUrl(req, {
   return url.toString();
 }
 
+function normalizeAppPath(value) {
+  const normalized = normalizeString(value);
+  if (!normalized || !normalized.startsWith("/")) {
+    return "/settings/connected-accounts";
+  }
+  return normalized;
+}
+
+function appendCompletionParams(url, {
+  provider,
+  status,
+  message,
+  connectionId,
+}) {
+  if (provider) {
+    url.searchParams.set("social_provider", provider);
+  }
+  if (status) {
+    url.searchParams.set("social_status", status);
+  }
+  if (message) {
+    url.searchParams.set("social_message", message);
+  }
+  if (connectionId) {
+    url.searchParams.set("social_connection_id", connectionId);
+  }
+  return url;
+}
+
+function buildMobileDeepLink(appRoute) {
+  const scheme =
+    normalizeString(process.env.MOBILE_DEEP_LINK_SCHEME) ||
+    normalizeString(process.env.MOBILE_APP_URL_SCHEME) ||
+    normalizeString(process.env.STRIPE_RETURN_URL_SCHEME) ||
+    "myapp";
+  const host = normalizeString(process.env.MOBILE_DEEP_LINK_HOST) || "auth";
+  const url = new URL(`${scheme}://${host}/`);
+  url.searchParams.set("path", appRoute);
+  return url.toString();
+}
+
+function buildAndroidIntentUrl({ deepLinkUrl, packageName, fallbackUrl }) {
+  const parsed = new URL(deepLinkUrl);
+  const scheme = parsed.protocol.replace(/:$/, "");
+  const target = `${parsed.host}${parsed.pathname}${parsed.search}`;
+  const parts = [
+    `intent://${target}#Intent`,
+    `scheme=${encodeURIComponent(scheme)}`,
+  ];
+  if (packageName) {
+    parts.push(`package=${encodeURIComponent(packageName)}`);
+  }
+  if (fallbackUrl) {
+    parts.push(`S.browser_fallback_url=${encodeURIComponent(fallbackUrl)}`);
+  }
+  parts.push("end");
+  return parts.join(";");
+}
+
 function completionPageHtml({
   origin,
   provider,
@@ -90,20 +149,19 @@ function completionPageHtml({
   connectionId,
   appPath,
 }) {
-  const target = new URL(`${origin}${appPath || "/settings/connected-accounts"}`);
-  if (provider) {
-    target.searchParams.set("social_provider", provider);
-  }
-  if (status) {
-    target.searchParams.set("social_status", status);
-  }
-  if (message) {
-    target.searchParams.set("social_message", message);
-  }
-  if (connectionId) {
-    target.searchParams.set("social_connection_id", connectionId);
-  }
-  const targetUrl = target.toString();
+  const target = appendCompletionParams(
+    new URL(`${origin}${normalizeAppPath(appPath)}`),
+    { provider, status, message, connectionId },
+  );
+  const webTargetUrl = target.toString();
+  const appRoute = `${target.pathname}${target.search}`;
+  const appTargetUrl = buildMobileDeepLink(appRoute);
+  const androidTargetUrl = buildAndroidIntentUrl({
+    deepLinkUrl: appTargetUrl,
+    packageName:
+      normalizeString(process.env.ANDROID_APP_PACKAGE) || "com.luxcorp.polis",
+    fallbackUrl: webTargetUrl,
+  });
   const headline = status === "success" ? "Connection complete" : "Connection issue";
   const actionLabel = status === "success" ? "Open Polis" : "Back to Polis";
   return `<!DOCTYPE html>
@@ -194,13 +252,20 @@ function completionPageHtml({
       <h1>${escapeHtml(headline)}</h1>
       <p>${escapeHtml(message || "Returning you to the app.")}</p>
       <div class="actions">
-        <a class="button" href="${escapeHtml(targetUrl)}">${escapeHtml(actionLabel)}</a>
+        <a class="button" id="open-polis" href="${escapeHtml(appTargetUrl)}">${escapeHtml(actionLabel)}</a>
       </div>
-      <p class="status">If Polis is installed, this page should reopen it automatically.</p>
+      <p class="status">If Polis is installed, this page should reopen it automatically. If it does not, tap the button.</p>
     </main>
     <script>
       (function () {
-        var target = ${JSON.stringify(targetUrl)};
+        var appTarget = ${JSON.stringify(appTargetUrl)};
+        var androidTarget = ${JSON.stringify(androidTargetUrl)};
+        var isAndroid = /Android/i.test(navigator.userAgent || "");
+        var target = isAndroid ? androidTarget : appTarget;
+        var button = document.getElementById("open-polis");
+        if (button) {
+          button.href = target;
+        }
         window.setTimeout(function () {
           window.location.assign(target);
         }, 250);
