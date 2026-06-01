@@ -12,6 +12,7 @@ const SOCIAL_CARD_MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const APP_SHELL_ROUTE_DEFINITIONS = [
   { routeKey: "feed", pattern: /^\/feed$/u, params: [] },
   { routeKey: "candidates", pattern: /^\/candidates$/u, params: [] },
+  { routeKey: "election-day", pattern: /^\/election-day$/u, params: [] },
   {
     routeKey: "official-report-card",
     pattern: /^\/officials\/([^/]+)\/report-card$/u,
@@ -836,6 +837,16 @@ function getAppShellPageMeta(routeMatch) {
         supportingCopy:
           "Sign in to browse candidates, follow campaigns, and manage your candidate page.",
       };
+    case "election-day":
+      return {
+        title: "Election Day | Polis",
+        description:
+          "Track live and finalized federal election results in Polis.",
+        eyebrow: "Election Day",
+        headline: "Live election results",
+        supportingCopy:
+          "Follow federal race results, district maps, reporting status, and called winners from the browser.",
+      };
     case "events":
     case "event-detail":
     case "manage-events":
@@ -898,7 +909,7 @@ function renderAppShellPage(req, routeMatch) {
     routeParams: routeMatch.routeParams,
     canonicalUrl,
     requestUrl,
-    requiresAuth: true,
+    requiresAuth: routeMatch.routeKey !== "election-day",
   });
 
   return renderWebShellPage({
@@ -926,6 +937,7 @@ router.get(
   [
     "/feed",
     "/candidates",
+    "/election-day",
     "/officials/:officialId",
     "/officials/:officialId/report-card",
     "/auto-candidates/:entityId",
@@ -1076,6 +1088,7 @@ router.get("/.well-known/apple-app-site-association", (_req, res) => {
             components: [
               { "/": "/feed" },
               { "/": "/candidates" },
+              { "/": "/election-day" },
               { "/": "/candidates/*" },
               { "/": "/officials/*" },
               { "/": "/auto-candidates/*" },

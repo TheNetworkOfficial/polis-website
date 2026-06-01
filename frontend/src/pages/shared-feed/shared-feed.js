@@ -37,6 +37,7 @@ const GRID_FEED_PAGE_LIMIT = 25;
 const ROUTE_KEY_SHARE_POST = "share-post";
 const ROUTE_KEY_FEED = "feed";
 const ROUTE_KEY_CANDIDATES = "candidates";
+const ROUTE_KEY_ELECTION_DAY = "election-day";
 const ROUTE_KEY_OFFICIAL_DETAIL = "official-detail";
 const ROUTE_KEY_OFFICIAL_REPORT_CARD = "official-report-card";
 const ROUTE_KEY_AUTO_CANDIDATE_DETAIL = "auto-candidate-detail";
@@ -54,6 +55,14 @@ const ROUTE_KEY_PROFILE_CONNECTIONS = "profile-connections";
 const ROUTE_KEY_PROFILE_NOTIFICATIONS = "profile-notifications";
 const ROUTE_KEY_MESSAGES_ROOT = "messages-root";
 const ROUTE_KEY_MESSAGES_WILDCARD = "messages-wildcard";
+const ELECTION_MAP_STATE_SOURCE_ID = "shared-election-state-source";
+const ELECTION_MAP_DISTRICT_SOURCE_ID = "shared-election-district-source";
+const ELECTION_MAP_MASK_SOURCE_ID = "shared-election-mask-source";
+const ELECTION_MAP_STATE_LINE_LAYER_ID = "shared-election-state-line";
+const ELECTION_MAP_DISTRICT_FILL_LAYER_ID = "shared-election-district-fill";
+const ELECTION_MAP_DISTRICT_GLOW_LAYER_ID = "shared-election-district-glow";
+const ELECTION_MAP_DISTRICT_LINE_LAYER_ID = "shared-election-district-line";
+const ELECTION_MAP_MASK_LAYER_ID = "shared-election-mask";
 
 function normalizePathname(value) {
   const normalized = normalizeString(value);
@@ -91,6 +100,7 @@ function parseRouteFromLocation(pathname = window.location.pathname) {
     [ROUTE_KEY_SHARE_POST, /^\/posts\/([^/]+)$/u, ["postId"]],
     [ROUTE_KEY_FEED, /^\/feed$/u, []],
     [ROUTE_KEY_CANDIDATES, /^\/candidates$/u, []],
+    [ROUTE_KEY_ELECTION_DAY, /^\/election-day$/u, []],
     [
       ROUTE_KEY_OFFICIAL_REPORT_CARD,
       /^\/officials\/([^/]+)\/report-card$/u,
@@ -269,6 +279,29 @@ const state = {
         total: null,
       },
     },
+    elections: {
+      context: null,
+      contextLoading: false,
+      contextError: "",
+      selectedScope: "federal",
+      selectedStateId: "",
+      selectedDistrictId: "",
+      selectedElectionId: "",
+      selectedCandidateId: "",
+      map: {
+        geometry: null,
+        etag: "",
+        loading: false,
+        error: "",
+      },
+      results: {
+        snapshot: null,
+        previousSnapshot: null,
+        loading: false,
+        error: "",
+        loaded: false,
+      },
+    },
     events: {
       list: {
         ...createPagedState(),
@@ -415,6 +448,9 @@ let mapLibreLoaderPromise = null;
 let mapLibreStylesReady = false;
 let eventsMapInstance = null;
 let eventsMapMarkers = [];
+let electionMapInstance = null;
+let electionMapContainer = null;
+let electionPollTimer = null;
 let messagingTypingStopTimer = null;
 let messagingSessionRetained = false;
 
@@ -467,21 +503,26 @@ function isFeedRoute(route = state.route) {
   return routeKey === ROUTE_KEY_FEED || routeKey === ROUTE_KEY_SHARE_POST;
 }
 
+function isElectionDayRoute(route = state.route) {
+  return normalizeString(route?.routeKey) === ROUTE_KEY_ELECTION_DAY;
+}
+
 function isProtectedRoute(route = state.route) {
-  return !isShareRoute(route);
+  return !isShareRoute(route) && !isElectionDayRoute(route);
 }
 
 function getRouteSection(route = state.route) {
   const routeKey = normalizeString(route?.routeKey);
   if (
     routeKey === ROUTE_KEY_CANDIDATES ||
+    routeKey === ROUTE_KEY_ELECTION_DAY ||
     routeKey === ROUTE_KEY_OFFICIAL_DETAIL ||
     routeKey === ROUTE_KEY_OFFICIAL_REPORT_CARD ||
     routeKey === ROUTE_KEY_AUTO_CANDIDATE_DETAIL ||
     routeKey === ROUTE_KEY_CANDIDATE_DETAIL ||
     routeKey === ROUTE_KEY_CANDIDATE_EDIT
   ) {
-    return "candidates";
+    return routeKey === ROUTE_KEY_ELECTION_DAY ? "elections" : "candidates";
   }
   if (
     routeKey === ROUTE_KEY_EVENTS ||
@@ -1212,6 +1253,455 @@ async function bindEventsMap() {
   } catch {
     mapRoot.innerHTML =
       '<div class="shared-page__empty">Event map failed to load.</div>';
+  }
+}
+
+function emptyElectionFeatureCollection() {
+  return { type: "FeatureCollection", features: [] };
+}
+
+function normalizeElectionLongitude(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return null;
+  }
+  return ((((numeric + 180) % 360) + 360) % 360) - 180;
+}
+
+function collectElectionCoordinates(node, out) {
+  if (!node || typeof node !== "object") {
+    return;
+  }
+  const type = normalizeString(node.type).toLowerCase();
+  if (type === "featurecollection") {
+    (Array.isArray(node.features) ? node.features : []).forEach((feature) =>
+      collectElectionCoordinates(feature, out),
+    );
+    return;
+  }
+  if (type === "feature") {
+    collectElectionCoordinates(node.geometry, out);
+    return;
+  }
+  if (type === "geometrycollection") {
+    (Array.isArray(node.geometries) ? node.geometries : []).forEach(
+      (geometry) => collectElectionCoordinates(geometry, out),
+    );
+    return;
+  }
+  const coordinates = node.coordinates;
+  if (!Array.isArray(coordinates)) {
+    return;
+  }
+  const visit = (value) => {
+    if (!Array.isArray(value)) {
+      return;
+    }
+    if (
+      value.length >= 2 &&
+      Number.isFinite(Number(value[0])) &&
+      Number.isFinite(Number(value[1]))
+    ) {
+      const lng = normalizeElectionLongitude(value[0]);
+      const lat = Number(value[1]);
+      if (lng !== null && Number.isFinite(lat)) {
+        out.push([lng, Math.max(-85, Math.min(85, lat))]);
+      }
+      return;
+    }
+    value.forEach(visit);
+  };
+  visit(coordinates);
+}
+
+function computeElectionGeometryBounds(geometry = null) {
+  const coordinates = [];
+  collectElectionCoordinates(geometry?.stateBoundary, coordinates);
+  if (!coordinates.length) {
+    collectElectionCoordinates(geometry?.districts, coordinates);
+  }
+  if (!coordinates.length) {
+    return null;
+  }
+  let minLat = 85;
+  let maxLat = -85;
+  const longitudes = [];
+  for (const [lng, lat] of coordinates) {
+    minLat = Math.min(minLat, lat);
+    maxLat = Math.max(maxLat, lat);
+    longitudes.push(lng);
+  }
+  const sortedLngs = Array.from(new Set(longitudes)).sort((a, b) => a - b);
+  if (!sortedLngs.length) {
+    return null;
+  }
+  let west = sortedLngs[0];
+  let east = sortedLngs[sortedLngs.length - 1];
+  if (sortedLngs.length > 1) {
+    let largestGap = -1;
+    let largestGapIndex = 0;
+    sortedLngs.forEach((lng, index) => {
+      const next =
+        index === sortedLngs.length - 1
+          ? sortedLngs[0] + 360
+          : sortedLngs[index + 1];
+      const gap = next - lng;
+      if (gap > largestGap) {
+        largestGap = gap;
+        largestGapIndex = index;
+      }
+    });
+    west = sortedLngs[(largestGapIndex + 1) % sortedLngs.length];
+    east = sortedLngs[largestGapIndex];
+    if (east < west) {
+      east += 360;
+    }
+  }
+  if (Math.abs(east - west) < 0.04) {
+    west -= 0.02;
+    east += 0.02;
+  }
+  if (Math.abs(maxLat - minLat) < 0.04) {
+    minLat -= 0.02;
+    maxLat += 0.02;
+  }
+  return [
+    [west, Math.max(-85, minLat)],
+    [east, Math.min(85, maxLat)],
+  ];
+}
+
+function collectElectionOuterRings(node, out) {
+  if (!node || typeof node !== "object") {
+    return;
+  }
+  const type = normalizeString(node.type).toLowerCase();
+  if (type === "featurecollection") {
+    (Array.isArray(node.features) ? node.features : []).forEach((feature) =>
+      collectElectionOuterRings(feature, out),
+    );
+    return;
+  }
+  if (type === "feature") {
+    collectElectionOuterRings(node.geometry, out);
+    return;
+  }
+  if (type === "polygon") {
+    const ring = Array.isArray(node.coordinates?.[0])
+      ? node.coordinates[0]
+          .map((point) => {
+            const lng = normalizeElectionLongitude(point?.[0]);
+            const lat = Number(point?.[1]);
+            return lng === null || !Number.isFinite(lat) ? null : [lng, lat];
+          })
+          .filter(Boolean)
+      : [];
+    if (ring.length >= 4) {
+      out.push(ring);
+    }
+    return;
+  }
+  if (type === "multipolygon") {
+    (Array.isArray(node.coordinates) ? node.coordinates : []).forEach(
+      (polygon) => {
+        const ring = Array.isArray(polygon?.[0])
+          ? polygon[0]
+              .map((point) => {
+                const lng = normalizeElectionLongitude(point?.[0]);
+                const lat = Number(point?.[1]);
+                return lng === null || !Number.isFinite(lat)
+                  ? null
+                  : [lng, lat];
+              })
+              .filter(Boolean)
+          : [];
+        if (ring.length >= 4) {
+          out.push(ring);
+        }
+      },
+    );
+  }
+}
+
+function buildElectionMapMask(geometry = null) {
+  const rings = [];
+  collectElectionOuterRings(geometry?.stateBoundary, rings);
+  if (!rings.length) {
+    collectElectionOuterRings(geometry?.districts, rings);
+  }
+  if (!rings.length) {
+    return emptyElectionFeatureCollection();
+  }
+  const worldRing = [
+    [-180, -85],
+    [180, -85],
+    [180, 85],
+    [-180, 85],
+    [-180, -85],
+  ];
+  return {
+    type: "FeatureCollection",
+    features: [
+      {
+        type: "Feature",
+        geometry: {
+          type: "Polygon",
+          coordinates: [worldRing, ...rings],
+        },
+        properties: { kind: "election-map-mask" },
+      },
+    ],
+  };
+}
+
+function buildElectionDistrictFeatureCollection(geometry = null) {
+  const snapshot = state.pages.elections.results.snapshot;
+  const selectedDistrictId = normalizeString(
+    state.pages.elections.selectedDistrictId,
+  );
+  const rawFeatures = Array.isArray(geometry?.districts?.features)
+    ? geometry.districts.features
+    : [];
+  return {
+    type: "FeatureCollection",
+    features: rawFeatures.map((rawFeature) => {
+      const feature =
+        rawFeature && typeof rawFeature === "object" ? { ...rawFeature } : {};
+      const properties = {
+        ...(feature.properties && typeof feature.properties === "object"
+          ? feature.properties
+          : {}),
+      };
+      const districtId = normalizeString(
+        properties.districtId || properties.id || feature.id,
+      );
+      const winnerPartyToken = normalizeElectionPartyToken(
+        properties.winnerPartyToken,
+      );
+      const called = properties.called === true || properties.isCalled === true;
+      const fillColor =
+        snapshot?.isGeneral && called && winnerPartyToken
+          ? electionPartyColor(winnerPartyToken)
+          : "#e2e8f0";
+      feature.properties = {
+        ...properties,
+        districtId,
+        selected:
+          Boolean(selectedDistrictId) && districtId === selectedDistrictId,
+        dimmed:
+          Boolean(selectedDistrictId) && districtId !== selectedDistrictId,
+        fillColor,
+      };
+      return feature;
+    }),
+  };
+}
+
+function upsertElectionMapSource(map, sourceId, data) {
+  const existing = map.getSource(sourceId);
+  if (existing && typeof existing.setData === "function") {
+    existing.setData(data);
+    return;
+  }
+  map.addSource(sourceId, {
+    type: "geojson",
+    data,
+  });
+}
+
+function ensureElectionMapLayer(map, layer) {
+  if (!map.getLayer(layer.id)) {
+    map.addLayer(layer);
+  }
+}
+
+function ensureElectionMapLayers(map) {
+  upsertElectionMapSource(
+    map,
+    ELECTION_MAP_STATE_SOURCE_ID,
+    emptyElectionFeatureCollection(),
+  );
+  upsertElectionMapSource(
+    map,
+    ELECTION_MAP_DISTRICT_SOURCE_ID,
+    emptyElectionFeatureCollection(),
+  );
+  upsertElectionMapSource(
+    map,
+    ELECTION_MAP_MASK_SOURCE_ID,
+    emptyElectionFeatureCollection(),
+  );
+  ensureElectionMapLayer(map, {
+    id: ELECTION_MAP_MASK_LAYER_ID,
+    type: "fill",
+    source: ELECTION_MAP_MASK_SOURCE_ID,
+    paint: {
+      "fill-color": "#020617",
+      "fill-opacity": 0.72,
+    },
+  });
+  ensureElectionMapLayer(map, {
+    id: ELECTION_MAP_DISTRICT_FILL_LAYER_ID,
+    type: "fill",
+    source: ELECTION_MAP_DISTRICT_SOURCE_ID,
+    paint: {
+      "fill-color": ["get", "fillColor"],
+      "fill-opacity": [
+        "case",
+        ["==", ["get", "selected"], true],
+        0.92,
+        ["==", ["get", "dimmed"], true],
+        0.42,
+        0.74,
+      ],
+      "fill-outline-color": "#475569",
+    },
+  });
+  ensureElectionMapLayer(map, {
+    id: ELECTION_MAP_DISTRICT_GLOW_LAYER_ID,
+    type: "line",
+    source: ELECTION_MAP_DISTRICT_SOURCE_ID,
+    paint: {
+      "line-color": "#f59e0b",
+      "line-opacity": ["case", ["==", ["get", "selected"], true], 0.86, 0],
+      "line-width": 9,
+      "line-blur": 5,
+    },
+  });
+  ensureElectionMapLayer(map, {
+    id: ELECTION_MAP_DISTRICT_LINE_LAYER_ID,
+    type: "line",
+    source: ELECTION_MAP_DISTRICT_SOURCE_ID,
+    paint: {
+      "line-color": [
+        "case",
+        ["==", ["get", "selected"], true],
+        "#fbbf24",
+        "#475569",
+      ],
+      "line-opacity": 0.94,
+      "line-width": ["case", ["==", ["get", "selected"], true], 3.2, 1.25],
+    },
+  });
+  ensureElectionMapLayer(map, {
+    id: ELECTION_MAP_STATE_LINE_LAYER_ID,
+    type: "line",
+    source: ELECTION_MAP_STATE_SOURCE_ID,
+    paint: {
+      "line-color": "#0f172a",
+      "line-opacity": 0.9,
+      "line-width": 2.25,
+    },
+  });
+}
+
+function syncElectionMapSources(map, { fit = false } = {}) {
+  const geometry = state.pages.elections.map.geometry;
+  if (!geometry) {
+    return;
+  }
+  ensureElectionMapLayers(map);
+  upsertElectionMapSource(
+    map,
+    ELECTION_MAP_STATE_SOURCE_ID,
+    geometry.stateBoundary || emptyElectionFeatureCollection(),
+  );
+  upsertElectionMapSource(
+    map,
+    ELECTION_MAP_MASK_SOURCE_ID,
+    buildElectionMapMask(geometry),
+  );
+  upsertElectionMapSource(
+    map,
+    ELECTION_MAP_DISTRICT_SOURCE_ID,
+    buildElectionDistrictFeatureCollection(geometry),
+  );
+  if (!map.__polisElectionDistrictClickBound) {
+    map.on("click", ELECTION_MAP_DISTRICT_FILL_LAYER_ID, (event) => {
+      const districtId = normalizeString(
+        event?.features?.[0]?.properties?.districtId,
+      );
+      if (districtId) {
+        navigateElectionSelection({ districtId });
+      }
+    });
+    map.on("mouseenter", ELECTION_MAP_DISTRICT_FILL_LAYER_ID, () => {
+      map.getCanvas().style.cursor = "pointer";
+    });
+    map.on("mouseleave", ELECTION_MAP_DISTRICT_FILL_LAYER_ID, () => {
+      map.getCanvas().style.cursor = "";
+    });
+    map.__polisElectionDistrictClickBound = true;
+  }
+  if (fit) {
+    const bounds = computeElectionGeometryBounds(geometry);
+    if (bounds) {
+      map.fitBounds(bounds, {
+        padding: { top: 44, right: 32, bottom: 36, left: 32 },
+        duration: 320,
+      });
+    }
+  }
+}
+
+function clearElectionMap() {
+  if (electionMapInstance) {
+    electionMapInstance.remove();
+    electionMapInstance = null;
+  }
+  electionMapContainer = null;
+}
+
+async function bindElectionMap() {
+  const mapRoot = root?.querySelector("#shared-election-map");
+  if (!mapRoot || !isElectionDayRoute()) {
+    clearElectionMap();
+    return;
+  }
+  if (!state.pages.elections.selectedStateId) {
+    return;
+  }
+  const styleUrl = getMapStyleUrl();
+  if (!styleUrl) {
+    mapRoot.innerHTML =
+      '<div class="shared-page__empty">Map style is not configured for this environment.</div>';
+    return;
+  }
+  try {
+    const maplibregl = await ensureMapLibreLoader();
+    if (electionMapInstance && electionMapContainer !== mapRoot) {
+      clearElectionMap();
+    }
+    const geometry = state.pages.elections.map.geometry;
+    const bounds = computeElectionGeometryBounds(geometry);
+    if (!electionMapInstance) {
+      electionMapContainer = mapRoot;
+      electionMapInstance = new maplibregl.Map({
+        container: mapRoot,
+        style: styleUrl,
+        center: bounds
+          ? [
+              (bounds[0][0] + bounds[1][0]) / 2,
+              (bounds[0][1] + bounds[1][1]) / 2,
+            ]
+          : [-98.5795, 39.8283],
+        zoom: bounds ? 4 : 3,
+      });
+      electionMapInstance.on("load", () =>
+        syncElectionMapSources(electionMapInstance, { fit: true }),
+      );
+      return;
+    }
+    if (electionMapInstance.isStyleLoaded()) {
+      syncElectionMapSources(electionMapInstance, { fit: true });
+    } else {
+      electionMapInstance.once("load", () =>
+        syncElectionMapSources(electionMapInstance, { fit: true }),
+      );
+    }
+  } catch {
+    mapRoot.innerHTML =
+      '<div class="shared-page__empty">Election map failed to load.</div>';
   }
 }
 
@@ -2027,6 +2517,154 @@ function formatCalendarDate(value) {
   });
 }
 
+function formatElectionDate(value) {
+  return formatCalendarDate(value);
+}
+
+function formatElectionVotes(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return "0";
+  }
+  return new Intl.NumberFormat(undefined, {
+    maximumFractionDigits: 0,
+  }).format(Math.max(0, Math.round(numeric)));
+}
+
+function formatElectionPercent(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return "0%";
+  }
+  return `${numeric.toFixed(numeric >= 10 ? 1 : 2)}%`;
+}
+
+function normalizeElectionPartyToken(value) {
+  const token = normalizeString(value).toUpperCase();
+  if (!token) return "";
+  if (token === "D" || token === "DEM" || token.includes("DEMOCRAT")) {
+    return "DEM";
+  }
+  if (
+    token === "R" ||
+    token === "REP" ||
+    token === "GOP" ||
+    token.includes("REPUBLICAN")
+  ) {
+    return "REP";
+  }
+  if (token === "I" || token === "IND" || token.includes("INDEPENDENT")) {
+    return "IND";
+  }
+  if (token === "L" || token === "LIB" || token.includes("LIBERTARIAN")) {
+    return "LIB";
+  }
+  if (token === "G" || token === "GRN" || token.includes("GREEN")) {
+    return "GRN";
+  }
+  return token.length <= 4 ? token : "OTH";
+}
+
+function electionPartyColor(value) {
+  const token = normalizeElectionPartyToken(value);
+  if (token === "DEM") return "#2563eb";
+  if (token === "REP") return "#dc2626";
+  if (token === "IND") return "#7c3aed";
+  if (token === "LIB") return "#eab308";
+  if (token === "GRN") return "#16a34a";
+  return "#26f4ee";
+}
+
+function normalizeElectionStateOption(raw = {}) {
+  return {
+    stateId: normalizeString(raw.stateId || raw.state),
+    stateName: normalizeString(raw.stateName || raw.name) || "State",
+    scope: normalizeString(raw.scope) || "federal",
+    electionId: normalizeString(raw.electionId),
+    electionName: normalizeString(raw.electionName),
+    electionType: normalizeString(raw.electionType),
+    electionDate: normalizeString(raw.electionDate),
+    status: normalizeString(raw.status),
+    active: raw.active === true || raw.isActive === true,
+    finalized: raw.finalized === true || raw.isFinalized === true,
+    future: raw.future === true || raw.isFuture === true,
+    clickable: raw.clickable === true || raw.enabled === true,
+    disabledReason: normalizeString(raw.disabledReason),
+  };
+}
+
+function electionStateOptionLabel(option = {}) {
+  const date = formatElectionDate(option.electionDate);
+  if (option.active) {
+    return date
+      ? `${option.stateName} - Live ${date}`
+      : `${option.stateName} - Live`;
+  }
+  if (option.finalized) {
+    return date
+      ? `${option.stateName} - Final ${date}`
+      : `${option.stateName} - Final`;
+  }
+  if (option.future) {
+    return date
+      ? `${option.stateName} - Next ${date}`
+      : `${option.stateName} - Upcoming`;
+  }
+  return date ? `${option.stateName} - ${date}` : option.stateName;
+}
+
+function normalizeActiveElection(raw = null) {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const stateId = normalizeString(raw.stateId || raw.state);
+  const districtId = normalizeString(raw.districtId || raw.district);
+  const electionId = normalizeString(raw.electionId);
+  const candidateId = normalizeString(raw.candidateId);
+  const scope = normalizeString(raw.scope) || "federal";
+  const path =
+    normalizeString(raw.path || raw.destinationPath) ||
+    buildElectionDayRoute({
+      scope,
+      stateId,
+      districtId,
+      electionId,
+      candidateId,
+    });
+  return {
+    scope,
+    stateId,
+    districtId,
+    electionId,
+    candidateId,
+    path,
+    electionName: normalizeString(raw.electionName),
+    electionDate: normalizeString(raw.electionDate),
+    status: normalizeString(raw.status),
+    isActive: raw.isActive === true || raw.active === true,
+  };
+}
+
+function buildElectionDayRoute({
+  scope = "federal",
+  stateId = "",
+  districtId = "",
+  electionId = "",
+  candidateId = "",
+} = {}) {
+  const query = new URLSearchParams();
+  query.set("scope", normalizeString(scope) || "federal");
+  if (normalizeString(stateId)) query.set("state", normalizeString(stateId));
+  if (normalizeString(districtId))
+    query.set("district", normalizeString(districtId));
+  if (normalizeString(electionId))
+    query.set("electionId", normalizeString(electionId));
+  if (normalizeString(candidateId))
+    query.set("candidateId", normalizeString(candidateId));
+  const queryString = query.toString();
+  return queryString ? `/election-day?${queryString}` : "/election-day";
+}
+
 function formatTermRange(startAt, endAt) {
   const startLabel = formatCalendarDate(startAt);
   const endLabel = formatCalendarDate(endAt);
@@ -2099,6 +2737,7 @@ function normalizeCandidate(raw = {}) {
     donationsEnabled: raw.donationsEnabled === true,
     donationsAvailable: raw.donationsAvailable === true,
     donationDisabledReason: normalizeString(raw.donationDisabledReason),
+    activeElection: normalizeActiveElection(raw.activeElection),
     canEdit:
       state.auth.user?.userId &&
       state.auth.user.userId ===
@@ -2125,6 +2764,7 @@ function normalizeOfficialProfile(raw = {}) {
     autoGenerated: raw.autoGenerated === true,
     autoGeneratedMessage: normalizeString(raw.autoGeneratedMessage),
     hasAccount: raw.hasAccount === true,
+    activeElection: normalizeActiveElection(raw.activeElection),
   };
 }
 
@@ -2149,6 +2789,7 @@ function normalizeAutoCandidateProfile(raw = {}) {
     electionStatus: normalizeString(raw.electionStatus),
     followersCount: Number(raw.followersCount) || 0,
     isFollowing: raw.isFollowing === true,
+    activeElection: normalizeActiveElection(raw.activeElection),
   };
 }
 
@@ -2850,6 +3491,437 @@ async function toggleCandidateFollow(candidateId, officialId = "") {
     );
   }
   scheduleRender();
+}
+
+function normalizeElectionContextPayload(payload = {}) {
+  const source =
+    payload.context && typeof payload.context === "object"
+      ? payload.context
+      : payload;
+  return {
+    serverNow: normalizeString(source.serverNow || payload.serverNow),
+    scope: normalizeString(source.scope) || "federal",
+    userStateId: normalizeString(source.userStateId),
+    userDistrictId: normalizeString(source.userDistrictId),
+    states: (source.states || [])
+      .map(normalizeElectionStateOption)
+      .filter((option) => option.stateId),
+    defaultDestination: normalizeActiveElection(source.defaultDestination),
+  };
+}
+
+function normalizeElectionCandidateResult(raw = {}) {
+  return {
+    id:
+      normalizeString(
+        raw.id || raw.candidateId || raw.entityId || raw.officialId,
+      ) || "candidate",
+    candidateId: normalizeString(raw.candidateId),
+    officialId: normalizeString(raw.officialId),
+    entityId: normalizeString(raw.entityId),
+    name: normalizeString(raw.name || raw.displayName) || "Candidate",
+    partyLabel: normalizeString(raw.partyLabel || raw.party),
+    partyToken: normalizeElectionPartyToken(
+      raw.partyToken || raw.partyCode || raw.party,
+    ),
+    avatarUrl: normalizeUrl(raw.avatarUrl || raw.photoUrl || raw.imageUrl),
+    votes: Number(raw.votes || raw.voteCount) || 0,
+    votePercent: Number(raw.votePercent || raw.percent) || 0,
+    isWinner: raw.isWinner === true || raw.winner === true,
+    isIncumbent: raw.isIncumbent === true || raw.incumbent === true,
+  };
+}
+
+function normalizeElectionRace(raw = {}) {
+  return {
+    raceId: normalizeString(raw.raceId || raw.id) || "race",
+    districtId: normalizeString(raw.districtId || raw.district),
+    districtName: normalizeString(raw.districtName || raw.districtLabel),
+    officeTitle:
+      normalizeString(raw.officeTitle || raw.office) || "Federal race",
+    raceType: normalizeString(raw.raceType),
+    stage: normalizeString(raw.stage),
+    isGeneral: raw.isGeneral === true,
+    status: normalizeString(raw.status),
+    called: raw.called === true,
+    winnerPartyToken: normalizeElectionPartyToken(raw.winnerPartyToken),
+    winnerCandidateId: normalizeString(raw.winnerCandidateId),
+    candidates: (raw.candidates || []).map(normalizeElectionCandidateResult),
+  };
+}
+
+function normalizeElectionSnapshot(payload = {}) {
+  const source =
+    payload.snapshot && typeof payload.snapshot === "object"
+      ? payload.snapshot
+      : payload;
+  return {
+    electionId: normalizeString(source.electionId),
+    electionName: normalizeString(source.electionName),
+    electionType: normalizeString(source.electionType),
+    scope: normalizeString(source.scope) || "federal",
+    stateId: normalizeString(source.stateId || source.state),
+    stateName: normalizeString(source.stateName),
+    selectedDistrictId: normalizeString(source.selectedDistrictId),
+    status: normalizeString(source.status),
+    isActive: source.isActive === true,
+    isFinalized: source.isFinalized === true,
+    isGeneral: source.isGeneral === true,
+    version: normalizeString(source.version),
+    updatedAt: normalizeString(source.updatedAt),
+    serverNow: normalizeString(source.serverNow || payload.serverNow),
+    reporting:
+      source.reporting && typeof source.reporting === "object"
+        ? source.reporting
+        : {},
+    districts: Array.isArray(source.districts) ? source.districts : [],
+    races: (source.races || []).map(normalizeElectionRace),
+  };
+}
+
+function selectedElectionStateOption() {
+  const election = state.pages.elections;
+  const selectedStateId = normalizeString(election.selectedStateId);
+  return (
+    election.context?.states?.find(
+      (option) => normalizeString(option.stateId) === selectedStateId,
+    ) || null
+  );
+}
+
+function isSelectedElectionUpcomingOnly() {
+  const option = selectedElectionStateOption();
+  return option?.future === true && option.clickable !== true;
+}
+
+function chooseElectionDefaultFromContext(context = null) {
+  const states = context?.states || [];
+  const defaultDestination = context?.defaultDestination;
+  if (defaultDestination?.stateId) {
+    return defaultDestination;
+  }
+  if (context?.userStateId) {
+    const userOption = states.find(
+      (option) => option.stateId === context.userStateId,
+    );
+    if (userOption) {
+      return {
+        scope: "federal",
+        stateId: userOption.stateId,
+        districtId: context.userDistrictId,
+        electionId: userOption.electionId,
+      };
+    }
+  }
+  const option =
+    states.find((item) => item.active || item.finalized || item.clickable) ||
+    states.find((item) => item.future) ||
+    states[0] ||
+    null;
+  return option
+    ? {
+        scope: "federal",
+        stateId: option.stateId,
+        districtId: "",
+        electionId: option.electionId,
+      }
+    : { scope: "federal", stateId: "", districtId: "", electionId: "" };
+}
+
+function applyElectionRouteSelection(context = null) {
+  const election = state.pages.elections;
+  const params = readCurrentSearchParams();
+  const routeState = normalizeString(params.get("state"));
+  const routeDistrict = normalizeString(params.get("district"));
+  const routeElectionId = normalizeString(params.get("electionId"));
+  const routeCandidateId = normalizeString(params.get("candidateId"));
+  const routeScope = normalizeString(params.get("scope")) || "federal";
+  const fallback = chooseElectionDefaultFromContext(context);
+  election.selectedScope = routeScope || fallback.scope || "federal";
+  election.selectedStateId = routeState || fallback.stateId || "";
+  election.selectedDistrictId =
+    routeState || routeDistrict ? routeDistrict : fallback.districtId || "";
+  election.selectedElectionId =
+    routeElectionId ||
+    fallback.electionId ||
+    selectedElectionStateOption()?.electionId ||
+    "";
+  election.selectedCandidateId = routeCandidateId;
+}
+
+async function loadElectionContext({ refresh = false } = {}) {
+  const election = state.pages.elections;
+  if (election.contextLoading) {
+    return election.context;
+  }
+  if (election.context && !refresh) {
+    return election.context;
+  }
+  election.contextLoading = true;
+  election.contextError = "";
+  scheduleRender();
+  try {
+    const payload = await fetchJson("/api/elections/context", {
+      auth: Boolean(state.auth.session),
+    });
+    election.context = normalizeElectionContextPayload(payload);
+    election.contextError = "";
+    return election.context;
+  } catch (error) {
+    election.contextError =
+      normalizeString(error?.message) ||
+      "Election availability failed to load.";
+    return election.context;
+  } finally {
+    election.contextLoading = false;
+    scheduleRender();
+  }
+}
+
+function electionMapCacheKey(scope, stateId) {
+  return `polis:election-map:${normalizeString(scope) || "federal"}:${normalizeString(stateId)}`;
+}
+
+function readElectionMapCache(scope, stateId) {
+  try {
+    const raw = window.localStorage?.getItem(
+      electionMapCacheKey(scope, stateId),
+    );
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed?.geometry ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeElectionMapCache(scope, stateId, geometry, etag = "") {
+  try {
+    window.localStorage?.setItem(
+      electionMapCacheKey(scope, stateId),
+      JSON.stringify({
+        geometry,
+        etag: normalizeString(etag || geometry?.etag),
+        fetchedAt: Date.now(),
+      }),
+    );
+  } catch {
+    // Local cache is opportunistic.
+  }
+}
+
+async function fetchElectionMapGeometry(scope, stateId, etag = "") {
+  const baseUrl = getApiBaseUrl();
+  if (!baseUrl) {
+    throw new Error("video_backend_base_url_missing");
+  }
+  const query = new URLSearchParams({
+    scope: normalizeString(scope) || "federal",
+    state: normalizeString(stateId),
+  });
+  const headers = { Accept: "application/json" };
+  if (normalizeString(etag)) {
+    headers["If-None-Match"] = normalizeString(etag);
+  }
+  const response = await fetch(`${baseUrl}/api/elections/map?${query}`, {
+    headers,
+  });
+  if (response.status === 304) {
+    return { notModified: true, etag };
+  }
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(
+      normalizeString(payload?.message || payload?.error) ||
+        "election_map_failed",
+    );
+  }
+  const geometry = payload.geometry || payload;
+  return {
+    geometry,
+    etag:
+      normalizeString(response.headers.get("ETag")) ||
+      normalizeString(payload.etag || geometry?.etag),
+  };
+}
+
+async function loadElectionMapGeometry({ refresh = false } = {}) {
+  const election = state.pages.elections;
+  const stateId = normalizeString(election.selectedStateId);
+  if (!stateId) {
+    return;
+  }
+  const scope = normalizeString(election.selectedScope) || "federal";
+  const cached = readElectionMapCache(scope, stateId);
+  if (cached?.geometry && !election.map.geometry) {
+    election.map.geometry = cached.geometry;
+    election.map.etag = normalizeString(cached.etag || cached.geometry.etag);
+    scheduleRender();
+  }
+  election.map.loading = true;
+  election.map.error = "";
+  scheduleRender();
+  try {
+    const fetched = await fetchElectionMapGeometry(
+      scope,
+      stateId,
+      refresh ? "" : normalizeString(cached?.etag || election.map.etag),
+    );
+    if (
+      normalizeString(state.pages.elections.selectedStateId) !== stateId ||
+      normalizeString(state.pages.elections.selectedScope) !== scope
+    ) {
+      return;
+    }
+    if (fetched.notModified && cached?.geometry) {
+      election.map.geometry = cached.geometry;
+      election.map.etag = normalizeString(cached.etag);
+    } else if (fetched.geometry) {
+      election.map.geometry = fetched.geometry;
+      election.map.etag = normalizeString(
+        fetched.etag || fetched.geometry.etag,
+      );
+      writeElectionMapCache(
+        scope,
+        stateId,
+        election.map.geometry,
+        election.map.etag,
+      );
+    }
+    election.map.error = "";
+  } catch (error) {
+    election.map.error =
+      normalizeString(error?.message) || "Election map failed to load.";
+  } finally {
+    election.map.loading = false;
+    scheduleRender();
+  }
+}
+
+async function loadElectionResults({ manual = false } = {}) {
+  const election = state.pages.elections;
+  const stateId = normalizeString(election.selectedStateId);
+  if (!stateId || isSelectedElectionUpcomingOnly()) {
+    election.results.snapshot = null;
+    election.results.loading = false;
+    election.results.error = "";
+    election.results.loaded = false;
+    configureElectionPolling();
+    scheduleRender();
+    return;
+  }
+  if (manual) {
+    election.results.loading = true;
+    election.results.error = "";
+    scheduleRender();
+  }
+  const query = new URLSearchParams({
+    scope: normalizeString(election.selectedScope) || "federal",
+    state: stateId,
+  });
+  if (normalizeString(election.selectedDistrictId)) {
+    query.set("district", normalizeString(election.selectedDistrictId));
+  }
+  if (normalizeString(election.selectedElectionId)) {
+    query.set("electionId", normalizeString(election.selectedElectionId));
+  }
+  try {
+    const payload = await fetchJson(`/api/elections/results?${query}`, {
+      auth: Boolean(state.auth.session),
+    });
+    const snapshot = normalizeElectionSnapshot(payload);
+    const previous = election.results.snapshot;
+    if (!manual && previous?.version && previous.version === snapshot.version) {
+      configureElectionPolling(snapshot);
+      return;
+    }
+    election.results.previousSnapshot = previous;
+    election.results.snapshot = snapshot;
+    election.selectedElectionId =
+      normalizeString(election.selectedElectionId) || snapshot.electionId;
+    election.results.loaded = true;
+    election.results.error = "";
+    configureElectionPolling(snapshot);
+  } catch (error) {
+    election.results.error =
+      normalizeString(error?.message) || "Election results failed to load.";
+  } finally {
+    election.results.loading = false;
+    scheduleRender();
+  }
+}
+
+function clearElectionPolling() {
+  if (electionPollTimer) {
+    window.clearInterval(electionPollTimer);
+    electionPollTimer = null;
+  }
+}
+
+function configureElectionPolling(
+  snapshot = state.pages.elections.results.snapshot,
+) {
+  clearElectionPolling();
+  if (
+    document.hidden ||
+    !isElectionDayRoute() ||
+    !snapshot?.isActive ||
+    snapshot?.isFinalized
+  ) {
+    return;
+  }
+  electionPollTimer = window.setInterval(() => {
+    if (isElectionDayRoute()) {
+      loadElectionResults().catch(() => {});
+    }
+  }, 15000);
+}
+
+async function loadElectionDayPage({ refresh = false } = {}) {
+  const election = state.pages.elections;
+  const context = await loadElectionContext({ refresh });
+  applyElectionRouteSelection(context);
+  if (
+    election.map.geometry &&
+    (normalizeString(election.map.geometry.stateId) !==
+      normalizeString(election.selectedStateId) ||
+      normalizeString(election.map.geometry.scope) !==
+        (normalizeString(election.selectedScope) || "federal"))
+  ) {
+    election.map.geometry = null;
+    election.map.etag = "";
+  }
+  if (refresh) {
+    election.map.geometry = null;
+    election.map.etag = "";
+    election.results.snapshot = null;
+    election.results.previousSnapshot = null;
+  }
+  await Promise.all([
+    loadElectionMapGeometry({ refresh }).catch(() => {}),
+    loadElectionResults({ manual: true }).catch(() => {}),
+  ]);
+}
+
+function navigateElectionSelection({ stateId, districtId, electionId } = {}) {
+  const election = state.pages.elections;
+  navigateTo(
+    buildElectionDayRoute({
+      scope: election.selectedScope || "federal",
+      stateId:
+        stateId !== undefined
+          ? stateId
+          : normalizeString(election.selectedStateId),
+      districtId:
+        districtId !== undefined
+          ? districtId
+          : normalizeString(election.selectedDistrictId),
+      electionId:
+        electionId !== undefined
+          ? electionId
+          : normalizeString(election.selectedElectionId),
+    }),
+  );
 }
 
 async function saveCandidateFromForm(formData) {
@@ -4944,8 +6016,15 @@ async function loadCurrentRoute({ refresh = false } = {}) {
   }
 
   const routeKey = normalizeString(route.routeKey);
+  if (routeKey !== ROUTE_KEY_ELECTION_DAY) {
+    clearElectionPolling();
+  }
   if (routeKey === ROUTE_KEY_CANDIDATES) {
     await loadCandidateList({ refresh });
+    return;
+  }
+  if (routeKey === ROUTE_KEY_ELECTION_DAY) {
+    await loadElectionDayPage({ refresh });
     return;
   }
   if (routeKey === ROUTE_KEY_OFFICIAL_DETAIL) {
@@ -5266,6 +6345,13 @@ function getNavItems() {
       active: activeSection === "candidates",
     },
     {
+      label: "Election Day",
+      key: "elections",
+      icon: "election",
+      path: "/election-day",
+      active: activeSection === "elections",
+    },
+    {
       label: "Events",
       key: "events",
       icon: "calendar",
@@ -5306,6 +6392,8 @@ function renderIcon(name) {
     feed: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h7v7H4zM13 5h7v7h-7zM4 14h7v5H4zM13 14h7v5h-7z"></path></svg>',
     candidate:
       '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a4 4 0 1 1 0 8 4 4 0 0 1 0-8Zm0 10c4.418 0 8 2.239 8 5v3H4v-3c0-2.761 3.582-5 8-5Z"></path></svg>',
+    election:
+      '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h14v18H5V3Zm2 2v14h10V5H7Zm2 2h6v2H9V7Zm0 4h6v2H9v-2Zm0 4h4v2H9v-2Z"></path></svg>',
     create:
       '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 4h2v7h7v2h-7v7h-2v-7H4v-2h7z"></path></svg>',
     calendar:
@@ -5403,9 +6491,11 @@ function renderTopChrome() {
                 ? "Profile"
                 : getRouteSection() === "events"
                   ? "Events"
-                  : getRouteSection() === "candidates"
-                    ? "Candidates"
-                    : "Polis",
+                  : getRouteSection() === "elections"
+                    ? "Election Day"
+                    : getRouteSection() === "candidates"
+                      ? "Candidates"
+                      : "Polis",
           )}</div>`
         : ""
     }</div>
@@ -5837,6 +6927,275 @@ function renderFeedOverviewPage() {
   </section>`;
 }
 
+function electionStatusLabel(snapshot = null, option = null) {
+  if (option?.future && option.clickable !== true) return "Upcoming";
+  if (snapshot?.isActive || option?.active) return "Live";
+  if (snapshot?.isFinalized || option?.finalized) return "Final";
+  return "Election";
+}
+
+function electionReportingLine(snapshot = null) {
+  if (!snapshot) return "Select a state to view federal race results.";
+  const reporting = snapshot.reporting || {};
+  const precinctsReported = Number(reporting.precinctsReported);
+  const precinctsTotal = Number(reporting.precinctsTotal);
+  const percent = Number(reporting.percent);
+  const parts = [];
+  if (
+    Number.isFinite(precinctsReported) &&
+    Number.isFinite(precinctsTotal) &&
+    precinctsTotal > 0
+  ) {
+    parts.push(
+      `${formatElectionVotes(precinctsReported)} of ${formatElectionVotes(precinctsTotal)} precincts`,
+    );
+  }
+  if (Number.isFinite(percent) && percent > 0) {
+    parts.push(`${formatElectionPercent(percent)} reporting`);
+  }
+  if (snapshot.updatedAt) {
+    parts.push(`Updated ${formatCalendarDate(snapshot.updatedAt)}`);
+  }
+  return parts.join(" · ") || "Results update as vote totals are reported.";
+}
+
+function electionPreviousCandidateMap(snapshot = null) {
+  const map = new Map();
+  for (const race of snapshot?.races || []) {
+    for (const candidate of race.candidates || []) {
+      map.set(`${race.raceId}:${candidate.id}`, candidate);
+    }
+  }
+  return map;
+}
+
+function groupElectionRaces(snapshot = null, selectedDistrictId = "") {
+  const races = snapshot?.races || [];
+  if (!races.length) return [];
+  const selectedDistrict = normalizeString(selectedDistrictId);
+  if (selectedDistrict) {
+    return [{ title: selectedDistrict, races }];
+  }
+  const groups = new Map();
+  for (const race of races) {
+    const key = normalizeString(race.districtId) || "statewide";
+    const title =
+      normalizeString(race.districtName || race.districtId) || "Statewide";
+    const entry = groups.get(key) || { title, races: [] };
+    entry.races.push(race);
+    groups.set(key, entry);
+  }
+  return Array.from(groups.values()).sort((left, right) =>
+    left.title.localeCompare(right.title),
+  );
+}
+
+function renderElectionControls(election, selectedOption) {
+  const states = election.context?.states || [];
+  const stateOptions = states
+    .map((option) => {
+      const selected =
+        normalizeString(option.stateId) ===
+        normalizeString(election.selectedStateId);
+      return `<option value="${escapeHtml(option.stateId)}"${selected ? " selected" : ""}${option.clickable || selected ? "" : " disabled"}>${escapeHtml(electionStateOptionLabel(option))}</option>`;
+    })
+    .join("");
+  return `<div class="shared-election-controls">
+    <label>
+      <span>Race level</span>
+      <select data-election-control="scope">
+        <option value="federal" selected>Federal</option>
+        <option value="state" disabled>State</option>
+        <option value="local" disabled>Local</option>
+      </select>
+    </label>
+    <label>
+      <span>State</span>
+      <select data-election-control="state"${states.length ? "" : " disabled"}>
+        ${stateOptions || '<option value="">No elections available</option>'}
+      </select>
+    </label>
+    ${
+      selectedOption?.future && selectedOption.clickable !== true
+        ? `<div class="shared-election-controls__hint">Next Election Date ${escapeHtml(formatElectionDate(selectedOption.electionDate) || "unavailable")}</div>`
+        : ""
+    }
+  </div>`;
+}
+
+function renderElectionMapPanel(election) {
+  const selectedDistrict = normalizeString(election.selectedDistrictId);
+  return `<section class="shared-election-map-panel">
+    <div class="shared-election-map" id="shared-election-map">
+      ${
+        election.map.loading && !election.map.geometry
+          ? '<div class="shared-page__loading">Loading election map…</div>'
+          : ""
+      }
+      ${
+        election.map.error && !election.map.geometry
+          ? `<div class="shared-page__error">${escapeHtml(election.map.error)}</div>`
+          : ""
+      }
+    </div>
+    <div class="shared-election-map-panel__chrome">
+      <span>${escapeHtml(selectedDistrict || `${election.selectedStateId || "State"} view`)}</span>
+      ${
+        selectedDistrict
+          ? '<button class="shared-feed-chip" data-action="election-state-view">State view</button>'
+          : ""
+      }
+    </div>
+  </section>`;
+}
+
+function renderElectionCandidateRow(candidate, race, previousCandidateMap) {
+  const previous = previousCandidateMap.get(`${race.raceId}:${candidate.id}`);
+  const changed =
+    previous &&
+    (Number(previous.votes) !== Number(candidate.votes) ||
+      Number(previous.votePercent) !== Number(candidate.votePercent));
+  const color = electionPartyColor(
+    candidate.partyToken || candidate.partyLabel,
+  );
+  const width = Math.max(0, Math.min(100, Number(candidate.votePercent) || 0));
+  return `<div class="shared-election-candidate${candidate.isWinner ? " is-winner" : ""}${changed ? " is-updated" : ""}" style="--party-color:${escapeHtml(color)}">
+    ${
+      candidate.avatarUrl
+        ? `<img class="shared-election-candidate__avatar" src="${escapeHtml(candidate.avatarUrl)}" alt="${escapeHtml(candidate.name)}" />`
+        : `<div class="shared-election-candidate__avatar shared-election-candidate__avatar--placeholder">${escapeHtml(candidate.name.slice(0, 1).toUpperCase() || "C")}</div>`
+    }
+    <div class="shared-election-candidate__body">
+      <div class="shared-election-candidate__topline">
+        <strong>${escapeHtml(candidate.name)}</strong>
+        <span>${escapeHtml(candidate.partyLabel || candidate.partyToken || "Other")}</span>
+      </div>
+      <div class="shared-election-candidate__bar">
+        <span style="width:${width}%"></span>
+      </div>
+    </div>
+    <div class="shared-election-candidate__numbers">
+      <strong data-election-counter data-from="${escapeHtml(String(previous?.votes ?? candidate.votes))}" data-to="${escapeHtml(String(candidate.votes))}">${escapeHtml(formatElectionVotes(candidate.votes))}</strong>
+      <span>${escapeHtml(formatElectionPercent(candidate.votePercent))}</span>
+      ${candidate.isWinner ? "<em>Winner</em>" : ""}
+    </div>
+  </div>`;
+}
+
+function renderElectionRaceCard(race, previousCandidateMap) {
+  const orderedCandidates = [...(race.candidates || [])].sort(
+    (left, right) => Number(right.votes) - Number(left.votes),
+  );
+  return `<article class="shared-election-race">
+    <div class="shared-election-race__header">
+      <div>
+        <div class="shared-card__meta">
+          ${race.districtId ? `<span>${escapeHtml(race.districtId)}</span>` : ""}
+          ${race.stage ? `<span>${escapeHtml(humanizeLabel(race.stage))}</span>` : ""}
+          ${race.called ? "<span>Called</span>" : ""}
+        </div>
+        <h3>${escapeHtml(race.officeTitle)}</h3>
+      </div>
+      ${
+        race.called
+          ? `<span class="shared-election-status shared-election-status--called">Called</span>`
+          : ""
+      }
+    </div>
+    <div class="shared-election-race__candidates">
+      ${orderedCandidates
+        .map((candidate) =>
+          renderElectionCandidateRow(candidate, race, previousCandidateMap),
+        )
+        .join("")}
+    </div>
+  </article>`;
+}
+
+function renderElectionResults(election, selectedOption) {
+  if (selectedOption?.future && selectedOption.clickable !== true) {
+    return `<section class="shared-election-upcoming">
+      <h2>Next Election Date ${escapeHtml(formatElectionDate(selectedOption.electionDate) || "unavailable")}</h2>
+      <p>${escapeHtml(selectedOption.electionName || "Federal results will appear here when vote totals are available.")}</p>
+    </section>`;
+  }
+  const snapshot = election.results.snapshot;
+  if (election.results.loading && !snapshot) {
+    return '<div class="shared-page__loading">Loading election results…</div>';
+  }
+  if (election.results.error && !snapshot) {
+    return `<div class="shared-page__error">${escapeHtml(election.results.error)}</div>`;
+  }
+  if (!snapshot) {
+    return '<div class="shared-page__empty">No federal race results are available for this selection.</div>';
+  }
+  const previousCandidateMap = electionPreviousCandidateMap(
+    election.results.previousSnapshot,
+  );
+  const groups = groupElectionRaces(snapshot, election.selectedDistrictId);
+  return `<section class="shared-election-results">
+    <div class="shared-election-results__header">
+      <div>
+        <h2>${escapeHtml(snapshot.electionName || "Federal election")}</h2>
+        <p>${escapeHtml(electionReportingLine(snapshot))}</p>
+      </div>
+      <span class="shared-election-status">${escapeHtml(electionStatusLabel(snapshot, selectedOption))}</span>
+    </div>
+    ${
+      groups.length
+        ? groups
+            .map(
+              (group) => `<div class="shared-election-group">
+                <h3>${escapeHtml(group.title)}</h3>
+                ${group.races
+                  .map((race) =>
+                    renderElectionRaceCard(race, previousCandidateMap),
+                  )
+                  .join("")}
+              </div>`,
+            )
+            .join("")
+        : '<div class="shared-page__empty">No federal race results are available for this selection.</div>'
+    }
+  </section>`;
+}
+
+function renderElectionDayPage() {
+  const election = state.pages.elections;
+  const selectedOption = selectedElectionStateOption();
+  const snapshot = election.results.snapshot;
+  const status = electionStatusLabel(snapshot, selectedOption);
+  const subtitle =
+    selectedOption?.future && selectedOption.clickable !== true
+      ? `Next Election Date ${formatElectionDate(selectedOption.electionDate) || "unavailable"}`
+      : electionReportingLine(snapshot);
+  return `<section class="shared-page shared-election-page">
+    ${renderTopChrome()}
+    <div class="shared-page__content">
+      <div class="shared-page__header shared-page__header--hero">
+        <div>
+          <p class="shared-page__eyebrow">Election Day</p>
+          <h1>Live election results</h1>
+          <p>${escapeHtml(subtitle)}</p>
+          <div class="shared-card__meta">
+            <span>${escapeHtml(status)}</span>
+            ${election.selectedStateId ? `<span>${escapeHtml(election.selectedStateId)}</span>` : ""}
+            ${election.selectedDistrictId ? `<span>${escapeHtml(election.selectedDistrictId)}</span>` : ""}
+          </div>
+        </div>
+        <div class="shared-card__actions">
+          <button class="shared-feed-chip shared-feed-chip--primary" data-action="election-refresh">Refresh</button>
+          <button class="shared-feed-chip" data-action="open-app-shell">Open app</button>
+        </div>
+      </div>
+      ${election.contextError ? `<div class="shared-page__error">${escapeHtml(election.contextError)}</div>` : ""}
+      ${renderElectionMapPanel(election)}
+      ${renderElectionControls(election, selectedOption)}
+      ${renderElectionResults(election, selectedOption)}
+    </div>
+  </section>`;
+}
+
 function renderCandidateListPage() {
   const list = state.pages.candidates.list;
   const currentPath = getCurrentPathWithQuery();
@@ -5848,6 +7207,9 @@ function renderCandidateListPage() {
           <p class="shared-page__eyebrow">Candidates</p>
           <h1>Candidate pages</h1>
           <p>Browse candidates, follow campaigns, and open full candidate detail pages from the browser.</p>
+        </div>
+        <div class="shared-card__actions">
+          <button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="/election-day">${renderIcon("election")} Election Day</button>
         </div>
       </div>
       <form class="shared-form shared-form--inline" data-route-form="candidates-filter">
@@ -5895,6 +7257,11 @@ function renderCandidateListPage() {
                 </div>
                 <div class="shared-card__actions">
                   <button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="${escapeHtml(resolveCandidateOpenRoute(candidate, currentPath))}">Open</button>
+                  ${
+                    candidate.activeElection?.path
+                      ? `<button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(candidate.activeElection.path)}">${renderIcon("election")} Results</button>`
+                      : ""
+                  }
                   ${
                     resolveCandidateFollowTarget(candidate).candidateId ||
                     resolveCandidateFollowTarget(candidate).officialId
@@ -5968,6 +7335,11 @@ function renderCandidateDetailPage() {
         </div>
         <div class="shared-card__actions">
           <button class="shared-feed-chip shared-feed-chip--primary" data-action="candidate-follow" data-candidate-id="${escapeHtml(candidate.candidateId)}" data-official-id="${escapeHtml(officialId)}">${candidate.isFollowing ? "Following" : "Follow"}</button>
+          ${
+            candidate.activeElection?.path
+              ? `<button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(candidate.activeElection.path)}">${renderIcon("election")} Results</button>`
+              : ""
+          }
           ${
             candidate.canEdit
               ? `<button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(resolveCandidateEditRoute(candidate))}">${isEditRoute ? "Editing" : "Edit page"}</button>`
@@ -6089,6 +7461,11 @@ function renderOfficialDetailPage() {
         </div>
         <div class="shared-card__actions">
           <button class="shared-feed-chip shared-feed-chip--primary" data-action="candidate-follow" data-candidate-id="" data-official-id="${escapeHtml(official.officialId)}">${official.isFollowing ? "Following" : "Follow"}</button>
+          ${
+            official.activeElection?.path
+              ? `<button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(official.activeElection.path)}">${renderIcon("election")} Results</button>`
+              : ""
+          }
           <button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(buildOfficialReportCardRoute(official.officialId, { returnTo: getCurrentPathWithQuery() }))}">Report Card</button>
           ${
             official.officialUrl
@@ -6152,6 +7529,11 @@ function renderAutoCandidateDetailPage() {
           </div>
         </div>
         <div class="shared-card__actions">
+          ${
+            candidate.activeElection?.path
+              ? `<button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="${escapeHtml(candidate.activeElection.path)}">${renderIcon("election")} Results</button>`
+              : ""
+          }
           ${
             candidate.hasAccount && candidate.linkedCandidateId
               ? `<button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="/candidates/${escapeHtml(encodeURIComponent(candidate.linkedCandidateId))}">Open Claimed Polis Profile</button>`
@@ -7337,6 +8719,9 @@ function renderRouteStage() {
   if (routeKey === ROUTE_KEY_CANDIDATES) {
     return renderCandidateListPage();
   }
+  if (routeKey === ROUTE_KEY_ELECTION_DAY) {
+    return renderElectionDayPage();
+  }
   if (routeKey === ROUTE_KEY_OFFICIAL_DETAIL) {
     return renderOfficialDetailPage();
   }
@@ -7725,8 +9110,44 @@ function renderApp() {
   bindObservers();
   bindVideos();
   bindEventsMap().catch(() => {});
+  bindElectionMap().catch(() => {});
+  bindElectionCounters();
   restorePlaybackState(playbackSnapshot);
   focusComposerIfNeeded();
+}
+
+function bindElectionCounters() {
+  const counters = Array.from(root.querySelectorAll("[data-election-counter]"));
+  if (!counters.length) {
+    return;
+  }
+  const reduceMotion = window.matchMedia?.(
+    "(prefers-reduced-motion: reduce)",
+  )?.matches;
+  counters.forEach((counter) => {
+    const from = Number(counter.getAttribute("data-from"));
+    const to = Number(counter.getAttribute("data-to"));
+    if (
+      !Number.isFinite(from) ||
+      !Number.isFinite(to) ||
+      from === to ||
+      reduceMotion
+    ) {
+      counter.textContent = formatElectionVotes(to);
+      return;
+    }
+    const startedAt = performance.now();
+    const duration = 720;
+    const tick = (now) => {
+      const progress = Math.min(1, Math.max(0, (now - startedAt) / duration));
+      const eased = 1 - Math.pow(1 - progress, 3);
+      counter.textContent = formatElectionVotes(from + (to - from) * eased);
+      if (progress < 1) {
+        window.requestAnimationFrame(tick);
+      }
+    };
+    window.requestAnimationFrame(tick);
+  });
 }
 
 function focusComposerIfNeeded() {
@@ -8357,6 +9778,18 @@ function handleRootClick(event) {
     return;
   }
 
+  if (action === "election-refresh") {
+    loadElectionDayPage({ refresh: true }).catch(() => {
+      showToast("Election results refresh failed.");
+    });
+    return;
+  }
+
+  if (action === "election-state-view") {
+    navigateElectionSelection({ districtId: "" });
+    return;
+  }
+
   if (action === "toggle-like") {
     handlePostLike(target.getAttribute("data-post-id")).catch(() => {});
     return;
@@ -8923,6 +10356,36 @@ function handleRootInput(event) {
   updateScrubber(postId, video);
 }
 
+function handleRootChange(event) {
+  const control = event.target.closest("[data-election-control]");
+  if (!control) {
+    return;
+  }
+  const controlKind = normalizeString(
+    control.getAttribute("data-election-control"),
+  );
+  if (controlKind === "scope") {
+    if (normalizeString(control.value) !== "federal") {
+      control.value = "federal";
+    }
+    return;
+  }
+  if (controlKind === "state") {
+    const stateId = normalizeString(control.value);
+    if (!stateId) {
+      return;
+    }
+    const option = (state.pages.elections.context?.states || []).find(
+      (item) => normalizeString(item.stateId) === stateId,
+    );
+    navigateElectionSelection({
+      stateId,
+      districtId: "",
+      electionId: normalizeString(option?.electionId),
+    });
+  }
+}
+
 function handleCommentSubmit(event) {
   const routeForm = event.target.closest("[data-route-form]");
   if (routeForm) {
@@ -9070,11 +10533,22 @@ async function bootstrapAuth() {
 function attachGlobalListeners() {
   root?.addEventListener("click", handleRootClick);
   root?.addEventListener("input", handleRootInput);
+  root?.addEventListener("change", handleRootChange);
   root?.addEventListener("submit", handleCommentSubmit);
   window.addEventListener("popstate", () => {
     state.route = parseRouteFromLocation(window.location.pathname);
     loadCurrentRoute().catch(() => {});
     scheduleRender();
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      clearElectionPolling();
+      return;
+    }
+    if (isElectionDayRoute()) {
+      configureElectionPolling();
+      loadElectionResults().catch(() => {});
+    }
   });
   window.addEventListener(
     "pointerdown",

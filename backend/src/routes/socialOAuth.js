@@ -1,6 +1,11 @@
 const express = require("express");
+const crypto = require("crypto");
 
 const router = express.Router();
+const callbackFormParser = express.urlencoded({ extended: false });
+const callbackJsonParser = express.json({
+  type: ["application/json", "application/*+json"],
+});
 
 function normalizeString(value) {
   if (value === undefined || value === null) {
@@ -80,6 +85,17 @@ function buildCompletionUrl(req, {
   }
   url.searchParams.set("path", "/settings/connected-accounts");
   return url.toString();
+}
+
+function buildDataDeletionResponse(req, provider) {
+  const origin = requestOrigin(req);
+  const confirmationCode = `polis-${provider || "social"}-${crypto
+    .randomBytes(8)
+    .toString("hex")}`;
+  return {
+    url: `${origin}/delete-account.html`,
+    confirmation_code: confirmationCode,
+  };
 }
 
 function normalizeAppPath(value) {
@@ -338,6 +354,36 @@ router.get("/oauth/:platform/callback", async (req, res) => {
     );
   }
 });
+
+router.get("/oauth/:platform/deauthorize", (req, res) => {
+  const provider = normalizeString(req.params.platform).toLowerCase();
+  res.json({ ok: true, provider });
+});
+
+router.post(
+  "/oauth/:platform/deauthorize",
+  callbackFormParser,
+  callbackJsonParser,
+  (req, res) => {
+    const provider = normalizeString(req.params.platform).toLowerCase();
+    res.json({ ok: true, provider });
+  },
+);
+
+router.get("/oauth/:platform/data-deletion", (req, res) => {
+  const provider = normalizeString(req.params.platform).toLowerCase();
+  res.json(buildDataDeletionResponse(req, provider));
+});
+
+router.post(
+  "/oauth/:platform/data-deletion",
+  callbackFormParser,
+  callbackJsonParser,
+  (req, res) => {
+    const provider = normalizeString(req.params.platform).toLowerCase();
+    res.json(buildDataDeletionResponse(req, provider));
+  },
+);
 
 router.get("/oauth/complete", (req, res) => {
   const origin = requestOrigin(req);
