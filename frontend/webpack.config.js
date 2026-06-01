@@ -296,7 +296,7 @@ module.exports = {
       favicon: "./src/assets/images/polis/Polis.png",
     }),
     staticElectionDayShell("election-day.html"),
-    staticElectionDayShell("election-day"),
+    staticElectionDayShell("election-day/index.html"),
   ],
   devServer: {
     proxy: [
