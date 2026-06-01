@@ -1076,14 +1076,26 @@ function ensureMediaPreconnect() {
   });
 }
 
-function getMapStyleUrl() {
+function getMapStyle() {
   const styleUrl = normalizeString(runtimeConfig.map?.styleUrl);
   if (styleUrl) {
     return styleUrl;
   }
   const mapTilerApiKey = normalizeString(runtimeConfig.map?.maptilerApiKey);
   if (!mapTilerApiKey) {
-    return "";
+    return {
+      version: 8,
+      sources: {},
+      layers: [
+        {
+          id: "background",
+          type: "background",
+          paint: {
+            "background-color": "#111822",
+          },
+        },
+      ],
+    };
   }
   return `https://api.maptiler.com/maps/streets/style.json?key=${encodeURIComponent(mapTilerApiKey)}`;
 }
@@ -1194,12 +1206,7 @@ async function bindEventsMap() {
     clearEventsMap();
     return;
   }
-  const styleUrl = getMapStyleUrl();
-  if (!styleUrl) {
-    mapRoot.innerHTML =
-      '<div class="shared-page__empty">Map style is not configured for this environment.</div>';
-    return;
-  }
+  const mapStyle = getMapStyle();
   try {
     const maplibregl = await ensureMapLibreLoader();
     if (
@@ -1220,7 +1227,7 @@ async function bindEventsMap() {
     if (!eventsMapInstance) {
       eventsMapInstance = new maplibregl.Map({
         container: mapRoot,
-        style: styleUrl,
+        style: mapStyle,
         center: locations[0]
           ? [locations[0].coordinates.lng, locations[0].coordinates.lat]
           : [-111.891, 40.761],
@@ -1661,12 +1668,7 @@ async function bindElectionMap() {
   if (!state.pages.elections.selectedStateId) {
     return;
   }
-  const styleUrl = getMapStyleUrl();
-  if (!styleUrl) {
-    mapRoot.innerHTML =
-      '<div class="shared-page__empty">Map style is not configured for this environment.</div>';
-    return;
-  }
+  const mapStyle = getMapStyle();
   try {
     const maplibregl = await ensureMapLibreLoader();
     if (electionMapInstance && electionMapContainer !== mapRoot) {
@@ -1678,7 +1680,7 @@ async function bindElectionMap() {
       electionMapContainer = mapRoot;
       electionMapInstance = new maplibregl.Map({
         container: mapRoot,
-        style: styleUrl,
+        style: mapStyle,
         center: bounds
           ? [
               (bounds[0][0] + bounds[1][0]) / 2,
@@ -2506,7 +2508,14 @@ function formatCalendarDate(value) {
   if (!normalized) {
     return "";
   }
-  const date = new Date(normalized);
+  const dateOnlyMatch = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const date = dateOnlyMatch
+    ? new Date(
+        Number(dateOnlyMatch[1]),
+        Number(dateOnlyMatch[2]) - 1,
+        Number(dateOnlyMatch[3]),
+      )
+    : new Date(normalized);
   if (Number.isNaN(date.getTime())) {
     return normalized;
   }
