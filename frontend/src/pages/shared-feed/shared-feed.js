@@ -453,6 +453,8 @@ let eventsMapInstance = null;
 let eventsMapMarkers = [];
 let electionMapInstance = null;
 let electionMapContainer = null;
+let electionMapHost = null;
+let electionMapLastFitKey = "";
 let electionPollTimer = null;
 let messagingTypingStopTimer = null;
 let messagingSessionRetained = false;
@@ -1611,6 +1613,31 @@ function ensureElectionMapLayers(map) {
   });
 }
 
+function electionMapFitKey(geometry = null) {
+  const stateId = normalizeString(geometry?.stateId);
+  if (!stateId) {
+    return "";
+  }
+  return [
+    normalizeString(geometry?.scope) || "federal",
+    stateId,
+    normalizeString(geometry?.mapVersion || geometry?.etag),
+  ].join(":");
+}
+
+function attachElectionMapContainer(mapRoot) {
+  if (!electionMapContainer) {
+    electionMapContainer = document.createElement("div");
+    electionMapContainer.className = "shared-election-map__canvas";
+  }
+  if (electionMapContainer.parentElement !== mapRoot) {
+    mapRoot.replaceChildren(electionMapContainer);
+    electionMapHost = mapRoot;
+    electionMapInstance?.resize?.();
+  }
+  return electionMapContainer;
+}
+
 function syncElectionMapSources(map, { fit = false } = {}) {
   const geometry = state.pages.elections.map.geometry;
   if (!geometry) {
@@ -1637,7 +1664,11 @@ function syncElectionMapSources(map, { fit = false } = {}) {
       const districtId = normalizeString(
         event?.features?.[0]?.properties?.districtId,
       );
-      if (districtId) {
+      if (
+        districtId &&
+        districtId !==
+          normalizeString(state.pages.elections.selectedDistrictId)
+      ) {
         navigateElectionSelection({ districtId });
       }
     });
@@ -1656,6 +1687,7 @@ function syncElectionMapSources(map, { fit = false } = {}) {
         padding: { top: 44, right: 32, bottom: 36, left: 32 },
         duration: 320,
       });
+      electionMapLastFitKey = electionMapFitKey(geometry);
     }
   }
 }
@@ -1666,6 +1698,8 @@ function clearElectionMap() {
     electionMapInstance = null;
   }
   electionMapContainer = null;
+  electionMapHost = null;
+  electionMapLastFitKey = "";
 }
 
 async function bindElectionMap() {
@@ -1680,15 +1714,14 @@ async function bindElectionMap() {
   const mapStyle = getMapStyle();
   try {
     const maplibregl = await ensureMapLibreLoader();
-    if (electionMapInstance && electionMapContainer !== mapRoot) {
-      clearElectionMap();
-    }
+    const mapContainer = attachElectionMapContainer(mapRoot);
     const geometry = state.pages.elections.map.geometry;
     const bounds = computeElectionGeometryBounds(geometry);
+    const fitKey = electionMapFitKey(geometry);
+    const shouldFit = Boolean(fitKey) && fitKey !== electionMapLastFitKey;
     if (!electionMapInstance) {
-      electionMapContainer = mapRoot;
       electionMapInstance = new maplibregl.Map({
-        container: mapRoot,
+        container: mapContainer,
         style: mapStyle,
         center: bounds
           ? [
@@ -1703,14 +1736,19 @@ async function bindElectionMap() {
       );
       return;
     }
+    if (electionMapHost !== mapRoot) {
+      attachElectionMapContainer(mapRoot);
+    }
+    electionMapInstance.resize();
     if (electionMapInstance.isStyleLoaded()) {
-      syncElectionMapSources(electionMapInstance, { fit: true });
+      syncElectionMapSources(electionMapInstance, { fit: shouldFit });
     } else {
       electionMapInstance.once("load", () =>
-        syncElectionMapSources(electionMapInstance, { fit: true }),
+        syncElectionMapSources(electionMapInstance, { fit: shouldFit }),
       );
     }
-  } catch {
+  } catch (error) {
+    console.warn("[shared-feed.election-map] failed to bind map", error);
     mapRoot.innerHTML =
       '<div class="shared-page__empty">Election map failed to load.</div>';
   }
@@ -3916,6 +3954,13 @@ async function loadElectionDayPage({ refresh = false } = {}) {
   const election = state.pages.elections;
   const context = await loadElectionContext({ refresh });
   applyElectionRouteSelection(context);
+  const shouldLoadMap =
+    refresh ||
+    !election.map.geometry ||
+    normalizeString(election.map.geometry.stateId) !==
+      normalizeString(election.selectedStateId) ||
+    normalizeString(election.map.geometry.scope) !==
+      (normalizeString(election.selectedScope) || "federal");
   if (
     election.map.geometry &&
     (normalizeString(election.map.geometry.stateId) !==
@@ -3933,7 +3978,9 @@ async function loadElectionDayPage({ refresh = false } = {}) {
     election.results.previousSnapshot = null;
   }
   await Promise.all([
-    loadElectionMapGeometry({ refresh }).catch(() => {}),
+    shouldLoadMap
+      ? loadElectionMapGeometry({ refresh }).catch(() => {})
+      : Promise.resolve(),
     loadElectionResults({ manual: true }).catch(() => {}),
   ]);
 }

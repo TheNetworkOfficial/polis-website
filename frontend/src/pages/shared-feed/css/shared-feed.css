@@ -1531,6 +1531,11 @@ a {
   min-height: min(58vh, 560px);
 }
 
+.shared-election-map__canvas {
+  width: 100%;
+  min-height: min(58vh, 560px);
+}
+
 .shared-election-map .maplibregl-canvas {
   outline: none;
 }
