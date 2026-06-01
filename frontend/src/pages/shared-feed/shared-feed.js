@@ -3649,6 +3649,13 @@ function applyElectionRouteSelection(context = null) {
   election.selectedCandidateId = routeCandidateId;
 }
 
+function electionApiPath(path, { auth = false } = {}) {
+  const suffix = normalizeString(path).startsWith("/")
+    ? normalizeString(path)
+    : `/${normalizeString(path)}`;
+  return `${auth ? "/api/elections" : "/api/public/elections"}${suffix}`;
+}
+
 async function loadElectionContext({ refresh = false } = {}) {
   const election = state.pages.elections;
   if (election.contextLoading) {
@@ -3661,9 +3668,13 @@ async function loadElectionContext({ refresh = false } = {}) {
   election.contextError = "";
   scheduleRender();
   try {
-    const payload = await fetchJson("/api/elections/context", {
-      auth: Boolean(state.auth.session),
-    });
+    const useAuth = Boolean(state.auth.session);
+    const payload = await fetchJson(
+      electionApiPath("/context", { auth: useAuth }),
+      {
+        auth: useAuth,
+      },
+    );
     election.context = normalizeElectionContextPayload(payload);
     election.contextError = "";
     return election.context;
@@ -3723,9 +3734,12 @@ async function fetchElectionMapGeometry(scope, stateId, etag = "") {
   if (normalizeString(etag)) {
     headers["If-None-Match"] = normalizeString(etag);
   }
-  const response = await fetch(`${baseUrl}/api/elections/map?${query}`, {
-    headers,
-  });
+  const response = await fetch(
+    `${baseUrl}${electionApiPath("/map")}?${query}`,
+    {
+      headers,
+    },
+  );
   if (response.status === 304) {
     return { notModified: true, etag };
   }
@@ -3826,9 +3840,13 @@ async function loadElectionResults({ manual = false } = {}) {
     query.set("electionId", normalizeString(election.selectedElectionId));
   }
   try {
-    const payload = await fetchJson(`/api/elections/results?${query}`, {
-      auth: Boolean(state.auth.session),
-    });
+    const useAuth = Boolean(state.auth.session);
+    const payload = await fetchJson(
+      `${electionApiPath("/results", { auth: useAuth })}?${query}`,
+      {
+        auth: useAuth,
+      },
+    );
     const snapshot = normalizeElectionSnapshot(payload);
     const previous = election.results.snapshot;
     if (!manual && previous?.version && previous.version === snapshot.version) {
