@@ -3604,14 +3604,12 @@ function chooseElectionDefaultFromContext(context = null) {
     const userOption = states.find(
       (option) => option.stateId === context.userStateId,
     );
-    if (userOption) {
-      return {
-        scope: "federal",
-        stateId: userOption.stateId,
-        districtId: context.userDistrictId,
-        electionId: userOption.electionId,
-      };
-    }
+    return {
+      scope: "federal",
+      stateId: userOption?.stateId || context.userStateId,
+      districtId: context.userDistrictId,
+      electionId: userOption?.electionId || "",
+    };
   }
   const option =
     states.find((item) => item.active || item.finalized || item.clickable) ||
@@ -7015,7 +7013,7 @@ function renderElectionControls(election, selectedOption) {
       const selected =
         normalizeString(option.stateId) ===
         normalizeString(election.selectedStateId);
-      return `<option value="${escapeHtml(option.stateId)}"${selected ? " selected" : ""}${option.clickable || selected ? "" : " disabled"}>${escapeHtml(electionStateOptionLabel(option))}</option>`;
+      return `<option value="${escapeHtml(option.stateId)}"${selected ? " selected" : ""}>${escapeHtml(electionStateOptionLabel(option))}</option>`;
     })
     .join("");
   return `<div class="shared-election-controls">

@@ -5,6 +5,110 @@ const webpack = require("webpack");
 const path = require("path");
 
 const deleteAccountUrl = process.env.DELETE_ACCOUNT_PUBLIC_URL || "";
+const webAppApiBaseUrl =
+  process.env.VIDEO_BACKEND_BASE_URL || process.env.CTA_API_BASE_URL || "";
+
+function serializeInlineJson(value) {
+  return JSON.stringify(value)
+    .replace(/</g, "\\u003c")
+    .replace(/>/g, "\\u003e")
+    .replace(/&/g, "\\u0026")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+}
+
+function buildStaticSharedFeedShellHtml({
+  route,
+  routeKey,
+  title,
+  description,
+  eyebrow,
+  headline,
+  supportingCopy,
+  requiresAuth = false,
+}) {
+  const runtimeConfig = {
+    brandName: "Polis",
+    route,
+    routeKey,
+    routeParams: {},
+    requiresAuth,
+    requestUrl: "",
+    canonicalUrl: "",
+    publicWebBaseUrl: process.env.PUBLIC_WEB_BASE_URL || "",
+    apiBaseUrl: webAppApiBaseUrl,
+    appUrlScheme:
+      process.env.APP_URL_SCHEME ||
+      process.env.STRIPE_RETURN_URL_SCHEME ||
+      "myapp",
+    iosStoreUrl: process.env.CTA_IOS_STORE_URL || "",
+    androidStoreUrl: process.env.CTA_ANDROID_STORE_URL || "",
+    auth: {
+      region: process.env.COGNITO_REGION || "",
+      clientId: process.env.COGNITO_APP_CLIENT_ID || "",
+      domain: process.env.COGNITO_DOMAIN || "",
+      scopes: process.env.COGNITO_SCOPES || "",
+      enablePasswordFlow: process.env.COGNITO_ENABLE_PASSWORD_FLOW || "false",
+      redirectUri: process.env.COGNITO_REDIRECT_URI || "",
+    },
+    map: {
+      styleUrl: process.env.VOTER_MAP_STYLE_URL || "",
+      maptilerApiKey: process.env.MAPTILER_API_KEY || "",
+    },
+    messaging: {
+      wsUrl:
+        process.env.MESSAGING_WS_URL || process.env.MESSAGING_GATEWAY_URL || "",
+    },
+  };
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="${description}" />
+    <title>${title}</title>
+  </head>
+  <body>
+    <div id="shared-feed-app">
+      <div class="shared-feed-shell-fallback">
+        <div class="shared-feed-shell-fallback__card">
+          <p class="shared-feed-shell-fallback__eyebrow">${eyebrow}</p>
+          <h1>${headline}</h1>
+          <p>${supportingCopy}</p>
+          <div class="shared-feed-shell-fallback__actions">
+            <button class="shared-feed-shell-fallback__button shared-feed-shell-fallback__button--primary" type="button">Loading...</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script>
+      window.__POLIS_WEB_APP__ = ${serializeInlineJson(runtimeConfig)};
+      window.__POLIS_SHARED_FEED__ = window.__POLIS_WEB_APP__;
+    </script>
+  </body>
+</html>`;
+}
+
+function staticElectionDayShell(filename) {
+  return new HtmlWebpackPlugin({
+    templateContent: buildStaticSharedFeedShellHtml({
+      route: "/election-day",
+      routeKey: "election-day",
+      title: "Election Day | Polis",
+      description:
+        "Track live and finalized federal election results in Polis.",
+      eyebrow: "Election Day",
+      headline: "Live election results",
+      supportingCopy:
+        "Follow federal race results, district maps, reporting status, and called winners from the browser.",
+      requiresAuth: false,
+    }),
+    filename,
+    chunks: ["shared-feed"],
+    favicon: "./src/assets/images/polis/Polis.png",
+  });
+}
+
 const deleteAccountDefineEnv = {
   __DELETE_ACCOUNT_API_BASE_URL__: JSON.stringify(
     process.env.DELETE_ACCOUNT_API_BASE_URL || "",
@@ -191,6 +295,8 @@ module.exports = {
       chunks: ["main", "notFound"],
       favicon: "./src/assets/images/polis/Polis.png",
     }),
+    staticElectionDayShell("election-day.html"),
+    staticElectionDayShell("election-day"),
   ],
   devServer: {
     proxy: [
