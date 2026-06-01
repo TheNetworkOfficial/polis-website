@@ -63,6 +63,9 @@ const ELECTION_MAP_DISTRICT_FILL_LAYER_ID = "shared-election-district-fill";
 const ELECTION_MAP_DISTRICT_GLOW_LAYER_ID = "shared-election-district-glow";
 const ELECTION_MAP_DISTRICT_LINE_LAYER_ID = "shared-election-district-line";
 const ELECTION_MAP_MASK_LAYER_ID = "shared-election-mask";
+const PRODUCTION_VIDEO_BACKEND_BASE_URL =
+  "https://b3nfp5rv5m.execute-api.us-west-2.amazonaws.com/prod";
+const PRODUCTION_WEB_HOSTS = new Set(["polisapp.io", "www.polisapp.io"]);
 
 function normalizePathname(value) {
   const normalized = normalizeString(value);
@@ -227,7 +230,7 @@ const state = {
   auth: {
     config: {
       ...(runtimeConfig.auth || {}),
-      apiBaseUrl: runtimeConfig.apiBaseUrl,
+      apiBaseUrl: getApiBaseUrl(),
     },
     session: null,
     user: null,
@@ -711,7 +714,13 @@ function getShareUrl(postId) {
 }
 
 function getApiBaseUrl() {
-  return normalizeString(runtimeConfig.apiBaseUrl).replace(/\/+$/g, "");
+  const configured = normalizeString(runtimeConfig.apiBaseUrl).replace(
+    /\/+$/g,
+    "",
+  );
+  if (configured) return configured;
+  const host = normalizeString(window.location.hostname).toLowerCase();
+  return PRODUCTION_WEB_HOSTS.has(host) ? PRODUCTION_VIDEO_BACKEND_BASE_URL : "";
 }
 
 function getStoreUrls() {
@@ -3744,6 +3753,7 @@ async function fetchElectionMapGeometry(scope, stateId, etag = "") {
   const response = await fetch(
     `${baseUrl}${electionApiPath("/map")}?${query}`,
     {
+      cache: "no-cache",
       headers,
     },
   );
