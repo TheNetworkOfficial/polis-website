@@ -1536,6 +1536,71 @@ a {
   min-height: min(58vh, 560px);
 }
 
+.shared-election-map__svg-fallback {
+  position: relative;
+  width: 100%;
+  min-height: min(58vh, 560px);
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.shared-election-map-svg {
+  width: 100%;
+  height: min(58vh, 560px);
+  display: block;
+}
+
+.shared-election-map-svg__district {
+  stroke: #475569;
+  stroke-width: 1.25;
+  vector-effect: non-scaling-stroke;
+  fill-opacity: 0.74;
+  transition:
+    fill-opacity 160ms ease,
+    stroke 160ms ease;
+}
+
+.shared-election-map-svg__district[data-action] {
+  cursor: pointer;
+}
+
+.shared-election-map-svg__district.is-selected {
+  stroke: #fbbf24;
+  stroke-width: 3;
+  fill-opacity: 0.92;
+}
+
+.shared-election-map-svg__district.is-dimmed {
+  fill-opacity: 0.42;
+}
+
+.shared-election-map-svg__district[data-action]:hover {
+  stroke: #f8fafc;
+  fill-opacity: 0.9;
+}
+
+.shared-election-map-svg__boundary {
+  fill: none;
+  stroke: #0f172a;
+  stroke-width: 2.25;
+  vector-effect: non-scaling-stroke;
+}
+
+.shared-election-map__fallback-note {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  max-width: min(320px, calc(100% - 32px));
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  background: rgba(2, 6, 23, 0.72);
+  color: rgba(248, 250, 252, 0.82);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
 .shared-election-map .maplibregl-canvas {
   outline: none;
 }

@@ -461,6 +461,8 @@ let electionMapInstance = null;
 let electionMapContainer = null;
 let electionMapHost = null;
 let electionMapLastFitKey = "";
+let electionMapWebGlUnavailable = false;
+let electionMapWebGlFailureLogged = false;
 let electionPollTimer = null;
 let messagingTypingStopTimer = null;
 let messagingSessionRetained = false;
@@ -1632,6 +1634,140 @@ function electionMapFitKey(geometry = null) {
   ].join(":");
 }
 
+function electionMapAdjustedLongitude(lng, west, east) {
+  let adjusted = normalizeElectionLongitude(lng);
+  if (adjusted === null) return null;
+  while (adjusted < west) adjusted += 360;
+  while (adjusted > east) adjusted -= 360;
+  if (adjusted < west) adjusted += 360;
+  return adjusted;
+}
+
+function electionMapMercatorY(lat) {
+  const clamped = Math.max(-85, Math.min(85, Number(lat) || 0));
+  const radians = (clamped * Math.PI) / 180;
+  return Math.log(Math.tan(Math.PI / 4 + radians / 2));
+}
+
+function electionMapSvgProjector(bounds, width, height) {
+  const west = bounds?.[0]?.[0];
+  const south = bounds?.[0]?.[1];
+  const east = bounds?.[1]?.[0];
+  const north = bounds?.[1]?.[1];
+  const xSpan = Math.max(0.000001, east - west);
+  const northY = electionMapMercatorY(north);
+  const southY = electionMapMercatorY(south);
+  const ySpan = Math.max(0.000001, northY - southY);
+  return (point) => {
+    if (!Array.isArray(point) || point.length < 2) return null;
+    const lng = electionMapAdjustedLongitude(point[0], west, east);
+    const lat = Number(point[1]);
+    if (lng === null || !Number.isFinite(lat)) return null;
+    const x = ((lng - west) / xSpan) * width;
+    const y = ((northY - electionMapMercatorY(lat)) / ySpan) * height;
+    return [x, y];
+  };
+}
+
+function electionMapSvgPathForRings(rings, project) {
+  return (Array.isArray(rings) ? rings : [])
+    .map((ring) => {
+      const points = (Array.isArray(ring) ? ring : [])
+        .map(project)
+        .filter(Boolean);
+      if (points.length < 3) return "";
+      return `${points
+        .map(
+          ([x, y], index) =>
+            `${index === 0 ? "M" : "L"}${x.toFixed(2)} ${y.toFixed(2)}`,
+        )
+        .join(" ")} Z`;
+    })
+    .filter(Boolean)
+    .join(" ");
+}
+
+function electionMapSvgPathForGeometry(geometry, project) {
+  if (!geometry || typeof geometry !== "object") return "";
+  const type = normalizeString(geometry.type).toLowerCase();
+  if (type === "polygon") {
+    return electionMapSvgPathForRings(geometry.coordinates, project);
+  }
+  if (type === "multipolygon") {
+    return (Array.isArray(geometry.coordinates) ? geometry.coordinates : [])
+      .map((polygon) => electionMapSvgPathForRings(polygon, project))
+      .filter(Boolean)
+      .join(" ");
+  }
+  return "";
+}
+
+function electionMapSvgPathForFeatureCollection(collection, project) {
+  return (Array.isArray(collection?.features) ? collection.features : [])
+    .map((feature) => electionMapSvgPathForGeometry(feature?.geometry, project))
+    .filter(Boolean)
+    .join(" ");
+}
+
+function renderElectionMapSvgFallback(mapRoot, reason = "") {
+  const geometry = state.pages.elections.map.geometry;
+  if (!mapRoot || !geometry) return;
+  if (electionMapInstance) {
+    electionMapInstance.remove();
+    electionMapInstance = null;
+  }
+  const bounds = computeElectionGeometryBounds(geometry);
+  if (!bounds) return;
+  const lngSpan = Math.max(0.000001, bounds[1][0] - bounds[0][0]);
+  const latSpan = Math.max(0.000001, bounds[1][1] - bounds[0][1]);
+  const width = 1000;
+  const height = Math.max(420, Math.min(760, (latSpan / lngSpan) * width));
+  const project = electionMapSvgProjector(bounds, width, height);
+  const districts = buildElectionDistrictFeatureCollection(geometry);
+  const canSelectDistrict = electionDistrictSelectionEnabled();
+  const districtPaths = (Array.isArray(districts.features)
+    ? districts.features
+    : []
+  )
+    .map((feature) => {
+      const districtId = normalizeString(feature?.properties?.districtId);
+      const path = electionMapSvgPathForGeometry(feature?.geometry, project);
+      if (!districtId || !path) return "";
+      const selected = feature?.properties?.selected === true;
+      const dimmed = feature?.properties?.dimmed === true;
+      const fillColor = normalizeString(feature?.properties?.fillColor) || "#e2e8f0";
+      const actionAttrs = canSelectDistrict
+        ? ` data-action="election-district-select" data-district-id="${escapeHtml(districtId)}" tabindex="0" role="button"`
+        : "";
+      return `<path class="shared-election-map-svg__district${selected ? " is-selected" : ""}${dimmed ? " is-dimmed" : ""}" d="${path}" fill="${escapeHtml(fillColor)}"${actionAttrs}><title>${escapeHtml(feature?.properties?.name || districtId)}</title></path>`;
+    })
+    .join("");
+  const boundaryPath = electionMapSvgPathForFeatureCollection(
+    geometry.stateBoundary,
+    project,
+  );
+  const fallback = document.createElement("div");
+  fallback.className = "shared-election-map__svg-fallback";
+  fallback.innerHTML = `<svg class="shared-election-map-svg" viewBox="0 0 ${width} ${height.toFixed(0)}" role="img" aria-label="${escapeHtml(geometry.stateName || geometry.stateId || "Election map")}" preserveAspectRatio="xMidYMid meet">
+    <rect width="${width}" height="${height.toFixed(0)}" fill="#111822"></rect>
+    <g>${districtPaths}</g>
+    ${
+      boundaryPath
+        ? `<path class="shared-election-map-svg__boundary" d="${boundaryPath}"></path>`
+        : ""
+    }
+  </svg>
+  ${
+    reason
+      ? `<div class="shared-election-map__fallback-note">${escapeHtml(reason)}</div>`
+      : ""
+  }`;
+  mapRoot.replaceChildren(fallback);
+  electionMapContainer = fallback;
+  electionMapHost = mapRoot;
+  electionMapLastFitKey = electionMapFitKey(geometry);
+}
+
 function attachElectionMapContainer(mapRoot) {
   if (!electionMapContainer) {
     electionMapContainer = document.createElement("div");
@@ -1721,6 +1857,10 @@ async function bindElectionMap() {
   if (!state.pages.elections.selectedStateId) {
     return;
   }
+  if (electionMapWebGlUnavailable) {
+    renderElectionMapSvgFallback(mapRoot);
+    return;
+  }
   const mapStyle = getMapStyle();
   try {
     const maplibregl = await ensureMapLibreLoader();
@@ -1758,9 +1898,15 @@ async function bindElectionMap() {
       );
     }
   } catch (error) {
-    console.warn("[shared-feed.election-map] failed to bind map", error);
-    mapRoot.innerHTML =
-      '<div class="shared-page__empty">Election map failed to load.</div>';
+    electionMapWebGlUnavailable = true;
+    renderElectionMapSvgFallback(
+      mapRoot,
+      "Map rendered without WebGL in this browser.",
+    );
+    if (!electionMapWebGlFailureLogged) {
+      console.warn("[shared-feed.election-map] using SVG fallback", error);
+      electionMapWebGlFailureLogged = true;
+    }
   }
 }
 
