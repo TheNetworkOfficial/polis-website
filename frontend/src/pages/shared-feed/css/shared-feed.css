@@ -1852,7 +1852,11 @@ a {
 }
 
 .shared-election-custom-add {
-  grid-template-columns: minmax(190px, 0.8fr) minmax(160px, 0.5fr) auto;
+  grid-template-columns:
+    minmax(150px, 0.55fr)
+    minmax(190px, 0.8fr)
+    minmax(160px, 0.5fr)
+    auto;
 }
 
 .shared-election-custom-toolbar label,
@@ -1982,6 +1986,19 @@ a {
 
 .shared-election-custom-column h3 {
   margin: 0;
+}
+
+.shared-election-custom-state-group {
+  display: grid;
+  gap: 12px;
+}
+
+.shared-election-custom-state-group h4 {
+  margin: 0;
+  color: var(--sf-muted);
+  font-size: 0.88rem;
+  font-weight: 800;
+  text-transform: uppercase;
 }
 
 .shared-election-results__header,
