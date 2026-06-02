@@ -3066,6 +3066,33 @@ function electionScopeRequiresAuth(scope) {
   return ELECTION_AUTH_SCOPES.has(normalizeElectionScope(scope));
 }
 
+function isLikelyAuthRequestFailure(error) {
+  const status = Number(error?.status || 0);
+  if (status === 401 || status === 403) return true;
+  const message = normalizeString(error?.message).toLowerCase();
+  return (
+    error?.name === "TypeError" &&
+    (message.includes("failed to fetch") || message.includes("networkerror"))
+  );
+}
+
+function clearStaleAuthSession() {
+  clearSharedFeedSession();
+  state.auth.session = null;
+  state.auth.user = null;
+}
+
+async function refreshElectionAuthSession() {
+  const session = await restoreSharedFeedSession(state.auth.config);
+  if (!session) {
+    clearStaleAuthSession();
+    return null;
+  }
+  state.auth.session = session;
+  state.auth.user = getAuthenticatedUser(session);
+  return session;
+}
+
 function normalizeElectionStringList(value) {
   return Array.isArray(value)
     ? Array.from(
@@ -5027,6 +5054,15 @@ async function loadElectionCustomViews({ refresh = false } = {}) {
     election.selectedCustomViewId = "";
     return [];
   }
+  if (!(await refreshElectionAuthSession())) {
+    election.customViews.items = [];
+    election.customViews.loading = false;
+    election.customViews.error = "";
+    election.selectedCustomViewId = "";
+    openAuthModal("election_custom_views");
+    scheduleRender();
+    return [];
+  }
   if (election.customViews.loading) {
     return election.customViews.items;
   }
@@ -5056,6 +5092,14 @@ async function loadElectionCustomViews({ refresh = false } = {}) {
     election.customViews.error = "";
     return election.customViews.items;
   } catch (error) {
+    if (isLikelyAuthRequestFailure(error)) {
+      clearStaleAuthSession();
+      election.customViews.items = [];
+      election.selectedCustomViewId = "";
+      openAuthModal("election_custom_views");
+      showToast("Please sign in again.");
+      return election.customViews.items;
+    }
     election.customViews.error =
       normalizeString(error?.message) || "Custom views failed to load.";
     return election.customViews.items;
@@ -5088,6 +5132,10 @@ function createElectionCustomDraft(view = null) {
 async function saveElectionCustomDraft() {
   const election = state.pages.elections;
   if (!state.auth.session) {
+    openAuthModal("election_custom_views");
+    return;
+  }
+  if (!(await refreshElectionAuthSession())) {
     openAuthModal("election_custom_views");
     return;
   }
@@ -5125,6 +5173,12 @@ async function saveElectionCustomDraft() {
     });
     loadElectionResults({ manual: true }).catch(() => {});
   } catch (error) {
+    if (isLikelyAuthRequestFailure(error)) {
+      clearStaleAuthSession();
+      openAuthModal("election_custom_views");
+      showToast("Please sign in again.");
+      return;
+    }
     election.customViews.error =
       normalizeString(error?.message) || "Custom view save failed.";
     showToast("Custom view save failed.");
@@ -5138,6 +5192,10 @@ async function deleteElectionCustomView(viewId) {
   const election = state.pages.elections;
   const normalizedViewId = normalizeString(viewId);
   if (!state.auth.session || !normalizedViewId) return;
+  if (!(await refreshElectionAuthSession())) {
+    openAuthModal("election_custom_views");
+    return;
+  }
   election.customViews.saving = true;
   election.customViews.error = "";
   scheduleRender();
@@ -5164,6 +5222,12 @@ async function deleteElectionCustomView(viewId) {
     });
     loadElectionResults({ manual: true }).catch(() => {});
   } catch (error) {
+    if (isLikelyAuthRequestFailure(error)) {
+      clearStaleAuthSession();
+      openAuthModal("election_custom_views");
+      showToast("Please sign in again.");
+      return;
+    }
     election.customViews.error =
       normalizeString(error?.message) || "Custom view delete failed.";
     showToast("Custom view delete failed.");
@@ -5177,6 +5241,10 @@ async function copyElectionCustomShareLink(viewId) {
   const election = state.pages.elections;
   const normalizedViewId = normalizeString(viewId);
   if (!state.auth.session || !normalizedViewId) {
+    openAuthModal("election_custom_views");
+    return;
+  }
+  if (!(await refreshElectionAuthSession())) {
     openAuthModal("election_custom_views");
     return;
   }
@@ -5220,6 +5288,12 @@ async function copyElectionCustomShareLink(viewId) {
       window.prompt("Copy share link", shareUrl.toString());
     }
   } catch (error) {
+    if (isLikelyAuthRequestFailure(error)) {
+      clearStaleAuthSession();
+      openAuthModal("election_custom_views");
+      showToast("Please sign in again.");
+      return;
+    }
     election.customViews.error =
       normalizeString(error?.message) || "Share link failed.";
     showToast("Share link failed.");
@@ -5443,11 +5517,30 @@ async function loadElectionResults({ manual = false } = {}) {
   ) {
     query.set("viewId", normalizeString(election.selectedCustomViewId));
   }
+  const authRequired =
+    electionScopeRequiresAuth(scope) &&
+    !(scope === ELECTION_SCOPE_CUSTOM && customShareId);
+  let useAuth =
+    scope === ELECTION_SCOPE_CUSTOM && customShareId
+      ? false
+      : authRequired || Boolean(state.auth.session);
+  if (useAuth) {
+    const session = await refreshElectionAuthSession();
+    if (!session) {
+      useAuth = false;
+      if (authRequired) {
+        election.results.snapshot = null;
+        election.results.loading = false;
+        election.results.error = "";
+        election.results.loaded = false;
+        configureElectionPolling();
+        openAuthModal("election_custom_views");
+        scheduleRender();
+        return;
+      }
+    }
+  }
   try {
-    const useAuth =
-      scope === ELECTION_SCOPE_CUSTOM && customShareId
-        ? false
-        : electionScopeRequiresAuth(scope) || Boolean(state.auth.session);
     const payload = await fetchJson(
       `${electionApiPath("/results", { auth: useAuth })}?${query}`,
       {
@@ -5483,6 +5576,20 @@ async function loadElectionResults({ manual = false } = {}) {
     election.results.error = "";
     configureElectionPolling(snapshot);
   } catch (error) {
+    if (useAuth && isLikelyAuthRequestFailure(error)) {
+      clearStaleAuthSession();
+      if (authRequired) {
+        election.results.snapshot = null;
+        election.results.error = "";
+        election.results.loaded = false;
+        configureElectionPolling();
+        openAuthModal("election_custom_views");
+        showToast("Please sign in again.");
+      } else {
+        loadElectionResults({ manual }).catch(() => {});
+      }
+      return;
+    }
     election.results.error =
       normalizeString(error?.message) || "Election results failed to load.";
   } finally {
