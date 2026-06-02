@@ -1649,7 +1649,7 @@ function electionMapMercatorY(lat) {
   return Math.log(Math.tan(Math.PI / 4 + radians / 2));
 }
 
-function electionMapSvgProjector(bounds, width, height) {
+function electionMapSvgProjector(bounds, width, height, padding = 0) {
   const west = bounds?.[0]?.[0];
   const south = bounds?.[0]?.[1];
   const east = bounds?.[1]?.[0];
@@ -1658,13 +1658,16 @@ function electionMapSvgProjector(bounds, width, height) {
   const northY = electionMapMercatorY(north);
   const southY = electionMapMercatorY(south);
   const ySpan = Math.max(0.000001, northY - southY);
+  const innerWidth = Math.max(1, width - padding * 2);
+  const innerHeight = Math.max(1, height - padding * 2);
   return (point) => {
     if (!Array.isArray(point) || point.length < 2) return null;
     const lng = electionMapAdjustedLongitude(point[0], west, east);
     const lat = Number(point[1]);
     if (lng === null || !Number.isFinite(lat)) return null;
-    const x = ((lng - west) / xSpan) * width;
-    const y = ((northY - electionMapMercatorY(lat)) / ySpan) * height;
+    const x = padding + ((lng - west) / xSpan) * innerWidth;
+    const y =
+      padding + ((northY - electionMapMercatorY(lat)) / ySpan) * innerHeight;
     return [x, y];
   };
 }
@@ -1718,11 +1721,19 @@ function renderElectionMapSvgFallback(mapRoot, reason = "") {
   }
   const bounds = computeElectionGeometryBounds(geometry);
   if (!bounds) return;
-  const lngSpan = Math.max(0.000001, bounds[1][0] - bounds[0][0]);
-  const latSpan = Math.max(0.000001, bounds[1][1] - bounds[0][1]);
+  const lngSpanRadians =
+    Math.max(0.000001, bounds[1][0] - bounds[0][0]) * (Math.PI / 180);
+  const mercatorSpan = Math.max(
+    0.000001,
+    electionMapMercatorY(bounds[1][1]) - electionMapMercatorY(bounds[0][1]),
+  );
   const width = 1000;
-  const height = Math.max(420, Math.min(760, (latSpan / lngSpan) * width));
-  const project = electionMapSvgProjector(bounds, width, height);
+  const padding = 36;
+  const height = Math.max(
+    420,
+    Math.min(860, (mercatorSpan / lngSpanRadians) * width),
+  );
+  const project = electionMapSvgProjector(bounds, width, height, padding);
   const districts = buildElectionDistrictFeatureCollection(geometry);
   const canSelectDistrict = electionDistrictSelectionEnabled();
   const districtPaths = (Array.isArray(districts.features)
@@ -1739,7 +1750,7 @@ function renderElectionMapSvgFallback(mapRoot, reason = "") {
       const actionAttrs = canSelectDistrict
         ? ` data-action="election-district-select" data-district-id="${escapeHtml(districtId)}" tabindex="0" role="button"`
         : "";
-      return `<path class="shared-election-map-svg__district${selected ? " is-selected" : ""}${dimmed ? " is-dimmed" : ""}" d="${path}" fill="${escapeHtml(fillColor)}"${actionAttrs}><title>${escapeHtml(feature?.properties?.name || districtId)}</title></path>`;
+      return `<path class="shared-election-map-svg__district${selected ? " is-selected" : ""}${dimmed ? " is-dimmed" : ""}" d="${path}" fill="${escapeHtml(fillColor)}" fill-rule="evenodd"${actionAttrs}><title>${escapeHtml(feature?.properties?.name || districtId)}</title></path>`;
     })
     .join("");
   const boundaryPath = electionMapSvgPathForFeatureCollection(
