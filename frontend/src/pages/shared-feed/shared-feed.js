@@ -1343,9 +1343,7 @@ function collectElectionCoordinates(node, out) {
 function computeElectionGeometryBounds(geometry = null) {
   const coordinates = [];
   collectElectionCoordinates(geometry?.stateBoundary, coordinates);
-  if (!coordinates.length) {
-    collectElectionCoordinates(geometry?.districts, coordinates);
-  }
+  collectElectionCoordinates(geometry?.districts, coordinates);
   if (!coordinates.length) {
     return null;
   }
@@ -1635,12 +1633,19 @@ function electionMapFitKey(geometry = null) {
 }
 
 function electionMapAdjustedLongitude(lng, west, east) {
-  let adjusted = normalizeElectionLongitude(lng);
+  const adjusted = normalizeElectionLongitude(lng);
   if (adjusted === null) return null;
-  while (adjusted < west) adjusted += 360;
-  while (adjusted > east) adjusted -= 360;
-  if (adjusted < west) adjusted += 360;
-  return adjusted;
+  const center = (Number(west) + Number(east)) / 2;
+  if (!Number.isFinite(center)) {
+    return adjusted;
+  }
+  return [adjusted - 360, adjusted, adjusted + 360].reduce(
+    (best, candidate) =>
+      Math.abs(candidate - center) < Math.abs(best - center)
+        ? candidate
+        : best,
+    adjusted,
+  );
 }
 
 function electionMapMercatorY(lat) {
