@@ -1543,12 +1543,15 @@ a {
   display: grid;
   place-items: center;
   padding: 24px;
+  overflow: hidden;
 }
 
 .shared-election-map-svg {
   width: 100%;
+  max-width: 100%;
   height: min(58vh, 560px);
   display: block;
+  overflow: hidden;
   shape-rendering: geometricPrecision;
 }
 
