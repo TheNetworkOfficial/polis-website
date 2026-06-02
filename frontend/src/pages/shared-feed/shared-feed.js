@@ -4933,7 +4933,10 @@ async function loadElectionContext({ refresh = false } = {}) {
   election.contextError = "";
   scheduleRender();
   try {
-    const useAuth = Boolean(state.auth.session);
+    let useAuth = false;
+    if (state.auth.session) {
+      useAuth = Boolean(await refreshElectionAuthSession().catch(() => null));
+    }
     const payload = await fetchJson(
       electionApiPath("/context", { auth: useAuth }),
       {
@@ -4951,6 +4954,20 @@ async function loadElectionContext({ refresh = false } = {}) {
     election.contextError = "";
     return election.context;
   } catch (error) {
+    if (isLikelyAuthRequestFailure(error)) {
+      clearStaleAuthSession();
+      try {
+        const payload = await fetchJson(electionApiPath("/context"));
+        election.context = normalizeElectionContextPayload(payload);
+        election.contextError = "";
+        return election.context;
+      } catch (fallbackError) {
+        election.contextError =
+          normalizeString(fallbackError?.message) ||
+          "Election availability failed to load.";
+        return election.context;
+      }
+    }
     election.contextError =
       normalizeString(error?.message) ||
       "Election availability failed to load.";
