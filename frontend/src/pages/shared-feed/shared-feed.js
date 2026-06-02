@@ -65,9 +65,21 @@ const ELECTION_MAP_DISTRICT_LINE_LAYER_ID = "shared-election-district-line";
 const ELECTION_MAP_MASK_LAYER_ID = "shared-election-mask";
 const ELECTION_SCOPE_FEDERAL = "federal";
 const ELECTION_SCOPE_STATE = "state";
+const ELECTION_SCOPE_MY_DISTRICT = "my-district";
+const ELECTION_SCOPE_CUSTOM = "custom";
 const ELECTION_SCOPE_LOCAL = "local";
+const ELECTION_AUTH_SCOPES = new Set([
+  ELECTION_SCOPE_MY_DISTRICT,
+  ELECTION_SCOPE_CUSTOM,
+]);
 const ELECTION_STATE_RACE_TYPES = ["statewide", "house", "senate"];
 const ELECTION_STATE_MAP_CHAMBERS = ["house", "senate"];
+const ELECTION_CUSTOM_VIEW_MAX_COUNT = 3;
+const ELECTION_MAP_SVG_MIN_SCALE = 1;
+const ELECTION_MAP_SVG_MAX_SCALE = 9;
+const ELECTION_MAP_SVG_ZOOM_STEP = 1.35;
+const CANDIDATE_PARTY_COLLAPSE_STORAGE_KEY =
+  "polis:candidates:collapsed-party-groups";
 const PRODUCTION_VIDEO_BACKEND_BASE_URL =
   "https://b3nfp5rv5m.execute-api.us-west-2.amazonaws.com/prod";
 const PRODUCTION_WEB_HOSTS = new Set(["polisapp.io", "www.polisapp.io"]);
@@ -297,6 +309,8 @@ const state = {
       selectedElectionId: "",
       selectedCandidateId: "",
       selectedRaceType: "statewide",
+      selectedPartyFilter: "all",
+      selectedCustomViewId: "",
       map: {
         geometry: null,
         etag: "",
@@ -309,6 +323,18 @@ const state = {
         loading: false,
         error: "",
         loaded: false,
+      },
+      customViews: {
+        items: [],
+        loading: false,
+        error: "",
+        saving: false,
+        editing: false,
+        draft: null,
+        addType: "federal-senate",
+        addDistrict: "",
+        maxViews: ELECTION_CUSTOM_VIEW_MAX_COUNT,
+        maxItemsPerView: 30,
       },
     },
     events: {
@@ -464,6 +490,9 @@ let electionMapLastFitKey = "";
 let electionMapWebGlUnavailable = false;
 let electionMapWebGlFailureLogged = false;
 let electionPollTimer = null;
+let electionMapSvgViewState = { fitKey: "", scale: 1, x: 0, y: 0 };
+let candidateCollapsedPartyGroups = new Set();
+let candidateCollapsedPartyGroupsLoaded = false;
 let messagingTypingStopTimer = null;
 let messagingSessionRetained = false;
 
@@ -1717,6 +1746,211 @@ function electionMapSvgPathForFeatureCollection(collection, project) {
     .join(" ");
 }
 
+function electionMapSvgClamp(value, min, max) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return min;
+  return Math.max(min, Math.min(max, numeric));
+}
+
+function ensureElectionMapSvgViewState(geometry = null) {
+  const fitKey = electionMapFitKey(geometry);
+  if (!fitKey || electionMapSvgViewState.fitKey !== fitKey) {
+    electionMapSvgViewState = { fitKey, scale: 1, x: 0, y: 0 };
+  }
+  return electionMapSvgViewState;
+}
+
+function clampElectionMapSvgViewState(state, width, height) {
+  const scale = electionMapSvgClamp(
+    state?.scale,
+    ELECTION_MAP_SVG_MIN_SCALE,
+    ELECTION_MAP_SVG_MAX_SCALE,
+  );
+  const minX = Math.min(0, width - width * scale);
+  const minY = Math.min(0, height - height * scale);
+  return {
+    ...state,
+    scale,
+    x: electionMapSvgClamp(state?.x, minX, 0),
+    y: electionMapSvgClamp(state?.y, minY, 0),
+  };
+}
+
+function applyElectionMapSvgViewState(fallback, width, height) {
+  const viewport = fallback?.querySelector(
+    ".shared-election-map-svg__viewport",
+  );
+  if (!viewport) return;
+  electionMapSvgViewState = clampElectionMapSvgViewState(
+    electionMapSvgViewState,
+    width,
+    height,
+  );
+  viewport.setAttribute(
+    "transform",
+    `translate(${electionMapSvgViewState.x.toFixed(2)} ${electionMapSvgViewState.y.toFixed(2)}) scale(${electionMapSvgViewState.scale.toFixed(
+      4,
+    )})`,
+  );
+  const zoomLabel = fallback.querySelector(
+    "[data-election-svg-map-zoom-label]",
+  );
+  if (zoomLabel) {
+    zoomLabel.textContent = `${Math.round(electionMapSvgViewState.scale * 100)}%`;
+  }
+}
+
+function electionMapSvgPointFromEvent(svg, event, width, height) {
+  const rect = svg?.getBoundingClientRect?.();
+  if (!rect?.width || !rect?.height) return null;
+  return {
+    x: ((event.clientX - rect.left) / rect.width) * width,
+    y: ((event.clientY - rect.top) / rect.height) * height,
+  };
+}
+
+function zoomElectionMapSvgFallback(fallback, width, height, factor, anchor) {
+  const nextScale = electionMapSvgClamp(
+    electionMapSvgViewState.scale * factor,
+    ELECTION_MAP_SVG_MIN_SCALE,
+    ELECTION_MAP_SVG_MAX_SCALE,
+  );
+  const currentScale = electionMapSvgViewState.scale || 1;
+  const point = anchor || { x: width / 2, y: height / 2 };
+  const mapX = (point.x - electionMapSvgViewState.x) / currentScale;
+  const mapY = (point.y - electionMapSvgViewState.y) / currentScale;
+  electionMapSvgViewState = {
+    ...electionMapSvgViewState,
+    scale: nextScale,
+    x: point.x - mapX * nextScale,
+    y: point.y - mapY * nextScale,
+  };
+  applyElectionMapSvgViewState(fallback, width, height);
+}
+
+function resetElectionMapSvgFallback(fallback, width, height) {
+  electionMapSvgViewState = {
+    ...electionMapSvgViewState,
+    scale: 1,
+    x: 0,
+    y: 0,
+  };
+  applyElectionMapSvgViewState(fallback, width, height);
+}
+
+function attachElectionMapSvgFallbackInteractions(fallback, width, height) {
+  const svg = fallback?.querySelector(".shared-election-map-svg");
+  if (!fallback || !svg) return;
+  let pointer = null;
+  let suppressClickUntil = 0;
+
+  const startDrag = (event) => {
+    if (event.button !== undefined && event.button !== 0) return;
+    pointer = {
+      id: event.pointerId,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startX: electionMapSvgViewState.x,
+      startY: electionMapSvgViewState.y,
+      moved: false,
+    };
+    try {
+      svg.setPointerCapture?.(event.pointerId);
+    } catch {
+      // Synthetic pointer events used in smoke tests may not be capturable.
+    }
+    svg.classList.add("is-dragging");
+  };
+
+  const moveDrag = (event) => {
+    if (!pointer || pointer.id !== event.pointerId) return;
+    const rect = svg.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    const dx = ((event.clientX - pointer.startClientX) / rect.width) * width;
+    const dy = ((event.clientY - pointer.startClientY) / rect.height) * height;
+    if (
+      Math.abs(event.clientX - pointer.startClientX) > 3 ||
+      Math.abs(event.clientY - pointer.startClientY) > 3
+    ) {
+      pointer.moved = true;
+    }
+    electionMapSvgViewState = {
+      ...electionMapSvgViewState,
+      x: pointer.startX + dx,
+      y: pointer.startY + dy,
+    };
+    applyElectionMapSvgViewState(fallback, width, height);
+    event.preventDefault();
+  };
+
+  const endDrag = (event) => {
+    if (!pointer || pointer.id !== event.pointerId) return;
+    if (pointer.moved) {
+      suppressClickUntil = Date.now() + 350;
+    }
+    try {
+      svg.releasePointerCapture?.(event.pointerId);
+    } catch {
+      // Ignore capture release failures after synthetic or cancelled drags.
+    }
+    svg.classList.remove("is-dragging");
+    pointer = null;
+  };
+
+  svg.addEventListener("pointerdown", startDrag);
+  svg.addEventListener("pointermove", moveDrag);
+  svg.addEventListener("pointerup", endDrag);
+  svg.addEventListener("pointercancel", endDrag);
+  svg.addEventListener(
+    "wheel",
+    (event) => {
+      event.preventDefault();
+      const point = electionMapSvgPointFromEvent(svg, event, width, height);
+      const direction =
+        event.deltaY < 0
+          ? ELECTION_MAP_SVG_ZOOM_STEP
+          : 1 / ELECTION_MAP_SVG_ZOOM_STEP;
+      zoomElectionMapSvgFallback(fallback, width, height, direction, point);
+    },
+    { passive: false },
+  );
+  fallback.addEventListener(
+    "click",
+    (event) => {
+      if (Date.now() < suppressClickUntil) {
+        if (event.target.closest("[data-election-svg-map-control]")) return;
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    },
+    true,
+  );
+  fallback.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-election-svg-map-control]");
+    if (!button) return;
+    const control = normalizeString(
+      button.getAttribute("data-election-svg-map-control"),
+    );
+    if (control === "zoom-in") {
+      zoomElectionMapSvgFallback(
+        fallback,
+        width,
+        height,
+        ELECTION_MAP_SVG_ZOOM_STEP,
+      );
+    } else if (control === "zoom-out") {
+      zoomElectionMapSvgFallback(
+        fallback,
+        width,
+        height,
+        1 / ELECTION_MAP_SVG_ZOOM_STEP,
+      );
+    } else if (control === "reset") {
+      resetElectionMapSvgFallback(fallback, width, height);
+    }
+  });
+}
+
 function renderElectionMapSvgFallback(mapRoot, reason = "") {
   const geometry = state.pages.elections.map.geometry;
   if (!mapRoot || !geometry) return;
@@ -1762,23 +1996,34 @@ function renderElectionMapSvgFallback(mapRoot, reason = "") {
     geometry.stateBoundary,
     project,
   );
+  ensureElectionMapSvgViewState(geometry);
   const fallback = document.createElement("div");
   fallback.className = "shared-election-map__svg-fallback";
   fallback.innerHTML = `<svg class="shared-election-map-svg" viewBox="0 0 ${width} ${height.toFixed(0)}" role="img" aria-label="${escapeHtml(geometry.stateName || geometry.stateId || "Election map")}" preserveAspectRatio="xMidYMid meet">
     <rect width="${width}" height="${height.toFixed(0)}" fill="#111822"></rect>
-    <g>${districtPaths}</g>
-    ${
-      boundaryPath
-        ? `<path class="shared-election-map-svg__boundary" d="${boundaryPath}"></path>`
-        : ""
-    }
+    <g class="shared-election-map-svg__viewport">
+      <g>${districtPaths}</g>
+      ${
+        boundaryPath
+          ? `<path class="shared-election-map-svg__boundary" d="${boundaryPath}"></path>`
+          : ""
+      }
+    </g>
   </svg>
+  <div class="shared-election-map__svg-controls" aria-label="Map zoom controls">
+    <button type="button" data-election-svg-map-control="zoom-out" aria-label="Zoom out">-</button>
+    <span data-election-svg-map-zoom-label>100%</span>
+    <button type="button" data-election-svg-map-control="zoom-in" aria-label="Zoom in">+</button>
+    <button type="button" data-election-svg-map-control="reset">Reset</button>
+  </div>
   ${
     reason
       ? `<div class="shared-election-map__fallback-note">${escapeHtml(reason)}</div>`
       : ""
   }`;
   mapRoot.replaceChildren(fallback);
+  applyElectionMapSvgViewState(fallback, width, height);
+  attachElectionMapSvgFallbackInteractions(fallback, width, height);
   electionMapContainer = fallback;
   electionMapHost = mapRoot;
   electionMapLastFitKey = electionMapFitKey(geometry);
@@ -2806,8 +3051,14 @@ function electionPartyColor(value) {
 function normalizeElectionScope(value) {
   const scope = normalizeString(value).toLowerCase();
   if (scope === ELECTION_SCOPE_STATE) return ELECTION_SCOPE_STATE;
+  if (scope === ELECTION_SCOPE_MY_DISTRICT) return ELECTION_SCOPE_MY_DISTRICT;
+  if (scope === ELECTION_SCOPE_CUSTOM) return ELECTION_SCOPE_CUSTOM;
   if (scope === ELECTION_SCOPE_LOCAL) return ELECTION_SCOPE_LOCAL;
   return ELECTION_SCOPE_FEDERAL;
+}
+
+function electionScopeRequiresAuth(scope) {
+  return ELECTION_AUTH_SCOPES.has(normalizeElectionScope(scope));
 }
 
 function normalizeElectionStringList(value) {
@@ -2845,6 +3096,8 @@ function electionRaceTypeLabel(raceType) {
 function electionScopeLabel(scope) {
   const normalized = normalizeElectionScope(scope);
   if (normalized === ELECTION_SCOPE_STATE) return "state";
+  if (normalized === ELECTION_SCOPE_MY_DISTRICT) return "my district";
+  if (normalized === ELECTION_SCOPE_CUSTOM) return "custom";
   if (normalized === ELECTION_SCOPE_LOCAL) return "local";
   return "federal";
 }
@@ -2852,6 +3105,12 @@ function electionScopeLabel(scope) {
 function electionOptionSupportsScope(option = null, scope = ELECTION_SCOPE_FEDERAL) {
   const normalizedScope = normalizeElectionScope(scope);
   if (normalizedScope === ELECTION_SCOPE_FEDERAL) return true;
+  if (ELECTION_AUTH_SCOPES.has(normalizedScope)) {
+    const selectedState = normalizeString(
+      option?.stateId || state.pages.elections.selectedStateId,
+    );
+    return selectedState === "MT" && Boolean(state.auth.session);
+  }
   const supportedScopes = normalizeElectionStringList(option?.supportedScopes);
   if (supportedScopes.includes(normalizedScope)) return true;
   return (
@@ -2985,6 +3244,8 @@ function buildElectionDayRoute({
   electionId = "",
   candidateId = "",
   raceType = "",
+  viewId = "",
+  party = "",
 } = {}) {
   const query = new URLSearchParams();
   const normalizedScope = normalizeElectionScope(scope);
@@ -2993,14 +3254,291 @@ function buildElectionDayRoute({
   if (normalizedScope === ELECTION_SCOPE_STATE) {
     query.set("raceType", normalizeElectionRaceType(raceType));
   }
-  if (normalizeString(districtId))
+  if (
+    normalizeString(districtId) &&
+    !ELECTION_AUTH_SCOPES.has(normalizedScope)
+  )
     query.set("district", normalizeString(districtId));
   if (normalizeString(electionId))
     query.set("electionId", normalizeString(electionId));
+  if (
+    normalizedScope === ELECTION_SCOPE_CUSTOM &&
+    normalizeString(viewId)
+  ) {
+    query.set("viewId", normalizeString(viewId));
+  }
+  const partyFilter = normalizeElectionPartyFilter(party);
+  if (partyFilter !== "all") query.set("party", partyFilter);
   if (normalizeString(candidateId))
     query.set("candidateId", normalizeString(candidateId));
   const queryString = query.toString();
   return queryString ? `/election-day?${queryString}` : "/election-day";
+}
+
+function normalizeElectionPartyFilter(value) {
+  const normalized = normalizeString(value).toLowerCase();
+  if (!normalized || normalized === "all") return "all";
+  return normalizeElectionPartyToken(value) || "all";
+}
+
+function createClientElectionId(prefix = "view") {
+  if (window.crypto?.randomUUID) {
+    return `${prefix}-${window.crypto.randomUUID()}`;
+  }
+  return `${prefix}-${Date.now().toString(36)}-${Math.random()
+    .toString(36)
+    .slice(2, 10)}`;
+}
+
+function normalizeElectionFederalOffice(value) {
+  const office = normalizeString(value).toLowerCase();
+  if (office === "senate" || office === "us-senate") return "senate";
+  if (office === "house" || office === "us-house") return "house";
+  return "";
+}
+
+function normalizeElectionFederalDistrictId(value, stateId = "MT") {
+  const stateCode = normalizeString(stateId || "MT").toUpperCase();
+  const text = normalizeString(value).toUpperCase();
+  if (!text) return "";
+  const explicit = text.match(/^([A-Z]{2})-(\d{1,2})$/u);
+  if (explicit) {
+    return `${explicit[1]}-${String(Number(explicit[2])).padStart(2, "0")}`;
+  }
+  const number = Number(text.match(/(\d+)$/u)?.[1]);
+  if (Number.isFinite(number) && number > 0) {
+    return `${stateCode}-${String(number).padStart(2, "0")}`;
+  }
+  return text;
+}
+
+function normalizeElectionLegislativeDistrictId(
+  value,
+  stateId = "MT",
+  chamber = "house",
+) {
+  const stateCode = normalizeString(stateId || "MT").toUpperCase();
+  const chamberCode = chamber === "senate" ? "SD" : "HD";
+  const text = normalizeString(value).toUpperCase();
+  if (!text) return "";
+  const explicit = text.match(/^([A-Z]{2})-(HD|SD)-(\d{1,3})$/u);
+  if (explicit) return `${explicit[1]}-${explicit[2]}-${Number(explicit[3])}`;
+  const number = Number(text.match(/(\d+)$/u)?.[1]);
+  if (Number.isFinite(number) && number > 0) {
+    return `${stateCode}-${chamberCode}-${number}`;
+  }
+  return text;
+}
+
+function electionCustomItemKey(item = {}) {
+  const scope = normalizeElectionScope(item.scope);
+  if (scope === ELECTION_SCOPE_FEDERAL) {
+    const office = normalizeElectionFederalOffice(item.office);
+    const district =
+      office === "house"
+        ? normalizeElectionFederalDistrictId(item.districtId, item.stateId)
+        : "statewide";
+    return [scope, office, district].join(":");
+  }
+  if (scope === ELECTION_SCOPE_STATE) {
+    const raceType = normalizeElectionRaceType(item.raceType);
+    const district =
+      raceType === "house" || raceType === "senate"
+        ? normalizeElectionLegislativeDistrictId(
+            item.districtId,
+            item.stateId,
+            raceType,
+          )
+        : "statewide";
+    return [scope, raceType, district].join(":");
+  }
+  return "";
+}
+
+function normalizeElectionCustomViewItem(raw = {}, fallbackState = "MT") {
+  const scope = normalizeElectionScope(raw.scope);
+  const stateId = normalizeString(raw.stateId || raw.state || fallbackState || "MT")
+    .toUpperCase();
+  if (scope === ELECTION_SCOPE_STATE) {
+    if (stateId !== "MT") return null;
+    const raceType = normalizeElectionRaceType(raw.raceType);
+    const districtId =
+      raceType === "house" || raceType === "senate"
+        ? normalizeElectionLegislativeDistrictId(
+            raw.districtId || raw.district,
+            stateId,
+            raceType,
+          )
+        : "";
+    if ((raceType === "house" || raceType === "senate") && !districtId) {
+      return null;
+    }
+    return {
+      scope: ELECTION_SCOPE_STATE,
+      stateId,
+      raceType,
+      ...(districtId ? { districtId } : {}),
+    };
+  }
+  const office = normalizeElectionFederalOffice(raw.office || raw.raceType);
+  if (!office) return null;
+  const districtId =
+    office === "house"
+      ? normalizeElectionFederalDistrictId(raw.districtId || raw.district, stateId)
+      : "";
+  if (office === "house" && !districtId) return null;
+  return {
+    scope: ELECTION_SCOPE_FEDERAL,
+    stateId,
+    office,
+    ...(districtId ? { districtId } : {}),
+  };
+}
+
+function normalizeElectionCustomView(raw = null, { fallbackState = "MT" } = {}) {
+  if (!raw || typeof raw !== "object") return null;
+  const stateId = normalizeString(raw.stateId || raw.state || fallbackState || "MT")
+    .toUpperCase();
+  const seen = new Set();
+  const items = [];
+  for (const item of Array.isArray(raw.items) ? raw.items : []) {
+    const normalized = normalizeElectionCustomViewItem(item, stateId);
+    if (!normalized) continue;
+    const key = electionCustomItemKey(normalized);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    items.push(normalized);
+  }
+  return {
+    viewId: normalizeString(raw.viewId || raw.id) || createClientElectionId("view"),
+    name: normalizeString(raw.name || raw.title) || "Custom slate",
+    stateId,
+    electionId: normalizeString(raw.electionId),
+    items,
+    createdAt: normalizeString(raw.createdAt),
+    updatedAt: normalizeString(raw.updatedAt),
+  };
+}
+
+function normalizeElectionCustomViews(raw = [], options = {}) {
+  const views = [];
+  const seen = new Set();
+  for (const item of Array.isArray(raw) ? raw : []) {
+    const view = normalizeElectionCustomView(item, options);
+    if (!view || seen.has(view.viewId)) continue;
+    seen.add(view.viewId);
+    views.push(view);
+  }
+  return views.slice(0, ELECTION_CUSTOM_VIEW_MAX_COUNT);
+}
+
+function electionCustomItemLabel(item = {}) {
+  const scope = normalizeElectionScope(item.scope);
+  if (scope === ELECTION_SCOPE_STATE) {
+    const raceType = normalizeElectionRaceType(item.raceType);
+    if (raceType === "house") return `MT House ${item.districtId || ""}`.trim();
+    if (raceType === "senate") return `MT Senate ${item.districtId || ""}`.trim();
+    return "Montana statewide races";
+  }
+  const office = normalizeElectionFederalOffice(item.office);
+  if (office === "house") return `U.S. House ${item.districtId || ""}`.trim();
+  return "U.S. Senate";
+}
+
+function electionCustomTargetTypeOptions() {
+  return [
+    { value: "federal-senate", label: "U.S. Senate" },
+    { value: "federal-house", label: "U.S. House" },
+    { value: "state-statewide", label: "Statewide state races" },
+    { value: "state-senate", label: "State Senate" },
+    { value: "state-house", label: "State House" },
+  ];
+}
+
+function electionCustomDistrictOptionsForType(type) {
+  const normalized = normalizeString(type);
+  if (normalized === "federal-house") {
+    return [1, 2].map((number) => ({
+      value: `MT-${String(number).padStart(2, "0")}`,
+      label: `MT-${String(number).padStart(2, "0")}`,
+    }));
+  }
+  if (normalized === "state-senate") {
+    return Array.from({ length: 50 }, (_, index) => ({
+      value: `MT-SD-${index + 1}`,
+      label: `SD ${index + 1}`,
+    }));
+  }
+  if (normalized === "state-house") {
+    return Array.from({ length: 100 }, (_, index) => ({
+      value: `MT-HD-${index + 1}`,
+      label: `HD ${index + 1}`,
+    }));
+  }
+  return [];
+}
+
+function electionCustomDefaultDistrictForType(
+  type,
+  election = state.pages.elections,
+) {
+  const context = election.context || {};
+  const options = electionCustomDistrictOptionsForType(type);
+  if (!options.length) return "";
+  const preferred =
+    type === "federal-house"
+      ? context.userDistrictId
+      : type === "state-senate"
+        ? context.userStateSenateDistrictId
+        : type === "state-house"
+          ? context.userStateHouseDistrictId
+          : "";
+  return (
+    options.find((option) => option.value === preferred)?.value ||
+    options[0]?.value ||
+    ""
+  );
+}
+
+function createElectionCustomItemFromSelection(
+  type,
+  districtId,
+  election = state.pages.elections,
+) {
+  const stateId = normalizeString(election.selectedStateId || "MT").toUpperCase();
+  const district =
+    normalizeString(districtId) || electionCustomDefaultDistrictForType(type, election);
+  if (type === "federal-senate") {
+    return { scope: ELECTION_SCOPE_FEDERAL, office: "senate", stateId };
+  }
+  if (type === "federal-house") {
+    return {
+      scope: ELECTION_SCOPE_FEDERAL,
+      office: "house",
+      stateId,
+      districtId: normalizeElectionFederalDistrictId(district, stateId),
+    };
+  }
+  if (type === "state-statewide") {
+    return { scope: ELECTION_SCOPE_STATE, raceType: "statewide", stateId };
+  }
+  if (type === "state-senate") {
+    return {
+      scope: ELECTION_SCOPE_STATE,
+      raceType: "senate",
+      stateId,
+      districtId: normalizeElectionLegislativeDistrictId(district, stateId, "senate"),
+    };
+  }
+  if (type === "state-house") {
+    return {
+      scope: ELECTION_SCOPE_STATE,
+      raceType: "house",
+      stateId,
+      districtId: normalizeElectionLegislativeDistrictId(district, stateId, "house"),
+    };
+  }
+  return null;
 }
 
 function formatTermRange(startAt, endAt) {
@@ -3058,6 +3596,9 @@ function normalizeCandidate(raw = {}) {
     levelOfOffice: normalizeString(raw.levelOfOffice || raw.level),
     officeTitle: normalizeString(raw.officeTitle || raw.office),
     partyLabel: normalizeString(raw.partyLabel || raw.party),
+    partyToken: normalizeElectionPartyToken(
+      raw.partyToken || raw.partyCode || raw.partyLabel || raw.party,
+    ),
     chamber: normalizeString(raw.chamber),
     officialUrl: normalizeUrl(raw.officialUrl),
     followersCount:
@@ -3844,6 +4385,12 @@ function normalizeElectionContextPayload(payload = {}) {
     ),
     userStateId: normalizeString(source.userStateId),
     userDistrictId: normalizeString(source.userDistrictId),
+    userStateHouseDistrictId: normalizeString(source.userStateHouseDistrictId),
+    userStateSenateDistrictId: normalizeString(source.userStateSenateDistrictId),
+    userPartyToken: normalizeElectionPartyToken(
+      source.userPartyToken || source.userPartyCode || source.userPartyLabel,
+    ),
+    userPartyLabel: normalizeString(source.userPartyLabel),
     states: (source.states || [])
       .map(normalizeElectionStateOption)
       .filter((option) => option.stateId),
@@ -3853,6 +4400,9 @@ function normalizeElectionContextPayload(payload = {}) {
     stateMapChambers: normalizeElectionStringList(
       source.stateMapChambers,
     ).map(normalizeElectionMapChamber),
+    customViews: normalizeElectionCustomViews(source.customViews, {
+      fallbackState: source.userStateId || "MT",
+    }),
     defaultDestination: normalizeActiveElection(source.defaultDestination),
   };
 }
@@ -3921,6 +4471,8 @@ function normalizeElectionCountyResult(raw = {}) {
 function normalizeElectionRace(raw = {}) {
   return {
     raceId: normalizeString(raw.raceId || raw.id) || "race",
+    scope: normalizeElectionScope(raw.scope || raw.resultScope),
+    resultScope: normalizeElectionScope(raw.resultScope || raw.scope),
     districtId: normalizeString(raw.districtId || raw.district),
     districtName: normalizeString(raw.districtName || raw.districtLabel),
     officeTitle:
@@ -3996,6 +4548,20 @@ function normalizeElectionSnapshot(payload = {}) {
     countyCoverage: normalizeElectionCountyCoverage(source.countyCoverage),
     districts: Array.isArray(source.districts) ? source.districts : [],
     races: (source.races || []).map(normalizeElectionRace),
+    customView: normalizeElectionCustomView(source.customView, {
+      fallbackState: source.stateId || "MT",
+    }),
+    customViews: normalizeElectionCustomViews(source.customViews, {
+      fallbackState: source.stateId || "MT",
+    }),
+    missingDistricts:
+      source.missingDistricts && typeof source.missingDistricts === "object"
+        ? {
+            congressional: source.missingDistricts.congressional === true,
+            stateHouse: source.missingDistricts.stateHouse === true,
+            stateSenate: source.missingDistricts.stateSenate === true,
+          }
+        : null,
   };
 }
 
@@ -4096,6 +4662,10 @@ function applyElectionRouteSelection(context = null) {
   const routeDistrict = normalizeString(params.get("district"));
   const routeElectionId = normalizeString(params.get("electionId"));
   const routeCandidateId = normalizeString(params.get("candidateId"));
+  const routeViewId = normalizeString(params.get("viewId"));
+  const routePartyFilter = normalizeElectionPartyFilter(
+    params.get("party") || params.get("partyToken"),
+  );
   const routeScope = normalizeElectionScope(params.get("scope"));
   const routeRaceType = normalizeElectionRaceType(
     params.get("raceType") || params.get("chamber"),
@@ -4108,6 +4678,8 @@ function applyElectionRouteSelection(context = null) {
     routeScope === ELECTION_SCOPE_STATE &&
     electionOptionSupportsScope(option, ELECTION_SCOPE_STATE)
       ? ELECTION_SCOPE_STATE
+      : ELECTION_AUTH_SCOPES.has(routeScope)
+        ? routeScope
       : routeScope === ELECTION_SCOPE_LOCAL
         ? ELECTION_SCOPE_FEDERAL
         : fallbackScope;
@@ -4124,6 +4696,8 @@ function applyElectionRouteSelection(context = null) {
   if (nextScope === ELECTION_SCOPE_STATE) {
     election.selectedDistrictId =
       election.selectedRaceType === "statewide" ? "" : routeDistrict;
+  } else if (ELECTION_AUTH_SCOPES.has(nextScope)) {
+    election.selectedDistrictId = "";
   } else {
     election.selectedDistrictId =
       routeState || routeDistrict ? routeDistrict : fallback.districtId || "";
@@ -4134,6 +4708,9 @@ function applyElectionRouteSelection(context = null) {
     selectedElectionStateOption()?.electionId ||
     "";
   election.selectedCandidateId = routeCandidateId;
+  election.selectedCustomViewId =
+    routeViewId || election.selectedCustomViewId || "";
+  election.selectedPartyFilter = routePartyFilter;
 }
 
 function electionApiPath(path, { auth = false } = {}) {
@@ -4163,6 +4740,13 @@ async function loadElectionContext({ refresh = false } = {}) {
       },
     );
     election.context = normalizeElectionContextPayload(payload);
+    if (state.auth.session && Array.isArray(election.context.customViews)) {
+      election.customViews.items = election.context.customViews;
+      election.customViews.error = "";
+      if (!election.selectedCustomViewId && election.customViews.items.length) {
+        election.selectedCustomViewId = election.customViews.items[0].viewId;
+      }
+    }
     election.contextError = "";
     return election.context;
   } catch (error) {
@@ -4172,6 +4756,170 @@ async function loadElectionContext({ refresh = false } = {}) {
     return election.context;
   } finally {
     election.contextLoading = false;
+    scheduleRender();
+  }
+}
+
+function selectedElectionCustomView(election = state.pages.elections) {
+  const selectedId = normalizeString(election.selectedCustomViewId);
+  return (
+    election.customViews.items.find((view) => view.viewId === selectedId) ||
+    election.customViews.items[0] ||
+    null
+  );
+}
+
+async function loadElectionCustomViews({ refresh = false } = {}) {
+  const election = state.pages.elections;
+  if (!state.auth.session) {
+    election.customViews.items = [];
+    election.customViews.loading = false;
+    election.customViews.error = "";
+    election.selectedCustomViewId = "";
+    return [];
+  }
+  if (election.customViews.loading) {
+    return election.customViews.items;
+  }
+  if (election.customViews.items.length && !refresh) {
+    if (!selectedElectionCustomView(election)) {
+      election.selectedCustomViewId = election.customViews.items[0].viewId;
+    }
+    return election.customViews.items;
+  }
+  election.customViews.loading = true;
+  election.customViews.error = "";
+  scheduleRender();
+  try {
+    const payload = await fetchJson(electionApiPath("/custom-views", { auth: true }), {
+      auth: true,
+    });
+    election.customViews.items = normalizeElectionCustomViews(payload.views, {
+      fallbackState: election.selectedStateId || "MT",
+    });
+    election.customViews.maxViews =
+      Number(payload.maxViews) || ELECTION_CUSTOM_VIEW_MAX_COUNT;
+    election.customViews.maxItemsPerView =
+      Number(payload.maxItemsPerView) || election.customViews.maxItemsPerView;
+    if (!selectedElectionCustomView(election) && election.customViews.items.length) {
+      election.selectedCustomViewId = election.customViews.items[0].viewId;
+    }
+    election.customViews.error = "";
+    return election.customViews.items;
+  } catch (error) {
+    election.customViews.error =
+      normalizeString(error?.message) || "Custom views failed to load.";
+    return election.customViews.items;
+  } finally {
+    election.customViews.loading = false;
+    scheduleRender();
+  }
+}
+
+function createElectionCustomDraft(view = null) {
+  const election = state.pages.elections;
+  const source =
+    view ||
+    normalizeElectionCustomView(
+      {
+        viewId: createClientElectionId("view"),
+        name: "Montana slate",
+        stateId: election.selectedStateId || "MT",
+        electionId: election.selectedElectionId,
+        items: [],
+      },
+      { fallbackState: election.selectedStateId || "MT" },
+    );
+  return {
+    ...source,
+    items: source.items.map((item) => ({ ...item })),
+  };
+}
+
+async function saveElectionCustomDraft() {
+  const election = state.pages.elections;
+  if (!state.auth.session) {
+    openAuthModal("election_custom_views");
+    return;
+  }
+  const draft = normalizeElectionCustomView(election.customViews.draft, {
+    fallbackState: election.selectedStateId || "MT",
+  });
+  if (!draft) return;
+  const exists = election.customViews.items.some(
+    (view) => view.viewId === draft.viewId,
+  );
+  election.customViews.saving = true;
+  election.customViews.error = "";
+  scheduleRender();
+  try {
+    const path = exists
+      ? `/custom-views/${encodeURIComponent(draft.viewId)}`
+      : "/custom-views";
+    const payload = await fetchJson(electionApiPath(path, { auth: true }), {
+      auth: true,
+      method: exists ? "PUT" : "POST",
+      body: draft,
+    });
+    election.customViews.items = normalizeElectionCustomViews(payload.views, {
+      fallbackState: election.selectedStateId || "MT",
+    });
+    election.selectedCustomViewId =
+      normalizeString(payload.view?.viewId) || draft.viewId;
+    election.customViews.editing = false;
+    election.customViews.draft = null;
+    showToast("Custom view saved.");
+    navigateElectionSelection({
+      scope: ELECTION_SCOPE_CUSTOM,
+      viewId: election.selectedCustomViewId,
+      party: election.selectedPartyFilter,
+    });
+    loadElectionResults({ manual: true }).catch(() => {});
+  } catch (error) {
+    election.customViews.error =
+      normalizeString(error?.message) || "Custom view save failed.";
+    showToast("Custom view save failed.");
+  } finally {
+    election.customViews.saving = false;
+    scheduleRender();
+  }
+}
+
+async function deleteElectionCustomView(viewId) {
+  const election = state.pages.elections;
+  const normalizedViewId = normalizeString(viewId);
+  if (!state.auth.session || !normalizedViewId) return;
+  election.customViews.saving = true;
+  election.customViews.error = "";
+  scheduleRender();
+  try {
+    const payload = await fetchJson(
+      electionApiPath(`/custom-views/${encodeURIComponent(normalizedViewId)}`, {
+        auth: true,
+      }),
+      { auth: true, method: "DELETE" },
+    );
+    election.customViews.items = normalizeElectionCustomViews(payload.views, {
+      fallbackState: election.selectedStateId || "MT",
+    });
+    if (election.selectedCustomViewId === normalizedViewId) {
+      election.selectedCustomViewId = election.customViews.items[0]?.viewId || "";
+    }
+    election.customViews.editing = false;
+    election.customViews.draft = null;
+    showToast("Custom view deleted.");
+    navigateElectionSelection({
+      scope: ELECTION_SCOPE_CUSTOM,
+      viewId: election.selectedCustomViewId,
+      party: election.selectedPartyFilter,
+    });
+    loadElectionResults({ manual: true }).catch(() => {});
+  } catch (error) {
+    election.customViews.error =
+      normalizeString(error?.message) || "Custom view delete failed.";
+    showToast("Custom view delete failed.");
+  } finally {
+    election.customViews.saving = false;
     scheduleRender();
   }
 }
@@ -4345,6 +5093,15 @@ async function loadElectionResults({ manual = false } = {}) {
     scheduleRender();
   }
   const scope = normalizeElectionScope(election.selectedScope);
+  if (electionScopeRequiresAuth(scope) && !state.auth.session) {
+    election.results.snapshot = null;
+    election.results.loading = false;
+    election.results.error = "";
+    election.results.loaded = false;
+    configureElectionPolling();
+    scheduleRender();
+    return;
+  }
   const raceType = selectedElectionRaceType();
   const query = new URLSearchParams({
     scope,
@@ -4362,8 +5119,14 @@ async function loadElectionResults({ manual = false } = {}) {
   if (normalizeString(election.selectedElectionId)) {
     query.set("electionId", normalizeString(election.selectedElectionId));
   }
+  if (
+    scope === ELECTION_SCOPE_CUSTOM &&
+    normalizeString(election.selectedCustomViewId)
+  ) {
+    query.set("viewId", normalizeString(election.selectedCustomViewId));
+  }
   try {
-    const useAuth = Boolean(state.auth.session);
+    const useAuth = electionScopeRequiresAuth(scope) || Boolean(state.auth.session);
     const payload = await fetchJson(
       `${electionApiPath("/results", { auth: useAuth })}?${query}`,
       {
@@ -4378,6 +5141,15 @@ async function loadElectionResults({ manual = false } = {}) {
     }
     election.results.previousSnapshot = previous;
     election.results.snapshot = snapshot;
+    if (Array.isArray(snapshot.customViews) && snapshot.customViews.length) {
+      election.customViews.items = snapshot.customViews;
+      if (!selectedElectionCustomView(election)) {
+        election.selectedCustomViewId = snapshot.customViews[0].viewId;
+      }
+    }
+    if (snapshot.customView?.viewId) {
+      election.selectedCustomViewId = snapshot.customView.viewId;
+    }
     if (snapshot.scope === ELECTION_SCOPE_STATE) {
       election.selectedRaceType = normalizeElectionRaceTypeForOption(
         snapshot.raceType,
@@ -4430,8 +5202,11 @@ async function loadElectionDayPage({ refresh = false } = {}) {
   const context = await loadElectionContext({ refresh });
   applyElectionRouteSelection(context);
   const scope = normalizeElectionScope(election.selectedScope);
+  if (scope === ELECTION_SCOPE_CUSTOM && state.auth.session) {
+    await loadElectionCustomViews({ refresh }).catch(() => {});
+  }
   const chamber = selectedElectionMapChamber();
-  const shouldUseMap = scope !== ELECTION_SCOPE_STATE || Boolean(chamber);
+  const shouldUseMap = shouldRenderElectionMap(election);
   const shouldLoadMap =
     shouldUseMap &&
     (refresh ||
@@ -4481,6 +5256,8 @@ function navigateElectionSelection({
   districtId,
   electionId,
   raceType,
+  viewId,
+  party,
 } = {}) {
   const election = state.pages.elections;
   const nextScope = normalizeElectionScope(
@@ -4512,6 +5289,14 @@ function navigateElectionSelection({
           ? electionId
           : normalizeString(election.selectedElectionId),
       raceType: nextRaceType,
+      viewId:
+        viewId !== undefined
+          ? viewId
+          : normalizeString(election.selectedCustomViewId),
+      party:
+        party !== undefined
+          ? party
+          : normalizeElectionPartyFilter(election.selectedPartyFilter),
     }),
   );
 }
@@ -6612,7 +7397,10 @@ async function loadCurrentRoute({ refresh = false } = {}) {
     clearElectionPolling();
   }
   if (routeKey === ROUTE_KEY_CANDIDATES) {
-    await loadCandidateList({ refresh });
+    await Promise.all([
+      loadCandidateList({ refresh }),
+      loadElectionContext({ refresh }).catch(() => state.pages.elections.context),
+    ]);
     return;
   }
   if (routeKey === ROUTE_KEY_ELECTION_DAY) {
@@ -7606,6 +8394,7 @@ function selectedElectionDistrictLabel(election = state.pages.elections) {
 
 function shouldRenderElectionMap(election = state.pages.elections) {
   const scope = normalizeElectionScope(election.selectedScope);
+  if (ELECTION_AUTH_SCOPES.has(scope)) return false;
   return scope !== ELECTION_SCOPE_STATE || Boolean(selectedElectionMapChamber());
 }
 
@@ -7671,10 +8460,211 @@ function groupElectionRaces(snapshot = null, selectedDistrictId = "") {
   );
 }
 
+function electionRaceResultScope(race = {}) {
+  return normalizeElectionScope(race.scope || race.resultScope);
+}
+
+function electionCandidatePartyKey(candidate = {}) {
+  return normalizeElectionPartyToken(
+    candidate.partyToken || candidate.partyCode || candidate.partyLabel,
+  ) || "UNK";
+}
+
+function electionPartyFilterOptions(snapshot = null) {
+  const userParty = normalizeElectionPartyToken(
+    state.pages.elections.context?.userPartyToken ||
+      state.pages.elections.context?.userPartyLabel,
+  );
+  const options = new Map();
+  if (userParty) {
+    options.set(userParty, {
+      value: userParty,
+      label: candidatePartyLabelForKey(userParty),
+    });
+  }
+  for (const race of snapshot?.races || []) {
+    for (const candidate of race.candidates || []) {
+      const value = electionCandidatePartyKey(candidate);
+      if (!options.has(value)) {
+        options.set(value, {
+          value,
+          label: candidatePartyLabelForKey(value, candidate),
+        });
+      }
+    }
+  }
+  return [
+    { value: "all", label: "All" },
+    ...Array.from(options.values()).sort((left, right) => {
+      const leftRank = candidatePartySortRank(left.value, userParty);
+      const rightRank = candidatePartySortRank(right.value, userParty);
+      if (leftRank !== rightRank) return leftRank - rightRank;
+      return left.label.localeCompare(right.label);
+    }),
+  ];
+}
+
+function selectedElectionPartyFilterValue(snapshot = null) {
+  const selected = normalizeElectionPartyFilter(
+    state.pages.elections.selectedPartyFilter,
+  );
+  if (selected === "all") return "all";
+  const options = electionPartyFilterOptions(snapshot);
+  return options.some((option) => option.value === selected) ? selected : "all";
+}
+
+function renderElectionPartyFilterControl(election) {
+  const snapshot = election.results.snapshot;
+  const selected = selectedElectionPartyFilterValue(snapshot);
+  const options = electionPartyFilterOptions(snapshot);
+  return `<label>
+    <span>Party</span>
+    <select data-election-control="party-filter">
+      ${options
+        .map(
+          (option) =>
+            `<option value="${escapeHtml(option.value)}"${option.value === selected ? " selected" : ""}>${escapeHtml(option.label)}</option>`,
+        )
+        .join("")}
+    </select>
+  </label>`;
+}
+
+function renderElectionAuthPrompt(scope) {
+  return `<section class="shared-election-upcoming">
+    <h2>${escapeHtml(electionScopeLabel(scope))} results require sign-in</h2>
+    <p>Sign in to load district-specific and saved election views for your account.</p>
+    <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="auth-login-inline">Sign in</button>
+  </section>`;
+}
+
+function renderElectionCustomViewSelector(election) {
+  const custom = election.customViews;
+  const selected = selectedElectionCustomView(election);
+  const atLimit = custom.items.length >= custom.maxViews;
+  return `<div class="shared-election-custom-toolbar">
+    <label>
+      <span>Saved slate</span>
+      <select data-election-control="custom-view"${custom.items.length ? "" : " disabled"}>
+        ${
+          custom.items.length
+            ? custom.items
+                .map(
+                  (view) =>
+                    `<option value="${escapeHtml(view.viewId)}"${view.viewId === selected?.viewId ? " selected" : ""}>${escapeHtml(view.name)}</option>`,
+                )
+                .join("")
+            : '<option value="">No saved slates</option>'
+        }
+      </select>
+    </label>
+    <div class="shared-election-custom-toolbar__actions">
+      <button class="shared-feed-chip${custom.items.length ? "" : " shared-feed-chip--primary"}" type="button" data-action="election-custom-new"${atLimit ? " disabled" : ""}>New</button>
+      <button class="shared-feed-chip" type="button" data-action="election-custom-edit"${selected ? "" : " disabled"}>Edit</button>
+      <button class="shared-feed-chip" type="button" data-action="election-custom-delete"${selected ? "" : " disabled"}>Delete</button>
+    </div>
+  </div>`;
+}
+
+function renderElectionCustomEditor(election) {
+  const custom = election.customViews;
+  const draft = custom.draft || createElectionCustomDraft(selectedElectionCustomView(election));
+  const targetType = normalizeString(custom.addType || "federal-senate");
+  const districtOptions = electionCustomDistrictOptionsForType(targetType);
+  const selectedDistrict =
+    normalizeString(custom.addDistrict) ||
+    electionCustomDefaultDistrictForType(targetType, election);
+  return `<div class="shared-election-custom-editor">
+    <label>
+      <span>Name</span>
+      <input data-election-custom-field="name" value="${escapeHtml(draft.name)}" maxlength="80" />
+    </label>
+    <div class="shared-election-custom-add">
+      <label>
+        <span>Race</span>
+        <select data-election-custom-field="target-type">
+          ${electionCustomTargetTypeOptions()
+            .map(
+              (option) =>
+                `<option value="${escapeHtml(option.value)}"${option.value === targetType ? " selected" : ""}>${escapeHtml(option.label)}</option>`,
+            )
+            .join("")}
+        </select>
+      </label>
+      ${
+        districtOptions.length
+          ? `<label>
+              <span>District</span>
+              <select data-election-custom-field="target-district">
+                ${districtOptions
+                  .map(
+                    (option) =>
+                      `<option value="${escapeHtml(option.value)}"${option.value === selectedDistrict ? " selected" : ""}>${escapeHtml(option.label)}</option>`,
+                  )
+                  .join("")}
+              </select>
+            </label>`
+          : ""
+      }
+      <button class="shared-feed-chip" type="button" data-action="election-custom-add-item">Add</button>
+    </div>
+    <div class="shared-election-custom-items">
+      ${
+        draft.items.length
+          ? draft.items
+              .map(
+                (item, index) => `<div class="shared-election-custom-item">
+                  <div>
+                    <strong>${escapeHtml(electionCustomItemLabel(item))}</strong>
+                    <span>${escapeHtml(electionScopeLabel(item.scope))}</span>
+                  </div>
+                  <div class="shared-election-custom-item__actions">
+                    <button class="shared-feed-icon-button" type="button" data-action="election-custom-move-item" data-index="${index}" data-direction="-1" aria-label="Move up">^</button>
+                    <button class="shared-feed-icon-button" type="button" data-action="election-custom-move-item" data-index="${index}" data-direction="1" aria-label="Move down">v</button>
+                    <button class="shared-feed-icon-button" type="button" data-action="election-custom-remove-item" data-index="${index}" aria-label="Remove">x</button>
+                  </div>
+                </div>`,
+              )
+              .join("")
+          : '<div class="shared-page__empty">Add races to this slate.</div>'
+      }
+    </div>
+    <div class="shared-card__actions">
+      <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="election-custom-save"${custom.saving ? " disabled" : ""}>Save</button>
+      <button class="shared-feed-chip" type="button" data-action="election-custom-cancel">Cancel</button>
+    </div>
+  </div>`;
+}
+
+function renderElectionCustomControls(election) {
+  if (normalizeElectionScope(election.selectedScope) !== ELECTION_SCOPE_CUSTOM) {
+    return "";
+  }
+  if (!state.auth.session) return "";
+  const custom = election.customViews;
+  return `<section class="shared-election-custom-panel">
+    ${custom.loading ? '<div class="shared-page__loading">Loading custom views…</div>' : ""}
+    ${custom.error ? `<div class="shared-page__error">${escapeHtml(custom.error)}</div>` : ""}
+    ${renderElectionCustomViewSelector(election)}
+    ${custom.editing ? renderElectionCustomEditor(election) : ""}
+  </section>`;
+}
+
 function renderElectionControls(election, selectedOption) {
   const states = election.context?.states || [];
   const selectedScope = normalizeElectionScope(election.selectedScope);
   const stateAvailable = electionStateTrackingAvailable(selectedOption);
+  const myDistrictAvailable = electionOptionSupportsScope(
+    selectedOption,
+    ELECTION_SCOPE_MY_DISTRICT,
+  );
+  const customAvailable = electionOptionSupportsScope(
+    selectedOption,
+    ELECTION_SCOPE_CUSTOM,
+  );
+  const showPartyFilter =
+    selectedScope === ELECTION_SCOPE_MY_DISTRICT ||
+    selectedScope === ELECTION_SCOPE_CUSTOM;
   const raceTypes = stateAvailable
     ? electionStateRaceTypesForOption(selectedOption)
     : [];
@@ -7693,6 +8683,8 @@ function renderElectionControls(election, selectedOption) {
       <select data-election-control="scope">
         <option value="federal"${selectedScope === ELECTION_SCOPE_FEDERAL ? " selected" : ""}>Federal</option>
         <option value="state"${selectedScope === ELECTION_SCOPE_STATE ? " selected" : ""}${stateAvailable ? "" : " disabled"}>State</option>
+        <option value="my-district"${selectedScope === ELECTION_SCOPE_MY_DISTRICT ? " selected" : ""}${myDistrictAvailable ? "" : " disabled"}>My District</option>
+        <option value="custom"${selectedScope === ELECTION_SCOPE_CUSTOM ? " selected" : ""}${customAvailable ? "" : " disabled"}>Custom</option>
         <option value="local" disabled>Local</option>
       </select>
     </label>
@@ -7702,6 +8694,7 @@ function renderElectionControls(election, selectedOption) {
         ${stateOptions || '<option value="">No elections available</option>'}
       </select>
     </label>
+    ${showPartyFilter ? renderElectionPartyFilterControl(election) : ""}
     ${
       selectedOption?.future && selectedOption.clickable !== true
         ? `<div class="shared-election-controls__hint">Next Election Date ${escapeHtml(formatElectionDate(selectedOption.electionDate) || "unavailable")}</div>`
@@ -7815,19 +8808,27 @@ function renderElectionCountyCandidate(candidate) {
   </div>`;
 }
 
-function renderElectionCountyResultRow(county) {
+function renderElectionCountyResultRow(county, { partyFilter = "all" } = {}) {
+  const candidates = (county.candidates || []).filter(
+    (candidate) =>
+      partyFilter === "all" || electionCandidatePartyKey(candidate) === partyFilter,
+  );
   return `<div class="shared-election-county-row">
     <div class="shared-election-county-row__header">
       <strong>${escapeHtml(county.countyName)}</strong>
       <span>${escapeHtml(formatElectionVotes(county.totalVotes))} votes</span>
     </div>
     <div class="shared-election-county-row__candidates">
-      ${(county.candidates || []).map(renderElectionCountyCandidate).join("")}
+      ${
+        candidates.length
+          ? candidates.map(renderElectionCountyCandidate).join("")
+          : '<span class="shared-election-empty-candidates">No matching county candidate rows.</span>'
+      }
     </div>
   </div>`;
 }
 
-function renderElectionCountyResults(race) {
+function renderElectionCountyResults(race, options = {}) {
   const counties = Array.isArray(race.countyResults)
     ? race.countyResults
     : [];
@@ -7835,15 +8836,43 @@ function renderElectionCountyResults(race) {
   return `<details class="shared-election-county-results">
     <summary>County results <span>${escapeHtml(formatElectionVotes(counties.length))}</span></summary>
     <div class="shared-election-county-results__list">
-      ${counties.map(renderElectionCountyResultRow).join("")}
+      ${counties
+        .map((county) => renderElectionCountyResultRow(county, options))
+        .join("")}
     </div>
   </details>`;
 }
 
-function renderElectionRaceCard(race, previousCandidateMap) {
-  const orderedCandidates = [...(race.candidates || [])].sort(
-    (left, right) => Number(right.votes) - Number(left.votes),
+function renderElectionRaceCard(race, previousCandidateMap, options = {}) {
+  const partyFilter = normalizeElectionPartyFilter(options.partyFilter);
+  const userPartyToken = normalizeElectionPartyToken(
+    state.pages.elections.context?.userPartyToken ||
+      state.pages.elections.context?.userPartyLabel,
   );
+  const orderedCandidates = [...(race.candidates || [])].sort(
+    (left, right) => {
+      if (options.partyFirst) {
+        const leftRank = candidatePartySortRank(
+          electionCandidatePartyKey(left),
+          userPartyToken,
+        );
+        const rightRank = candidatePartySortRank(
+          electionCandidatePartyKey(right),
+          userPartyToken,
+        );
+        if (leftRank !== rightRank) return leftRank - rightRank;
+      }
+      const votes = Number(right.votes) - Number(left.votes);
+      if (votes) return votes;
+      return normalizeString(left.name).localeCompare(normalizeString(right.name));
+    },
+  );
+  const visibleCandidates = orderedCandidates.filter(
+    (candidate) =>
+      partyFilter === "all" || electionCandidatePartyKey(candidate) === partyFilter,
+  );
+  const selectedPartyLabel =
+    partyFilter === "all" ? "" : candidatePartyLabelForKey(partyFilter);
   return `<article class="shared-election-race">
     <div class="shared-election-race__header">
       <div>
@@ -7861,17 +8890,64 @@ function renderElectionRaceCard(race, previousCandidateMap) {
       }
     </div>
     <div class="shared-election-race__candidates">
-      ${orderedCandidates
-        .map((candidate) =>
-          renderElectionCandidateRow(candidate, race, previousCandidateMap),
-        )
-        .join("")}
+      ${
+        visibleCandidates.length
+          ? visibleCandidates
+              .map((candidate) =>
+                renderElectionCandidateRow(candidate, race, previousCandidateMap),
+              )
+              .join("")
+          : `<div class="shared-election-empty-candidates">No ${escapeHtml(selectedPartyLabel)} candidates in this office.</div>`
+      }
     </div>
-    ${renderElectionCountyResults(race)}
+    ${renderElectionCountyResults(race, { partyFilter })}
   </article>`;
 }
 
+function renderElectionMissingDistrictNotice(snapshot = null) {
+  const missing = snapshot?.missingDistricts;
+  if (!missing?.stateHouse && !missing?.stateSenate) return "";
+  return `<div class="shared-page__empty">Home address needed for state legislative races.</div>`;
+}
+
+function renderElectionRaceList(races, previousCandidateMap, options = {}) {
+  return races
+    .map((race) => renderElectionRaceCard(race, previousCandidateMap, options))
+    .join("");
+}
+
+function renderElectionCustomColumns(snapshot, previousCandidateMap, options = {}) {
+  const federalRaces = (snapshot.races || []).filter(
+    (race) => electionRaceResultScope(race) === ELECTION_SCOPE_FEDERAL,
+  );
+  const stateRaces = (snapshot.races || []).filter(
+    (race) => electionRaceResultScope(race) === ELECTION_SCOPE_STATE,
+  );
+  return `<div class="shared-election-custom-columns">
+    <section class="shared-election-custom-column">
+      <h3>Federal</h3>
+      ${
+        federalRaces.length
+          ? renderElectionRaceList(federalRaces, previousCandidateMap, options)
+          : '<div class="shared-page__empty">No federal races in this slate.</div>'
+      }
+    </section>
+    <section class="shared-election-custom-column">
+      <h3>State level</h3>
+      ${
+        stateRaces.length
+          ? renderElectionRaceList(stateRaces, previousCandidateMap, options)
+          : '<div class="shared-page__empty">No state races in this slate.</div>'
+      }
+    </section>
+  </div>`;
+}
+
 function renderElectionResults(election, selectedOption) {
+  const selectedScope = normalizeElectionScope(election.selectedScope);
+  if (electionScopeRequiresAuth(selectedScope) && !state.auth.session) {
+    return renderElectionAuthPrompt(selectedScope);
+  }
   if (selectedOption?.future && selectedOption.clickable !== true) {
     return `<section class="shared-election-upcoming">
       <h2>Next Election Date ${escapeHtml(formatElectionDate(selectedOption.electionDate) || "unavailable")}</h2>
@@ -7891,8 +8967,35 @@ function renderElectionResults(election, selectedOption) {
   const previousCandidateMap = electionPreviousCandidateMap(
     election.results.previousSnapshot,
   );
+  const partyFilter =
+    selectedScope === ELECTION_SCOPE_MY_DISTRICT ||
+    selectedScope === ELECTION_SCOPE_CUSTOM
+      ? selectedElectionPartyFilterValue(snapshot)
+      : "all";
   const groups = groupElectionRaces(snapshot, election.selectedDistrictId);
   const countyCoverageLine = electionCountyCoverageLine(snapshot);
+  const customResults =
+    selectedScope === ELECTION_SCOPE_CUSTOM
+      ? renderElectionCustomColumns(snapshot, previousCandidateMap, {
+          partyFilter,
+          partyFirst: true,
+        })
+      : "";
+  const myDistrictResults =
+    selectedScope === ELECTION_SCOPE_MY_DISTRICT
+      ? `<div class="shared-election-group">
+          <h3>My District ballot</h3>
+          ${renderElectionMissingDistrictNotice(snapshot)}
+          ${
+            (snapshot.races || []).length
+              ? renderElectionRaceList(snapshot.races || [], previousCandidateMap, {
+                  partyFilter,
+                  partyFirst: true,
+                })
+              : '<div class="shared-page__empty">No tracked races are available for your district.</div>'
+          }
+        </div>`
+      : "";
   return `<section class="shared-election-results">
     <div class="shared-election-results__header">
       <div>
@@ -7907,20 +9010,25 @@ function renderElectionResults(election, selectedOption) {
         : ""
     }
     ${
-      groups.length
+      customResults ||
+      myDistrictResults ||
+      (groups.length
         ? groups
             .map(
               (group) => `<div class="shared-election-group">
                 <h3>${escapeHtml(group.title)}</h3>
                 ${group.races
                   .map((race) =>
-                    renderElectionRaceCard(race, previousCandidateMap),
+                    renderElectionRaceCard(race, previousCandidateMap, {
+                      partyFilter: "all",
+                      partyFirst: false,
+                    }),
                   )
                   .join("")}
               </div>`,
             )
             .join("")
-        : `<div class="shared-page__empty">No ${escapeHtml(electionScopeLabel(snapshot.scope))} race results are available for this selection.</div>`
+        : `<div class="shared-page__empty">No ${escapeHtml(electionScopeLabel(snapshot.scope))} race results are available for this selection.</div>`)
     }
   </section>`;
 }
@@ -7958,6 +9066,7 @@ function renderElectionDayPage() {
       </div>
       ${election.contextError ? `<div class="shared-page__error">${escapeHtml(election.contextError)}</div>` : ""}
       ${renderElectionControls(election, selectedOption)}
+      ${renderElectionCustomControls(election)}
       ${showMap ? renderElectionMapPanel(election) : ""}
       ${renderElectionDistrictFilters(election)}
       ${renderElectionResults(election, selectedOption)}
@@ -7965,9 +9074,221 @@ function renderElectionDayPage() {
   </section>`;
 }
 
+function normalizedCandidatePartyToken(candidate = {}) {
+  return normalizeElectionPartyToken(
+    candidate.partyToken || candidate.partyCode || candidate.partyLabel,
+  );
+}
+
+function candidatePartyGroupKey(candidate = {}) {
+  return normalizedCandidatePartyToken(candidate) || "UNK";
+}
+
+function candidatePartyLabelForKey(key, sample = null) {
+  const normalizedKey = normalizeString(key).toUpperCase();
+  const sampleLabel = normalizeString(sample?.partyLabel);
+  if (sampleLabel) return sampleLabel;
+  switch (normalizedKey) {
+    case "DEM":
+      return "Democratic";
+    case "REP":
+      return "Republican";
+    case "LIB":
+      return "Libertarian";
+    case "GRN":
+      return "Green";
+    case "IND":
+      return "Independent";
+    case "OTH":
+      return "Other";
+    default:
+      return "Unknown party";
+  }
+}
+
+function candidatePartyColorForKey(key) {
+  return electionPartyColor(key || "OTH");
+}
+
+function selectedUserCandidatePartyToken() {
+  const params = readCurrentSearchParams();
+  return normalizeElectionPartyToken(
+    params.get("partyToken") ||
+      params.get("party") ||
+      params.get("partyLabel") ||
+      state.pages.elections.context?.userPartyToken ||
+      state.pages.elections.context?.userPartyLabel,
+  );
+}
+
+function candidatePartySortRank(key, userPartyToken = "") {
+  const normalizedKey = normalizeString(key).toUpperCase();
+  const normalizedUserParty = normalizeString(userPartyToken).toUpperCase();
+  if (normalizedUserParty && normalizedKey === normalizedUserParty) {
+    return -10;
+  }
+  const rank = ["DEM", "REP", "LIB", "GRN", "IND", "OTH", "UNK"].indexOf(
+    normalizedKey,
+  );
+  return rank >= 0 ? rank : 999;
+}
+
+function compareCandidateDirectoryItems(left = {}, right = {}) {
+  if (left.isFollowing !== right.isFollowing) {
+    return left.isFollowing ? -1 : 1;
+  }
+  if (Boolean(left.activeElection?.path) !== Boolean(right.activeElection?.path)) {
+    return left.activeElection?.path ? -1 : 1;
+  }
+  const leftOffice = normalizeString(left.officeTitle || left.levelOfOffice);
+  const rightOffice = normalizeString(right.officeTitle || right.levelOfOffice);
+  const officeCompare = leftOffice.localeCompare(rightOffice);
+  if (officeCompare) return officeCompare;
+  return normalizeString(left.displayName).localeCompare(
+    normalizeString(right.displayName),
+  );
+}
+
+function candidatePartyGroups(items = []) {
+  const userPartyToken = selectedUserCandidatePartyToken();
+  const groups = new Map();
+  for (const candidate of items) {
+    const key = candidatePartyGroupKey(candidate);
+    const existing = groups.get(key) || {
+      key,
+      title: candidatePartyLabelForKey(key, candidate),
+      items: [],
+    };
+    existing.items.push(candidate);
+    if (!existing.title || existing.title === "Unknown party") {
+      existing.title = candidatePartyLabelForKey(key, candidate);
+    }
+    groups.set(key, existing);
+  }
+  return Array.from(groups.values())
+    .map((group) => ({
+      ...group,
+      items: [...group.items].sort(compareCandidateDirectoryItems),
+      count: group.items.length,
+      preferred: Boolean(
+        userPartyToken && normalizeString(group.key).toUpperCase() === userPartyToken,
+      ),
+    }))
+    .sort((left, right) => {
+      const leftRank = candidatePartySortRank(left.key, userPartyToken);
+      const rightRank = candidatePartySortRank(right.key, userPartyToken);
+      if (leftRank !== rightRank) return leftRank - rightRank;
+      return left.title.localeCompare(right.title);
+    });
+}
+
+function ensureCandidateCollapsedPartyGroupsLoaded() {
+  if (candidateCollapsedPartyGroupsLoaded) return;
+  candidateCollapsedPartyGroupsLoaded = true;
+  try {
+    const raw = window.localStorage?.getItem(
+      CANDIDATE_PARTY_COLLAPSE_STORAGE_KEY,
+    );
+    const parsed = raw ? JSON.parse(raw) : [];
+    candidateCollapsedPartyGroups = new Set(
+      Array.isArray(parsed) ? parsed.map((entry) => normalizeString(entry)) : [],
+    );
+  } catch {
+    candidateCollapsedPartyGroups = new Set();
+  }
+}
+
+function persistCandidateCollapsedPartyGroups() {
+  try {
+    window.localStorage?.setItem(
+      CANDIDATE_PARTY_COLLAPSE_STORAGE_KEY,
+      JSON.stringify(Array.from(candidateCollapsedPartyGroups).filter(Boolean)),
+    );
+  } catch {
+    // Collapsed state is an enhancement.
+  }
+}
+
+function renderCandidatePreviewCard(candidate, currentPath) {
+  const followTarget = resolveCandidateFollowTarget(candidate);
+  const partyToken = normalizedCandidatePartyToken(candidate);
+  const partyLabel = candidatePartyLabelForKey(partyToken || "UNK", candidate);
+  const partyColor = candidatePartyColorForKey(partyToken || "OTH");
+  return `<article class="shared-card shared-card--candidate-preview" style="--candidate-party-color:${escapeHtml(partyColor)}">
+    ${
+      candidate.avatarUrl
+        ? `<img class="shared-card__avatar" src="${escapeHtml(candidate.avatarUrl)}" alt="${escapeHtml(candidate.displayName)}" />`
+        : `<div class="shared-card__avatar shared-card__avatar--placeholder">${escapeHtml(candidate.displayName.slice(0, 1).toUpperCase() || "C")}</div>`
+    }
+    <div class="shared-card__body shared-card__body--candidate-preview">
+      <div class="shared-card__meta">
+        <span class="shared-candidate-party-pill">${escapeHtml(partyToken || partyLabel)}</span>
+        <span>${escapeHtml(candidate.officeTitle || candidate.levelOfOffice || "Candidate")}</span>
+        ${
+          candidate.district
+            ? `<span>${escapeHtml(candidate.district)}</span>`
+            : ""
+        }
+      </div>
+      <h3>${escapeHtml(partyToken ? `${candidate.displayName} (${partyToken})` : candidate.displayName)}</h3>
+      <p class="shared-card__summary">${escapeHtml(candidate.bio || (candidate.kind === "official" ? "Open the official profile to see office details and the report card." : candidate.kind === "raceCandidate" ? "Open the auto-generated profile to see election details and any linked Polis profile." : "Open the candidate page to see recent posts, events, and campaign details."))}</p>
+      <div class="shared-card__meta shared-card__meta--candidate-preview">
+        <span>${escapeHtml(formatCount(candidate.followersCount))} followers</span>
+        ${
+          candidate.tags.length
+            ? `<span>${escapeHtml(candidate.tags.join(", "))}</span>`
+            : ""
+        }
+      </div>
+      <div class="shared-card__actions">
+        <button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="${escapeHtml(resolveCandidateOpenRoute(candidate, currentPath))}">Open</button>
+        ${
+          candidate.activeElection?.path
+            ? `<button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(candidate.activeElection.path)}">${renderIcon("election")} Results</button>`
+            : ""
+        }
+        ${
+          followTarget.candidateId || followTarget.officialId
+            ? `<button class="shared-feed-chip" data-action="candidate-follow" data-candidate-id="${escapeHtml(followTarget.candidateId)}" data-official-id="${escapeHtml(followTarget.officialId)}">${candidate.isFollowing ? "Following" : "Follow"}</button>`
+            : ""
+        }
+        ${
+          candidate.canEdit
+            ? `<button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(resolveCandidateEditRoute(candidate))}">Edit</button>`
+            : ""
+        }
+      </div>
+    </div>
+  </article>`;
+}
+
+function renderCandidatePartyGroup(group, currentPath) {
+  const collapsed = candidateCollapsedPartyGroups.has(group.key);
+  const color = candidatePartyColorForKey(group.key);
+  return `<section class="shared-candidate-party-group" style="--candidate-party-color:${escapeHtml(color)}">
+    <button class="shared-candidate-party-group__header" type="button" data-action="candidate-party-toggle" data-party-key="${escapeHtml(group.key)}" aria-expanded="${collapsed ? "false" : "true"}">
+      <span class="shared-candidate-party-group__chevron" aria-hidden="true">${collapsed ? "›" : "⌄"}</span>
+      <span class="shared-candidate-party-group__title">${escapeHtml(group.title)}</span>
+      ${group.preferred ? '<span class="shared-candidate-party-group__badge">Your party</span>' : ""}
+      <span class="shared-candidate-party-group__count">${escapeHtml(formatCount(group.count))}</span>
+    </button>
+    ${
+      collapsed
+        ? ""
+        : `<div class="shared-card-grid shared-card-grid--candidates">
+            ${group.items
+              .map((candidate) => renderCandidatePreviewCard(candidate, currentPath))
+              .join("")}
+          </div>`
+    }
+  </section>`;
+}
+
 function renderCandidateListPage() {
   const list = state.pages.candidates.list;
   const currentPath = getCurrentPathWithQuery();
+  ensureCandidateCollapsedPartyGroupsLoaded();
+  const groups = candidatePartyGroups(list.items);
   return `<section class="shared-page">
     ${renderTopChrome()}
     <div class="shared-page__content">
@@ -7994,59 +9315,16 @@ function renderCandidateListPage() {
           : ""
       }
       ${list.error ? `<div class="shared-page__error">${escapeHtml(list.error)}</div>` : ""}
-      <div class="shared-card-grid shared-card-grid--candidates">
-        ${list.items
-          .map(
-            (
-              candidate,
-            ) => `<article class="shared-card shared-card--candidate-preview">
-              ${
-                candidate.avatarUrl
-                  ? `<img class="shared-card__avatar" src="${escapeHtml(candidate.avatarUrl)}" alt="${escapeHtml(candidate.displayName)}" />`
-                  : `<div class="shared-card__avatar shared-card__avatar--placeholder">${escapeHtml(candidate.displayName.slice(0, 1).toUpperCase() || "C")}</div>`
-              }
-              <div class="shared-card__body shared-card__body--candidate-preview">
-                <div class="shared-card__meta">
-                  <span>${escapeHtml(candidate.officeTitle || candidate.levelOfOffice || "Candidate")}</span>
-                  ${
-                    candidate.district
-                      ? `<span>${escapeHtml(candidate.district)}</span>`
-                      : ""
-                  }
-                </div>
-                <h3>${escapeHtml(candidate.displayName)}</h3>
-                <p class="shared-card__summary">${escapeHtml(candidate.bio || (candidate.kind === "official" ? "Open the official profile to see office details and the report card." : candidate.kind === "raceCandidate" ? "Open the auto-generated profile to see election details and any linked Polis profile." : "Open the candidate page to see recent posts, events, and campaign details."))}</p>
-                <div class="shared-card__meta shared-card__meta--candidate-preview">
-                  <span>${escapeHtml(formatCount(candidate.followersCount))} followers</span>
-                  ${
-                    candidate.tags.length
-                      ? `<span>${escapeHtml(candidate.tags.join(", "))}</span>`
-                      : ""
-                  }
-                </div>
-                <div class="shared-card__actions">
-                  <button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="${escapeHtml(resolveCandidateOpenRoute(candidate, currentPath))}">Open</button>
-                  ${
-                    candidate.activeElection?.path
-                      ? `<button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(candidate.activeElection.path)}">${renderIcon("election")} Results</button>`
-                      : ""
-                  }
-                  ${
-                    resolveCandidateFollowTarget(candidate).candidateId ||
-                    resolveCandidateFollowTarget(candidate).officialId
-                      ? `<button class="shared-feed-chip" data-action="candidate-follow" data-candidate-id="${escapeHtml(resolveCandidateFollowTarget(candidate).candidateId)}" data-official-id="${escapeHtml(resolveCandidateFollowTarget(candidate).officialId)}">${candidate.isFollowing ? "Following" : "Follow"}</button>`
-                      : ""
-                  }
-                  ${
-                    candidate.canEdit
-                      ? `<button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(resolveCandidateEditRoute(candidate))}">Edit</button>`
-                      : ""
-                  }
-                </div>
-              </div>
-            </article>`,
-          )
-          .join("")}
+      <div class="shared-candidate-party-groups">
+        ${
+          groups.length
+            ? groups
+                .map((group) => renderCandidatePartyGroup(group, currentPath))
+                .join("")
+            : list.loaded && !list.loading
+              ? '<div class="shared-page__empty">No candidates match these filters.</div>'
+              : ""
+        }
       </div>
       ${
         list.loadingMore
@@ -10578,6 +11856,108 @@ function handleRootClick(event) {
     return;
   }
 
+  if (action === "election-custom-new") {
+    const election = state.pages.elections;
+    if (!state.auth.session) {
+      openAuthModal("election_custom_views");
+      return;
+    }
+    if (election.customViews.items.length >= election.customViews.maxViews) {
+      showToast("You can save up to three custom views.");
+      return;
+    }
+    election.customViews.editing = true;
+    election.customViews.draft = createElectionCustomDraft(null);
+    scheduleRender();
+    return;
+  }
+
+  if (action === "election-custom-edit") {
+    const election = state.pages.elections;
+    const view = selectedElectionCustomView(election);
+    if (!view) return;
+    election.customViews.editing = true;
+    election.customViews.draft = createElectionCustomDraft(view);
+    scheduleRender();
+    return;
+  }
+
+  if (action === "election-custom-cancel") {
+    const custom = state.pages.elections.customViews;
+    custom.editing = false;
+    custom.draft = null;
+    scheduleRender();
+    return;
+  }
+
+  if (action === "election-custom-add-item") {
+    const election = state.pages.elections;
+    const custom = election.customViews;
+    if (!custom.draft) {
+      custom.draft = createElectionCustomDraft(selectedElectionCustomView(election));
+    }
+    const item = normalizeElectionCustomViewItem(
+      createElectionCustomItemFromSelection(
+        custom.addType,
+        custom.addDistrict,
+        election,
+      ),
+      election.selectedStateId || "MT",
+    );
+    if (!item) {
+      showToast("Choose a valid race target.");
+      return;
+    }
+    const key = electionCustomItemKey(item);
+    if (custom.draft.items.some((existing) => electionCustomItemKey(existing) === key)) {
+      showToast("That race is already in this custom view.");
+      return;
+    }
+    custom.draft.items = [...custom.draft.items, item];
+    scheduleRender();
+    return;
+  }
+
+  if (action === "election-custom-remove-item") {
+    const custom = state.pages.elections.customViews;
+    const index = Number(target.getAttribute("data-index"));
+    if (!custom.draft || !Number.isInteger(index)) return;
+    custom.draft.items = custom.draft.items.filter((_, itemIndex) => itemIndex !== index);
+    scheduleRender();
+    return;
+  }
+
+  if (action === "election-custom-move-item") {
+    const custom = state.pages.elections.customViews;
+    const index = Number(target.getAttribute("data-index"));
+    const direction = Number(target.getAttribute("data-direction"));
+    if (!custom.draft || !Number.isInteger(index) || !Number.isInteger(direction)) {
+      return;
+    }
+    const nextIndex = index + direction;
+    if (nextIndex < 0 || nextIndex >= custom.draft.items.length) return;
+    const items = [...custom.draft.items];
+    const [item] = items.splice(index, 1);
+    items.splice(nextIndex, 0, item);
+    custom.draft.items = items;
+    scheduleRender();
+    return;
+  }
+
+  if (action === "election-custom-save") {
+    saveElectionCustomDraft().catch(() => {});
+    return;
+  }
+
+  if (action === "election-custom-delete") {
+    const view = selectedElectionCustomView(state.pages.elections);
+    if (!view) return;
+    if (window.confirm(`Delete ${view.name}?`)) {
+      deleteElectionCustomView(view.viewId).catch(() => {});
+    }
+    return;
+  }
+
   if (action === "toggle-like") {
     handlePostLike(target.getAttribute("data-post-id")).catch(() => {});
     return;
@@ -10797,6 +12177,21 @@ function handleRootClick(event) {
     ).catch(() => {
       showToast("Candidate follow failed.");
     });
+    return;
+  }
+
+  if (action === "candidate-party-toggle") {
+    ensureCandidateCollapsedPartyGroupsLoaded();
+    const partyKey = normalizeString(target.getAttribute("data-party-key"));
+    if (partyKey) {
+      if (candidateCollapsedPartyGroups.has(partyKey)) {
+        candidateCollapsedPartyGroups.delete(partyKey);
+      } else {
+        candidateCollapsedPartyGroups.add(partyKey);
+      }
+      persistCandidateCollapsedPartyGroups();
+      scheduleRender();
+    }
     return;
   }
 
@@ -11094,6 +12489,20 @@ function handleRootClick(event) {
 }
 
 function handleRootInput(event) {
+  const customNameField = event.target.closest(
+    '[data-election-custom-field="name"]',
+  );
+  if (customNameField) {
+    const custom = state.pages.elections.customViews;
+    if (!custom.draft) {
+      custom.draft = createElectionCustomDraft(
+        selectedElectionCustomView(state.pages.elections),
+      );
+    }
+    custom.draft.name = normalizeString(customNameField.value).slice(0, 80);
+    return;
+  }
+
   const authField = event.target.closest("[data-auth-field]");
   if (authField && state.ui.authModal) {
     const fieldName = normalizeString(
@@ -11145,6 +12554,31 @@ function handleRootInput(event) {
 }
 
 function handleRootChange(event) {
+  const customField = event.target.closest("[data-election-custom-field]");
+  if (customField) {
+    const custom = state.pages.elections.customViews;
+    if (!custom.draft) {
+      custom.draft = createElectionCustomDraft(
+        selectedElectionCustomView(state.pages.elections),
+      );
+    }
+    const field = normalizeString(
+      customField.getAttribute("data-election-custom-field"),
+    );
+    if (field === "name") {
+      custom.draft.name = normalizeString(customField.value).slice(0, 80);
+    } else if (field === "target-type") {
+      custom.addType = normalizeString(customField.value) || "federal-senate";
+      custom.addDistrict = electionCustomDefaultDistrictForType(
+        custom.addType,
+        state.pages.elections,
+      );
+    } else if (field === "target-district") {
+      custom.addDistrict = normalizeString(customField.value);
+    }
+    scheduleRender();
+    return;
+  }
   const control = event.target.closest("[data-election-control]");
   if (!control) {
     return;
@@ -11165,6 +12599,14 @@ function handleRootChange(event) {
       control.value = ELECTION_SCOPE_FEDERAL;
       return;
     }
+    if (
+      ELECTION_AUTH_SCOPES.has(requestedScope) &&
+      !electionOptionSupportsScope(selectedElectionStateOption(), requestedScope)
+    ) {
+      control.value = normalizeElectionScope(state.pages.elections.selectedScope);
+      if (!state.auth.session) openAuthModal("election_results");
+      return;
+    }
     navigateElectionSelection({
       scope: requestedScope,
       districtId: "",
@@ -11172,6 +12614,25 @@ function handleRootChange(event) {
         requestedScope === ELECTION_SCOPE_STATE
           ? selectedElectionRaceType() || "statewide"
           : "",
+      viewId:
+        requestedScope === ELECTION_SCOPE_CUSTOM
+          ? normalizeString(state.pages.elections.selectedCustomViewId)
+          : "",
+      party: state.pages.elections.selectedPartyFilter,
+    });
+    return;
+  }
+  if (controlKind === "party-filter") {
+    navigateElectionSelection({
+      party: normalizeElectionPartyFilter(control.value),
+    });
+    return;
+  }
+  if (controlKind === "custom-view") {
+    navigateElectionSelection({
+      scope: ELECTION_SCOPE_CUSTOM,
+      viewId: normalizeString(control.value),
+      party: state.pages.elections.selectedPartyFilter,
     });
     return;
   }
@@ -11190,6 +12651,9 @@ function handleRootChange(event) {
       currentScope === ELECTION_SCOPE_STATE &&
       electionStateTrackingAvailable(option)
         ? ELECTION_SCOPE_STATE
+        : ELECTION_AUTH_SCOPES.has(currentScope) &&
+            electionOptionSupportsScope(option, currentScope)
+          ? currentScope
         : ELECTION_SCOPE_FEDERAL;
     navigateElectionSelection({
       scope: nextScope,
@@ -11203,6 +12667,11 @@ function handleRootChange(event) {
               option,
             )
           : "",
+      viewId:
+        nextScope === ELECTION_SCOPE_CUSTOM
+          ? normalizeString(state.pages.elections.selectedCustomViewId)
+          : "",
+      party: state.pages.elections.selectedPartyFilter,
     });
   }
 }
