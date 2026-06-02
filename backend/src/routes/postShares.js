@@ -841,11 +841,11 @@ function getAppShellPageMeta(routeMatch) {
       return {
         title: "Election Day | Polis",
         description:
-          "Track live and finalized federal election results in Polis.",
+          "Track live and finalized election results in Polis.",
         eyebrow: "Election Day",
         headline: "Live election results",
         supportingCopy:
-          "Follow federal race results, district maps, reporting status, and called winners from the browser.",
+          "Follow race results, district maps, reporting status, and called winners from the browser.",
       };
     case "events":
     case "event-detail":

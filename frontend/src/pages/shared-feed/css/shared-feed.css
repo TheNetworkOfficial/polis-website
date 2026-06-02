@@ -1611,6 +1611,35 @@ a {
   font-weight: 700;
 }
 
+.shared-election-race-tabs {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.shared-election-districts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-height: 172px;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid var(--sf-line);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.shared-election-coverage {
+  padding: 10px 12px;
+  border: 1px solid rgba(38, 244, 238, 0.18);
+  border-radius: 16px;
+  background: rgba(38, 244, 238, 0.08);
+  color: #c6fffb;
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
 .shared-election-results,
 .shared-election-group,
 .shared-election-race,
@@ -1808,6 +1837,81 @@ a {
   font-style: normal;
   font-weight: 900;
   text-transform: uppercase;
+}
+
+.shared-election-county-results {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 12px;
+}
+
+.shared-election-county-results summary {
+  cursor: pointer;
+  color: var(--sf-ink);
+  font-weight: 900;
+}
+
+.shared-election-county-results summary span {
+  margin-left: 6px;
+  color: var(--sf-muted);
+  font-size: 0.82rem;
+}
+
+.shared-election-county-results__list {
+  display: grid;
+  gap: 10px;
+  max-height: 360px;
+  overflow: auto;
+  margin-top: 12px;
+  padding-right: 4px;
+}
+
+.shared-election-county-row {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.shared-election-county-row__header,
+.shared-election-county-candidate {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(78px, auto) minmax(58px, auto);
+  gap: 10px;
+  align-items: center;
+}
+
+.shared-election-county-row__header {
+  grid-template-columns: minmax(0, 1fr) auto;
+  color: var(--sf-muted);
+  font-size: 0.82rem;
+}
+
+.shared-election-county-row__header strong {
+  color: var(--sf-ink);
+}
+
+.shared-election-county-candidate {
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.shared-election-county-candidate span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shared-election-county-candidate strong,
+.shared-election-county-candidate em {
+  justify-self: end;
+}
+
+.shared-election-county-candidate em {
+  color: var(--sf-muted);
+  font-style: normal;
+  font-weight: 800;
 }
 
 @keyframes shared-election-edge-glow {
@@ -2019,6 +2123,19 @@ a {
     align-items: center;
     justify-content: start;
     gap: 10px;
+  }
+
+  .shared-election-districts {
+    max-height: 220px;
+  }
+
+  .shared-election-county-row__header,
+  .shared-election-county-candidate {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .shared-election-county-candidate em {
+    grid-column: 2;
   }
 }
 

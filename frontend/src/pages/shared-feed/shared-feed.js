@@ -63,6 +63,11 @@ const ELECTION_MAP_DISTRICT_FILL_LAYER_ID = "shared-election-district-fill";
 const ELECTION_MAP_DISTRICT_GLOW_LAYER_ID = "shared-election-district-glow";
 const ELECTION_MAP_DISTRICT_LINE_LAYER_ID = "shared-election-district-line";
 const ELECTION_MAP_MASK_LAYER_ID = "shared-election-mask";
+const ELECTION_SCOPE_FEDERAL = "federal";
+const ELECTION_SCOPE_STATE = "state";
+const ELECTION_SCOPE_LOCAL = "local";
+const ELECTION_STATE_RACE_TYPES = ["statewide", "house", "senate"];
+const ELECTION_STATE_MAP_CHAMBERS = ["house", "senate"];
 const PRODUCTION_VIDEO_BACKEND_BASE_URL =
   "https://b3nfp5rv5m.execute-api.us-west-2.amazonaws.com/prod";
 const PRODUCTION_WEB_HOSTS = new Set(["polisapp.io", "www.polisapp.io"]);
@@ -291,6 +296,7 @@ const state = {
       selectedDistrictId: "",
       selectedElectionId: "",
       selectedCandidateId: "",
+      selectedRaceType: "statewide",
       map: {
         geometry: null,
         etag: "",
@@ -1619,8 +1625,9 @@ function electionMapFitKey(geometry = null) {
     return "";
   }
   return [
-    normalizeString(geometry?.scope) || "federal",
+    normalizeElectionScope(geometry?.scope),
     stateId,
+    normalizeElectionMapChamber(geometry?.chamber) || "all",
     normalizeString(geometry?.mapVersion || geometry?.etag),
   ].join(":");
 }
@@ -1661,6 +1668,9 @@ function syncElectionMapSources(map, { fit = false } = {}) {
   );
   if (!map.__polisElectionDistrictClickBound) {
     map.on("click", ELECTION_MAP_DISTRICT_FILL_LAYER_ID, (event) => {
+      if (!electionDistrictSelectionEnabled()) {
+        return;
+      }
       const districtId = normalizeString(
         event?.features?.[0]?.properties?.districtId,
       );
@@ -2631,11 +2641,110 @@ function electionPartyColor(value) {
   return "#26f4ee";
 }
 
+function normalizeElectionScope(value) {
+  const scope = normalizeString(value).toLowerCase();
+  if (scope === ELECTION_SCOPE_STATE) return ELECTION_SCOPE_STATE;
+  if (scope === ELECTION_SCOPE_LOCAL) return ELECTION_SCOPE_LOCAL;
+  return ELECTION_SCOPE_FEDERAL;
+}
+
+function normalizeElectionStringList(value) {
+  return Array.isArray(value)
+    ? Array.from(
+        new Set(value.map((item) => normalizeString(item)).filter(Boolean)),
+      )
+    : [];
+}
+
+function normalizeElectionRaceType(value) {
+  const raceType = normalizeString(value).toLowerCase();
+  return ELECTION_STATE_RACE_TYPES.includes(raceType)
+    ? raceType
+    : "statewide";
+}
+
+function normalizeElectionMapChamber(value) {
+  const chamber = normalizeString(value).toLowerCase();
+  return ELECTION_STATE_MAP_CHAMBERS.includes(chamber) ? chamber : "";
+}
+
+function electionRaceTypeChamber(raceType) {
+  const normalized = normalizeElectionRaceType(raceType);
+  return normalized === "house" || normalized === "senate" ? normalized : "";
+}
+
+function electionRaceTypeLabel(raceType) {
+  const normalized = normalizeElectionRaceType(raceType);
+  if (normalized === "house") return "House";
+  if (normalized === "senate") return "Senate";
+  return "Statewide";
+}
+
+function electionScopeLabel(scope) {
+  const normalized = normalizeElectionScope(scope);
+  if (normalized === ELECTION_SCOPE_STATE) return "state";
+  if (normalized === ELECTION_SCOPE_LOCAL) return "local";
+  return "federal";
+}
+
+function electionOptionSupportsScope(option = null, scope = ELECTION_SCOPE_FEDERAL) {
+  const normalizedScope = normalizeElectionScope(scope);
+  if (normalizedScope === ELECTION_SCOPE_FEDERAL) return true;
+  const supportedScopes = normalizeElectionStringList(option?.supportedScopes);
+  if (supportedScopes.includes(normalizedScope)) return true;
+  return (
+    normalizedScope === ELECTION_SCOPE_STATE &&
+    option?.stateTrackingAvailable === true
+  );
+}
+
+function electionStateRaceTypesForOption(option = null) {
+  const raceTypes = normalizeElectionStringList(option?.stateRaceTypes)
+    .map(normalizeElectionRaceType)
+    .filter((raceType) => ELECTION_STATE_RACE_TYPES.includes(raceType));
+  return raceTypes.length ? raceTypes : ELECTION_STATE_RACE_TYPES;
+}
+
+function electionStateMapChambersForOption(option = null) {
+  const chambers = normalizeElectionStringList(option?.stateMapChambers)
+    .map(normalizeElectionMapChamber)
+    .filter(Boolean);
+  return chambers.length ? chambers : ELECTION_STATE_MAP_CHAMBERS;
+}
+
+function electionStateTrackingAvailable(option = null) {
+  return electionOptionSupportsScope(option, ELECTION_SCOPE_STATE);
+}
+
+function normalizeElectionRaceTypeForOption(value, option = null) {
+  const normalized = normalizeElectionRaceType(value);
+  const raceTypes = electionStateRaceTypesForOption(option);
+  if (raceTypes.includes(normalized)) return normalized;
+  return raceTypes.includes("statewide") ? "statewide" : raceTypes[0];
+}
+
 function normalizeElectionStateOption(raw = {}) {
+  const supportedScopes = normalizeElectionStringList(
+    raw.supportedScopes || raw.scopes || [raw.scope],
+  )
+    .map(normalizeElectionScope)
+    .filter((scope) => scope !== ELECTION_SCOPE_LOCAL || raw.localEnabled);
+  const stateRaceTypes = normalizeElectionStringList(raw.stateRaceTypes).map(
+    normalizeElectionRaceType,
+  );
+  const stateMapChambers = normalizeElectionStringList(
+    raw.stateMapChambers,
+  ).map(normalizeElectionMapChamber);
   return {
     stateId: normalizeString(raw.stateId || raw.state),
     stateName: normalizeString(raw.stateName || raw.name) || "State",
-    scope: normalizeString(raw.scope) || "federal",
+    scope: normalizeElectionScope(raw.scope),
+    supportedScopes,
+    stateTrackingAvailable:
+      raw.stateTrackingAvailable === true ||
+      supportedScopes.includes(ELECTION_SCOPE_STATE),
+    stateRaceTypes: stateRaceTypes.filter(Boolean),
+    stateMapChambers: stateMapChambers.filter(Boolean),
     electionId: normalizeString(raw.electionId),
     electionName: normalizeString(raw.electionName),
     electionType: normalizeString(raw.electionType),
@@ -2677,7 +2786,11 @@ function normalizeActiveElection(raw = null) {
   const districtId = normalizeString(raw.districtId || raw.district);
   const electionId = normalizeString(raw.electionId);
   const candidateId = normalizeString(raw.candidateId);
-  const scope = normalizeString(raw.scope) || "federal";
+  const scope = normalizeElectionScope(raw.scope);
+  const raceType =
+    scope === ELECTION_SCOPE_STATE
+      ? normalizeElectionRaceType(raw.raceType || raw.chamber)
+      : "";
   const path =
     normalizeString(raw.path || raw.destinationPath) ||
     buildElectionDayRoute({
@@ -2686,6 +2799,7 @@ function normalizeActiveElection(raw = null) {
       districtId,
       electionId,
       candidateId,
+      raceType,
     });
   return {
     scope,
@@ -2693,6 +2807,7 @@ function normalizeActiveElection(raw = null) {
     districtId,
     electionId,
     candidateId,
+    raceType,
     path,
     electionName: normalizeString(raw.electionName),
     electionDate: normalizeString(raw.electionDate),
@@ -2707,10 +2822,15 @@ function buildElectionDayRoute({
   districtId = "",
   electionId = "",
   candidateId = "",
+  raceType = "",
 } = {}) {
   const query = new URLSearchParams();
-  query.set("scope", normalizeString(scope) || "federal");
+  const normalizedScope = normalizeElectionScope(scope);
+  query.set("scope", normalizedScope);
   if (normalizeString(stateId)) query.set("state", normalizeString(stateId));
+  if (normalizedScope === ELECTION_SCOPE_STATE) {
+    query.set("raceType", normalizeElectionRaceType(raceType));
+  }
   if (normalizeString(districtId))
     query.set("district", normalizeString(districtId));
   if (normalizeString(electionId))
@@ -3556,12 +3676,21 @@ function normalizeElectionContextPayload(payload = {}) {
       : payload;
   return {
     serverNow: normalizeString(source.serverNow || payload.serverNow),
-    scope: normalizeString(source.scope) || "federal",
+    scope: normalizeElectionScope(source.scope),
+    supportedScopes: normalizeElectionStringList(source.supportedScopes).map(
+      normalizeElectionScope,
+    ),
     userStateId: normalizeString(source.userStateId),
     userDistrictId: normalizeString(source.userDistrictId),
     states: (source.states || [])
       .map(normalizeElectionStateOption)
       .filter((option) => option.stateId),
+    stateRaceTypes: normalizeElectionStringList(source.stateRaceTypes).map(
+      normalizeElectionRaceType,
+    ),
+    stateMapChambers: normalizeElectionStringList(
+      source.stateMapChambers,
+    ).map(normalizeElectionMapChamber),
     defaultDestination: normalizeActiveElection(source.defaultDestination),
   };
 }
@@ -3588,6 +3717,45 @@ function normalizeElectionCandidateResult(raw = {}) {
   };
 }
 
+function normalizeElectionCountyCandidateResult(raw = {}) {
+  return {
+    id:
+      normalizeString(
+        raw.id || raw.candidateId || raw.providerCandidateId || raw.name,
+      ) || "candidate",
+    candidateId: normalizeString(raw.candidateId),
+    providerCandidateId: normalizeString(raw.providerCandidateId),
+    name: normalizeString(raw.name || raw.displayName) || "Candidate",
+    partyLabel: normalizeString(raw.partyLabel || raw.party),
+    partyToken: normalizeElectionPartyToken(
+      raw.partyToken || raw.partyCode || raw.party,
+    ),
+    votes: Number(raw.votes || raw.voteCount) || 0,
+    votePercent: Number(raw.votePercent || raw.percent) || 0,
+  };
+}
+
+function normalizeElectionCountyResult(raw = {}) {
+  const candidates = (raw.candidates || [])
+    .map(normalizeElectionCountyCandidateResult)
+    .sort((left, right) => Number(right.votes) - Number(left.votes));
+  return {
+    countyId: normalizeString(raw.countyId || raw.regionId),
+    countyName:
+      normalizeString(raw.countyName || raw.regionName || raw.name) ||
+      "County",
+    totalVotes:
+      Number(raw.totalVotes) ||
+      candidates.reduce(
+        (sum, candidate) => sum + (Number(candidate.votes) || 0),
+        0,
+      ),
+    reporting:
+      raw.reporting && typeof raw.reporting === "object" ? raw.reporting : {},
+    candidates,
+  };
+}
+
 function normalizeElectionRace(raw = {}) {
   return {
     raceId: normalizeString(raw.raceId || raw.id) || "race",
@@ -3596,6 +3764,7 @@ function normalizeElectionRace(raw = {}) {
     officeTitle:
       normalizeString(raw.officeTitle || raw.office) || "Federal race",
     raceType: normalizeString(raw.raceType),
+    chamber: normalizeString(raw.chamber),
     stage: normalizeString(raw.stage),
     isGeneral: raw.isGeneral === true,
     status: normalizeString(raw.status),
@@ -3603,6 +3772,36 @@ function normalizeElectionRace(raw = {}) {
     winnerPartyToken: normalizeElectionPartyToken(raw.winnerPartyToken),
     winnerCandidateId: normalizeString(raw.winnerCandidateId),
     candidates: (raw.candidates || []).map(normalizeElectionCandidateResult),
+    countyResults: (raw.countyResults || [])
+      .map(normalizeElectionCountyResult)
+      .filter((county) => county.countyId || county.countyName),
+  };
+}
+
+function normalizeElectionCountyCoverage(raw = null) {
+  if (!raw || typeof raw !== "object") return null;
+  const counties = Array.isArray(raw.counties)
+    ? raw.counties.map((county) => ({
+        countyId: normalizeString(county.countyId || county.regionId),
+        countyName:
+          normalizeString(county.countyName || county.regionName || county.name) ||
+          "County",
+        status: normalizeString(county.status) || "unknown",
+        message: normalizeString(county.message),
+        precinctsReported: Number(county.precinctsReported) || 0,
+        precinctsPartial: Number(county.precinctsPartial) || 0,
+        precinctsTotal: Number(county.precinctsTotal) || 0,
+        reportingPercent: Number(county.reportingPercent) || 0,
+        lastSourceTimestamp: normalizeString(county.lastSourceTimestamp),
+      }))
+    : [];
+  return {
+    stateId: normalizeString(raw.stateId || raw.state),
+    expectedCount: Number(raw.expectedCount || raw.expectedCountyCount) || 0,
+    reportingCount: Number(raw.reportingCount || raw.reportingCountyCount) || 0,
+    healthyCount: Number(raw.healthyCount) || 0,
+    updatedAt: normalizeString(raw.updatedAt),
+    counties,
   };
 }
 
@@ -3615,13 +3814,15 @@ function normalizeElectionSnapshot(payload = {}) {
     electionId: normalizeString(source.electionId),
     electionName: normalizeString(source.electionName),
     electionType: normalizeString(source.electionType),
-    scope: normalizeString(source.scope) || "federal",
+    scope: normalizeElectionScope(source.scope),
+    raceType: normalizeElectionRaceType(source.raceType),
     stateId: normalizeString(source.stateId || source.state),
     stateName: normalizeString(source.stateName),
     selectedDistrictId: normalizeString(source.selectedDistrictId),
     status: normalizeString(source.status),
     isActive: source.isActive === true,
     isFinalized: source.isFinalized === true,
+    shouldPoll: source.shouldPoll !== false,
     isGeneral: source.isGeneral === true,
     version: normalizeString(source.version),
     updatedAt: normalizeString(source.updatedAt),
@@ -3630,6 +3831,7 @@ function normalizeElectionSnapshot(payload = {}) {
       source.reporting && typeof source.reporting === "object"
         ? source.reporting
         : {},
+    countyCoverage: normalizeElectionCountyCoverage(source.countyCoverage),
     districts: Array.isArray(source.districts) ? source.districts : [],
     races: (source.races || []).map(normalizeElectionRace),
   };
@@ -3643,6 +3845,41 @@ function selectedElectionStateOption() {
       (option) => normalizeString(option.stateId) === selectedStateId,
     ) || null
   );
+}
+
+function selectedElectionIsStateScope() {
+  return (
+    normalizeElectionScope(state.pages.elections.selectedScope) ===
+    ELECTION_SCOPE_STATE
+  );
+}
+
+function selectedElectionRaceType() {
+  const option = selectedElectionStateOption();
+  return selectedElectionIsStateScope()
+    ? normalizeElectionRaceTypeForOption(
+        state.pages.elections.selectedRaceType,
+        option,
+      )
+    : "";
+}
+
+function selectedElectionMapChamber() {
+  const chamber = electionRaceTypeChamber(selectedElectionRaceType());
+  const option = selectedElectionStateOption();
+  return electionStateMapChambersForOption(option).includes(chamber)
+    ? chamber
+    : "";
+}
+
+function selectedElectionCanUseStateScope() {
+  return electionStateTrackingAvailable(selectedElectionStateOption());
+}
+
+function electionDistrictSelectionEnabled(election = state.pages.elections) {
+  const scope = normalizeElectionScope(election.selectedScope);
+  if (scope === ELECTION_SCOPE_FEDERAL) return true;
+  return scope === ELECTION_SCOPE_STATE && Boolean(selectedElectionMapChamber());
 }
 
 function isSelectedElectionUpcomingOnly() {
@@ -3661,10 +3898,11 @@ function chooseElectionDefaultFromContext(context = null) {
       (option) => option.stateId === context.userStateId,
     );
     return {
-      scope: "federal",
+      scope: ELECTION_SCOPE_FEDERAL,
       stateId: userOption?.stateId || context.userStateId,
       districtId: context.userDistrictId,
       electionId: userOption?.electionId || "",
+      raceType: "",
     };
   }
   const option =
@@ -3674,12 +3912,19 @@ function chooseElectionDefaultFromContext(context = null) {
     null;
   return option
     ? {
-        scope: "federal",
+        scope: ELECTION_SCOPE_FEDERAL,
         stateId: option.stateId,
         districtId: "",
         electionId: option.electionId,
+        raceType: "",
       }
-    : { scope: "federal", stateId: "", districtId: "", electionId: "" };
+    : {
+        scope: ELECTION_SCOPE_FEDERAL,
+        stateId: "",
+        districtId: "",
+        electionId: "",
+        raceType: "",
+      };
 }
 
 function applyElectionRouteSelection(context = null) {
@@ -3689,12 +3934,38 @@ function applyElectionRouteSelection(context = null) {
   const routeDistrict = normalizeString(params.get("district"));
   const routeElectionId = normalizeString(params.get("electionId"));
   const routeCandidateId = normalizeString(params.get("candidateId"));
-  const routeScope = normalizeString(params.get("scope")) || "federal";
+  const routeScope = normalizeElectionScope(params.get("scope"));
+  const routeRaceType = normalizeElectionRaceType(
+    params.get("raceType") || params.get("chamber"),
+  );
   const fallback = chooseElectionDefaultFromContext(context);
-  election.selectedScope = routeScope || fallback.scope || "federal";
   election.selectedStateId = routeState || fallback.stateId || "";
-  election.selectedDistrictId =
-    routeState || routeDistrict ? routeDistrict : fallback.districtId || "";
+  const option = selectedElectionStateOption();
+  const fallbackScope = normalizeElectionScope(fallback.scope);
+  const nextScope =
+    routeScope === ELECTION_SCOPE_STATE &&
+    electionOptionSupportsScope(option, ELECTION_SCOPE_STATE)
+      ? ELECTION_SCOPE_STATE
+      : routeScope === ELECTION_SCOPE_LOCAL
+        ? ELECTION_SCOPE_FEDERAL
+        : fallbackScope;
+  election.selectedScope = nextScope;
+  election.selectedRaceType =
+    nextScope === ELECTION_SCOPE_STATE
+      ? normalizeElectionRaceTypeForOption(
+          params.has("raceType") || params.has("chamber")
+            ? routeRaceType
+            : fallback.raceType || "statewide",
+          option,
+        )
+      : "";
+  if (nextScope === ELECTION_SCOPE_STATE) {
+    election.selectedDistrictId =
+      election.selectedRaceType === "statewide" ? "" : routeDistrict;
+  } else {
+    election.selectedDistrictId =
+      routeState || routeDistrict ? routeDistrict : fallback.districtId || "";
+  }
   election.selectedElectionId =
     routeElectionId ||
     fallback.electionId ||
@@ -3743,14 +4014,19 @@ async function loadElectionContext({ refresh = false } = {}) {
   }
 }
 
-function electionMapCacheKey(scope, stateId) {
-  return `polis:election-map:${normalizeString(scope) || "federal"}:${normalizeString(stateId)}`;
+function electionMapCacheKey(scope, stateId, chamber = "") {
+  return [
+    "polis:election-map",
+    normalizeElectionScope(scope),
+    normalizeString(stateId),
+    normalizeElectionMapChamber(chamber) || "all",
+  ].join(":");
 }
 
-function readElectionMapCache(scope, stateId) {
+function readElectionMapCache(scope, stateId, chamber = "") {
   try {
     const raw = window.localStorage?.getItem(
-      electionMapCacheKey(scope, stateId),
+      electionMapCacheKey(scope, stateId, chamber),
     );
     if (!raw) return null;
     const parsed = JSON.parse(raw);
@@ -3760,10 +4036,10 @@ function readElectionMapCache(scope, stateId) {
   }
 }
 
-function writeElectionMapCache(scope, stateId, geometry, etag = "") {
+function writeElectionMapCache(scope, stateId, chamber, geometry, etag = "") {
   try {
     window.localStorage?.setItem(
-      electionMapCacheKey(scope, stateId),
+      electionMapCacheKey(scope, stateId, chamber),
       JSON.stringify({
         geometry,
         etag: normalizeString(etag || geometry?.etag),
@@ -3775,15 +4051,25 @@ function writeElectionMapCache(scope, stateId, geometry, etag = "") {
   }
 }
 
-async function fetchElectionMapGeometry(scope, stateId, etag = "") {
+async function fetchElectionMapGeometry(
+  scope,
+  stateId,
+  chamber = "",
+  etag = "",
+) {
   const baseUrl = getApiBaseUrl();
   if (!baseUrl) {
     throw new Error("video_backend_base_url_missing");
   }
+  const normalizedScope = normalizeElectionScope(scope);
+  const normalizedChamber = normalizeElectionMapChamber(chamber);
   const query = new URLSearchParams({
-    scope: normalizeString(scope) || "federal",
+    scope: normalizedScope,
     state: normalizeString(stateId),
   });
+  if (normalizedScope === ELECTION_SCOPE_STATE && normalizedChamber) {
+    query.set("chamber", normalizedChamber);
+  }
   const headers = { Accept: "application/json" };
   if (normalizeString(etag)) {
     headers["If-None-Match"] = normalizeString(etag);
@@ -3820,8 +4106,17 @@ async function loadElectionMapGeometry({ refresh = false } = {}) {
   if (!stateId) {
     return;
   }
-  const scope = normalizeString(election.selectedScope) || "federal";
-  const cached = readElectionMapCache(scope, stateId);
+  const scope = normalizeElectionScope(election.selectedScope);
+  const chamber = selectedElectionMapChamber();
+  if (scope === ELECTION_SCOPE_STATE && !chamber) {
+    election.map.geometry = null;
+    election.map.etag = "";
+    election.map.loading = false;
+    election.map.error = "";
+    scheduleRender();
+    return;
+  }
+  const cached = readElectionMapCache(scope, stateId, chamber);
   if (cached?.geometry && !election.map.geometry) {
     election.map.geometry = cached.geometry;
     election.map.etag = normalizeString(cached.etag || cached.geometry.etag);
@@ -3834,11 +4129,13 @@ async function loadElectionMapGeometry({ refresh = false } = {}) {
     const fetched = await fetchElectionMapGeometry(
       scope,
       stateId,
+      chamber,
       refresh ? "" : normalizeString(cached?.etag || election.map.etag),
     );
     if (
       normalizeString(state.pages.elections.selectedStateId) !== stateId ||
-      normalizeString(state.pages.elections.selectedScope) !== scope
+      normalizeElectionScope(state.pages.elections.selectedScope) !== scope ||
+      selectedElectionMapChamber() !== chamber
     ) {
       return;
     }
@@ -3853,6 +4150,7 @@ async function loadElectionMapGeometry({ refresh = false } = {}) {
       writeElectionMapCache(
         scope,
         stateId,
+        chamber,
         election.map.geometry,
         election.map.etag,
       );
@@ -3884,11 +4182,19 @@ async function loadElectionResults({ manual = false } = {}) {
     election.results.error = "";
     scheduleRender();
   }
+  const scope = normalizeElectionScope(election.selectedScope);
+  const raceType = selectedElectionRaceType();
   const query = new URLSearchParams({
-    scope: normalizeString(election.selectedScope) || "federal",
+    scope,
     state: stateId,
   });
-  if (normalizeString(election.selectedDistrictId)) {
+  if (scope === ELECTION_SCOPE_STATE) {
+    query.set("raceType", raceType || "statewide");
+  }
+  if (
+    normalizeString(election.selectedDistrictId) &&
+    (scope !== ELECTION_SCOPE_STATE || raceType !== "statewide")
+  ) {
     query.set("district", normalizeString(election.selectedDistrictId));
   }
   if (normalizeString(election.selectedElectionId)) {
@@ -3910,6 +4216,12 @@ async function loadElectionResults({ manual = false } = {}) {
     }
     election.results.previousSnapshot = previous;
     election.results.snapshot = snapshot;
+    if (snapshot.scope === ELECTION_SCOPE_STATE) {
+      election.selectedRaceType = normalizeElectionRaceTypeForOption(
+        snapshot.raceType,
+        selectedElectionStateOption(),
+      );
+    }
     election.selectedElectionId =
       normalizeString(election.selectedElectionId) || snapshot.electionId;
     election.results.loaded = true;
@@ -3938,6 +4250,7 @@ function configureElectionPolling(
   if (
     document.hidden ||
     !isElectionDayRoute() ||
+    snapshot?.shouldPoll === false ||
     !snapshot?.isActive ||
     snapshot?.isFinalized
   ) {
@@ -3954,19 +4267,34 @@ async function loadElectionDayPage({ refresh = false } = {}) {
   const election = state.pages.elections;
   const context = await loadElectionContext({ refresh });
   applyElectionRouteSelection(context);
+  const scope = normalizeElectionScope(election.selectedScope);
+  const chamber = selectedElectionMapChamber();
+  const shouldUseMap = scope !== ELECTION_SCOPE_STATE || Boolean(chamber);
   const shouldLoadMap =
-    refresh ||
-    !election.map.geometry ||
-    normalizeString(election.map.geometry.stateId) !==
-      normalizeString(election.selectedStateId) ||
-    normalizeString(election.map.geometry.scope) !==
-      (normalizeString(election.selectedScope) || "federal");
+    shouldUseMap &&
+    (refresh ||
+      !election.map.geometry ||
+      normalizeString(election.map.geometry.stateId) !==
+        normalizeString(election.selectedStateId) ||
+      normalizeElectionScope(election.map.geometry.scope) !== scope ||
+      normalizeElectionMapChamber(election.map.geometry.chamber) !== chamber);
+  if (
+    (!shouldUseMap ||
+      (election.map.geometry &&
+        (normalizeString(election.map.geometry.stateId) !==
+          normalizeString(election.selectedStateId) ||
+          normalizeElectionScope(election.map.geometry.scope) !== scope ||
+          normalizeElectionMapChamber(election.map.geometry.chamber) !==
+            chamber)))
+  ) {
+    election.map.geometry = null;
+    election.map.etag = "";
+  }
   if (
     election.map.geometry &&
     (normalizeString(election.map.geometry.stateId) !==
       normalizeString(election.selectedStateId) ||
-      normalizeString(election.map.geometry.scope) !==
-        (normalizeString(election.selectedScope) || "federal"))
+      normalizeElectionScope(election.map.geometry.scope) !== scope)
   ) {
     election.map.geometry = null;
     election.map.etag = "";
@@ -3985,23 +4313,43 @@ async function loadElectionDayPage({ refresh = false } = {}) {
   ]);
 }
 
-function navigateElectionSelection({ stateId, districtId, electionId } = {}) {
+function navigateElectionSelection({
+  scope,
+  stateId,
+  districtId,
+  electionId,
+  raceType,
+} = {}) {
   const election = state.pages.elections;
+  const nextScope = normalizeElectionScope(
+    scope !== undefined ? scope : election.selectedScope,
+  );
+  const nextRaceType =
+    nextScope === ELECTION_SCOPE_STATE
+      ? normalizeElectionRaceType(
+          raceType !== undefined ? raceType : election.selectedRaceType,
+        )
+      : "";
+  const nextDistrictId =
+    districtId !== undefined
+      ? districtId
+      : normalizeString(election.selectedDistrictId);
   navigateTo(
     buildElectionDayRoute({
-      scope: election.selectedScope || "federal",
+      scope: nextScope,
       stateId:
         stateId !== undefined
           ? stateId
           : normalizeString(election.selectedStateId),
       districtId:
-        districtId !== undefined
-          ? districtId
-          : normalizeString(election.selectedDistrictId),
+        nextScope === ELECTION_SCOPE_STATE && nextRaceType === "statewide"
+          ? ""
+          : nextDistrictId,
       electionId:
         electionId !== undefined
           ? electionId
           : normalizeString(election.selectedElectionId),
+      raceType: nextRaceType,
     }),
   );
 }
@@ -7051,12 +7399,101 @@ function electionPreviousCandidateMap(snapshot = null) {
   return map;
 }
 
+function electionMapDistrictOptions(election = state.pages.elections) {
+  const features = Array.isArray(election.map.geometry?.districts?.features)
+    ? election.map.geometry.districts.features
+    : [];
+  return features
+    .map((feature) => {
+      const properties =
+        feature?.properties && typeof feature.properties === "object"
+          ? feature.properties
+          : {};
+      const districtId = normalizeString(
+        properties.districtId || properties.id || feature?.id,
+      );
+      if (!districtId) return null;
+      return {
+        districtId,
+        label:
+          normalizeString(properties.name || properties.districtName) ||
+          districtId.replace(/^([A-Z]{2})-(HD|SD)-(\d+)$/u, "$2 $3"),
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => {
+      const leftNumber = Number(left.districtId.match(/-(\d+)$/u)?.[1]);
+      const rightNumber = Number(right.districtId.match(/-(\d+)$/u)?.[1]);
+      if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) {
+        return leftNumber - rightNumber;
+      }
+      return left.label.localeCompare(right.label);
+    });
+}
+
+function selectedElectionDistrictLabel(election = state.pages.elections) {
+  const selectedDistrict = normalizeString(election.selectedDistrictId);
+  if (!selectedDistrict) {
+    return `${election.selectedStateId || "State"} view`;
+  }
+  const option = electionMapDistrictOptions(election).find(
+    (district) => district.districtId === selectedDistrict,
+  );
+  return option?.label || selectedDistrict;
+}
+
+function shouldRenderElectionMap(election = state.pages.elections) {
+  const scope = normalizeElectionScope(election.selectedScope);
+  return scope !== ELECTION_SCOPE_STATE || Boolean(selectedElectionMapChamber());
+}
+
+function formatElectionTimestamp(value) {
+  const normalized = normalizeString(value);
+  if (!normalized) return "";
+  const numeric = Number(normalized);
+  const date =
+    Number.isFinite(numeric) && numeric > 0
+      ? new Date(numeric)
+      : new Date(normalized);
+  if (Number.isNaN(date.getTime())) return normalized;
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function electionCountyCoverageLine(snapshot = null) {
+  const coverage = snapshot?.countyCoverage;
+  if (!coverage) return "";
+  const expected = Number(coverage.expectedCount) || coverage.counties.length;
+  const reporting = Number(coverage.reportingCount) || 0;
+  const parts = [
+    expected
+      ? `${formatElectionVotes(reporting)} of ${formatElectionVotes(expected)} counties reporting`
+      : `${formatElectionVotes(reporting)} counties reporting`,
+  ];
+  const updatedAt = formatElectionTimestamp(coverage.updatedAt);
+  if (updatedAt) parts.push(`Updated ${updatedAt}`);
+  return parts.join(" · ");
+}
+
 function groupElectionRaces(snapshot = null, selectedDistrictId = "") {
   const races = snapshot?.races || [];
   if (!races.length) return [];
   const selectedDistrict = normalizeString(selectedDistrictId);
   if (selectedDistrict) {
-    return [{ title: selectedDistrict, races }];
+    const districtName =
+      races.find((race) => normalizeString(race.districtName))?.districtName ||
+      selectedDistrict;
+    return [{ title: districtName, races }];
+  }
+  if (
+    normalizeElectionScope(snapshot?.scope) === ELECTION_SCOPE_STATE &&
+    normalizeElectionRaceType(snapshot?.raceType) === "statewide"
+  ) {
+    return [{ title: "Statewide state races", races }];
   }
   const groups = new Map();
   for (const race of races) {
@@ -7074,6 +7511,12 @@ function groupElectionRaces(snapshot = null, selectedDistrictId = "") {
 
 function renderElectionControls(election, selectedOption) {
   const states = election.context?.states || [];
+  const selectedScope = normalizeElectionScope(election.selectedScope);
+  const stateAvailable = electionStateTrackingAvailable(selectedOption);
+  const raceTypes = stateAvailable
+    ? electionStateRaceTypesForOption(selectedOption)
+    : [];
+  const selectedRaceType = selectedElectionRaceType() || "statewide";
   const stateOptions = states
     .map((option) => {
       const selected =
@@ -7086,8 +7529,8 @@ function renderElectionControls(election, selectedOption) {
     <label>
       <span>Race level</span>
       <select data-election-control="scope">
-        <option value="federal" selected>Federal</option>
-        <option value="state" disabled>State</option>
+        <option value="federal"${selectedScope === ELECTION_SCOPE_FEDERAL ? " selected" : ""}>Federal</option>
+        <option value="state"${selectedScope === ELECTION_SCOPE_STATE ? " selected" : ""}${stateAvailable ? "" : " disabled"}>State</option>
         <option value="local" disabled>Local</option>
       </select>
     </label>
@@ -7102,11 +7545,24 @@ function renderElectionControls(election, selectedOption) {
         ? `<div class="shared-election-controls__hint">Next Election Date ${escapeHtml(formatElectionDate(selectedOption.electionDate) || "unavailable")}</div>`
         : ""
     }
+    ${
+      selectedScope === ELECTION_SCOPE_STATE
+        ? `<div class="shared-election-race-tabs" role="tablist" aria-label="State race type">
+            ${raceTypes
+              .map(
+                (raceType) =>
+                  `<button class="shared-feed-chip${raceType === selectedRaceType ? " shared-feed-chip--primary" : ""}" type="button" data-action="election-race-type" data-race-type="${escapeHtml(raceType)}" aria-pressed="${raceType === selectedRaceType ? "true" : "false"}">${escapeHtml(electionRaceTypeLabel(raceType))}</button>`,
+              )
+              .join("")}
+          </div>`
+        : ""
+    }
   </div>`;
 }
 
 function renderElectionMapPanel(election) {
   const selectedDistrict = normalizeString(election.selectedDistrictId);
+  const selectedDistrictLabel = selectedElectionDistrictLabel(election);
   return `<section class="shared-election-map-panel">
     <div class="shared-election-map" id="shared-election-map">
       ${
@@ -7121,7 +7577,7 @@ function renderElectionMapPanel(election) {
       }
     </div>
     <div class="shared-election-map-panel__chrome">
-      <span>${escapeHtml(selectedDistrict || `${election.selectedStateId || "State"} view`)}</span>
+      <span>${escapeHtml(selectedDistrictLabel)}</span>
       ${
         selectedDistrict
           ? '<button class="shared-feed-chip" data-action="election-state-view">State view</button>'
@@ -7129,6 +7585,31 @@ function renderElectionMapPanel(election) {
       }
     </div>
   </section>`;
+}
+
+function renderElectionDistrictFilters(election) {
+  if (
+    normalizeElectionScope(election.selectedScope) !== ELECTION_SCOPE_STATE ||
+    !selectedElectionMapChamber()
+  ) {
+    return "";
+  }
+  const districts = electionMapDistrictOptions(election);
+  if (!districts.length) {
+    return election.map.loading
+      ? ""
+      : '<div class="shared-page__empty">District filters will appear when the map loads.</div>';
+  }
+  const selectedDistrict = normalizeString(election.selectedDistrictId);
+  return `<div class="shared-election-districts" aria-label="District filters">
+    <button class="shared-feed-chip${selectedDistrict ? "" : " shared-feed-chip--primary"}" type="button" data-action="election-district-select" data-district-id="">All districts</button>
+    ${districts
+      .map(
+        (district) =>
+          `<button class="shared-feed-chip${district.districtId === selectedDistrict ? " shared-feed-chip--primary" : ""}" type="button" data-action="election-district-select" data-district-id="${escapeHtml(district.districtId)}">${escapeHtml(district.label)}</button>`,
+      )
+      .join("")}
+  </div>`;
 }
 
 function renderElectionCandidateRow(candidate, race, previousCandidateMap) {
@@ -7164,6 +7645,39 @@ function renderElectionCandidateRow(candidate, race, previousCandidateMap) {
   </div>`;
 }
 
+function renderElectionCountyCandidate(candidate) {
+  return `<div class="shared-election-county-candidate">
+    <span>${escapeHtml(candidate.name)}</span>
+    <strong>${escapeHtml(formatElectionVotes(candidate.votes))}</strong>
+    <em>${escapeHtml(formatElectionPercent(candidate.votePercent))}</em>
+  </div>`;
+}
+
+function renderElectionCountyResultRow(county) {
+  return `<div class="shared-election-county-row">
+    <div class="shared-election-county-row__header">
+      <strong>${escapeHtml(county.countyName)}</strong>
+      <span>${escapeHtml(formatElectionVotes(county.totalVotes))} votes</span>
+    </div>
+    <div class="shared-election-county-row__candidates">
+      ${(county.candidates || []).map(renderElectionCountyCandidate).join("")}
+    </div>
+  </div>`;
+}
+
+function renderElectionCountyResults(race) {
+  const counties = Array.isArray(race.countyResults)
+    ? race.countyResults
+    : [];
+  if (!counties.length) return "";
+  return `<details class="shared-election-county-results">
+    <summary>County results <span>${escapeHtml(formatElectionVotes(counties.length))}</span></summary>
+    <div class="shared-election-county-results__list">
+      ${counties.map(renderElectionCountyResultRow).join("")}
+    </div>
+  </details>`;
+}
+
 function renderElectionRaceCard(race, previousCandidateMap) {
   const orderedCandidates = [...(race.candidates || [])].sort(
     (left, right) => Number(right.votes) - Number(left.votes),
@@ -7191,6 +7705,7 @@ function renderElectionRaceCard(race, previousCandidateMap) {
         )
         .join("")}
     </div>
+    ${renderElectionCountyResults(race)}
   </article>`;
 }
 
@@ -7198,7 +7713,7 @@ function renderElectionResults(election, selectedOption) {
   if (selectedOption?.future && selectedOption.clickable !== true) {
     return `<section class="shared-election-upcoming">
       <h2>Next Election Date ${escapeHtml(formatElectionDate(selectedOption.electionDate) || "unavailable")}</h2>
-      <p>${escapeHtml(selectedOption.electionName || "Federal results will appear here when vote totals are available.")}</p>
+      <p>${escapeHtml(selectedOption.electionName || "Results will appear here when vote totals are available.")}</p>
     </section>`;
   }
   const snapshot = election.results.snapshot;
@@ -7209,20 +7724,26 @@ function renderElectionResults(election, selectedOption) {
     return `<div class="shared-page__error">${escapeHtml(election.results.error)}</div>`;
   }
   if (!snapshot) {
-    return '<div class="shared-page__empty">No federal race results are available for this selection.</div>';
+    return `<div class="shared-page__empty">No ${escapeHtml(electionScopeLabel(election.selectedScope))} race results are available for this selection.</div>`;
   }
   const previousCandidateMap = electionPreviousCandidateMap(
     election.results.previousSnapshot,
   );
   const groups = groupElectionRaces(snapshot, election.selectedDistrictId);
+  const countyCoverageLine = electionCountyCoverageLine(snapshot);
   return `<section class="shared-election-results">
     <div class="shared-election-results__header">
       <div>
-        <h2>${escapeHtml(snapshot.electionName || "Federal election")}</h2>
+        <h2>${escapeHtml(snapshot.electionName || `${electionScopeLabel(snapshot.scope)} election`)}</h2>
         <p>${escapeHtml(electionReportingLine(snapshot))}</p>
       </div>
       <span class="shared-election-status">${escapeHtml(electionStatusLabel(snapshot, selectedOption))}</span>
     </div>
+    ${
+      countyCoverageLine
+        ? `<div class="shared-election-coverage">${escapeHtml(countyCoverageLine)}</div>`
+        : ""
+    }
     ${
       groups.length
         ? groups
@@ -7237,7 +7758,7 @@ function renderElectionResults(election, selectedOption) {
               </div>`,
             )
             .join("")
-        : '<div class="shared-page__empty">No federal race results are available for this selection.</div>'
+        : `<div class="shared-page__empty">No ${escapeHtml(electionScopeLabel(snapshot.scope))} race results are available for this selection.</div>`
     }
   </section>`;
 }
@@ -7247,6 +7768,8 @@ function renderElectionDayPage() {
   const selectedOption = selectedElectionStateOption();
   const snapshot = election.results.snapshot;
   const status = electionStatusLabel(snapshot, selectedOption);
+  const selectedScope = normalizeElectionScope(election.selectedScope);
+  const showMap = shouldRenderElectionMap(election);
   const subtitle =
     selectedOption?.future && selectedOption.clickable !== true
       ? `Next Election Date ${formatElectionDate(selectedOption.electionDate) || "unavailable"}`
@@ -7262,6 +7785,7 @@ function renderElectionDayPage() {
           <div class="shared-card__meta">
             <span>${escapeHtml(status)}</span>
             ${election.selectedStateId ? `<span>${escapeHtml(election.selectedStateId)}</span>` : ""}
+            ${selectedScope === ELECTION_SCOPE_STATE ? `<span>${escapeHtml(electionRaceTypeLabel(selectedElectionRaceType()))}</span>` : ""}
             ${election.selectedDistrictId ? `<span>${escapeHtml(election.selectedDistrictId)}</span>` : ""}
           </div>
         </div>
@@ -7271,8 +7795,9 @@ function renderElectionDayPage() {
         </div>
       </div>
       ${election.contextError ? `<div class="shared-page__error">${escapeHtml(election.contextError)}</div>` : ""}
-      ${renderElectionMapPanel(election)}
       ${renderElectionControls(election, selectedOption)}
+      ${showMap ? renderElectionMapPanel(election) : ""}
+      ${renderElectionDistrictFilters(election)}
       ${renderElectionResults(election, selectedOption)}
     </div>
   </section>`;
@@ -9872,6 +10397,25 @@ function handleRootClick(event) {
     return;
   }
 
+  if (action === "election-race-type") {
+    const raceType = normalizeElectionRaceType(
+      target.getAttribute("data-race-type"),
+    );
+    navigateElectionSelection({
+      scope: ELECTION_SCOPE_STATE,
+      raceType,
+      districtId: "",
+    });
+    return;
+  }
+
+  if (action === "election-district-select") {
+    navigateElectionSelection({
+      districtId: normalizeString(target.getAttribute("data-district-id")),
+    });
+    return;
+  }
+
   if (action === "toggle-like") {
     handlePostLike(target.getAttribute("data-post-id")).catch(() => {});
     return;
@@ -10447,9 +10991,26 @@ function handleRootChange(event) {
     control.getAttribute("data-election-control"),
   );
   if (controlKind === "scope") {
-    if (normalizeString(control.value) !== "federal") {
-      control.value = "federal";
+    const requestedScope = normalizeElectionScope(control.value);
+    if (requestedScope === ELECTION_SCOPE_LOCAL) {
+      control.value = normalizeElectionScope(state.pages.elections.selectedScope);
+      return;
     }
+    if (
+      requestedScope === ELECTION_SCOPE_STATE &&
+      !selectedElectionCanUseStateScope()
+    ) {
+      control.value = ELECTION_SCOPE_FEDERAL;
+      return;
+    }
+    navigateElectionSelection({
+      scope: requestedScope,
+      districtId: "",
+      raceType:
+        requestedScope === ELECTION_SCOPE_STATE
+          ? selectedElectionRaceType() || "statewide"
+          : "",
+    });
     return;
   }
   if (controlKind === "state") {
@@ -10460,10 +11021,26 @@ function handleRootChange(event) {
     const option = (state.pages.elections.context?.states || []).find(
       (item) => normalizeString(item.stateId) === stateId,
     );
+    const currentScope = normalizeElectionScope(
+      state.pages.elections.selectedScope,
+    );
+    const nextScope =
+      currentScope === ELECTION_SCOPE_STATE &&
+      electionStateTrackingAvailable(option)
+        ? ELECTION_SCOPE_STATE
+        : ELECTION_SCOPE_FEDERAL;
     navigateElectionSelection({
+      scope: nextScope,
       stateId,
       districtId: "",
       electionId: normalizeString(option?.electionId),
+      raceType:
+        nextScope === ELECTION_SCOPE_STATE
+          ? normalizeElectionRaceTypeForOption(
+              state.pages.elections.selectedRaceType,
+              option,
+            )
+          : "",
     });
   }
 }
