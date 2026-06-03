@@ -3000,7 +3000,7 @@ function formatElectionDate(value) {
 }
 
 function formatElectionVotes(value) {
-  const numeric = Number(value);
+  const numeric = parseElectionNumber(value);
   if (!Number.isFinite(numeric)) {
     return "0";
   }
@@ -3010,11 +3010,36 @@ function formatElectionVotes(value) {
 }
 
 function formatElectionPercent(value) {
-  const numeric = Number(value);
+  const numeric = parseElectionNumber(value);
   if (!Number.isFinite(numeric)) {
     return "0%";
   }
   return `${numeric.toFixed(numeric >= 10 ? 1 : 2)}%`;
+}
+
+function parseElectionNumber(value) {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value !== "string") {
+    return null;
+  }
+  const normalized = value
+    .replace(/,/g, "")
+    .replace(/%/g, "")
+    .replace(/\u00a0/g, " ")
+    .trim();
+  if (!normalized) return null;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function firstElectionNumber(...values) {
+  for (const value of values) {
+    const parsed = parseElectionNumber(value);
+    if (parsed !== null) return parsed;
+  }
+  return null;
 }
 
 function normalizeElectionPartyToken(value) {
@@ -4581,6 +4606,19 @@ function normalizeElectionContextPayload(payload = {}) {
 }
 
 function normalizeElectionCandidateResult(raw = {}) {
+  const votes = firstElectionNumber(
+    raw.votes,
+    raw.voteCount,
+    raw.vote_count,
+    raw.voteTotal,
+    raw.totalVotes,
+  );
+  const votePercent = firstElectionNumber(
+    raw.votePercent,
+    raw.percent,
+    raw.percentage,
+    raw.pct,
+  );
   return {
     id:
       normalizeString(
@@ -4595,14 +4633,27 @@ function normalizeElectionCandidateResult(raw = {}) {
       raw.partyToken || raw.partyCode || raw.party,
     ),
     avatarUrl: normalizeUrl(raw.avatarUrl || raw.photoUrl || raw.imageUrl),
-    votes: Number(raw.votes || raw.voteCount) || 0,
-    votePercent: Number(raw.votePercent || raw.percent) || 0,
+    votes: votes ?? 0,
+    votePercent: votePercent ?? 0,
     isWinner: raw.isWinner === true || raw.winner === true,
     isIncumbent: raw.isIncumbent === true || raw.incumbent === true,
   };
 }
 
 function normalizeElectionCountyCandidateResult(raw = {}) {
+  const votes = firstElectionNumber(
+    raw.votes,
+    raw.voteCount,
+    raw.vote_count,
+    raw.voteTotal,
+    raw.totalVotes,
+  );
+  const votePercent = firstElectionNumber(
+    raw.votePercent,
+    raw.percent,
+    raw.percentage,
+    raw.pct,
+  );
   return {
     id:
       normalizeString(
@@ -4615,8 +4666,8 @@ function normalizeElectionCountyCandidateResult(raw = {}) {
     partyToken: normalizeElectionPartyToken(
       raw.partyToken || raw.partyCode || raw.party,
     ),
-    votes: Number(raw.votes || raw.voteCount) || 0,
-    votePercent: Number(raw.votePercent || raw.percent) || 0,
+    votes: votes ?? 0,
+    votePercent: votePercent ?? 0,
   };
 }
 
@@ -4630,7 +4681,7 @@ function normalizeElectionCountyResult(raw = {}) {
       normalizeString(raw.countyName || raw.regionName || raw.name) ||
       "County",
     totalVotes:
-      Number(raw.totalVotes) ||
+      firstElectionNumber(raw.totalVotes, raw.voteTotal, raw.votes) ??
       candidates.reduce(
         (sum, candidate) => sum + (Number(candidate.votes) || 0),
         0,
