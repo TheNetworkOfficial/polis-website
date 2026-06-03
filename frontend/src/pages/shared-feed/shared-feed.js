@@ -3082,10 +3082,14 @@ function clearStaleAuthSession() {
   state.auth.user = null;
 }
 
-async function refreshElectionAuthSession() {
-  const session = await restoreSharedFeedSession(state.auth.config);
+async function refreshElectionAuthSession({ clearOnFailure = true } = {}) {
+  const session = await restoreSharedFeedSession(state.auth.config, {
+    clearOnFailure,
+  });
   if (!session) {
-    clearStaleAuthSession();
+    if (clearOnFailure) {
+      clearStaleAuthSession();
+    }
     return null;
   }
   state.auth.session = session;
@@ -4933,41 +4937,11 @@ async function loadElectionContext({ refresh = false } = {}) {
   election.contextError = "";
   scheduleRender();
   try {
-    let useAuth = false;
-    if (state.auth.session) {
-      useAuth = Boolean(await refreshElectionAuthSession().catch(() => null));
-    }
-    const payload = await fetchJson(
-      electionApiPath("/context", { auth: useAuth }),
-      {
-        auth: useAuth,
-      },
-    );
+    const payload = await fetchJson(electionApiPath("/context"));
     election.context = normalizeElectionContextPayload(payload);
-    if (state.auth.session && Array.isArray(election.context.customViews)) {
-      election.customViews.items = election.context.customViews;
-      election.customViews.error = "";
-      if (!election.selectedCustomViewId && election.customViews.items.length) {
-        election.selectedCustomViewId = election.customViews.items[0].viewId;
-      }
-    }
     election.contextError = "";
     return election.context;
   } catch (error) {
-    if (isLikelyAuthRequestFailure(error)) {
-      clearStaleAuthSession();
-      try {
-        const payload = await fetchJson(electionApiPath("/context"));
-        election.context = normalizeElectionContextPayload(payload);
-        election.contextError = "";
-        return election.context;
-      } catch (fallbackError) {
-        election.contextError =
-          normalizeString(fallbackError?.message) ||
-          "Election availability failed to load.";
-        return election.context;
-      }
-    }
     election.contextError =
       normalizeString(error?.message) ||
       "Election availability failed to load.";
@@ -5537,10 +5511,7 @@ async function loadElectionResults({ manual = false } = {}) {
   const authRequired =
     electionScopeRequiresAuth(scope) &&
     !(scope === ELECTION_SCOPE_CUSTOM && customShareId);
-  let useAuth =
-    scope === ELECTION_SCOPE_CUSTOM && customShareId
-      ? false
-      : authRequired || Boolean(state.auth.session);
+  let useAuth = authRequired;
   if (useAuth) {
     const session = await refreshElectionAuthSession();
     if (!session) {
@@ -5595,16 +5566,12 @@ async function loadElectionResults({ manual = false } = {}) {
   } catch (error) {
     if (useAuth && isLikelyAuthRequestFailure(error)) {
       clearStaleAuthSession();
-      if (authRequired) {
-        election.results.snapshot = null;
-        election.results.error = "";
-        election.results.loaded = false;
-        configureElectionPolling();
-        openAuthModal("election_custom_views");
-        showToast("Please sign in again.");
-      } else {
-        loadElectionResults({ manual }).catch(() => {});
-      }
+      election.results.snapshot = null;
+      election.results.error = "";
+      election.results.loaded = false;
+      configureElectionPolling();
+      openAuthModal("election_custom_views");
+      showToast("Please sign in again.");
       return;
     }
     election.results.error =

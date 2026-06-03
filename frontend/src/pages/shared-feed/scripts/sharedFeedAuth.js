@@ -980,7 +980,10 @@ export function getStoredSharedFeedSession() {
   return getStoredSession();
 }
 
-export async function restoreSharedFeedSession(config = {}) {
+export async function restoreSharedFeedSession(
+  config = {},
+  { clearOnFailure = true } = {},
+) {
   const storedSession = getStoredSession({ allowExpired: true });
   if (!storedSession) {
     return null;
@@ -993,7 +996,9 @@ export async function restoreSharedFeedSession(config = {}) {
   try {
     return await refreshSharedFeedSession(config, storedSession);
   } catch {
-    clearStoredSessionOnly();
+    if (clearOnFailure) {
+      clearStoredSessionOnly();
+    }
     return null;
   }
 }
