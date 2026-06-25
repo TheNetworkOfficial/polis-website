@@ -55,6 +55,12 @@ function buildStaticSharedFeedShellHtml({
       styleUrl: process.env.VOTER_MAP_STYLE_URL || "",
       maptilerApiKey: process.env.MAPTILER_API_KEY || "",
     },
+    stripe: {
+      publishableKey:
+        process.env.STRIPE_PUBLISHABLE_KEY ||
+        process.env.STRIPE_PUBLIC_KEY ||
+        "",
+    },
     messaging: {
       wsUrl:
         process.env.MESSAGING_WS_URL || process.env.MESSAGING_GATEWAY_URL || "",
@@ -109,6 +115,26 @@ function staticElectionDayShell(filename) {
   });
 }
 
+function staticCtaInviteShell(filename) {
+  return new HtmlWebpackPlugin({
+    templateContent: buildStaticSharedFeedShellHtml({
+      route: "/cta-invite",
+      routeKey: "cta-invite",
+      title: "CTA Invitation | Polis",
+      description:
+        "Preview and accept a coalition call-to-action invitation in Polis.",
+      eyebrow: "CTA Invitation",
+      headline: "Opening your invitation",
+      supportingCopy:
+        "Review event details, sign in, and accept your coalition invitation from the browser.",
+      requiresAuth: false,
+    }),
+    filename,
+    chunks: ["shared-feed"],
+    favicon: "./src/assets/images/polis/Polis.png",
+  });
+}
+
 const deleteAccountDefineEnv = {
   __DELETE_ACCOUNT_API_BASE_URL__: JSON.stringify(
     process.env.DELETE_ACCOUNT_API_BASE_URL || "",
@@ -149,7 +175,6 @@ module.exports = {
     dataSafety: "./src/pages/data-safety/data-safety.js",
     childSafety: "./src/pages/child-safety/child-safety.js",
     deleteAccount: "./src/pages/delete-account/delete-account.js",
-    ctaInvite: "./src/pages/cta-invite/cta-invite.js",
     "shared-feed": "./src/pages/shared-feed/shared-feed.js",
     notFound: "./src/pages/404/404.js",
   },
@@ -283,16 +308,12 @@ module.exports = {
       chunks: ["main", "deleteAccount"],
       favicon: "./src/assets/images/polis/Polis.png",
     }),
-    new HtmlWebpackPlugin({
-      template: "./src/pages/cta-invite/cta-invite.html",
-      filename: "cta-invite/index.html",
-      chunks: ["main", "ctaInvite"],
-      favicon: "./src/assets/images/polis/Polis.png",
-    }),
+    staticCtaInviteShell("cta-invite/index.html"),
     new HtmlWebpackPlugin({
       template: "./src/pages/404/404.html",
       filename: "404.html",
       chunks: ["main", "notFound"],
+      publicPath: "/",
       favicon: "./src/assets/images/polis/Polis.png",
     }),
     staticElectionDayShell("election-day.html"),

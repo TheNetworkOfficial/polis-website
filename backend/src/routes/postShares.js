@@ -1,4 +1,5 @@
 const express = require("express");
+const crypto = require("crypto");
 const { Resvg } = require("@resvg/resvg-js");
 
 const router = express.Router();
@@ -9,10 +10,30 @@ const SOCIAL_CARD_WIDTH = 1200;
 const SOCIAL_CARD_HEIGHT = 630;
 const SOCIAL_CARD_FETCH_TIMEOUT_MS = 5000;
 const SOCIAL_CARD_MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const candidateApplicationJsonParser = express.json({
+  limit: "32kb",
+  type: ["application/json", "application/*+json"],
+});
+const candidateApplicationStore = new Map();
 const APP_SHELL_ROUTE_DEFINITIONS = [
+  {
+    routeKey: "post-analytics",
+    pattern: /^\/posts\/([^/]+)\/analytics$/u,
+    params: ["postId"],
+  },
   { routeKey: "feed", pattern: /^\/feed$/u, params: [] },
+  { routeKey: "create", pattern: /^\/create$/u, params: [] },
+  { routeKey: "discover", pattern: /^\/discover$/u, params: [] },
+  { routeKey: "achievements", pattern: /^\/achievements$/u, params: [] },
+  { routeKey: "search", pattern: /^\/search$/u, params: [] },
+  { routeKey: "search-results", pattern: /^\/search\/results$/u, params: [] },
   { routeKey: "candidates", pattern: /^\/candidates$/u, params: [] },
   { routeKey: "election-day", pattern: /^\/election-day$/u, params: [] },
+  {
+    routeKey: "congressional-report-card",
+    pattern: /^\/officials\/congressional-report-card$/u,
+    params: [],
+  },
   {
     routeKey: "official-report-card",
     pattern: /^\/officials\/([^/]+)\/report-card$/u,
@@ -34,10 +55,79 @@ const APP_SHELL_ROUTE_DEFINITIONS = [
     params: ["candidateId"],
   },
   {
+    routeKey: "candidate-edit",
+    pattern: /^\/settings\/candidate-edit$/u,
+    params: [],
+  },
+  {
     routeKey: "candidate-detail",
     pattern: /^\/candidates\/([^/]+)$/u,
     params: ["candidateId"],
   },
+  {
+    routeKey: "candidate-dashboard-section",
+    pattern: /^\/candidate-dashboard\/([^/]+)\/([^/]+)$/u,
+    params: ["candidateId", "section"],
+  },
+  {
+    routeKey: "candidate-dashboard-detail",
+    pattern: /^\/candidate-dashboard\/([^/]+)$/u,
+    params: ["candidateId"],
+  },
+  {
+    routeKey: "candidate-dashboard",
+    pattern: /^\/candidate-dashboard$/u,
+    params: [],
+  },
+  {
+    routeKey: "candidate-voter-map-section",
+    pattern: /^\/candidate\/voter-map\/(.+)$/u,
+    params: ["voterMapSection"],
+  },
+  {
+    routeKey: "candidate-voter-map",
+    pattern: /^\/candidate\/voter-map$/u,
+    params: [],
+  },
+  {
+    routeKey: "coalition-start",
+    pattern: /^\/coalitions\/start$/u,
+    params: [],
+  },
+  {
+    routeKey: "coalition-join",
+    pattern: /^\/coalitions\/join$/u,
+    params: [],
+  },
+  {
+    routeKey: "coalition-section",
+    pattern: /^\/coalitions\/([^/]+)\/(.+)$/u,
+    params: ["coalitionId", "section"],
+  },
+  {
+    routeKey: "coalition-detail",
+    pattern: /^\/coalitions\/([^/]+)$/u,
+    params: ["coalitionId"],
+  },
+  { routeKey: "coalitions", pattern: /^\/coalitions$/u, params: [] },
+  {
+    routeKey: "mission-detail",
+    pattern: /^\/missions\/([^/]+)$/u,
+    params: ["missionId"],
+  },
+  { routeKey: "missions", pattern: /^\/missions$/u, params: [] },
+  { routeKey: "topics", pattern: /^\/topics$/u, params: [] },
+  {
+    routeKey: "onboarding-topics",
+    pattern: /^\/onboarding\/topics$/u,
+    params: [],
+  },
+  {
+    routeKey: "policy-question-detail",
+    pattern: /^\/questions\/([^/]+)$/u,
+    params: ["questionId"],
+  },
+  { routeKey: "policy-questions", pattern: /^\/questions$/u, params: [] },
   { routeKey: "events", pattern: /^\/events$/u, params: [] },
   {
     routeKey: "event-detail",
@@ -76,11 +166,23 @@ const APP_SHELL_ROUTE_DEFINITIONS = [
     pattern: /^\/profile\/([^/]+)$/u,
     params: ["userId"],
   },
+  { routeKey: "settings", pattern: /^\/settings$/u, params: [] },
+  {
+    routeKey: "settings-section",
+    pattern: /^\/settings\/(.+)$/u,
+    params: ["settingsPath"],
+  },
   { routeKey: "messages-root", pattern: /^\/messages$/u, params: [] },
   {
     routeKey: "messages-wildcard",
     pattern: /^\/messages\/(.+)$/u,
     params: ["messagePath"],
+  },
+  { routeKey: "admin", pattern: /^\/admin$/u, params: [] },
+  {
+    routeKey: "admin-section",
+    pattern: /^\/admin\/(.+)$/u,
+    params: ["adminPath"],
   },
 ];
 
@@ -623,6 +725,7 @@ function renderWebShellPage({
     <meta name="twitter:title" content="${escapeAttribute(safeTitle)}" />
     <meta name="twitter:description" content="${escapeAttribute(safeDescription)}" />
     <link rel="canonical" href="${escapeAttribute(canonicalUrl)}" />
+    <link rel="icon" type="image/png" href="/Polis.png" />
     <link rel="stylesheet" href="/css/shared-feed.css" />
     ${extraMeta}
     <style>
@@ -814,6 +917,15 @@ function getAppShellPageMeta(routeMatch) {
   const routeParams = routeMatch?.routeParams || {};
 
   switch (routeKey) {
+    case "post-analytics":
+      return {
+        title: "Post analytics | Polis",
+        description: "Review post reach, engagement, shares, and watch time in Polis.",
+        eyebrow: "Post analytics",
+        headline: "Post performance",
+        supportingCopy:
+          "Sign in to review reach, response mix, sharing, and watch quality for your Polis post.",
+      };
     case "feed":
       return {
         title: "Feed | Polis",
@@ -822,6 +934,47 @@ function getAppShellPageMeta(routeMatch) {
         headline: "Your Polis feed",
         supportingCopy:
           "Sign in to continue into the full Polis experience from the browser.",
+      };
+    case "create":
+      return {
+        title: "Create | Polis",
+        description:
+          "Publish image posts to the Polis feed from the browser.",
+        eyebrow: "Create",
+        headline: "Publish an image post",
+        supportingCopy:
+          "Sign in to upload a photo, add context, choose visibility, and publish it to the Polis feed.",
+      };
+    case "discover":
+      return {
+        title: "Discover | Polis",
+        description:
+          "Discover Polis feed trends, candidates, events, conversations, ballot tools, and civic work from the browser.",
+        eyebrow: "Discover",
+        headline: "Discover Polis",
+        supportingCopy:
+          "Sign in to browse civic feed trends, people, events, rooms, ballot guidance, missions, coalitions, and campaign work.",
+      };
+    case "achievements":
+      return {
+        title: "Achievements | Polis",
+        description:
+          "Track first policy answers, ballot progress, and civic streaks in Polis.",
+        eyebrow: "Achievements",
+        headline: "Civic milestones",
+        supportingCopy:
+          "Sign in to review the achievements that turn questions, ballot work, and daily activity into a stronger Polis profile.",
+      };
+    case "search":
+    case "search-results":
+      return {
+        title: "Search | Polis",
+        description:
+          "Search Polis posts, people, tags, and civic activity from the browser.",
+        eyebrow: "Search",
+        headline: "Search Polis",
+        supportingCopy:
+          "Sign in to search posts, people, tags, campaigns, coalitions, and civic work from the browser.",
       };
     case "candidates":
     case "official-detail":
@@ -836,6 +989,100 @@ function getAppShellPageMeta(routeMatch) {
         headline: "Candidate pages on the web",
         supportingCopy:
           "Sign in to browse candidates, follow campaigns, and manage your candidate page.",
+      };
+    case "congressional-report-card":
+      return {
+        title: "Congressional Report Card | Polis",
+        description:
+          "Review cross-chamber bills, chamber votes, Polis opinions, and representative accountability in Polis.",
+        eyebrow: "Report Card",
+        headline: "Congressional Report Card",
+        supportingCopy:
+          "Sign in to review cross-chamber bills, House and Senate votes, Polis opinions, and representative accountability from the browser.",
+      };
+    case "candidate-dashboard":
+    case "candidate-dashboard-detail":
+    case "candidate-dashboard-section":
+      return {
+        title: "Campaigns | Polis",
+        description: "Open the Polis candidate campaign dashboard in the browser.",
+        eyebrow: "Campaigns",
+        headline: "Campaign Command Center",
+        supportingCopy:
+          "Sign in to manage candidate analytics, events, calendar, staff, missions, messaging, and voter operations.",
+      };
+    case "candidate-voter-map":
+    case "candidate-voter-map-section":
+      return {
+        title: "Candidate voter map | Polis",
+        description:
+          "Open candidate voter-map territory, connected voters, and field operations in the browser.",
+        eyebrow: "Campaigns",
+        headline: "Candidate voter map",
+        supportingCopy:
+          "Sign in to review voter-map access, territories, connected voters, add-voter tools, and field operation readiness.",
+      };
+    case "coalitions":
+    case "coalition-detail":
+    case "coalition-section":
+      return {
+        title: "Coalitions | Polis",
+        description: "Open Polis coalition workspaces in the browser.",
+        eyebrow: "Coalitions",
+        headline: "Coalition Workspace",
+        supportingCopy:
+          "Sign in to open coalition rooms, members, missions, voter map tools, governance, calendar, and amplify requests.",
+      };
+    case "coalition-start":
+      return {
+        title: "Start a coalition | Polis",
+        description: "Create a Polis coalition workspace in the browser.",
+        eyebrow: "Coalitions",
+        headline: "Start a coalition",
+        supportingCopy:
+          "Sign in to create a coalition profile, access model, rooms, missions, voter map tools, and governance workspace.",
+      };
+    case "coalition-join":
+      return {
+        title: "Join coalition | Polis",
+        description: "Request access to a Polis coalition in the browser.",
+        eyebrow: "Coalitions",
+        headline: "Join coalition",
+        supportingCopy:
+          "Sign in to request coalition membership and return to the web workspace after approval.",
+      };
+    case "missions":
+    case "mission-detail":
+      return {
+        title: "Missions | Polis",
+        description: "Open campaign and coalition mission work in Polis.",
+        eyebrow: "Missions",
+        headline: "Mission Hub",
+        supportingCopy:
+          "Sign in to review active mission work, claim eligible role tasks, and track task progress from the browser.",
+      };
+    case "topics":
+    case "onboarding-topics":
+      return {
+        title: "Topics | Polis",
+        description:
+          "Follow civic topics in Polis and tune the web feed around the issues you care about.",
+        eyebrow: "Topics",
+        headline:
+          routeKey === "onboarding-topics" ? "Pick topics" : "Topics",
+        supportingCopy:
+          "Sign in to follow issue areas, shape recommendations, and continue onboarding from the browser.",
+      };
+    case "policy-questions":
+    case "policy-question-detail":
+      return {
+        title: "Policy Questions | Polis",
+        description:
+          "Answer reviewed civic policy questions in Polis from the browser.",
+        eyebrow: "Policy Questions",
+        headline: "Answer civic questions",
+        supportingCopy:
+          "Sign in to browse policy questions, answer issue prompts, and improve voter-intelligence signals from the browser.",
       };
     case "election-day":
       return {
@@ -877,6 +1124,17 @@ function getAppShellPageMeta(routeMatch) {
         supportingCopy:
           "Sign in to view your profile, connections, notifications, and edit your public page.",
       };
+    case "settings":
+    case "settings-section":
+      return {
+        title: "Settings | Polis",
+        description:
+          "Manage Polis settings, connected accounts, publishing defaults, and notifications in the browser.",
+        eyebrow: "Settings",
+        headline: "Polis settings",
+        supportingCopy:
+          "Sign in to manage connected accounts, social publishing, crosspost defaults, and notification preferences.",
+      };
     case "messages-root":
     case "messages-wildcard":
       return {
@@ -886,6 +1144,17 @@ function getAppShellPageMeta(routeMatch) {
         headline: "Messaging on the web",
         supportingCopy:
           "Sign in to open your inbox, requests, conversations, device security, and server spaces.",
+      };
+    case "admin":
+    case "admin-section":
+      return {
+        title: "Admin | Polis",
+        description:
+          "Open Polis admin applications, reports, donations, elections, tags, voter-map costs, and feed configuration in the browser.",
+        eyebrow: "Admin",
+        headline: "Admin workspace",
+        supportingCopy:
+          "Sign in with an admin account to review candidate applications, moderation reports, donations, address changes, election operations, tag catalogs, voter-map costs, and feed configuration.",
       };
     default:
       return {
@@ -926,6 +1195,285 @@ function renderAppShellPage(req, routeMatch) {
   });
 }
 
+function bearerTokenFromRequest(req) {
+  const header = normalizeString(req.headers.authorization);
+  if (!header.toLowerCase().startsWith("bearer ")) {
+    return "";
+  }
+  return header.slice(7).trim();
+}
+
+function decodeJwtPayload(token) {
+  const [, payload] = normalizeString(token).split(".");
+  if (!payload) {
+    return {};
+  }
+  try {
+    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized.padEnd(
+      normalized.length + ((4 - (normalized.length % 4)) % 4),
+      "=",
+    );
+    return JSON.parse(Buffer.from(padded, "base64").toString("utf8"));
+  } catch {
+    return {};
+  }
+}
+
+function candidateApplicationUserKey(req) {
+  const token = bearerTokenFromRequest(req);
+  if (!token) {
+    return "";
+  }
+  const payload = decodeJwtPayload(token);
+  const stableUserId = normalizeString(
+    payload.sub || payload.username || payload.email,
+  );
+  if (stableUserId) {
+    return `jwt:${stableUserId}`;
+  }
+  return `token:${crypto.createHash("sha256").update(token).digest("hex")}`;
+}
+
+function normalizeCandidateApplicationSubmission(body = {}) {
+  const source = body && typeof body === "object" ? body : {};
+  const normalized = {};
+  [
+    "fullName",
+    "firstName",
+    "middleName",
+    "lastName",
+    "campaignAddress",
+    "level",
+    "office",
+    "officeOther",
+    "state",
+    "county",
+    "city",
+    "district",
+    "fecCandidateId",
+    "fecCommitteeId",
+    "electionCycle",
+    "filingAuthority",
+    "jurisdictionCandidateId",
+    "jurisdictionCommitteeId",
+    "filingId",
+  ].forEach((key) => {
+    const value = normalizeString(source[key]);
+    if (value) {
+      normalized[key] = value;
+    }
+  });
+  return normalized;
+}
+
+function validateCandidateApplicationSubmission(application) {
+  if (!normalizeString(application.fullName)) {
+    return "Candidate legal name is required.";
+  }
+  if (!normalizeString(application.level)) {
+    return "Government level is required.";
+  }
+  if (!normalizeString(application.office)) {
+    return "Office is required.";
+  }
+  if (!normalizeString(application.campaignAddress)) {
+    return "Registered campaign address is required.";
+  }
+  return "";
+}
+
+function buildCandidateApplicationResponse(application) {
+  return {
+    application: application || null,
+  };
+}
+
+function firstQueryValue(value) {
+  if (Array.isArray(value)) {
+    return normalizeString(value[0]);
+  }
+  return normalizeString(value);
+}
+
+function buildRedirectQuery(req, omittedKeys = []) {
+  const omitted = new Set(omittedKeys);
+  const params = new URLSearchParams();
+  Object.entries(req.query || {}).forEach(([key, value]) => {
+    if (omitted.has(key)) {
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach((entry) => {
+        const normalized = normalizeString(entry);
+        if (normalized) {
+          params.append(key, normalized);
+        }
+      });
+      return;
+    }
+    const normalized = normalizeString(value);
+    if (normalized) {
+      params.set(key, normalized);
+    }
+  });
+  const query = params.toString();
+  return query ? `?${query}` : "";
+}
+
+function buildRedirectTarget(path, req, { extraParams = {}, omittedKeys = [] } = {}) {
+  const query = buildRedirectQuery(req, omittedKeys);
+  const params = new URLSearchParams(query ? query.slice(1) : "");
+  Object.entries(extraParams).forEach(([key, value]) => {
+    const normalized = normalizeString(value);
+    if (normalized) {
+      params.set(key, normalized);
+    }
+  });
+  const nextQuery = params.toString();
+  return `${path}${nextQuery ? `?${nextQuery}` : ""}`;
+}
+
+router.get("/api/candidateApplications/me", (req, res) => {
+  const userKey = candidateApplicationUserKey(req);
+  if (!userKey) {
+    res.status(401).json({
+      ok: false,
+      error: "authentication_required",
+      message: "Sign in before checking candidate access.",
+    });
+    return;
+  }
+
+  res
+    .status(200)
+    .json(buildCandidateApplicationResponse(candidateApplicationStore.get(userKey)));
+});
+
+router.post(
+  "/api/candidateApplications",
+  candidateApplicationJsonParser,
+  (req, res) => {
+    const userKey = candidateApplicationUserKey(req);
+    if (!userKey) {
+      res.status(401).json({
+        ok: false,
+        error: "authentication_required",
+        message: "Sign in before requesting candidate access.",
+      });
+      return;
+    }
+
+    const submitted = normalizeCandidateApplicationSubmission(req.body);
+    const validationError = validateCandidateApplicationSubmission(submitted);
+    if (validationError) {
+      res.status(400).json({
+        ok: false,
+        error: "invalid_candidate_application",
+        message: validationError,
+      });
+      return;
+    }
+
+    const previous = candidateApplicationStore.get(userKey);
+    const now = new Date().toISOString();
+    const application = {
+      ...(previous || {}),
+      ...submitted,
+      applicationId: previous?.applicationId || `cand-app-${crypto.randomUUID()}`,
+      status: "pending",
+      createdAt: previous?.createdAt || now,
+      updatedAt: now,
+    };
+
+    candidateApplicationStore.set(userKey, application);
+    res.status(previous ? 200 : 201).json(buildCandidateApplicationResponse(application));
+  },
+);
+
+router.get("/posts/view", (req, res) => {
+  const postId =
+    firstQueryValue(req.query.postId) ||
+    firstQueryValue(req.query.id) ||
+    firstQueryValue(req.query.post);
+  const query = buildRedirectQuery(req, ["postId", "id", "post"]);
+  if (postId) {
+    res.redirect(302, `/posts/${encodeURIComponent(postId)}${query}`);
+    return;
+  }
+  res.redirect(302, `/feed${query}`);
+});
+
+router.get(
+  [
+    "/auth",
+    "/auth/signup/email",
+    "/auth/signup/password",
+    "/auth/confirm-code",
+    "/auth/forgot-password",
+    "/auth/forgot-password/confirm",
+  ],
+  (req, res) => {
+    const path = normalizeString(req.path);
+    const mode = path.includes("/signup")
+      ? "signup"
+      : path.includes("/confirm-code")
+        ? "confirm"
+        : "login";
+    res.redirect(
+      302,
+      buildRedirectTarget("/feed", req, {
+        extraParams: { auth: mode },
+        omittedKeys: ["auth"],
+      }),
+    );
+  },
+);
+
+router.get("/onboarding/profile", (req, res) => {
+  res.redirect(
+    302,
+    buildRedirectTarget("/settings/voter-profile", req, {
+      extraParams: { onboarding: "profile" },
+      omittedKeys: ["onboarding"],
+    }),
+  );
+});
+
+router.get("/onboarding/photo", (req, res) => {
+  res.redirect(
+    302,
+    buildRedirectTarget("/profile/edit", req, {
+      extraParams: { onboarding: "photo" },
+      omittedKeys: ["onboarding"],
+    }),
+  );
+});
+
+router.get(["/onboarding/location", "/onboarding/address"], (req, res) => {
+  res.redirect(
+    302,
+    buildRedirectTarget("/settings/voter-profile/home-location", req, {
+      extraParams: { onboarding: req.path.endsWith("/address") ? "address" : "location" },
+      omittedKeys: ["onboarding"],
+    }),
+  );
+});
+
+router.get("/account-deletion-requested", (req, res) => {
+  res.redirect(
+    302,
+    buildRedirectTarget("/delete-account.html", req, {
+      extraParams: { requested: "1" },
+      omittedKeys: ["requested"],
+    }),
+  );
+});
+
+router.get("/create-tab", (req, res) => {
+  res.redirect(302, `/create${buildRedirectQuery(req)}`);
+});
+
 router.get("/profile-tab", (req, res) => {
   const query = req.url.includes("?")
     ? req.url.slice(req.url.indexOf("?"))
@@ -935,14 +1483,38 @@ router.get("/profile-tab", (req, res) => {
 
 router.get(
   [
+    "/posts/:postId/analytics",
     "/feed",
+    "/create",
+    "/discover",
+    "/achievements",
+    "/search",
+    "/search/results",
     "/candidates",
     "/election-day",
+    "/officials/congressional-report-card",
     "/officials/:officialId",
     "/officials/:officialId/report-card",
     "/auto-candidates/:entityId",
     "/candidates/:candidateId",
     "/candidates/:candidateId/edit",
+    "/settings/candidate-edit",
+    "/candidate-dashboard",
+    "/candidate-dashboard/:candidateId",
+    "/candidate-dashboard/:candidateId/:section",
+    "/candidate/voter-map",
+    "/candidate/voter-map/*",
+    "/coalitions",
+    "/coalitions/start",
+    "/coalitions/join",
+    "/coalitions/:coalitionId",
+    "/coalitions/:coalitionId/*",
+    "/missions",
+    "/missions/:missionId",
+    "/topics",
+    "/onboarding/topics",
+    "/questions",
+    "/questions/:questionId",
     "/events",
     "/events/:eventId",
     "/manage-events",
@@ -953,8 +1525,12 @@ router.get(
     "/profile/connections",
     "/profile/notifications",
     "/profile/:userId",
+    "/settings",
+    "/settings/*",
     "/messages",
     "/messages/*",
+    "/admin",
+    "/admin/*",
   ],
   (req, res) => {
     const routeMatch = matchAppShellRoute(req.path);
@@ -990,6 +1566,33 @@ router.get("/posts/:postId", async (req, res) => {
   if (!result.ok) {
     const statusCode =
       result.statusCode === 410 ? 410 : result.statusCode === 404 ? 404 : 502;
+    if (statusCode !== 404 && statusCode !== 410) {
+      const canonicalUrl = `${requestOrigin(req)}/posts/${encodeURIComponent(postId)}`;
+      const requestUrl = `${requestOrigin(req)}${req.originalUrl}`;
+      const storeUrls = resolveStoreUrls();
+      res
+        .status(200)
+        .type("html")
+        .send(
+          renderSharePage({
+            req,
+            shareCard: {
+              postId,
+              brandName: DEFAULT_BRAND_NAME,
+              previewTitle: `${DEFAULT_BRAND_NAME} post`,
+              previewText: `Open this post in ${DEFAULT_BRAND_NAME}.`,
+              authorDisplayName: "Post author",
+              canonicalUrl,
+            },
+            canonicalUrl,
+            requestUrl,
+            socialCardImageUrl: "",
+            iosStoreUrl: storeUrls.ios,
+            androidStoreUrl: storeUrls.android,
+          }),
+        );
+      return;
+    }
     res.status(statusCode).send(
       renderUnavailablePage({
         title: statusCode === 410 ? "Post removed" : "Post unavailable",
@@ -1087,9 +1690,22 @@ router.get("/.well-known/apple-app-site-association", (_req, res) => {
             appIDs: appIds,
             components: [
               { "/": "/feed" },
+              { "/": "/discover" },
+              { "/": "/search" },
+              { "/": "/search/results" },
               { "/": "/candidates" },
               { "/": "/election-day" },
               { "/": "/candidates/*" },
+              { "/": "/candidate-dashboard" },
+              { "/": "/candidate-dashboard/*" },
+              { "/": "/coalitions" },
+              { "/": "/coalitions/*" },
+              { "/": "/missions" },
+              { "/": "/missions/*" },
+              { "/": "/topics" },
+              { "/": "/onboarding/topics" },
+              { "/": "/questions" },
+              { "/": "/questions/*" },
               { "/": "/officials/*" },
               { "/": "/auto-candidates/*" },
               { "/": "/cta-invite/*" },
@@ -1099,6 +1715,7 @@ router.get("/.well-known/apple-app-site-association", (_req, res) => {
               { "/": "/profile" },
               { "/": "/profile/*" },
               { "/": "/messages/*" },
+              { "/": "/settings" },
               { "/": "/settings/*" },
             ],
           },

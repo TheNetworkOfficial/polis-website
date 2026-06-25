@@ -345,6 +345,25 @@ function hasRefreshSessionConfig(config = {}) {
   );
 }
 
+function requireCognitoUserPoolConfig(config = {}, feature = "This feature") {
+  if (!resolveCognitoRegion(config) || !resolveCognitoClientId(config)) {
+    throw new SharedFeedAuthError(`${feature} is not configured.`, {
+      errorCode: "auth_not_configured",
+    });
+  }
+}
+
+function requireAccessToken(session, feature = "This feature") {
+  const accessToken = normalizeString(session?.accessToken);
+  if (!accessToken) {
+    throw new SharedFeedAuthError(`${feature} requires sign-in.`, {
+      errorCode: "unauthorized",
+      statusCode: 401,
+    });
+  }
+  return accessToken;
+}
+
 export function getSharedFeedAuthCapabilities(config = {}) {
   return {
     direct: hasDirectSignUpConfig(config),
@@ -827,6 +846,230 @@ export async function confirmSharedFeedSignUp(
   }
 
   return true;
+}
+
+async function resolvePasswordResetUsername(identifier, config = {}) {
+  const normalizedIdentifier = normalizeString(identifier);
+  if (!normalizedIdentifier) {
+    return "";
+  }
+  if (!normalizedIdentifier.includes("@")) {
+    return normalizedIdentifier;
+  }
+  const resolvedUsername = await resolveCognitoUsername(
+    normalizedIdentifier,
+    config,
+  );
+  return resolvedUsername || normalizedIdentifier;
+}
+
+function normalizeCodeDeliveryDetails(details = {}) {
+  return {
+    deliveryDestination: normalizeString(details?.Destination) || null,
+    deliveryMedium: normalizeString(details?.DeliveryMedium) || null,
+  };
+}
+
+export async function requestSharedFeedPasswordReset(
+  config = {},
+  { identifier = "" } = {},
+) {
+  requireCognitoUserPoolConfig(config, "Password reset");
+  const normalizedIdentifier = normalizeString(identifier);
+  if (!normalizedIdentifier) {
+    throw new SharedFeedAuthError("Email or username is required.", {
+      errorCode: "missing_identifier",
+    });
+  }
+  const username = await resolvePasswordResetUsername(
+    normalizedIdentifier,
+    config,
+  );
+  const response = await fetch(getCognitoIdpEndpoint(config), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-amz-json-1.1",
+      "X-Amz-Target": "AWSCognitoIdentityProviderService.ForgotPassword",
+    },
+    body: JSON.stringify({
+      ClientId: resolveCognitoClientId(config),
+      Username: username,
+    }),
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const mapped = mapAuthFailure(payload, response.status, {
+      message: "Password reset could not be started.",
+      errorCode: "password_reset_request_failed",
+    });
+    throw new SharedFeedAuthError(mapped.message, {
+      statusCode: mapped.statusCode,
+      errorCode: mapped.errorCode,
+      payload,
+    });
+  }
+
+  return {
+    username,
+    ...normalizeCodeDeliveryDetails(payload?.CodeDeliveryDetails || {}),
+  };
+}
+
+export async function confirmSharedFeedPasswordReset(
+  config = {},
+  { identifier = "", code = "", password = "" } = {},
+) {
+  requireCognitoUserPoolConfig(config, "Password reset");
+  const normalizedIdentifier = normalizeString(identifier);
+  const normalizedCode = normalizeString(code);
+  const normalizedPassword = String(password || "");
+  if (!normalizedIdentifier || !normalizedCode || !normalizedPassword) {
+    throw new SharedFeedAuthError(
+      "Email or username, code, and new password are required.",
+      { errorCode: "missing_password_reset_details" },
+    );
+  }
+  if (normalizedPassword.length < 8) {
+    throw new SharedFeedAuthError("Password must be at least 8 characters.", {
+      errorCode: "invalid_password",
+    });
+  }
+
+  const username = await resolvePasswordResetUsername(
+    normalizedIdentifier,
+    config,
+  );
+  const response = await fetch(getCognitoIdpEndpoint(config), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-amz-json-1.1",
+      "X-Amz-Target": "AWSCognitoIdentityProviderService.ConfirmForgotPassword",
+    },
+    body: JSON.stringify({
+      ClientId: resolveCognitoClientId(config),
+      Username: username,
+      ConfirmationCode: normalizedCode,
+      Password: normalizedPassword,
+    }),
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const mapped = mapAuthFailure(payload, response.status, {
+      message: "Password reset could not be confirmed.",
+      errorCode: "password_reset_confirm_failed",
+    });
+    throw new SharedFeedAuthError(mapped.message, {
+      statusCode: mapped.statusCode,
+      errorCode: mapped.errorCode,
+      payload,
+    });
+  }
+
+  return true;
+}
+
+function buildTotpSetupUri(session, secretCode) {
+  const secret = normalizeString(secretCode);
+  if (!secret) return "";
+  const user = deriveSessionUser(session);
+  const accountLabel =
+    user.email || user.username || user.userId || "Polis account";
+  const issuer = "Polis";
+  const params = new URLSearchParams({
+    secret,
+    issuer,
+  });
+  return `otpauth://totp/${encodeURIComponent(issuer)}:${encodeURIComponent(accountLabel)}?${params.toString()}`;
+}
+
+export async function startSharedFeedTotpSetup(config = {}, session = null) {
+  requireCognitoUserPoolConfig(config, "Authenticator setup");
+  const accessToken = requireAccessToken(session, "Authenticator setup");
+  const response = await fetch(getCognitoIdpEndpoint(config), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-amz-json-1.1",
+      "X-Amz-Target":
+        "AWSCognitoIdentityProviderService.AssociateSoftwareToken",
+    },
+    body: JSON.stringify({ AccessToken: accessToken }),
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const mapped = mapAuthFailure(payload, response.status, {
+      message: "Authenticator setup could not be started.",
+      errorCode: "totp_setup_failed",
+    });
+    throw new SharedFeedAuthError(mapped.message, {
+      statusCode: mapped.statusCode,
+      errorCode: mapped.errorCode,
+      payload,
+    });
+  }
+
+  const secretCode = normalizeString(payload?.SecretCode);
+  return {
+    secretCode,
+    setupSession: normalizeString(payload?.Session),
+    setupUri: buildTotpSetupUri(session, secretCode),
+  };
+}
+
+export async function verifySharedFeedTotpSetup(
+  config = {},
+  session = null,
+  { code = "", setupSession = "" } = {},
+) {
+  requireCognitoUserPoolConfig(config, "Authenticator verification");
+  const accessToken = requireAccessToken(session, "Authenticator verification");
+  const userCode = normalizeString(code);
+  if (!userCode) {
+    throw new SharedFeedAuthError("Enter the code from your app.", {
+      errorCode: "missing_totp_code",
+    });
+  }
+
+  const body = {
+    UserCode: userCode,
+    FriendlyDeviceName: "Polis Web",
+  };
+  const normalizedSetupSession = normalizeString(setupSession);
+  if (normalizedSetupSession) {
+    body.Session = normalizedSetupSession;
+  } else {
+    body.AccessToken = accessToken;
+  }
+
+  const response = await fetch(getCognitoIdpEndpoint(config), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-amz-json-1.1",
+      "X-Amz-Target":
+        "AWSCognitoIdentityProviderService.VerifySoftwareToken",
+    },
+    body: JSON.stringify(body),
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const mapped = mapAuthFailure(payload, response.status, {
+      message: "Authenticator setup could not be verified.",
+      errorCode: "totp_verify_failed",
+    });
+    throw new SharedFeedAuthError(mapped.message, {
+      statusCode: mapped.statusCode,
+      errorCode: mapped.errorCode,
+      payload,
+    });
+  }
+
+  return {
+    status: normalizeString(payload?.Status) || "SUCCESS",
+    setupSession: normalizeString(payload?.Session),
+  };
 }
 
 export async function resendSharedFeedSignUpCode(

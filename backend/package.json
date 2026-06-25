@@ -1,5 +1,5 @@
 {
-  "name": "backend",
+  "name": "polisapp-io-backend",
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
@@ -10,7 +10,7 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": "",
+  "description": "Backend services for polisapp.io",
   "dependencies": {
     "@apollo/server": "^4.11.2",
     "@resvg/resvg-js": "^2.6.2",
