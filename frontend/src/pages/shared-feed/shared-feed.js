@@ -2150,6 +2150,12 @@ function getInitialRoute() {
       return parsedRoute;
     }
     if (
+      parsedRoute.routeKey === runtimeRouteKey &&
+      Object.keys(parsedRoute.routeParams || {}).length
+    ) {
+      return parsedRoute;
+    }
+    if (
       parsedRoute.routeKey !== ROUTE_KEY_SHARE_POST &&
       parsedRoute.routeKey !== runtimeRouteKey
     ) {
