@@ -1,0 +1,1246 @@
+
+> polisapp-io-frontend@1.0.0 start
+> webpack serve --config webpack.config.js --mode development --open --no-open --port 5177
+
+Webpack output path: C:\Users\Cowbo\Documents\Polis\polis-website\frontend\dist
+Entry points: {
+  main: './src/main.js',
+  index: './src/pages/index/index.js',
+  features: './src/pages/features/features.js',
+  about: './src/pages/about/about.js',
+  faq: './src/pages/faq/faq.js',
+  contact: './src/pages/contact/contact.js',
+  terms: './src/pages/terms/terms.js',
+  privacyPolicy: './src/pages/privacy-policy/privacy-policy.js',
+  dataSafety: './src/pages/data-safety/data-safety.js',
+  childSafety: './src/pages/child-safety/child-safety.js',
+  deleteAccount: './src/pages/delete-account/delete-account.js',
+  'shared-feed': './src/pages/shared-feed/shared-feed.js',
+  notFound: './src/pages/404/404.js'
+}
+assets by info 2.25 MiB [1m[32m[immutable][39m[22m 24 assets
+assets by path [1m[32m*.html[39m[22m 61.8 KiB
+  asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+  + 16 assets
+assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+assets by chunk 5.02 MiB (name: shared-feed)
+  asset [1m[32mscripts/shared-feed.js[39m[22m 4.11 MiB [1m[32m[emitted][39m[22m (name: shared-feed)
+  asset [1m[32mcss/shared-feed.css[39m[22m 936 KiB [1m[32m[emitted][39m[22m (name: shared-feed)
+assets by path [1m[32massets/*.png[39m[22m 269 KiB
+  asset [1m[32massets/Polis.png[39m[22m 187 KiB [1m[32m[emitted][39m[22m [from: src/assets/images/polis/Polis.png] (auxiliary name: shared-feed)
+  asset [1m[32massets/Banner.png[39m[22m 81.2 KiB [1m[32m[emitted][39m[22m [from: src/assets/images/polis/Banner.png]
+assets by path [1m[32msettings/[39m[22m 3.38 KiB
+  asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+  asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
++ 28 assets
+runtime modules 571 KiB 286 modules
+orphan modules 988 KiB [1m[33m[orphan][39m[22m 21 modules
+cacheable modules 4.02 MiB (javascript) 187 KiB (asset) 951 KiB (css/mini-extract)
+  modules by layer 4.02 MiB (javascript) 187 KiB (asset)
+    modules by path [1m./src/[39m[22m 3.91 MiB (javascript) 187 KiB (asset)
+      modules by path [1m./src/pages/[39m[22m 3.9 MiB 30 modules
+      modules by path [1m./src/scripts/*.js[39m[22m 15.2 KiB 4 modules
+      + 3 modules
+    modules by path [1m./node_modules/[39m[22m 112 KiB 16 modules
+  css modules 951 KiB
+    modules by path [1m./src/pages/[39m[22m 942 KiB 12 modules
+    modules by path [1m./src/css/*.css[39m[22m 5.48 KiB 4 modules
+    modules by path [1m./src/components/[39m[22m 3.82 KiB 2 modules
+    css ./node_modules/css-loader/dist/cjs.js![1m./src/styles.css[39m[22m 138 bytes [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+    css ./node_modules/css-loader/dist/cjs.js![1m./src/styles.css (1)[39m[22m 1 bytes [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 6975 ms
+assets by status 956 KiB [1m[32m[cached][39m[22m 13 assets
+assets by status 10.6 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.03 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.79 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 30 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 951 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.65 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 6918 ms
+assets by status 207 KiB [1m[32m[cached][39m[22m 13 assets
+assets by status 7.56 MiB [1m[32m[emitted][39m[22m
+  assets by info 2.24 MiB [1m[32m[immutable][39m[22m
+    assets by info 12.6 KiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 30 assets
+runtime modules 411 KiB 190 modules
+cached modules 4.02 MiB (javascript) 187 KiB (asset) 15.1 KiB (css/mini-extract) [1m[32m[cached][39m[22m 73 modules
+orphan modules 962 KiB [1m[33m[orphan][39m[22m 1 module
+cacheable modules 713 bytes (javascript) 936 KiB (css/mini-extract)
+  [1m./src/pages/shared-feed/css/shared-feed.css[39m[22m 713 bytes [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+  css ./node_modules/css-loader/dist/cjs.js![1m./src/pages/shared-feed/css/shared-feed.css[39m[22m 936 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 255 ms
+assets by status 1.12 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.4 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.03 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.79 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 952 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.65 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 7741 ms
+assets by status 1.12 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.4 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.03 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.79 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 952 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.65 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 6950 ms
+assets by status 1.12 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.4 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.03 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.79 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 952 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.65 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 7845 ms
+assets by status 1.12 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.4 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.03 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.79 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 952 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.65 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 8908 ms
+assets by status 1.12 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.4 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.03 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.79 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 952 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.65 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 8015 ms
+assets by status 1.12 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.4 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.03 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.79 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 952 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.65 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 8018 ms
+assets by status 20 KiB [1m[32m[cached][39m[22m 12 assets
+assets by status 2.73 MiB [1m[32m[emitted][39m[22m
+  assets by info 2.26 MiB [1m[32m[immutable][39m[22m
+    assets by info 23.6 KiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.5 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.22 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.28 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.68 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.6 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 241 KiB (javascript) 15.1 KiB (css/mini-extract) [1m[32m[cached][39m[22m 67 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 39 bytes [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m [1m[31m[1 error][39m[22m
+
+[1m[31mERROR[39m[22m in [1m./src/pages/shared-feed/shared-feed.js[39m[22m
+Module build failed (from ./node_modules/babel-loader/lib/index.js):
+SyntaxError: C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js: Unexpected token (73019:14)
+
+[0m [90m 73017 |[39m [32m              ? "Trusted-device and E2EE changes apply to protected workspace actions."[39m
+ [90m 73018 |[39m [32m              : "You need server management access to change security policy.",[39m
+[31m[1m>[22m[39m[90m 73019 |[39m [32m              : "You need workspace management access to change security policy.",[39m
+ [90m       |[39m               [31m[1m^[22m[39m
+ [90m 73020 |[39m [32m        )}</span>[39m
+ [90m 73021 |[39m [32m        <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(disabled)}>${saving ? "Saving..." : "Save policy"}</button>[39m
+ [90m 73022 |[39m [32m      </div>[39m[0m
+    at constructor (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:359:19)
+    at Parser.raise (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:3266:19)
+    at Parser.unexpected (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:3286:16)
+    at Parser.parseExprAtom (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:10987:16)
+    at Parser.parseExprSubscripts (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:10619:23)
+    at Parser.parseUpdate (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:10604:21)
+    at Parser.parseMaybeUnary (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:10584:23)
+    at Parser.parseMaybeUnaryOrPrivate (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:10438:61)
+    at Parser.parseExprOps (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:10443:23)
+    at Parser.parseMaybeConditional (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:10420:23)
+    at Parser.parseMaybeAssign (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:10383:21)
+    at C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:10353:39
+    at Parser.allowInAnd (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:11955:12)
+    at Parser.parseMaybeAssignAllowIn (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:10353:17)
+    at Parser.parseExprListItem (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:11713:18)
+    at Parser.parseCallExpressionArguments (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:10788:22)
+    at Parser.parseCoverCallAndAsyncArrowHead (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:10722:29)
+    at Parser.parseSubscript (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:10659:19)
+    at Parser.parseSubscripts (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:10632:19)
+    at Parser.parseExprSubscripts (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:10623:17)
+    at Parser.parseUpdate (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:10604:21)
+    at Parser.parseMaybeUnary (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:10584:23)
+    at Parser.parseMaybeUnaryOrPrivate (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:10438:61)
+    at Parser.parseExprOps (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:10443:23)
+    at Parser.parseMaybeConditional (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:10420:23)
+    at Parser.parseMaybeAssign (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:10383:21)
+    at Parser.parseExpressionBase (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:10337:23)
+    at C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:10333:39
+    at Parser.allowInAnd (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:11955:12)
+    at Parser.parseExpression (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:10333:17)
+    at Parser.parseTemplateSubstitution (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:11344:17)
+    at Parser.parseTemplate (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:11335:31)
+    at Parser.parseExprAtom (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:10897:21)
+    at Parser.parseExprSubscripts (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:10619:23)
+    at Parser.parseUpdate (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:10604:21)
+    at Parser.parseMaybeUnary (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:10584:23)
+    at Parser.parseMaybeUnaryOrPrivate (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:10438:61)
+    at Parser.parseExprOps (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:10443:23)
+    at Parser.parseMaybeConditional (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:10420:23)
+    at Parser.parseMaybeAssign (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:10383:21)
+    at Parser.parseExpressionBase (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:10337:23)
+    at C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:10333:39
+    at Parser.allowInAnd (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:11950:16)
+    at Parser.parseExpression (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:10333:17)
+    at Parser.parseReturnStatement (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:12640:28)
+    at Parser.parseStatementContent (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:12292:21)
+    at Parser.parseStatementLike (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:12261:17)
+    at Parser.parseStatementListItem (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:12241:17)
+    at Parser.parseBlockOrModuleBlockBody (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:12814:61)
+    at Parser.parseBlockBody (C:\Users\Cowbo\Documents\Polis\polis-website\frontend\node_modules\@babel\parser\lib\index.js:12807:10)
+
+webpack 5.97.1 compiled with [1m[31m1 error[39m[22m in 2693 ms
+assets by status 1.12 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.6 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.18 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.95 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 952 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.65 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 7514 ms
+assets by status 1.12 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.4 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.03 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.79 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 952 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.65 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 5224 ms
+assets by status 1.12 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.4 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.03 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.79 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 952 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.65 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 8066 ms
+assets by status 1.12 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.4 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.03 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.79 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 952 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.65 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 4775 ms
+assets by status 1.12 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.4 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.03 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.79 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 952 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.65 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 6848 ms
+assets by status 1.12 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.4 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.03 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.79 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 952 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.65 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 7182 ms
+assets by status 207 KiB [1m[32m[cached][39m[22m 13 assets
+assets by status 7.57 MiB [1m[32m[emitted][39m[22m
+  assets by info 2.24 MiB [1m[32m[immutable][39m[22m
+    assets by info 12.6 KiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 30 assets
+runtime modules 411 KiB 190 modules
+cached modules 4.02 MiB (javascript) 187 KiB (asset) 15.1 KiB (css/mini-extract) [1m[32m[cached][39m[22m 73 modules
+orphan modules 962 KiB [1m[33m[orphan][39m[22m 1 module
+cacheable modules 713 bytes (javascript) 936 KiB (css/mini-extract)
+  [1m./src/pages/shared-feed/css/shared-feed.css[39m[22m 713 bytes [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+  css ./node_modules/css-loader/dist/cjs.js![1m./src/pages/shared-feed/css/shared-feed.css[39m[22m 936 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 255 ms
+assets by status 207 KiB [1m[32m[cached][39m[22m 13 assets
+assets by status 7.57 MiB [1m[32m[emitted][39m[22m
+  assets by info 2.24 MiB [1m[32m[immutable][39m[22m
+    assets by info 12.6 KiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 30 assets
+runtime modules 411 KiB 190 modules
+cached modules 4.02 MiB (javascript) 187 KiB (asset) 15.1 KiB (css/mini-extract) [1m[32m[cached][39m[22m 73 modules
+orphan modules 962 KiB [1m[33m[orphan][39m[22m 1 module
+cacheable modules 713 bytes (javascript) 937 KiB (css/mini-extract)
+  [1m./src/pages/shared-feed/css/shared-feed.css[39m[22m 713 bytes [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+  css ./node_modules/css-loader/dist/cjs.js![1m./src/pages/shared-feed/css/shared-feed.css[39m[22m 937 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 175 ms
+assets by status 1.12 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.4 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.03 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.79 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 952 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.65 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 7615 ms
+assets by status 1.12 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.4 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.03 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.79 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 952 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.65 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 8993 ms
+assets by status 207 KiB [1m[32m[cached][39m[22m 13 assets
+assets by status 7.57 MiB [1m[32m[emitted][39m[22m
+  assets by info 2.24 MiB [1m[32m[immutable][39m[22m
+    assets by info 12.6 KiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 30 assets
+runtime modules 411 KiB 190 modules
+cached modules 4.02 MiB (javascript) 187 KiB (asset) 15.1 KiB (css/mini-extract) [1m[32m[cached][39m[22m 73 modules
+orphan modules 962 KiB [1m[33m[orphan][39m[22m 1 module
+cacheable modules 713 bytes (javascript) 937 KiB (css/mini-extract)
+  [1m./src/pages/shared-feed/css/shared-feed.css[39m[22m 713 bytes [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+  css ./node_modules/css-loader/dist/cjs.js![1m./src/pages/shared-feed/css/shared-feed.css[39m[22m 937 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 216 ms
+assets by status 207 KiB [1m[32m[cached][39m[22m 13 assets
+assets by status 7.57 MiB [1m[32m[emitted][39m[22m
+  assets by info 2.24 MiB [1m[32m[immutable][39m[22m
+    assets by info 12.6 KiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 30 assets
+runtime modules 411 KiB 190 modules
+cached modules 4.02 MiB (javascript) 187 KiB (asset) 15.1 KiB (css/mini-extract) [1m[32m[cached][39m[22m 73 modules
+orphan modules 962 KiB [1m[33m[orphan][39m[22m 1 module
+cacheable modules 713 bytes (javascript) 937 KiB (css/mini-extract)
+  [1m./src/pages/shared-feed/css/shared-feed.css[39m[22m 713 bytes [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+  css ./node_modules/css-loader/dist/cjs.js![1m./src/pages/shared-feed/css/shared-feed.css[39m[22m 937 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 236 ms
+assets by status 207 KiB [1m[32m[cached][39m[22m 13 assets
+assets by status 7.57 MiB [1m[32m[emitted][39m[22m
+  assets by info 2.24 MiB [1m[32m[immutable][39m[22m
+    assets by info 12.6 KiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 30 assets
+runtime modules 411 KiB 190 modules
+cached modules 4.02 MiB (javascript) 187 KiB (asset) 15.1 KiB (css/mini-extract) [1m[32m[cached][39m[22m 73 modules
+orphan modules 962 KiB [1m[33m[orphan][39m[22m 1 module
+cacheable modules 713 bytes (javascript) 937 KiB (css/mini-extract)
+  [1m./src/pages/shared-feed/css/shared-feed.css[39m[22m 713 bytes [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+  css ./node_modules/css-loader/dist/cjs.js![1m./src/pages/shared-feed/css/shared-feed.css[39m[22m 937 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 201 ms
+assets by status 207 KiB [1m[32m[cached][39m[22m 13 assets
+assets by status 7.57 MiB [1m[32m[emitted][39m[22m
+  assets by info 2.24 MiB [1m[32m[immutable][39m[22m
+    assets by info 12.6 KiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 30 assets
+runtime modules 411 KiB 190 modules
+cached modules 4.02 MiB (javascript) 187 KiB (asset) 15.1 KiB (css/mini-extract) [1m[32m[cached][39m[22m 73 modules
+orphan modules 962 KiB [1m[33m[orphan][39m[22m 1 module
+cacheable modules 713 bytes (javascript) 937 KiB (css/mini-extract)
+  [1m./src/pages/shared-feed/css/shared-feed.css[39m[22m 713 bytes [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+  css ./node_modules/css-loader/dist/cjs.js![1m./src/pages/shared-feed/css/shared-feed.css[39m[22m 937 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 200 ms
+assets by status 1.12 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.4 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.03 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.79 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 952 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.65 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 8931 ms
+assets by status 1.12 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.4 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.03 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.79 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 952 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.65 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 7922 ms
+assets by status 1.12 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.4 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.03 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.79 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 952 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.65 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 9992 ms
+assets by status 1.12 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.4 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.03 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.8 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 952 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.65 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 9899 ms
+assets by status 1.12 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.4 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.03 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.8 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 952 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.65 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 9106 ms
+assets by status 1.12 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.4 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.03 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.8 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 952 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.65 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 6871 ms
+assets by status 1.12 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.4 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.03 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.8 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 952 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.65 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 5776 ms
+assets by status 1.12 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.4 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.03 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.8 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 952 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.65 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 7474 ms
+assets by status 1.12 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.4 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.03 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.8 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 952 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.65 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 7401 ms
+assets by status 1.12 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.4 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.03 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.8 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 952 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.65 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 9388 ms
+assets by status 1.12 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.4 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.04 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.8 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 952 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.65 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 7473 ms
+assets by status 207 KiB [1m[32m[cached][39m[22m 13 assets
+assets by status 11.4 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.04 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.8 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 30 assets
+runtime modules 411 KiB 190 modules
+cached modules 388 KiB (javascript) 187 KiB (asset) 15.1 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+orphan modules 962 KiB [1m[33m[orphan][39m[22m 1 module
+cacheable modules 3.66 MiB (javascript) 937 KiB (css/mini-extract)
+  [1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.65 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+  [1m./src/pages/shared-feed/css/shared-feed.css[39m[22m 713 bytes [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+  css ./node_modules/css-loader/dist/cjs.js![1m./src/pages/shared-feed/css/shared-feed.css[39m[22m 937 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 6544 ms
+assets by status 1.12 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.5 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.04 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.8 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 952 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.65 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 7022 ms
+assets by status 1.12 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.5 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.04 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.8 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 952 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.66 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 6976 ms
+assets by status 1.12 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.5 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.04 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.8 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 952 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.66 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 6236 ms
+assets by status 207 KiB [1m[32m[cached][39m[22m 13 assets
+assets by status 7.58 MiB [1m[32m[emitted][39m[22m
+  assets by info 2.24 MiB [1m[32m[immutable][39m[22m
+    assets by info 12.6 KiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 30 assets
+runtime modules 411 KiB 190 modules
+cached modules 4.03 MiB (javascript) 187 KiB (asset) 15.1 KiB (css/mini-extract) [1m[32m[cached][39m[22m 73 modules
+orphan modules 966 KiB [1m[33m[orphan][39m[22m 1 module
+cacheable modules 713 bytes (javascript) 941 KiB (css/mini-extract)
+  [1m./src/pages/shared-feed/css/shared-feed.css[39m[22m 713 bytes [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+  css ./node_modules/css-loader/dist/cjs.js![1m./src/pages/shared-feed/css/shared-feed.css[39m[22m 941 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 768 ms
+assets by status 207 KiB [1m[32m[cached][39m[22m 13 assets
+assets by status 7.58 MiB [1m[32m[emitted][39m[22m
+  assets by info 2.24 MiB [1m[32m[immutable][39m[22m
+    assets by info 12.6 KiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 30 assets
+runtime modules 411 KiB 190 modules
+cached modules 4.03 MiB (javascript) 187 KiB (asset) 15.1 KiB (css/mini-extract) [1m[32m[cached][39m[22m 73 modules
+orphan modules 967 KiB [1m[33m[orphan][39m[22m 1 module
+cacheable modules 713 bytes (javascript) 942 KiB (css/mini-extract)
+  [1m./src/pages/shared-feed/css/shared-feed.css[39m[22m 713 bytes [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+  css ./node_modules/css-loader/dist/cjs.js![1m./src/pages/shared-feed/css/shared-feed.css[39m[22m 942 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 305 ms
+assets by status 207 KiB [1m[32m[cached][39m[22m 13 assets
+assets by status 7.58 MiB [1m[32m[emitted][39m[22m
+  assets by info 2.24 MiB [1m[32m[immutable][39m[22m
+    assets by info 12.6 KiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 30 assets
+runtime modules 411 KiB 190 modules
+cached modules 4.03 MiB (javascript) 187 KiB (asset) 15.1 KiB (css/mini-extract) [1m[32m[cached][39m[22m 73 modules
+orphan modules 967 KiB [1m[33m[orphan][39m[22m 1 module
+cacheable modules 713 bytes (javascript) 942 KiB (css/mini-extract)
+  [1m./src/pages/shared-feed/css/shared-feed.css[39m[22m 713 bytes [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+  css ./node_modules/css-loader/dist/cjs.js![1m./src/pages/shared-feed/css/shared-feed.css[39m[22m 942 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 199 ms
+assets by status 207 KiB [1m[32m[cached][39m[22m 13 assets
+assets by status 7.58 MiB [1m[32m[emitted][39m[22m
+  assets by info 2.24 MiB [1m[32m[immutable][39m[22m
+    assets by info 12.6 KiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 30 assets
+runtime modules 411 KiB 190 modules
+cached modules 4.03 MiB (javascript) 187 KiB (asset) 15.1 KiB (css/mini-extract) [1m[32m[cached][39m[22m 73 modules
+orphan modules 968 KiB [1m[33m[orphan][39m[22m 1 module
+cacheable modules 713 bytes (javascript) 942 KiB (css/mini-extract)
+  [1m./src/pages/shared-feed/css/shared-feed.css[39m[22m 713 bytes [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+  css ./node_modules/css-loader/dist/cjs.js![1m./src/pages/shared-feed/css/shared-feed.css[39m[22m 942 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 174 ms
+assets by status 1.12 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.5 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.04 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.8 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 958 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.66 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 8387 ms
+assets by status 1.12 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.5 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.06 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.83 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 958 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.68 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 8476 ms
+assets by status 1.12 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.5 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.06 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.83 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 958 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.68 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 8507 ms
+assets by status 1.12 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.5 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.06 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.83 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 958 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.68 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 7895 ms
+assets by status 1.12 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.5 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.06 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.83 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 958 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.68 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 5815 ms
+assets by status 1.12 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.5 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.06 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.83 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 958 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.68 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 8516 ms
+assets by status 1.12 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.5 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.06 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.83 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 958 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.68 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 8516 ms
+assets by status 1.12 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.5 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.07 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.84 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 958 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.69 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 6648 ms
+assets by status 1.12 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.5 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.07 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.84 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 958 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.69 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 7669 ms
+assets by status 1.12 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.5 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.07 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.84 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 958 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.69 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 7760 ms
+assets by status 7.82 MiB [1m[32m[cached][39m[22m 42 assets
+assets by path [1m[32m.[39m[22m 63.8 KiB
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB
+    assets by path [1m[32mauth/forgot-password/[39m[22m 3.17 KiB 2 assets
+    assets by path [1m[32mauth/signup/[39m[22m 3.15 KiB 2 assets
+    + 2 assets
+  assets by path [1m[32m*.html[39m[22m 6.77 KiB
+    asset [1m[32mcandidate-dashboard.html[39m[22m 1.77 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32mcoalitions.html[39m[22m 1.74 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32mmessages.html[39m[22m 1.67 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32melection-day.html[39m[22m 1.6 KiB [1m[32m[emitted][39m[22m
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 27 assets
+cached modules 386 KiB (javascript) 187 KiB (asset) 958 KiB (css/mini-extract) 398 KiB (runtime) [1m[32m[cached][39m[22m 254 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.69 MiB [1m[33m[built][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 7996 ms
+assets by status 1.12 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.6 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.09 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.86 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 958 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.71 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 9015 ms
+assets by status 1.12 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.6 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.09 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.86 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 958 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.71 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 9155 ms
+assets by status 1.12 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.6 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.1 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.86 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 958 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.71 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 5905 ms
+assets by status 1.12 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.6 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.1 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.87 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 958 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.72 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 7860 ms
+assets by status 1.12 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.6 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.1 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.87 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 958 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.72 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 8687 ms
+assets by status 1.12 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.6 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.1 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.87 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 958 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.72 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 6841 ms
+assets by status 1.12 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.6 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.1 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.87 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 958 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.72 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 7982 ms
+assets by status 207 KiB [1m[32m[cached][39m[22m 13 assets
+assets by status 7.65 MiB [1m[32m[emitted][39m[22m
+  assets by info 2.24 MiB [1m[32m[immutable][39m[22m
+    assets by info 12.6 KiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 30 assets
+runtime modules 411 KiB 190 modules
+cached modules 4.1 MiB (javascript) 187 KiB (asset) 15.1 KiB (css/mini-extract) [1m[32m[cached][39m[22m 73 modules
+orphan modules 971 KiB [1m[33m[orphan][39m[22m 1 module
+cacheable modules 713 bytes (javascript) 946 KiB (css/mini-extract)
+  [1m./src/pages/shared-feed/css/shared-feed.css[39m[22m 713 bytes [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+  css ./node_modules/css-loader/dist/cjs.js![1m./src/pages/shared-feed/css/shared-feed.css[39m[22m 946 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 783 ms
+assets by status 207 KiB [1m[32m[cached][39m[22m 13 assets
+assets by status 7.65 MiB [1m[32m[emitted][39m[22m
+  assets by info 2.24 MiB [1m[32m[immutable][39m[22m
+    assets by info 12.6 KiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 30 assets
+runtime modules 411 KiB 190 modules
+cached modules 4.1 MiB (javascript) 187 KiB (asset) 15.1 KiB (css/mini-extract) [1m[32m[cached][39m[22m 73 modules
+orphan modules 971 KiB [1m[33m[orphan][39m[22m 1 module
+cacheable modules 713 bytes (javascript) 946 KiB (css/mini-extract)
+  [1m./src/pages/shared-feed/css/shared-feed.css[39m[22m 713 bytes [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+  css ./node_modules/css-loader/dist/cjs.js![1m./src/pages/shared-feed/css/shared-feed.css[39m[22m 946 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 254 ms
+assets by status 1.13 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.6 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.1 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.87 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 961 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.72 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 8527 ms
+assets by status 1.13 MiB [1m[32m[cached][39m[22m 14 assets
+assets by status 10.6 MiB [1m[32m[emitted][39m[22m
+  assets by info 6.1 MiB [1m[32m[immutable][39m[22m
+    assets by info 3.87 MiB [1m[32m[hmr][39m[22m 26 assets
+    assets by path [1m[32mscripts/*.js[39m[22m 2.23 MiB 12 assets
+  assets by path [1m[32m*.html[39m[22m 61.8 KiB
+    asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+    + 16 assets
+  assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+  assets by path [1m[32msettings/[39m[22m 3.38 KiB
+    asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+    asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
+  + 29 assets
+runtime modules 398 KiB 182 modules
+cached modules 386 KiB (javascript) 187 KiB (asset) 961 KiB (css/mini-extract) [1m[32m[cached][39m[22m 72 modules
+[1m./src/pages/shared-feed/shared-feed.js[39m[22m 3.72 MiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 9547 ms

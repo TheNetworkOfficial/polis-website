@@ -280,6 +280,18 @@ const sharedAppShells = [
     requiresAuth: false,
   },
   {
+    filename: "petitions/index.html",
+    route: "/petitions",
+    routeKey: "public-petition",
+    title: "Petition | Polis",
+    description: "Open a Polis petition form from a shared link.",
+    eyebrow: "Petition",
+    headline: "Opening petition",
+    supportingCopy:
+      "Review the petition text, complete required fields, and submit your response from the browser.",
+    requiresAuth: false,
+  },
+  {
     filename: "create/index.html",
     route: "/create",
     routeKey: "create",
@@ -600,6 +612,7 @@ const sharedAppRouteRewrites = [
   [/^\/candidate-dashboard(?:\/.*)?$/u, "/candidate-dashboard/index.html"],
   [/^\/coalitions(?:\/.*)?$/u, "/coalitions/index.html"],
   [/^\/cta-invite(?:\/.*)?$/u, "/cta-invite/index.html"],
+  [/^\/petitions(?:\/.*)?$/u, "/petitions/index.html"],
   [/^\/election-day(?:\/.*)?$/u, "/election-day/index.html"],
   [/^\/feed(?:\/.*)?$/u, "/feed/index.html"],
   [/^\/posts(?:\/.*)?$/u, "/posts/index.html"],

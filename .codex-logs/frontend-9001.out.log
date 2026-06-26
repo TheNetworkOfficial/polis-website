@@ -1,0 +1,47 @@
+Webpack output path: C:\Users\Cowbo\Documents\Polis\polis-website\frontend\dist
+Entry points: {
+  main: './src/main.js',
+  index: './src/pages/index/index.js',
+  features: './src/pages/features/features.js',
+  about: './src/pages/about/about.js',
+  faq: './src/pages/faq/faq.js',
+  contact: './src/pages/contact/contact.js',
+  terms: './src/pages/terms/terms.js',
+  privacyPolicy: './src/pages/privacy-policy/privacy-policy.js',
+  dataSafety: './src/pages/data-safety/data-safety.js',
+  childSafety: './src/pages/child-safety/child-safety.js',
+  deleteAccount: './src/pages/delete-account/delete-account.js',
+  'shared-feed': './src/pages/shared-feed/shared-feed.js',
+  notFound: './src/pages/404/404.js'
+}
+assets by info 2.25 MiB [1m[32m[immutable][39m[22m 24 assets
+assets by path [1m[32m*.html[39m[22m 61.8 KiB
+  asset [1m[32mdelete-account.html[39m[22m 9.08 KiB [1m[32m[emitted][39m[22m
+  + 16 assets
+assets by path [1m[32mauth/[39m[22m 9.52 KiB 6 assets
+assets by chunk 5.11 MiB (name: shared-feed)
+  asset [1m[32mscripts/shared-feed.js[39m[22m 4.18 MiB [1m[32m[emitted][39m[22m (name: shared-feed)
+  asset [1m[32mcss/shared-feed.css[39m[22m 946 KiB [1m[32m[emitted][39m[22m (name: shared-feed)
+assets by path [1m[32massets/*.png[39m[22m 269 KiB
+  asset [1m[32massets/Polis.png[39m[22m 187 KiB [1m[32m[emitted][39m[22m [from: src/assets/images/polis/Polis.png] (auxiliary name: shared-feed)
+  asset [1m[32massets/Banner.png[39m[22m 81.2 KiB [1m[32m[emitted][39m[22m [from: src/assets/images/polis/Banner.png]
+assets by path [1m[32msettings/[39m[22m 3.38 KiB
+  asset [1m[32msettings/voter-intelligence/index.html[39m[22m 1.73 KiB [1m[32m[emitted][39m[22m
+  asset [1m[32msettings/index.html[39m[22m 1.65 KiB [1m[32m[emitted][39m[22m
++ 29 assets
+runtime modules 571 KiB 286 modules
+orphan modules 998 KiB [1m[33m[orphan][39m[22m 21 modules
+cacheable modules 4.1 MiB (javascript) 187 KiB (asset) 961 KiB (css/mini-extract)
+  modules by layer 4.1 MiB (javascript) 187 KiB (asset)
+    modules by path [1m./src/[39m[22m 3.99 MiB (javascript) 187 KiB (asset)
+      modules by path [1m./src/pages/[39m[22m 3.97 MiB 30 modules
+      modules by path [1m./src/scripts/*.js[39m[22m 15.2 KiB 4 modules
+      + 3 modules
+    modules by path [1m./node_modules/[39m[22m 112 KiB 16 modules
+  css modules 961 KiB
+    modules by path [1m./src/pages/[39m[22m 951 KiB 12 modules
+    modules by path [1m./src/css/*.css[39m[22m 5.48 KiB 4 modules
+    modules by path [1m./src/components/[39m[22m 3.82 KiB 2 modules
+    css ./node_modules/css-loader/dist/cjs.js![1m./src/styles.css[39m[22m 138 bytes [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+    css ./node_modules/css-loader/dist/cjs.js![1m./src/styles.css (1)[39m[22m 1 bytes [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.97.1 compiled [1m[32msuccessfully[39m[22m in 8045 ms

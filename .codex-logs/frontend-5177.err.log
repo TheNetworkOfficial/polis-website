@@ -1,0 +1,67 @@
+<i> [webpack-dev-server] [HPM] Proxy created: /api,/graphql,/uploads  -> http://localhost:3000
+<i> [webpack-dev-server] Project is running at:
+<i> [webpack-dev-server] Loopback: [36mhttp://localhost:5177/[39m, [36mhttp://[::1]:5177/[39m
+<i> [webpack-dev-server] On Your Network (IPv4): [36mhttp://192.168.0.106:5177/[39m
+<i> [webpack-dev-server] Content not from webpack is served from '[36mC:\Users\Cowbo\Documents\Polis\polis-website\frontend\dist[39m' directory
+<i> [webpack-dev-server] 404s will fallback to '[36m/index.html[39m'
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+<i> [webpack-dev-middleware] wait until bundle finished: /discover
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+<i> [webpack-dev-middleware] wait until bundle finished: /shared-feed.034a8d4ade213e8bd909.hot-update.json
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+<i> [webpack-dev-middleware] wait until bundle finished: /shared-feed.74af88e9225bf703de1f.hot-update.json
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+<i> [webpack-dev-middleware] wait until bundle finished: /discover
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+<i> [webpack-dev-middleware] wait until bundle finished: /discover
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+<i> [webpack-dev-middleware] wait until bundle finished: /scripts/shared-feed.js
+<i> [webpack-dev-middleware] wait until bundle finished: /css/shared-feed.css
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+<i> [webpack-dev-middleware] wait until bundle finished: /shared-feed.157c8b80fdfe4cf8a955.hot-update.json
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+<i> [webpack-dev-middleware] wait until bundle finished: /shared-feed.157c8b80fdfe4cf8a955.hot-update.js
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+<i> [webpack-dev-middleware] wait until bundle finished: /discover
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Cowbo\Documents\Polis\polis-website\frontend\src\pages\shared-feed\shared-feed.js as it exceeds the max of 500KB.

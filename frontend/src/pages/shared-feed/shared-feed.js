@@ -173,6 +173,7 @@ const ROUTE_KEY_ACHIEVEMENTS = "achievements";
 const ROUTE_KEY_SEARCH = "search";
 const ROUTE_KEY_SEARCH_RESULTS = "search-results";
 const ROUTE_KEY_CTA_INVITE = "cta-invite";
+const ROUTE_KEY_PUBLIC_PETITION = "public-petition";
 const ROUTE_KEY_CANDIDATES = "candidates";
 const ROUTE_KEY_ELECTION_DAY = "election-day";
 const ROUTE_KEY_CONGRESSIONAL_REPORT_CARD = "congressional-report-card";
@@ -356,6 +357,12 @@ const CANDIDATE_DASHBOARD_SECTION_CONFIG = [
     ],
   },
   {
+    key: "petitions",
+    label: "Petitions",
+    icon: "file",
+    permissions: ["petitions_manage"],
+  },
+  {
     key: "messaging",
     label: "Messaging",
     icon: "messages",
@@ -374,6 +381,7 @@ const CANDIDATE_DASHBOARD_FEATURE_ORDER = [
   "donations",
   "staff",
   "missions",
+  "petitions",
   "messaging",
 ];
 const CANDIDATE_DASHBOARD_FEATURE_COPY = {
@@ -442,6 +450,12 @@ const CANDIDATE_DASHBOARD_FEATURE_COPY = {
     description:
       "Assign work, manage approvals, coordinate files, deadlines, and mission templates.",
     cta: "Open missions",
+  },
+  petitions: {
+    eyebrow: "Petitions",
+    description:
+      "Create public petition forms, share guest links, review responses, and handle duplicate review.",
+    cta: "Manage petitions",
   },
   messaging: {
     eyebrow: "Messaging",
@@ -1066,6 +1080,11 @@ const CANDIDATE_STAFF_PERMISSION_DEFINITIONS = [
     category: "Missions",
   },
   {
+    key: "petitions_manage",
+    label: "Petition management",
+    category: "Field",
+  },
+  {
     key: "calendar_view_busy",
     label: "Calendar busy view",
     category: "Calendar",
@@ -1484,6 +1503,12 @@ const COALITION_SECTION_CONFIG = [
     ],
   },
   {
+    key: "petitions",
+    label: "Petitions",
+    icon: "file",
+    permissions: ["petitions_manage"],
+  },
+  {
     key: "voter-map",
     label: "Voter Map",
     icon: "map",
@@ -1522,6 +1547,7 @@ const COALITION_FEATURE_ORDER = [
   "members",
   "rooms",
   "missions",
+  "petitions",
   "voter-map",
   "calendar",
   "governance",
@@ -1551,6 +1577,12 @@ const COALITION_FEATURE_COPY = {
     description:
       "Create, assign, claim, approve, and track coalition missions with files, deadlines, and role-based access.",
     cta: "Open missions",
+  },
+  petitions: {
+    eyebrow: "Petitions",
+    description:
+      "Publish shareable petition forms, collect guest responses, review videos, and resolve duplicates.",
+    cta: "Open petitions",
   },
   "voter-map": {
     eyebrow: "Field",
@@ -1734,6 +1766,7 @@ const COALITION_ASSIGNABLE_PERMISSION_DEFINITIONS = [
   { key: "join_requests_manage", label: "Join requests", category: "Administration" },
   { key: "roles_manage", label: "Role management", category: "Administration" },
   { key: "amplify_manage", label: "Amplify management", category: "Operations" },
+  { key: "petitions_manage", label: "Petition management", category: "Field operations" },
   { key: "constitution_manage", label: "Constitution management", category: "Governance" },
   { key: "proposal_manage", label: "Proposal management", category: "Governance" },
   { key: "vote_manage", label: "Vote management", category: "Governance" },
@@ -1992,6 +2025,7 @@ function parseRouteFromLocation(pathname = window.location.pathname) {
     [ROUTE_KEY_SEARCH_RESULTS, /^\/search\/results$/u, []],
     [ROUTE_KEY_SEARCH, /^\/search$/u, []],
     [ROUTE_KEY_CTA_INVITE, /^\/cta-invite\/([^/]+)$/u, ["token"]],
+    [ROUTE_KEY_PUBLIC_PETITION, /^\/petitions\/([^/]+)$/u, ["publicSlug"]],
     [ROUTE_KEY_CANDIDATES, /^\/candidates$/u, []],
     [ROUTE_KEY_ELECTION_DAY, /^\/election-day$/u, []],
     [
@@ -2937,6 +2971,112 @@ function createCtaInvitePageState() {
   };
 }
 
+function createPetitionFieldDraft(type = "short_text", index = 0) {
+  const normalizedType = normalizeString(type) || "short_text";
+  const labelByType = {
+    name: "Name",
+    short_text: "Short answer",
+    long_text: "Long answer",
+    email: "Email",
+    phone: "Phone",
+    address: "Address",
+    signature: "E-signature",
+    checkbox: "Checkbox",
+    select: "Select",
+    cta_video: "Join the CTA",
+  };
+  return {
+    id: `field_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
+    type: normalizedType,
+    label: labelByType[normalizedType] || humanizeLabel(normalizedType),
+    required: ["name", "email", "address", "signature"].includes(normalizedType),
+    helpText: "",
+    order: Number.isFinite(Number(index)) ? Number(index) : 0,
+    options:
+      normalizedType === "select"
+        ? [
+            { value: "yes", label: "Yes" },
+            { value: "no", label: "No" },
+          ]
+        : [],
+    config:
+      normalizedType === "cta_video"
+        ? {
+            instructions: "",
+            consentCopy:
+              "I understand this video response may be used as part of this CTA.",
+            maxDurationSeconds: 60,
+          }
+        : {},
+  };
+}
+
+function createPetitionDraft(seed = {}) {
+  const fields = Array.isArray(seed.fieldSchema)
+    ? seed.fieldSchema
+    : Array.isArray(seed.fields)
+      ? seed.fields
+      : [];
+  return {
+    petitionId: normalizeString(seed.petitionId),
+    title: normalizeString(seed.title),
+    bodyText: normalizeString(seed.bodyText),
+    status: normalizeString(seed.status) || "draft",
+    publicSlug: normalizeString(seed.publicSlug),
+    publishedVersion: Number(seed.publishedVersion) || 0,
+    fieldSchema: fields.length
+      ? fields.map((field, index) => normalizePetitionField(field, index))
+      : [
+          createPetitionFieldDraft("name", 0),
+          createPetitionFieldDraft("email", 1),
+          createPetitionFieldDraft("address", 2),
+          createPetitionFieldDraft("signature", 3),
+        ],
+  };
+}
+
+function createPetitionsWorkspaceState() {
+  return {
+    ownerType: "",
+    ownerId: "",
+    items: [],
+    selectedPetitionId: "",
+    draft: createPetitionDraft(),
+    responses: [],
+    duplicateGroups: [],
+    loading: false,
+    responsesLoading: false,
+    error: "",
+    notice: "",
+    loaded: false,
+    actionPendingKey: "",
+  };
+}
+
+function createPublicPetitionState() {
+  return {
+    publicSlug: "",
+    item: null,
+    values: {},
+    videoFiles: {},
+    videoPreviews: {},
+    videoUploads: {},
+    addressLookup: {
+      fieldId: "",
+      query: "",
+      items: [],
+      loading: false,
+      error: "",
+      requestId: 0,
+    },
+    loading: false,
+    submitting: false,
+    error: "",
+    notice: "",
+    loaded: false,
+  };
+}
+
 function createAdminSliceState() {
   return {
     items: [],
@@ -3160,6 +3300,9 @@ const state = {
   pages: {
     feedPrompts: createFeedPromptState(),
     create: createPostComposerPageState(),
+    petitions: {
+      public: createPublicPetitionState(),
+    },
     discover: {
       feed: createPagedState(),
       candidates: createPagedState(),
@@ -3239,6 +3382,7 @@ const state = {
         calendarWorkspace: createCandidateDashboardCalendarState(),
         volunteers: createCandidateDashboardVolunteersState(),
         messagingWorkspace: createCandidateDashboardMessagingState(),
+        petitionsWorkspace: createPetitionsWorkspaceState(),
         contactPrompt: createCandidateDashboardContactPromptState(),
         voterRegistry: createCandidateDashboardVoterRegistryState(),
         campaignQuest: createCandidateDashboardCampaignQuestState(),
@@ -3268,6 +3412,7 @@ const state = {
         governanceWorkspace: createCoalitionGovernanceWorkspaceState(),
         amplifyRequests: [],
         amplifyWorkspace: createCoalitionAmplifyWorkspaceState(),
+        petitionsWorkspace: createPetitionsWorkspaceState(),
         voterMapAccess: null,
         voterMapWorkspace: createCoalitionVoterMapWorkspaceState(),
         accessWorkspace: createCoalitionAccessWorkspaceState(),
@@ -3651,6 +3796,7 @@ let messagingGroupPeopleSearchTimer = null;
 let candidateStaffInviteSearchTimer = null;
 let coalitionInviteSearchTimer = null;
 let eventAddressLookupTimer = null;
+let petitionAddressLookupTimer = null;
 let messagingTypingStopTimer = null;
 let messagingSessionRetained = false;
 
@@ -3740,6 +3886,10 @@ function isCtaInviteRoute(route = state.route) {
   return normalizeString(route?.routeKey) === ROUTE_KEY_CTA_INVITE;
 }
 
+function isPublicPetitionRoute(route = state.route) {
+  return normalizeString(route?.routeKey) === ROUTE_KEY_PUBLIC_PETITION;
+}
+
 function isPublicAccountRoute(route = state.route) {
   const routeKey = normalizeString(route?.routeKey);
   return (
@@ -3754,6 +3904,7 @@ function isProtectedRoute(route = state.route) {
     !isShareRoute(route) &&
     !isElectionDayRoute(route) &&
     !isCtaInviteRoute(route) &&
+    !isPublicPetitionRoute(route) &&
     !isPublicAccountRoute(route)
   );
 }
@@ -3819,6 +3970,7 @@ function getRouteSection(route = state.route) {
   if (
     routeKey === ROUTE_KEY_EVENTS ||
     routeKey === ROUTE_KEY_CTA_INVITE ||
+    routeKey === ROUTE_KEY_PUBLIC_PETITION ||
     routeKey === ROUTE_KEY_EVENT_DETAIL ||
     routeKey === ROUTE_KEY_EVENT_SIGNUP ||
     routeKey === ROUTE_KEY_EVENT_PAYMENT ||
@@ -8899,7 +9051,7 @@ function discoverRequestConfigs() {
     {
       key: "standaloneServers",
       path: "/api/messaging/servers/discover?limit=6",
-      label: "Public message workspaces could not be loaded.",
+      label: "Public conversations could not be loaded.",
       map: (payload) =>
         readArrayPayload(payload, ["servers", "items"])
           .map(normalizeDiscoverServer)
@@ -15026,6 +15178,790 @@ async function loadAutoCandidateDetail(entityId, { refresh = false } = {}) {
   }
 }
 
+function petitionFieldTypeOptions() {
+  return [
+    ["name", "Name"],
+    ["short_text", "Short text"],
+    ["long_text", "Long text"],
+    ["email", "Email"],
+    ["phone", "Phone"],
+    ["address", "Address"],
+    ["signature", "E-signature"],
+    ["checkbox", "Checkbox"],
+    ["select", "Select"],
+    ["cta_video", "Join CTA video"],
+  ];
+}
+
+function normalizePetitionFieldType(value) {
+  const normalized = normalizeString(value).toLowerCase();
+  return petitionFieldTypeOptions().some(([key]) => key === normalized)
+    ? normalized
+    : "short_text";
+}
+
+function normalizePetitionFieldOption(raw = {}) {
+  if (typeof raw === "string") {
+    const label = normalizeString(raw);
+    return label ? { value: label, label } : null;
+  }
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const label = normalizeString(raw.label || raw.value);
+  const value = normalizeString(raw.value || label);
+  return label && value ? { value, label } : null;
+}
+
+function normalizePetitionField(raw = {}, index = 0) {
+  const type = normalizePetitionFieldType(raw.type);
+  const base = createPetitionFieldDraft(type, index);
+  const id =
+    normalizeString(raw.id).replace(/[^a-zA-Z0-9_-]/g, "") || base.id;
+  const optionsSource = Array.isArray(raw.options)
+    ? raw.options
+    : Array.isArray(raw.config?.options)
+      ? raw.config.options
+      : [];
+  const options = optionsSource
+    .map(normalizePetitionFieldOption)
+    .filter(Boolean);
+  const config = raw.config && typeof raw.config === "object" ? raw.config : {};
+  return {
+    ...base,
+    id,
+    type,
+    label: normalizeString(raw.label) || base.label,
+    required: raw.required === true,
+    helpText: normalizeString(raw.helpText),
+    order: Number.isFinite(Number(raw.order)) ? Number(raw.order) : index,
+    options: type === "select" ? options : [],
+    config:
+      type === "cta_video"
+        ? {
+            instructions: normalizeString(
+              config.instructions || raw.instructions || raw.helpText,
+            ),
+            consentCopy:
+              normalizeString(config.consentCopy) ||
+              "I understand this video response may be used as part of this CTA.",
+            maxDurationSeconds: 60,
+          }
+        : config,
+  };
+}
+
+function normalizePetitionItem(raw = {}) {
+  const source = raw.petition && typeof raw.petition === "object" ? raw.petition : raw;
+  const fieldsSource = Array.isArray(source.fieldSchema)
+    ? source.fieldSchema
+    : Array.isArray(source.fields)
+      ? source.fields
+      : [];
+  return {
+    petitionId: normalizeString(source.petitionId || source.id),
+    ownerType: normalizeString(source.ownerType),
+    ownerId: normalizeString(source.ownerId),
+    title: normalizeString(source.title),
+    bodyText: normalizeString(source.bodyText),
+    status: normalizeString(source.status) || "draft",
+    publicSlug: normalizeString(source.publicSlug),
+    sharePath: normalizeString(source.sharePath),
+    shareUrl: normalizeString(source.shareUrl),
+    publishedVersion: Number(source.publishedVersion) || 0,
+    fieldSchema: fieldsSource.map((field, index) =>
+      normalizePetitionField(field, index),
+    ),
+    createdAt: normalizeString(source.createdAt),
+    updatedAt: normalizeString(source.updatedAt),
+    publishedAt: normalizeString(source.publishedAt),
+    raw: source,
+  };
+}
+
+function normalizePetitionResponse(raw = {}) {
+  const source =
+    raw.response && typeof raw.response === "object" ? raw.response : raw;
+  return {
+    petitionId: normalizeString(source.petitionId),
+    responseId: normalizeString(source.responseId || source.id),
+    version: Number(source.version) || 0,
+    values: source.values && typeof source.values === "object" ? source.values : {},
+    ctaVideos: Array.isArray(source.ctaVideos) ? source.ctaVideos : [],
+    duplicateFlags: Array.isArray(source.duplicateFlags)
+      ? source.duplicateFlags
+      : [],
+    reviewStatus: normalizeString(source.reviewStatus) || "clear",
+    status: normalizeString(source.status) || "active",
+    mergedIntoResponseId: normalizeString(source.mergedIntoResponseId),
+    createdAt: normalizeString(source.createdAt),
+    updatedAt: normalizeString(source.updatedAt),
+    raw: source,
+  };
+}
+
+function normalizePetitionDuplicateGroup(raw = {}) {
+  return {
+    key: normalizeString(raw.key),
+    type: normalizeString(raw.type) || "duplicate",
+    responseIds: normalizeStringList(raw.responseIds),
+    count: Number(raw.count) || normalizeStringList(raw.responseIds).length,
+  };
+}
+
+function petitionWorkspaceForOwner(ownerType) {
+  const normalizedOwnerType = normalizeString(ownerType).toLowerCase();
+  if (normalizedOwnerType === "coalition") {
+    const detail = state.pages.coalitions.detail;
+    if (!detail.petitionsWorkspace) {
+      detail.petitionsWorkspace = createPetitionsWorkspaceState();
+    }
+    return detail.petitionsWorkspace;
+  }
+  const detail = state.pages.candidateDashboard.detail;
+  if (!detail.petitionsWorkspace) {
+    detail.petitionsWorkspace = createPetitionsWorkspaceState();
+  }
+  return detail.petitionsWorkspace;
+}
+
+function petitionOwnerBasePath(ownerType, ownerId) {
+  const normalizedOwnerType = normalizeString(ownerType).toLowerCase();
+  const encodedOwnerId = encodeURIComponent(normalizeString(ownerId));
+  if (!encodedOwnerId) {
+    return "";
+  }
+  if (normalizedOwnerType === "coalition") {
+    return `/api/coalitions/${encodedOwnerId}/petitions`;
+  }
+  return `/api/candidate-dashboard/petitions?candidateId=${encodedOwnerId}`;
+}
+
+function petitionOwnerDetailPath(ownerType, ownerId, petitionId, suffix = "") {
+  const normalizedOwnerType = normalizeString(ownerType).toLowerCase();
+  const encodedPetitionId = encodeURIComponent(normalizeString(petitionId));
+  if (!encodedPetitionId) {
+    return "";
+  }
+  if (normalizedOwnerType === "coalition") {
+    const encodedOwnerId = encodeURIComponent(normalizeString(ownerId));
+    return `/api/coalitions/${encodedOwnerId}/petitions/${encodedPetitionId}${suffix}`;
+  }
+  const encodedOwnerId = encodeURIComponent(normalizeString(ownerId));
+  return `/api/candidate-dashboard/petitions/${encodedPetitionId}${suffix}?candidateId=${encodedOwnerId}`;
+}
+
+function petitionShareUrl(petition) {
+  const explicit = normalizeString(petition?.shareUrl);
+  if (explicit && explicit.startsWith("http")) {
+    return explicit;
+  }
+  const slug = normalizeString(petition?.publicSlug);
+  const path = normalizeString(petition?.sharePath) || (slug ? `/petitions/${slug}` : "");
+  return path ? `${window.location.origin}${path}` : "";
+}
+
+async function loadPetitionsWorkspace(ownerType, ownerId, { refresh = false } = {}) {
+  const workspace = petitionWorkspaceForOwner(ownerType);
+  const normalizedOwnerType = normalizeString(ownerType).toLowerCase();
+  const normalizedOwnerId = normalizeString(ownerId);
+  if (!normalizedOwnerId || workspace.loading) {
+    return;
+  }
+  const ownerChanged =
+    workspace.ownerType !== normalizedOwnerType ||
+    workspace.ownerId !== normalizedOwnerId;
+  if (ownerChanged || refresh) {
+    workspace.items = [];
+    workspace.selectedPetitionId = "";
+    workspace.responses = [];
+    workspace.duplicateGroups = [];
+    workspace.loaded = false;
+    workspace.draft = createPetitionDraft();
+  }
+  if (workspace.loaded && !refresh && !ownerChanged) {
+    scheduleRender();
+    return;
+  }
+  workspace.ownerType = normalizedOwnerType;
+  workspace.ownerId = normalizedOwnerId;
+  workspace.loading = true;
+  workspace.error = "";
+  scheduleRender();
+  try {
+    const payload = await fetchJson(petitionOwnerBasePath(ownerType, ownerId), {
+      auth: true,
+    });
+    workspace.items = readArrayPayload(payload, [
+      "items",
+      "petitions",
+      "forms",
+    ]).map(normalizePetitionItem);
+    workspace.loaded = true;
+    if (!workspace.selectedPetitionId && workspace.items.length) {
+      workspace.selectedPetitionId = workspace.items[0].petitionId;
+      workspace.draft = createPetitionDraft(workspace.items[0]);
+    }
+  } catch (error) {
+    workspace.error =
+      normalizeString(error?.message) || "Petitions could not be loaded.";
+  } finally {
+    workspace.loading = false;
+    scheduleRender();
+  }
+}
+
+function currentPetitionWorkspaceItem(workspace) {
+  const selectedId = normalizeString(workspace?.selectedPetitionId);
+  return (
+    (workspace?.items || []).find(
+      (item) => normalizeString(item.petitionId) === selectedId,
+    ) || null
+  );
+}
+
+function upsertPetitionWorkspaceItem(workspace, item) {
+  const normalized = normalizePetitionItem(item);
+  if (!normalized.petitionId) {
+    return normalized;
+  }
+  const index = workspace.items.findIndex(
+    (entry) => entry.petitionId === normalized.petitionId,
+  );
+  if (index >= 0) {
+    workspace.items[index] = normalized;
+  } else {
+    workspace.items = [normalized, ...workspace.items];
+  }
+  workspace.selectedPetitionId = normalized.petitionId;
+  workspace.draft = createPetitionDraft(normalized);
+  return normalized;
+}
+
+async function savePetitionDraft(ownerType, ownerId, formData, { publish = false, close = false } = {}) {
+  const workspace = petitionWorkspaceForOwner(ownerType);
+  const draft = buildPetitionDraftFromForm(formData, workspace.draft);
+  workspace.actionPendingKey = publish ? "publish" : close ? "close" : "save";
+  workspace.error = "";
+  workspace.notice = "";
+  scheduleRender();
+  try {
+    const existingId = normalizeString(draft.petitionId);
+    const payload = {
+      title: draft.title,
+      bodyText: draft.bodyText,
+      fieldSchema: draft.fieldSchema,
+      publish,
+      close,
+      status: close ? "closed" : draft.status,
+    };
+    const response = await fetchJson(
+      existingId
+        ? petitionOwnerDetailPath(ownerType, ownerId, existingId)
+        : petitionOwnerBasePath(ownerType, ownerId),
+      {
+        auth: true,
+        method: existingId ? "PATCH" : "POST",
+        body: payload,
+      },
+    );
+    const saved = upsertPetitionWorkspaceItem(
+      workspace,
+      response.petition || response.item || response,
+    );
+    workspace.notice = publish
+      ? "Petition published."
+      : close
+        ? "Petition closed."
+        : "Petition saved.";
+    showToast(workspace.notice);
+    return saved;
+  } catch (error) {
+    workspace.error =
+      normalizeString(error?.message) || "Petition could not be saved.";
+    showToast(workspace.error);
+    return null;
+  } finally {
+    workspace.actionPendingKey = "";
+    scheduleRender();
+  }
+}
+
+async function loadPetitionResponses(ownerType, ownerId, petitionId, { refresh = false } = {}) {
+  const workspace = petitionWorkspaceForOwner(ownerType);
+  const normalizedPetitionId = normalizeString(petitionId);
+  if (!normalizedPetitionId || workspace.responsesLoading) {
+    return;
+  }
+  if (
+    !refresh &&
+    workspace.selectedPetitionId === normalizedPetitionId &&
+    workspace.responses.length
+  ) {
+    scheduleRender();
+    return;
+  }
+  workspace.selectedPetitionId = normalizedPetitionId;
+  workspace.responsesLoading = true;
+  workspace.error = "";
+  scheduleRender();
+  try {
+    const payload = await fetchJson(
+      petitionOwnerDetailPath(
+        ownerType,
+        ownerId,
+        normalizedPetitionId,
+        "/responses",
+      ),
+      { auth: true },
+    );
+    if (payload.petition) {
+      upsertPetitionWorkspaceItem(workspace, payload.petition);
+      workspace.selectedPetitionId = normalizedPetitionId;
+    }
+    workspace.responses = readArrayPayload(payload, [
+      "responses",
+      "items",
+    ]).map(normalizePetitionResponse);
+    workspace.duplicateGroups = readArrayPayload(payload, [
+      "duplicateGroups",
+      "duplicates",
+    ]).map(normalizePetitionDuplicateGroup);
+  } catch (error) {
+    workspace.error =
+      normalizeString(error?.message) || "Petition responses could not be loaded.";
+  } finally {
+    workspace.responsesLoading = false;
+    scheduleRender();
+  }
+}
+
+async function mergePetitionDuplicateGroup(ownerType, ownerId, petitionId, groupKey) {
+  const workspace = petitionWorkspaceForOwner(ownerType);
+  const group = (workspace.duplicateGroups || []).find(
+    (entry) => entry.key === normalizeString(groupKey),
+  );
+  const responseIds = group?.responseIds || [];
+  if (responseIds.length < 2) {
+    showToast("Duplicate group unavailable.");
+    return;
+  }
+  const primaryResponseId = responseIds[0];
+  const duplicateResponseIds = responseIds.slice(1);
+  workspace.actionPendingKey = `merge:${group.key}`;
+  scheduleRender();
+  try {
+    await fetchJson(
+      petitionOwnerDetailPath(ownerType, ownerId, petitionId, "/responses/merge"),
+      {
+        auth: true,
+        method: "POST",
+        body: { primaryResponseId, duplicateResponseIds },
+      },
+    );
+    showToast("Duplicate responses merged.");
+    await loadPetitionResponses(ownerType, ownerId, petitionId, { refresh: true });
+  } catch (error) {
+    workspace.error =
+      normalizeString(error?.message) || "Duplicate responses could not be merged.";
+    showToast(workspace.error);
+  } finally {
+    workspace.actionPendingKey = "";
+    scheduleRender();
+  }
+}
+
+async function deletePetitionResponse(ownerType, ownerId, petitionId, responseId) {
+  const workspace = petitionWorkspaceForOwner(ownerType);
+  const normalizedResponseId = normalizeString(responseId);
+  if (!normalizedResponseId) {
+    return;
+  }
+  workspace.actionPendingKey = `delete:${normalizedResponseId}`;
+  scheduleRender();
+  try {
+    await fetchJson(
+      petitionOwnerDetailPath(
+        ownerType,
+        ownerId,
+        petitionId,
+        `/responses/${encodeURIComponent(normalizedResponseId)}/delete`,
+      ),
+      { auth: true, method: "POST", body: {} },
+    );
+    showToast("Response deleted.");
+    await loadPetitionResponses(ownerType, ownerId, petitionId, { refresh: true });
+  } catch (error) {
+    workspace.error =
+      normalizeString(error?.message) || "Response could not be deleted.";
+    showToast(workspace.error);
+  } finally {
+    workspace.actionPendingKey = "";
+    scheduleRender();
+  }
+}
+
+async function downloadPetitionResponsesCsv(ownerType, ownerId, petitionId) {
+  const workspace = petitionWorkspaceForOwner(ownerType);
+  const path = petitionOwnerDetailPath(
+    ownerType,
+    ownerId,
+    petitionId,
+    "/responses/export.csv",
+  );
+  workspace.actionPendingKey = "csv";
+  scheduleRender();
+  try {
+    const response = await fetch(`${getApiBaseUrl()}${path}`, {
+      headers: buildAuthorizedHeaders(state.auth.session),
+    });
+    if (!response.ok) {
+      throw new Error("csv_export_failed");
+    }
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `petition-${normalizeString(petitionId) || "responses"}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+  } catch (error) {
+    workspace.error =
+      normalizeString(error?.message) || "CSV export could not be downloaded.";
+    showToast(workspace.error);
+  } finally {
+    workspace.actionPendingKey = "";
+    scheduleRender();
+  }
+}
+
+async function loadPublicPetitionPage(publicSlug, { refresh = false } = {}) {
+  const page = state.pages.petitions.public;
+  const slug = decodeRouteSegment(publicSlug);
+  if (!slug || page.loading) {
+    return;
+  }
+  const slugChanged = page.publicSlug !== slug;
+  if (slugChanged || refresh) {
+    Object.assign(page, createPublicPetitionState(), { publicSlug: slug });
+  }
+  if (page.loaded && !refresh && !slugChanged) {
+    scheduleRender();
+    return;
+  }
+  page.loading = true;
+  page.error = "";
+  scheduleRender();
+  try {
+    const payload = await fetchJson(`/api/petitions/${encodeURIComponent(slug)}`, {
+      auth: false,
+    });
+    page.item = normalizePetitionItem(payload.petition || payload.item || payload);
+    page.loaded = true;
+  } catch (error) {
+    page.error =
+      normalizeString(error?.message) || "Petition could not be loaded.";
+  } finally {
+    page.loading = false;
+    scheduleRender();
+  }
+}
+
+async function createPublicPetitionVideoUpload(publicSlug, fieldId, file) {
+  const slug = normalizeString(publicSlug);
+  const normalizedFieldId = normalizeString(fieldId);
+  const mimeType = normalizeString(file?.type) || "video/mp4";
+  const payload = await fetchJson(
+    `/api/petitions/${encodeURIComponent(slug)}/uploads/create`,
+    {
+      auth: false,
+      method: "POST",
+      body: {
+        fieldId: normalizedFieldId,
+        fileName: normalizeString(file?.name) || "petition-video.mp4",
+        mimeType,
+      },
+    },
+  );
+  const upload = payload.upload || payload.item || payload;
+  const uploadUrl =
+    normalizeString(upload.tusUploadUrl || upload.uploadUrl || upload.uploadURL);
+  if (!uploadUrl) {
+    throw new Error("upload_url_missing");
+  }
+  const uploadResponse = await fetch(uploadUrl, {
+    method: "PATCH",
+    headers: {
+      "Tus-Resumable": "1.0.0",
+      "Upload-Offset": "0",
+      "Content-Type": "application/offset+octet-stream",
+    },
+    body: file,
+  });
+  if (!uploadResponse.ok) {
+    throw new Error("video_upload_failed");
+  }
+  return {
+    ...upload,
+    fieldId: normalizedFieldId,
+    uploadId: upload.uploadId || upload.uid,
+    uid: upload.uid || upload.uploadId,
+    fileName: normalizeString(file?.name),
+    mimeType,
+    sizeBytes: Number(file?.size) || null,
+  };
+}
+
+async function submitPublicPetitionForm(formData) {
+  const page = state.pages.petitions.public;
+  const petition = page.item;
+  if (!petition) {
+    return;
+  }
+  page.submitting = true;
+  page.error = "";
+  page.notice = "";
+  scheduleRender();
+  try {
+    const fields = [...(petition.fieldSchema || [])];
+    const values = {};
+    for (const field of fields) {
+      const key = `field:${field.id}`;
+      if (field.type === "name") {
+        values[field.id] = {
+          firstName: normalizeString(formData.get(`${key}:firstName`)),
+          lastName: normalizeString(formData.get(`${key}:lastName`)),
+        };
+      } else if (field.type === "address") {
+        values[field.id] = {
+          line1: normalizeString(formData.get(`${key}:line1`)),
+          line2: normalizeString(formData.get(`${key}:line2`)),
+          city: normalizeString(formData.get(`${key}:city`)),
+          state: normalizeString(formData.get(`${key}:state`)),
+          postalCode: normalizeString(formData.get(`${key}:postalCode`)),
+          placeId: normalizeString(formData.get(`${key}:placeId`)),
+          formattedAddress: normalizeString(formData.get(`${key}:formattedAddress`)),
+          lat: normalizeString(formData.get(`${key}:lat`)),
+          lng: normalizeString(formData.get(`${key}:lng`)),
+        };
+      } else if (field.type === "signature") {
+        values[field.id] = {
+          typedName: normalizeString(formData.get(key)),
+        };
+      } else if (field.type === "checkbox") {
+        values[field.id] = formData.get(key) === "on";
+      } else if (field.type === "cta_video") {
+        const file = page.videoFiles[field.id] || null;
+        const consentAccepted = formData.get(`${key}:consent`) === "on";
+        if (!page.videoUploads[field.id] && file) {
+          page.videoUploads[field.id] = await createPublicPetitionVideoUpload(
+            petition.publicSlug,
+            field.id,
+            file,
+          );
+        }
+        values[field.id] = {
+          ...(page.videoUploads[field.id] || {}),
+          consentAccepted,
+        };
+      } else {
+        values[field.id] = normalizeString(formData.get(key));
+      }
+    }
+    await fetchJson(
+      `/api/petitions/${encodeURIComponent(petition.publicSlug)}/responses`,
+      {
+        auth: false,
+        method: "POST",
+        body: { fields: values },
+      },
+    );
+    page.notice = "Response submitted.";
+    Object.values(page.videoPreviews || {}).forEach((url) => {
+      if (url) window.URL.revokeObjectURL(url);
+    });
+    page.values = {};
+    page.videoFiles = {};
+    page.videoPreviews = {};
+    page.videoUploads = {};
+    showToast(page.notice);
+  } catch (error) {
+    page.error =
+      normalizeString(error?.message) || "Response could not be submitted.";
+    showToast(page.error);
+  } finally {
+    page.submitting = false;
+    scheduleRender();
+  }
+}
+
+function buildPetitionDraftFromForm(formData, fallback = {}) {
+  const petitionId =
+    normalizeString(formData.get("petitionId")) ||
+    normalizeString(fallback.petitionId);
+  const fieldIds = normalizeStringList(formData.getAll("fieldId"));
+  const fieldSchema = fieldIds.map((fieldId, index) => {
+    const prefix = `field:${fieldId}`;
+    const type = normalizePetitionFieldType(formData.get(`${prefix}:type`));
+    const optionsText = normalizeString(formData.get(`${prefix}:options`));
+    const options = optionsText
+      .split(/\r?\n/u)
+      .map((line) => normalizeString(line))
+      .filter(Boolean)
+      .map((line) => {
+        const [valuePart, ...labelParts] = line.split("|");
+        const value = normalizeString(valuePart);
+        const label = normalizeString(labelParts.join("|")) || value;
+        return value ? { value, label } : null;
+      })
+      .filter(Boolean);
+    const config =
+      type === "cta_video"
+        ? {
+            instructions: normalizeString(formData.get(`${prefix}:instructions`)),
+            consentCopy:
+              normalizeString(formData.get(`${prefix}:consentCopy`)) ||
+              "I understand this video response may be used as part of this CTA.",
+            maxDurationSeconds: 60,
+          }
+        : {};
+    return {
+      id: fieldId,
+      type,
+      label:
+        normalizeString(formData.get(`${prefix}:label`)) ||
+        createPetitionFieldDraft(type, index).label,
+      required: formData.get(`${prefix}:required`) === "on" || type === "cta_video",
+      helpText: normalizeString(formData.get(`${prefix}:helpText`)),
+      order: index,
+      ...(type === "select" ? { options } : {}),
+      ...(Object.keys(config).length ? { config } : {}),
+    };
+  });
+  return {
+    petitionId,
+    title: normalizeString(formData.get("title")) || normalizeString(fallback.title),
+    bodyText: normalizeString(formData.get("bodyText")),
+    status: normalizeString(fallback.status) || "draft",
+    publicSlug: normalizeString(fallback.publicSlug),
+    publishedVersion: Number(fallback.publishedVersion) || 0,
+    fieldSchema,
+  };
+}
+
+function syncPetitionBuilderDraftFromDom(ownerType) {
+  const workspace = petitionWorkspaceForOwner(ownerType);
+  const form = root?.querySelector('[data-route-form="petition-builder"]');
+  if (!form) {
+    return workspace.draft;
+  }
+  const formData = new FormData(form);
+  workspace.draft = buildPetitionDraftFromForm(formData, workspace.draft);
+  return workspace.draft;
+}
+
+function queuePetitionAddressLookup(fieldId, query) {
+  const page = state.pages.petitions.public;
+  page.addressLookup.fieldId = normalizeString(fieldId);
+  page.addressLookup.query = normalizeString(query);
+  window.clearTimeout(petitionAddressLookupTimer);
+  petitionAddressLookupTimer = window.setTimeout(() => {
+    loadPetitionAddressSuggestions().catch(() => {});
+  }, 280);
+}
+
+async function loadPetitionAddressSuggestions() {
+  const page = state.pages.petitions.public;
+  const lookup = page.addressLookup;
+  const query = normalizeString(lookup.query);
+  lookup.items = [];
+  lookup.error = "";
+  if (!query || query.length < 3) {
+    lookup.loading = false;
+    scheduleRender();
+    return;
+  }
+  const requestId = lookup.requestId + 1;
+  lookup.requestId = requestId;
+  lookup.loading = true;
+  scheduleRender();
+  try {
+    const payload = await fetchJson(
+      `/api/geo/address/autocomplete?q=${encodeURIComponent(query)}`,
+      { auth: false },
+    );
+    if (lookup.requestId !== requestId) {
+      return;
+    }
+    const items = readArrayPayload(payload, [
+      "items",
+      "results",
+      "suggestions",
+      "predictions",
+    ]);
+    lookup.items = items.map(normalizeEventAddressSuggestion).filter(Boolean);
+  } catch (error) {
+    if (lookup.requestId === requestId) {
+      lookup.error =
+        normalizeString(error?.message) || "Address suggestions failed.";
+      lookup.items = [];
+    }
+  } finally {
+    if (lookup.requestId === requestId) {
+      lookup.loading = false;
+      scheduleRender();
+    }
+  }
+}
+
+async function selectPetitionAddressSuggestion(index) {
+  const page = state.pages.petitions.public;
+  const lookup = page.addressLookup;
+  const suggestion = lookup.items[Number(index)];
+  if (!suggestion) {
+    return;
+  }
+  lookup.loading = true;
+  lookup.error = "";
+  scheduleRender();
+  try {
+    const payload = await fetchJson(
+      `/api/geo/address/details?placeId=${encodeURIComponent(suggestion.placeId)}`,
+      { auth: false },
+    );
+    const item = payload.item || payload.details || payload.address || payload;
+    const details = normalizeEventAddressDetails(item);
+    const fieldId = lookup.fieldId;
+    page.values[fieldId] = {
+      ...(page.values[fieldId] && typeof page.values[fieldId] === "object"
+        ? page.values[fieldId]
+        : {}),
+      line1: normalizeString(
+        details.addressLine1 || eventAddressSuggestionLabel(suggestion),
+      ),
+      city: normalizeString(details.city),
+      state: normalizeString(details.state),
+      postalCode: normalizeString(details.postalCode),
+      placeId: normalizeString(details.placeId || suggestion.placeId),
+      formattedAddress: normalizeString(
+        details.formattedAddress || eventAddressSuggestionLabel(suggestion),
+      ),
+      lat: Number.isFinite(details.lat) ? String(details.lat) : "",
+      lng: Number.isFinite(details.lng) ? String(details.lng) : "",
+    };
+    lookup.items = [];
+    lookup.query = "";
+  } catch (error) {
+    lookup.error =
+      normalizeString(error?.message) || "Address details could not be loaded.";
+  } finally {
+    lookup.loading = false;
+    scheduleRender();
+  }
+}
+
 function resetCandidateDashboardDetail(candidateId = "") {
   const detail = state.pages.candidateDashboard.detail;
   state.pages.candidateDashboard.selectedCandidateId = normalizeString(candidateId);
@@ -15044,6 +15980,7 @@ function resetCandidateDashboardDetail(candidateId = "") {
   detail.calendarWorkspace = createCandidateDashboardCalendarState();
   detail.volunteers = createCandidateDashboardVolunteersState();
   detail.messagingWorkspace = createCandidateDashboardMessagingState();
+  detail.petitionsWorkspace = createPetitionsWorkspaceState();
   detail.contactPrompt = createCandidateDashboardContactPromptState();
   detail.voterRegistry = createCandidateDashboardVoterRegistryState();
   detail.campaignQuest = createCandidateDashboardCampaignQuestState();
@@ -24751,6 +25688,9 @@ async function loadCandidateDashboardPage({ refresh = false } = {}) {
     if (activeSection === "missions") {
       await loadCandidateDashboardMissions(candidateId, { refresh });
     }
+    if (activeSection === "petitions") {
+      await loadPetitionsWorkspace("candidate", candidateId, { refresh });
+    }
   }
 }
 
@@ -26013,6 +26953,7 @@ function resetCoalitionDetail(coalitionId = "") {
   detail.governanceWorkspace = createCoalitionGovernanceWorkspaceState();
   detail.amplifyRequests = [];
   detail.amplifyWorkspace = createCoalitionAmplifyWorkspaceState();
+  detail.petitionsWorkspace = createPetitionsWorkspaceState();
   detail.voterMapAccess = null;
   detail.voterMapWorkspace = createCoalitionVoterMapWorkspaceState();
   detail.accessWorkspace = createCoalitionAccessWorkspaceState();
@@ -26319,6 +27260,9 @@ async function loadCoalitionsPage({ refresh = false } = {}) {
     const activeSection = coalitionSectionForRoute(route);
     if (activeSection === "missions") {
       await loadCoalitionMissions(coalitionId, { refresh });
+    }
+    if (activeSection === "petitions") {
+      await loadPetitionsWorkspace("coalition", coalitionId, { refresh });
     }
     if (activeSection === "rooms") {
       await loadCoalitionRooms(coalitionId, { refresh });
@@ -44399,6 +45343,10 @@ async function loadCurrentRoute({ refresh = false } = {}) {
     await loadCtaInvitePage(route.routeParams.token, { refresh });
     return;
   }
+  if (routeKey === ROUTE_KEY_PUBLIC_PETITION) {
+    await loadPublicPetitionPage(route.routeParams.publicSlug, { refresh });
+    return;
+  }
   if (routeKey === ROUTE_KEY_SEARCH) {
     await loadSearchLanding({ refresh });
     return;
@@ -45635,42 +46583,66 @@ function renderFeedAuthGate() {
 function renderDiscoverAuthGate() {
   const quickPaths = [
     {
-      label: "People and organizations",
-      copy: "Find candidates, officials, coalitions, and civic profiles.",
+      label: "Feed",
+      copy: "Open posts, media, and civic conversations.",
+      route: "/feed",
+      icon: "feed",
+    },
+    {
+      label: "People",
+      copy: "Find candidates, officials, and civic profiles.",
       route: "/candidates",
       icon: "candidate",
     },
     {
-      label: "Events near you",
-      copy: "Open post-style event cards, map view, RSVP, and transport.",
+      label: "Events",
+      copy: "Browse event cards, map context, RSVP, and transport.",
       route: "/events",
       icon: "calendar",
     },
     {
-      label: "Mission work",
-      copy: "Jump into claimable campaign and coalition tasks.",
+      label: "Questions",
+      copy: "Answer issue prompts that tune your guide.",
+      route: "/questions",
+      icon: "search",
+    },
+    {
+      label: "Ballot",
+      copy: "Continue voter guidance and election context.",
+      route: "/settings/voter-intelligence",
+      icon: "election",
+    },
+    {
+      label: "Missions",
+      copy: "Review claimable campaign and coalition work.",
       route: "/missions",
       icon: "mission",
     },
   ];
   const previewCards = [
     {
+      title: "Policy questions",
+      copy: "Answer issue prompts and keep recommendations current.",
+      meta: "Civic challenge",
+      icon: "search",
+    },
+    {
       title: "Ballot guide",
       copy: "Rank races, compare issue signals, and continue voter-intelligence work.",
       meta: "Voter tools",
-      icon: "ballot",
+      icon: "election",
     },
     {
-      title: "Friend activity",
-      copy: "See follows, likes, event activity, posts, and question answers from people you know.",
-      meta: "Social proof",
-      icon: "team",
-    },
-    {
-      title: "Schedule",
+      title: "Calendar and schedule",
       copy: "Surface events, mission deadlines, and calendar-linked civic work.",
       meta: "Next 7 days",
       icon: "calendar",
+    },
+    {
+      title: "Achievements",
+      copy: "Track first answers, ballot progress, and daily action streaks.",
+      meta: "Milestones",
+      icon: "chart",
     },
   ];
   return `<section class="shared-page shared-discover-page shared-discover-page--auth">
@@ -45679,8 +46651,8 @@ function renderDiscoverAuthGate() {
       <section class="shared-discover-hero">
         <div>
           <span class="shared-discover-eyebrow">Discover</span>
-          <h1>Find the next civic action from the web.</h1>
-          <p>Sign in to browse Polis feed trends, people and organizations, campaign events, community rooms, friend activity, ballot tools, schedule cards, and mission work without falling back to a generic directory.</p>
+          <h1>Find what is worth opening next.</h1>
+          <p>Sign in to search across posts, people, events, questions, ballot guidance, messages, missions, and calendar cards from one focused place.</p>
           <div class="shared-auth-modal__actions">
             <button class="shared-feed-chip shared-feed-chip--primary" data-action="auth-login-inline">Sign in</button>
             <button class="shared-feed-chip" data-action="auth-signup-inline">Create account</button>
@@ -45688,7 +46660,7 @@ function renderDiscoverAuthGate() {
           </div>
         </div>
         <form class="shared-discover-search" aria-hidden="true">
-          <input type="search" value="candidates, events, missions" readonly />
+          <input type="search" value="housing, events, ballot" readonly />
           <button class="shared-feed-chip shared-feed-chip--primary" type="button">Search</button>
         </form>
         <div class="shared-discover-stats" aria-hidden="true">
@@ -45702,15 +46674,15 @@ function renderDiscoverAuthGate() {
         ${quickPaths.map(renderDiscoverQuickPath).join("")}
       </div>
       <div class="shared-discover-layout" aria-hidden="true">
-        <section class="shared-discover-section shared-discover-section--wide">
+        <section class="shared-discover-section shared-discover-section--wide shared-discover-section--feed">
           <div class="shared-discover-section__header">
             <div>
               <h2>Recommended now</h2>
-              <p>Preview the signed-in Discover mix of posts, events, people, and nearby work.</p>
+              <p>A calmer preview of feed posts, events, people, and next actions.</p>
             </div>
           </div>
-          <div class="shared-discover-list">
-            <article class="shared-discover-card shared-discover-card--post">
+          <div class="shared-discover-list shared-discover-list--featured">
+            <article class="shared-discover-card shared-discover-card--post is-featured">
               <div class="shared-discover-image shared-discover-image--wide"><span class="shared-image-fallback">${renderIcon("feed")}</span></div>
               <div class="shared-discover-card__body">
                 <span class="shared-discover-eyebrow">Trending feed</span>
@@ -45734,7 +46706,7 @@ function renderDiscoverAuthGate() {
           <div class="shared-discover-section__header">
             <div>
               <h2>Voter tools</h2>
-              <p>Ballot, district, and voter-intelligence shortcuts.</p>
+              <p>Questions, ballot guidance, schedule cards, and milestones.</p>
             </div>
           </div>
           <div class="shared-discover-list">
@@ -45755,13 +46727,13 @@ function renderDiscoverAuthGate() {
         <section class="shared-discover-section">
           <div class="shared-discover-section__header">
             <div>
-              <h2>Friend activity</h2>
-              <p>Follows, likes, event activity, posts, and question answers provide lightweight social proof.</p>
+              <h2>Personalized for you</h2>
+              <p>Your follows, location, and account context shape what appears first.</p>
             </div>
           </div>
           <div class="shared-discover-empty">
             <strong>Personalized after sign-in.</strong>
-            <span>Discover uses your profile, location, follows, and workspace access to decide what should be prominent.</span>
+            <span>Follow candidates, join rooms, and answer questions to make Discover sharper.</span>
           </div>
         </section>
       </div>
@@ -48578,9 +49550,13 @@ function renderDiscoverSection({
   emptyTitle,
   emptyCopy,
   className = "",
+  listClassName = "",
+  limit = 0,
 }) {
-  const items = Array.isArray(slice?.items) ? slice.items : [];
+  const allItems = Array.isArray(slice?.items) ? slice.items : [];
+  const items = limit > 0 ? allItems.slice(0, limit) : allItems;
   const modifier = className ? ` ${className}` : "";
+  const listModifier = listClassName ? ` ${listClassName}` : "";
   return `<section class="shared-discover-section${modifier}">
     <div class="shared-discover-section__header">
       <div>
@@ -48605,7 +49581,7 @@ function renderDiscoverSection({
     }
     ${
       items.length
-        ? `<div class="shared-discover-list">${items.map(renderItem).join("")}</div>`
+        ? `<div class="shared-discover-list${listModifier}">${items.map(renderItem).join("")}</div>`
         : slice?.loaded && !slice?.loading && !slice?.error
           ? `<div class="shared-discover-empty"><strong>${escapeHtml(emptyTitle)}</strong><span>${escapeHtml(emptyCopy)}</span></div>`
           : ""
@@ -48613,14 +49589,15 @@ function renderDiscoverSection({
   </section>`;
 }
 
-function renderDiscoverPostCard(item) {
+function renderDiscoverPostCard(item, index = 0) {
   const title =
     normalizeString(item.previewTitle || item.caption) || "Polis post";
   const route = item.postId
     ? `/posts/${encodeURIComponent(item.postId)}`
     : "/feed";
   const mediaUrl = item.imageUrl || item.posterUrl || item.authorAvatarUrl;
-  return `<article class="shared-discover-card shared-discover-card--post">
+  const featuredClass = index === 0 ? " is-featured" : "";
+  return `<article class="shared-discover-card shared-discover-card--post${featuredClass}">
     ${renderDiscoverImage(mediaUrl, title, "shared-discover-image--wide")}
     <div class="shared-discover-card__body">
       <div class="shared-card__meta">
@@ -48665,14 +49642,15 @@ function renderDiscoverCandidateCard(candidate) {
   </article>`;
 }
 
-function renderDiscoverEventCard(event) {
+function renderDiscoverEventCard(event, index = 0) {
   const route = event.eventId
     ? `/events/${encodeURIComponent(event.eventId)}`
     : "/events";
   const place =
     normalizeString(event.locationName || event.locationTown || event.address) ||
     "Location pending";
-  return `<article class="shared-discover-card shared-discover-card--event">
+  const featuredClass = index === 0 ? " is-featured" : "";
+  return `<article class="shared-discover-card shared-discover-card--event${featuredClass}">
     ${renderDiscoverImage(event.imageUrl, event.title, "shared-discover-image--wide")}
     <div class="shared-discover-card__body">
       <div class="shared-card__meta">
@@ -48695,13 +49673,13 @@ function renderDiscoverServerCard(server) {
     ${renderDiscoverImage(server.avatarUrl, server.title)}
     <div class="shared-discover-card__body">
       <div class="shared-card__meta">
-        <span>${escapeHtml(server.scopeBadge || "Workspace")}</span>
+        <span>${escapeHtml(server.scopeBadge || "Conversation")}</span>
         <span>${escapeHtml(formatCount(server.memberCount))} members</span>
       </div>
       <h3>${escapeHtml(server.title)}</h3>
-      <p>${escapeHtml(server.summary || "Open this civic message space.")}</p>
+      <p>${escapeHtml(server.summary || "Open this civic conversation.")}</p>
       <div class="shared-discover-card__footer">
-        <span>${escapeHtml(server.visibility || "Community")}</span>
+        <span>${escapeHtml(server.communityEnabled ? "Community" : "Room")}</span>
         ${
           route
             ? `<button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(route)}">Open</button>`
@@ -48713,11 +49691,6 @@ function renderDiscoverServerCard(server) {
 }
 
 function renderDiscoverActivityCard(item) {
-  const actorNames = item.actors
-    .map((actor) => actor.displayName)
-    .filter(Boolean)
-    .slice(0, 3)
-    .join(", ");
   const route = resolveDiscoverTargetPath(item.targetPath);
   return `<article class="shared-discover-card shared-discover-card--activity">
     ${renderDiscoverImage(item.thumbnailUrl, item.title)}
@@ -48727,7 +49700,7 @@ function renderDiscoverActivityCard(item) {
         ${item.createdAt ? `<span>${escapeHtml(formatRelativeTime(item.createdAt))}</span>` : ""}
       </div>
       <h3>${escapeHtml(item.title)}</h3>
-      <p>${escapeHtml(actorNames || item.subtitle || "People you follow are active here.")}</p>
+      <p>${escapeHtml(item.subtitle || "People you follow are active here.")}</p>
       <div class="shared-discover-card__footer">
         <span>${escapeHtml(formatCount(item.friendCount))} friend${item.friendCount === 1 ? "" : "s"}</span>
         ${
@@ -48832,11 +49805,11 @@ function renderDiscoverCalendarCard() {
         : "Nothing scheduled today";
     const body = firstToday
       ? `${discoverCalendarItemTitle(firstToday)} starts ${discoverCalendarItemTimeLabel(firstToday)}.`
-      : `Open ${campaignName}'s calendar for upcoming campaign events, shifts, meetings, and promotion windows.`;
+      : `Open ${campaignName}'s calendar for upcoming events, shifts, meetings, and reminders.`;
     const meta = [
       campaignName,
       `${formatCount(scheduleItems.length)} next 7 days`,
-      hasUnopenedToday ? "New today" : "Calendar ready",
+      hasUnopenedToday ? "New today" : "Ready",
     ];
     if (preview.error) {
       meta.push("Refresh available");
@@ -48872,10 +49845,10 @@ function renderDiscoverCalendarCard() {
     ? `Next event ${formatAbsoluteDateTime(nextEvent.startAt)}`
     : "Open today's civic calendar";
   const body = nextEvent
-    ? `${normalizeString(nextEvent.title) || "Upcoming event"}${campaign?.candidateId ? ` sits beside ${campaignName}'s campaign calendar.` : " is ready in the event workspace."}`
+    ? `${normalizeString(nextEvent.title) || "Upcoming event"}${campaign?.candidateId ? ` sits beside ${campaignName}'s calendar.` : " is ready on the events page."}`
     : campaign?.candidateId
-      ? `${campaignName}'s campaign calendar is available from the browser.`
-      : "Browse event listings while campaign calendar access loads.";
+      ? `${campaignName}'s calendar is available from the browser.`
+      : "Browse events while campaign calendars load.";
   const meta = [
     `${formatCount(events.length)} event${events.length === 1 ? "" : "s"}`,
     campaign?.candidateId ? "Campaign calendar" : "Public events",
@@ -48927,9 +49900,9 @@ function renderDiscoverScheduleCard() {
             .slice(0, 3)
             .map((item) => renderDiscoverScheduleItem(item, access))
             .join("")}</div>`
-        : `<div class="shared-discover-schedule-empty">${escapeHtml(access?.candidateId ? "No scheduled items in the next 7 days." : "Open a campaign dashboard to view schedule items.")}</div>`;
+        : `<div class="shared-discover-schedule-empty">${escapeHtml(access?.candidateId ? "No scheduled items in the next 7 days." : "Campaign schedules appear here once available.")}</div>`;
   const meta = [
-    access?.candidateId ? campaignName : "Calendar access",
+    access?.candidateId ? campaignName : "Schedule",
     `${formatCount(items.length)} item${items.length === 1 ? "" : "s"}`,
   ];
   return `<article class="shared-discover-action-card shared-discover-action-card--schedule${preview.error ? " is-warning" : ""}">
@@ -48937,7 +49910,7 @@ function renderDiscoverScheduleCard() {
     <div class="shared-discover-action-card__body">
       <span class="shared-discover-action-card__eyebrow">Schedule</span>
       <h3>Next 7 days</h3>
-      <p>${escapeHtml(access?.candidateId ? "Campaign calendar items you can open directly from Discover." : "Calendar access appears here when a campaign workspace is available.")}</p>
+      <p>${escapeHtml(access?.candidateId ? "Open upcoming calendar items directly from Discover." : "Calendar items appear here when a campaign is available.")}</p>
       <div class="shared-discover-action-card__meta">${meta
         .map((item) => `<span>${escapeHtml(item)}</span>`)
         .join("")}</div>
@@ -48966,7 +49939,7 @@ function renderDiscoverCivicChallengeCard() {
       ? unanswered.title
       : "Keep your voter signal current";
   const body = error
-    ? "Question recommendations could not load, but the policy question workspace is available."
+    ? "Question recommendations could not load, but the question page is available."
     : loading
       ? "Fetching the next policy question for your voter-intelligence profile."
       : unanswered
@@ -49037,9 +50010,9 @@ function renderDiscoverVolunteerCard() {
       : "/missions";
   const title = "Volunteer opportunities";
   const body = campaign?.candidateId
-    ? `${normalizeString(campaign.displayName || campaign.candidateName) || "This campaign"} mission work is available from the campaign dashboard.`
+    ? `${normalizeString(campaign.displayName || campaign.candidateName) || "This campaign"} mission work is ready to review.`
     : coalition?.coalitionId
-      ? `${coalition.name} mission work is available from the coalition workspace.`
+      ? `${coalition.name} mission work is ready to review.`
       : "Join a campaign or coalition to unlock claimable mission work.";
   const loading =
     (discover.campaigns.loading && !discover.campaigns.items.length) ||
@@ -49065,12 +50038,184 @@ function renderDiscoverVolunteerCard() {
   });
 }
 
+function renderDiscoverAchievementsCard() {
+  return renderDiscoverActionCard({
+    icon: "chart",
+    eyebrow: "Achievements",
+    title: "Civic milestones",
+    body:
+      "Track first answers, ballot progress, and daily action streaks from the web.",
+    route: "/achievements",
+    actionLabel: "View progress",
+    meta: ["Badges", "Streaks"],
+  });
+}
+
+function renderDiscoverVoterGuideCard() {
+  const context = state.pages.elections.context;
+  const nextElection = discoverNextElection(context);
+  const route = nextElection
+    ? buildElectionDayRoute({
+        scope: nextElection.scope,
+        stateId: nextElection.stateId,
+        electionId: nextElection.electionId,
+      })
+    : "/settings/voter-intelligence";
+  return renderDiscoverActionCard({
+    icon: "election",
+    eyebrow: "Your ballot",
+    title: nextElection ? "Election guide ready" : "Build your voter signal",
+    body: nextElection
+      ? "Open races, candidate context, and ballot guidance for your area."
+      : "Answer issue prompts and keep your candidate guidance current.",
+    route,
+    actionLabel: nextElection ? "Open guide" : "Start guide",
+    meta: [
+      state.pages.elections.contextLoading ? "Checking area" : "District aware",
+      nextElection?.stateName || "Voter tools",
+    ],
+  });
+}
+
+function renderDiscoverCreatorPromptCard() {
+  return renderDiscoverActionCard({
+    icon: "create",
+    eyebrow: "Create",
+    title: "Post an update",
+    body:
+      "Share a photo, video, or civic note into the feed from the browser composer.",
+    route: "/create",
+    actionLabel: "Create post",
+    meta: ["Photo", "Video"],
+  });
+}
+
+function renderDiscoverLocalPulseCard() {
+  const discover = state.pages.discover;
+  const signalCount =
+    discover.feed.items.length +
+    discover.events.items.length +
+    discover.candidates.items.length;
+  return renderDiscoverActionCard({
+    icon: "map",
+    eyebrow: "Local pulse",
+    title: "What is active nearby",
+    body:
+      "Scan the newest posts, events, and public profiles connected to your civic graph.",
+    route: "/search/results?q=local",
+    actionLabel: "Explore local",
+    meta: [
+      `${formatCount(signalCount)} signals`,
+      `${formatCount(discover.events.items.length)} events`,
+    ],
+  });
+}
+
+function renderDiscoverPolicyQuestionCard(question, index = 0) {
+  const route = question.questionId
+    ? `/questions/${encodeURIComponent(question.questionId)}`
+    : "/questions";
+  const answered = Boolean(question.selectedAnswer?.optionId);
+  const copy =
+    normalizeString(question.shortBackground || question.categoryLabel) ||
+    "Answer to improve your voter guide and candidate recommendations.";
+  return `<article class="shared-discover-card shared-discover-card--question${index === 0 ? " is-featured" : ""}">
+    <div class="shared-discover-card__icon" aria-hidden="true">${renderIcon(answered ? "check" : "search")}</div>
+    <div class="shared-discover-card__body">
+      <div class="shared-card__meta">
+        <span>${escapeHtml(answered ? "Answered" : "Open question")}</span>
+        ${question.categoryLabel ? `<span>${escapeHtml(question.categoryLabel)}</span>` : ""}
+      </div>
+      <h3>${escapeHtml(question.title || "Policy question")}</h3>
+      <p>${escapeHtml(copy)}</p>
+      <div class="shared-discover-card__footer">
+        <span>${escapeHtml(answered ? "Update anytime" : "Improves your guide")}</span>
+        <button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(route)}">${escapeHtml(answered ? "Review" : "Answer")}</button>
+      </div>
+    </div>
+  </article>`;
+}
+
+function renderDiscoverDestinationRail() {
+  const destinations = [
+    {
+      label: "Feed",
+      copy: "Open posts and civic conversations.",
+      route: "/feed",
+      icon: "feed",
+    },
+    {
+      label: "People",
+      copy: "Find candidates, officials, and organizers.",
+      route: "/candidates",
+      icon: "candidate",
+    },
+    {
+      label: "Events",
+      copy: "Browse nearby events and RSVP paths.",
+      route: "/events",
+      icon: "calendar",
+    },
+    {
+      label: "Questions",
+      copy: "Answer issue prompts for better guidance.",
+      route: "/questions",
+      icon: "search",
+    },
+    {
+      label: "Ballot",
+      copy: "Open voter intelligence and election guidance.",
+      route: "/settings/voter-intelligence",
+      icon: "election",
+    },
+    {
+      label: "Achievements",
+      copy: "Track badges, streaks, and next steps.",
+      route: "/achievements",
+      icon: "chart",
+    },
+    {
+      label: "Messages",
+      copy: "Open conversations, requests, and rooms.",
+      route: "/messages",
+      icon: "messages",
+    },
+    {
+      label: "Missions",
+      copy: "Review claimable campaign and coalition work.",
+      route: "/missions",
+      icon: "mission",
+    },
+    {
+      label: "Create",
+      copy: "Publish a post from the browser.",
+      route: "/create",
+      icon: "create",
+    },
+  ];
+  return `<section class="shared-discover-destinations" aria-label="Discover destinations">
+    <div class="shared-discover-destinations__header">
+      <div>
+        <h2>Jump to a surface</h2>
+        <p>Every app Discover destination stays one tap away on web.</p>
+      </div>
+    </div>
+    <div class="shared-discover-paths">
+      ${destinations.map(renderDiscoverQuickPath).join("")}
+    </div>
+  </section>`;
+}
+
 function renderDiscoverActionDeck() {
   return `<section class="shared-discover-action-deck" aria-label="Discover app modules">
+    ${renderDiscoverCivicChallengeCard()}
+    ${renderDiscoverAchievementsCard()}
+    ${renderDiscoverVoterGuideCard()}
     ${renderDiscoverCalendarCard()}
     ${renderDiscoverScheduleCard()}
-    ${renderDiscoverCivicChallengeCard()}
     ${renderDiscoverDeadlineCard()}
+    ${renderDiscoverLocalPulseCard()}
+    ${renderDiscoverCreatorPromptCard()}
     ${renderDiscoverVolunteerCard()}
   </section>`;
 }
@@ -49100,8 +50245,12 @@ function renderDiscoverPage() {
       <section class="shared-discover-hero">
         <div>
           <span class="shared-discover-eyebrow">Discover</span>
-          <h1>Your civic command surface.</h1>
-          <p>Move between feed trends, people, events, conversations, ballot work, missions, and campaign operations without leaving the web app.</p>
+          <h1>Find what is worth opening next.</h1>
+          <p>Search once, then move between posts, people, events, questions, ballot guidance, missions, rooms, and calendar items without losing your place.</p>
+          <div class="shared-discover-hero__actions">
+            <button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="/feed">Open feed</button>
+            <button class="shared-feed-chip" data-action="discover-refresh">Refresh</button>
+          </div>
         </div>
         <form class="shared-discover-search" data-route-form="discover-search">
           <input name="q" placeholder="Search posts, people, and tags" autocomplete="off" />
@@ -49123,100 +50272,73 @@ function renderDiscoverPage() {
 
       ${renderDiscoverActionDeck()}
 
-      <div class="shared-discover-paths">
-        ${[
-          {
-            label: "Campaigns",
-            copy: "Open candidate reporting, events, calendar, voter tools, staff, missions, and messaging.",
-            route: "/candidate-dashboard",
-            icon: "dashboard",
-          },
-          {
-            label: "Coalitions",
-            copy: "Review coalition rooms, members, missions, and governance.",
-            route: "/coalitions",
-            icon: "team",
-          },
-          {
-            label: "Missions",
-            copy: "Claim eligible tasks and track active civic work.",
-            route: "/missions",
-            icon: "mission",
-          },
-          {
-            label: "Create",
-            copy: "Publish image posts from the browser composer.",
-            route: "/create",
-            icon: "create",
-          },
-          {
-            label: "Your ballot",
-            copy: "Open voter intelligence and election guidance surfaces.",
-            route: "/settings/voter-intelligence",
-            icon: "election",
-          },
-          {
-            label: "Achievements",
-            copy: "Track first answers, ballot progress, and civic streaks.",
-            route: "/achievements",
-            icon: "chart",
-          },
-          {
-            label: "Messages",
-            copy: "Jump into DMs, requests, campaign rooms, and coalition rooms.",
-            route: "/messages",
-            icon: "messages",
-          },
-          {
-            label: "Events",
-            copy: "Browse nearby events and manage hosted event pages.",
-            route: "/events",
-            icon: "calendar",
-          },
-        ].map(renderDiscoverQuickPath).join("")}
-      </div>
+      ${renderDiscoverDestinationRail()}
 
-      <div class="shared-discover-layout">
+      <div class="shared-discover-layout shared-discover-layout--curated">
         ${renderDiscoverSection({
           title: "Trending civic feed",
-          copy: "Recent posts and conversations from your Polis graph.",
+          copy: "Recent posts and conversations sized for browsing, not crammed into a tiny feed.",
           actionLabel: "Open feed",
           actionRoute: "/feed",
           slice: discover.feed,
           renderItem: renderDiscoverPostCard,
           emptyTitle: "No feed items yet.",
-          emptyCopy: "Refresh Discover or open the feed to build recommendations.",
-          className: "shared-discover-section--wide",
+          emptyCopy: "Open the feed or follow a few people to tune recommendations.",
+          className: "shared-discover-section--wide shared-discover-section--feed",
+          listClassName: "shared-discover-list--featured",
+          limit: 5,
+        })}
+        ${renderDiscoverSection({
+          title: "Policy questions",
+          copy: "Issue prompts that improve your ballot and candidate guidance.",
+          actionLabel: "Open questions",
+          actionRoute: "/questions",
+          slice: discover.policyQuestions,
+          renderItem: renderDiscoverPolicyQuestionCard,
+          emptyTitle: "No questions ready.",
+          emptyCopy: "Check back after your topics and district are set.",
+          className: "shared-discover-section--questions",
+          listClassName: "shared-discover-list--compact",
+          limit: 4,
         })}
         ${renderDiscoverSection({
           title: "People to follow",
-          copy: "Candidate and official profiles surfaced from the directory.",
+          copy: "Candidate and official profiles worth checking next.",
           actionLabel: "Browse",
           actionRoute: "/candidates",
           slice: discover.candidates,
           renderItem: renderDiscoverCandidateCard,
           emptyTitle: "No people matched.",
           emptyCopy: "Try the candidate directory or search a race.",
+          className: "shared-discover-section--people",
+          listClassName: "shared-discover-list--compact",
+          limit: 4,
         })}
         ${renderDiscoverSection({
           title: "Events near you",
-          copy: "Upcoming civic events available in the web event flow.",
+          copy: "Upcoming civic events with direct paths to details and RSVP.",
           actionLabel: "All events",
           actionRoute: "/events",
           slice: discover.events,
           renderItem: renderDiscoverEventCard,
           emptyTitle: "No events available.",
-          emptyCopy: "Create or follow events from the event workspace.",
+          emptyCopy: "Follow campaigns and coalitions to see more events here.",
+          className: "shared-discover-section--events",
+          listClassName: "shared-discover-list--featured",
+          limit: 4,
         })}
         ${renderDiscoverSection({
           title: "Community conversations",
-          copy: "Campaign, coalition, and public rooms that can be opened from web messaging.",
+          copy: "Campaign, coalition, and public rooms you can open from web messaging.",
           actionLabel: "Messages",
           actionRoute: "/messages",
           slice: serverSlice,
           renderItem: renderDiscoverServerCard,
           emptyTitle: "No community rooms surfaced.",
           emptyCopy: "Join rooms from campaigns, coalitions, or message invites.",
+          className: "shared-discover-section--rooms",
+          listClassName: "shared-discover-list--compact",
+          limit: 4,
         })}
         ${renderDiscoverSection({
           title: "Friend activity",
@@ -49227,6 +50349,9 @@ function renderDiscoverPage() {
           renderItem: renderDiscoverActivityCard,
           emptyTitle: "No friend activity yet.",
           emptyCopy: "Follow people and campaigns to populate this activity stream.",
+          className: "shared-discover-section--activity",
+          listClassName: "shared-discover-list--compact",
+          limit: 4,
         })}
       </div>
 
@@ -58866,6 +59991,373 @@ function renderCandidateDashboardBuildoutPanel(section, candidateId) {
   </div>`;
 }
 
+function renderPetitionStatusPill(status) {
+  const normalized = normalizeString(status) || "draft";
+  const tone =
+    normalized === "published"
+      ? "good"
+      : normalized === "closed"
+        ? "bad"
+        : "pending";
+  return `<span class="shared-status-pill shared-status-pill--${escapeHtml(tone)}">${escapeHtml(humanizeLabel(normalized))}</span>`;
+}
+
+function renderPetitionBuilderField(field, index, pending) {
+  const typeOptions = petitionFieldTypeOptions()
+    .map(
+      ([value, label]) =>
+        `<option value="${escapeHtml(value)}"${field.type === value ? " selected" : ""}>${escapeHtml(label)}</option>`,
+    )
+    .join("");
+  const optionText = (field.options || [])
+    .map((option) =>
+      option.value === option.label ? option.value : `${option.value}|${option.label}`,
+    )
+    .join("\n");
+  const isSelect = field.type === "select";
+  const isCta = field.type === "cta_video";
+  const prefix = `field:${field.id}`;
+  return `<article class="shared-petition-field" data-petition-field-row="${escapeHtml(field.id)}">
+    <input type="hidden" name="fieldId" value="${escapeHtml(field.id)}" />
+    <div class="shared-petition-field__top">
+      <strong>${escapeHtml(field.label || `Field ${index + 1}`)}</strong>
+      <div class="shared-card__actions">
+        <button class="shared-feed-chip" type="button" data-action="petition-field-move" data-owner-type="" data-field-id="${escapeHtml(field.id)}" data-direction="up"${disabledAttr(pending || index === 0)}>Up</button>
+        <button class="shared-feed-chip" type="button" data-action="petition-field-move" data-owner-type="" data-field-id="${escapeHtml(field.id)}" data-direction="down"${disabledAttr(pending)}>Down</button>
+        <button class="shared-feed-chip is-danger" type="button" data-action="petition-field-remove" data-owner-type="" data-field-id="${escapeHtml(field.id)}"${disabledAttr(pending)}>Remove</button>
+      </div>
+    </div>
+    <div class="shared-petition-field__grid">
+      <label><span>Type</span><select name="${escapeHtml(prefix)}:type" data-petition-builder-field${disabledAttr(pending)}>${typeOptions}</select></label>
+      <label><span>Label</span><input name="${escapeHtml(prefix)}:label" value="${escapeHtml(field.label)}" data-petition-builder-field required${disabledAttr(pending)} /></label>
+      <label class="shared-form__checkbox"><input type="checkbox" name="${escapeHtml(prefix)}:required" data-petition-builder-field${checkedAttr(field.required || isCta)}${disabledAttr(pending || isCta)} /> Required</label>
+      <label class="is-wide"><span>Help text</span><input name="${escapeHtml(prefix)}:helpText" value="${escapeHtml(field.helpText)}" data-petition-builder-field${disabledAttr(pending)} /></label>
+      <label class="is-wide${isSelect ? "" : " is-hidden"}"><span>Select options</span><textarea name="${escapeHtml(prefix)}:options" rows="3" data-petition-builder-field${disabledAttr(pending)}>${escapeHtml(optionText)}</textarea><em>One per line. Use value|Label when the stored value should differ.</em></label>
+      <label class="is-wide${isCta ? "" : " is-hidden"}"><span>CTA video instructions</span><textarea name="${escapeHtml(prefix)}:instructions" rows="4" data-petition-builder-field${disabledAttr(pending)}>${escapeHtml(field.config?.instructions || "")}</textarea></label>
+      <label class="is-wide${isCta ? "" : " is-hidden"}"><span>Consent copy</span><input name="${escapeHtml(prefix)}:consentCopy" value="${escapeHtml(field.config?.consentCopy || "I understand this video response may be used as part of this CTA.")}" data-petition-builder-field${disabledAttr(pending)} /></label>
+    </div>
+  </article>`;
+}
+
+function renderPetitionBuilder(ownerType, ownerId, workspace) {
+  const selected = currentPetitionWorkspaceItem(workspace);
+  const draft = workspace.draft || createPetitionDraft(selected || {});
+  const pending = Boolean(workspace.actionPendingKey);
+  const fields = [...(draft.fieldSchema || [])].sort(
+    (left, right) => (Number(left.order) || 0) - (Number(right.order) || 0),
+  );
+  return `<form class="shared-petition-builder shared-coalition-panel" data-route-form="petition-builder" data-owner-type="${escapeHtml(ownerType)}" data-owner-id="${escapeHtml(ownerId)}">
+    <input type="hidden" name="petitionId" value="${escapeHtml(draft.petitionId)}" />
+    <div class="shared-coalition-panel__header">
+      <div>
+        <h2>${escapeHtml(draft.petitionId ? "Edit petition" : "Create petition")}</h2>
+        <p>Published changes create a new immutable public version.</p>
+      </div>
+      <div class="shared-card__actions">
+        <button class="shared-feed-chip" type="button" data-action="petition-add-field" data-field-type="short_text"${disabledAttr(pending)}>Add field</button>
+        <button class="shared-feed-chip" type="button" data-action="petition-add-field" data-field-type="cta_video"${disabledAttr(pending)}>Add CTA video</button>
+      </div>
+    </div>
+    <div class="shared-petition-builder__header">
+      <label class="is-wide"><span>Title</span><input name="title" value="${escapeHtml(draft.title)}" required${disabledAttr(pending)} /></label>
+      <label class="is-wide"><span>Body text</span><textarea name="bodyText" rows="5"${disabledAttr(pending)}>${escapeHtml(draft.bodyText)}</textarea></label>
+    </div>
+    <div class="shared-petition-fields">
+      ${fields.length ? fields.map((field, index) => renderPetitionBuilderField(field, index, pending)).join("") : '<div class="shared-page__empty">Add at least one field before publishing.</div>'}
+    </div>
+    <div class="shared-card__actions">
+      <button class="shared-feed-chip shared-feed-chip--primary" type="submit" name="petitionAction" value="save"${disabledAttr(pending)}>${workspace.actionPendingKey === "save" ? "Saving..." : "Save draft"}</button>
+      <button class="shared-feed-chip" type="submit" name="petitionAction" value="publish"${disabledAttr(pending || !fields.length)}>${workspace.actionPendingKey === "publish" ? "Publishing..." : "Publish"}</button>
+      ${draft.petitionId ? `<button class="shared-feed-chip is-danger" type="submit" name="petitionAction" value="close"${disabledAttr(pending)}>${workspace.actionPendingKey === "close" ? "Closing..." : "Close"}</button>` : ""}
+    </div>
+  </form>`;
+}
+
+function renderPetitionList(ownerType, ownerId, workspace) {
+  const items = workspace.items || [];
+  if (workspace.loading && !workspace.loaded) {
+    return '<div class="shared-page__loading">Loading petitions...</div>';
+  }
+  if (!items.length) {
+    return '<div class="shared-page__empty">No petitions yet.</div>';
+  }
+  return `<div class="shared-petition-list">
+    ${items
+      .map((item) => {
+        const active = workspace.selectedPetitionId === item.petitionId;
+        const shareUrl = petitionShareUrl(item);
+        return `<article class="shared-petition-card${active ? " is-active" : ""}">
+          <div>
+            <div class="shared-card__meta"><span>${escapeHtml(item.publishedVersion ? `v${item.publishedVersion}` : "Draft")}</span><span>${renderPetitionStatusPill(item.status)}</span></div>
+            <h3>${escapeHtml(item.title || "Untitled petition")}</h3>
+            <p>${escapeHtml(item.bodyText || "No body text added.")}</p>
+            ${shareUrl ? `<small>${escapeHtml(shareUrl)}</small>` : ""}
+          </div>
+          <div class="shared-card__actions">
+            <button class="shared-feed-chip" type="button" data-action="petition-select" data-owner-type="${escapeHtml(ownerType)}" data-owner-id="${escapeHtml(ownerId)}" data-petition-id="${escapeHtml(item.petitionId)}">Edit</button>
+            <button class="shared-feed-chip" type="button" data-action="petition-responses-load" data-owner-type="${escapeHtml(ownerType)}" data-owner-id="${escapeHtml(ownerId)}" data-petition-id="${escapeHtml(item.petitionId)}">Responses</button>
+            <button class="shared-feed-chip" type="button" data-action="petition-copy-share" data-share-url="${escapeHtml(shareUrl)}"${disabledAttr(!shareUrl)}>Copy link</button>
+          </div>
+        </article>`;
+      })
+      .join("")}
+  </div>`;
+}
+
+function petitionResponseValueLabel(value) {
+  if (value === undefined || value === null) return "";
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (typeof value === "string" || typeof value === "number") {
+    return normalizeString(value);
+  }
+  if (Array.isArray(value)) {
+    return value.map(petitionResponseValueLabel).filter(Boolean).join("; ");
+  }
+  if (typeof value === "object") {
+    if (value.firstName || value.lastName) {
+      return [value.firstName, value.lastName].map(normalizeString).filter(Boolean).join(" ");
+    }
+    if (value.typedName || value.signerName) {
+      return normalizeString(value.typedName || value.signerName);
+    }
+    if (value.formattedAddress) return normalizeString(value.formattedAddress);
+    const addressParts = [
+      value.line1 || value.addressLine1,
+      value.line2 || value.addressLine2,
+      value.city,
+      value.state,
+      value.postalCode,
+    ]
+      .map(normalizeString)
+      .filter(Boolean);
+    if (addressParts.length) return addressParts.join(", ");
+    if (value.uploadId || value.uid || value.videoId) {
+      return normalizeString(value.uploadId || value.uid || value.videoId);
+    }
+    return Object.entries(value)
+      .map(([key, entry]) => `${humanizeLabel(key)}: ${petitionResponseValueLabel(entry)}`)
+      .join("; ");
+  }
+  return "";
+}
+
+function renderPetitionResponses(ownerType, ownerId, workspace) {
+  const petition = currentPetitionWorkspaceItem(workspace);
+  if (!petition) {
+    return '<div class="shared-page__empty">Select a petition to review responses.</div>';
+  }
+  const fields = petition.fieldSchema || [];
+  const writtenFields = fields.filter((field) => field.type !== "cta_video");
+  const responses = workspace.responses || [];
+  const groups = workspace.duplicateGroups || [];
+  return `<section class="shared-coalition-panel shared-petition-responses">
+    <div class="shared-coalition-panel__header">
+      <div>
+        <h2>Responses</h2>
+        <p>${escapeHtml(petition.title || "Selected petition")}</p>
+      </div>
+      <div class="shared-card__actions">
+        <button class="shared-feed-chip" type="button" data-action="petition-responses-load" data-owner-type="${escapeHtml(ownerType)}" data-owner-id="${escapeHtml(ownerId)}" data-petition-id="${escapeHtml(petition.petitionId)}"${disabledAttr(workspace.responsesLoading)}>${workspace.responsesLoading ? "Refreshing..." : "Refresh"}</button>
+        <button class="shared-feed-chip" type="button" data-action="petition-export-csv" data-owner-type="${escapeHtml(ownerType)}" data-owner-id="${escapeHtml(ownerId)}" data-petition-id="${escapeHtml(petition.petitionId)}"${disabledAttr(workspace.actionPendingKey === "csv")}>CSV</button>
+      </div>
+    </div>
+    ${
+      groups.length
+        ? `<div class="shared-petition-duplicates">
+            ${groups
+              .map(
+                (group) => `<article>
+                  <strong>${escapeHtml(humanizeLabel(group.type))}</strong>
+                  <span>${escapeHtml(formatCount(group.count || group.responseIds.length))} matching responses</span>
+                  <button class="shared-feed-chip" type="button" data-action="petition-merge-group" data-owner-type="${escapeHtml(ownerType)}" data-owner-id="${escapeHtml(ownerId)}" data-petition-id="${escapeHtml(petition.petitionId)}" data-group-key="${escapeHtml(group.key)}"${disabledAttr(workspace.actionPendingKey === `merge:${group.key}`)}>Merge</button>
+                </article>`,
+              )
+              .join("")}
+          </div>`
+        : ""
+    }
+    <div class="shared-petition-response-table" role="table" aria-label="Petition responses" style="--petition-column-count: ${escapeHtml(String(Math.max(1, writtenFields.length)))};">
+      <div class="shared-petition-response-table__row is-header" role="row">
+        <span>Status</span>
+        <span>Submitted</span>
+        ${writtenFields.map((field) => `<span>${escapeHtml(field.label)}</span>`).join("")}
+        <span>CTA video</span>
+        <span>Actions</span>
+      </div>
+      ${
+        workspace.responsesLoading && !responses.length
+          ? '<div class="shared-page__loading">Loading responses...</div>'
+          : responses.length
+            ? responses
+                .map((response) => {
+                  const hasVideo = response.ctaVideos.length > 0;
+                  const duplicate = response.duplicateFlags.length > 0;
+                  return `<div class="shared-petition-response-table__row${duplicate ? " is-flagged" : ""}" role="row">
+                    <span>${renderPetitionStatusPill(response.reviewStatus || response.status)}</span>
+                    <span>${escapeHtml(response.createdAt ? new Date(response.createdAt).toLocaleString() : "")}</span>
+                    ${writtenFields
+                      .map((field) => `<span>${escapeHtml(petitionResponseValueLabel(response.values[field.id]))}</span>`)
+                      .join("")}
+                    <span>${hasVideo ? response.ctaVideos.map((video) => escapeHtml(video.uploadId || video.uid || video.videoId || "video")).join("<br>") : "No"}</span>
+                    <span><button class="shared-feed-chip is-danger" type="button" data-action="petition-delete-response" data-owner-type="${escapeHtml(ownerType)}" data-owner-id="${escapeHtml(ownerId)}" data-petition-id="${escapeHtml(petition.petitionId)}" data-response-id="${escapeHtml(response.responseId)}"${disabledAttr(workspace.actionPendingKey === `delete:${response.responseId}`)}>Delete</button></span>
+                  </div>`;
+                })
+                .join("")
+            : '<div class="shared-page__empty">No responses yet.</div>'
+      }
+    </div>
+  </section>`;
+}
+
+function renderPetitionsWorkspace(ownerType, ownerId, title, workspace) {
+  return `<div class="shared-campaign-section shared-petitions-workspace">
+    <section class="shared-coalition-panel">
+      <div class="shared-coalition-panel__header">
+        <div>
+          <h2>${escapeHtml(title)}</h2>
+          <p>Create shareable public forms for non-ballot petition and CTA work.</p>
+        </div>
+        <div class="shared-card__actions">
+          <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="petition-new" data-owner-type="${escapeHtml(ownerType)}" data-owner-id="${escapeHtml(ownerId)}">New petition</button>
+          <button class="shared-feed-chip" type="button" data-action="refresh-current-route"${disabledAttr(workspace.loading)}>Refresh</button>
+        </div>
+      </div>
+      ${workspace.error ? `<div class="shared-page__error">${escapeHtml(workspace.error)}</div>` : ""}
+      ${workspace.notice ? `<div class="shared-page__notice">${escapeHtml(workspace.notice)}</div>` : ""}
+      ${renderPetitionList(ownerType, ownerId, workspace)}
+    </section>
+    ${renderPetitionBuilder(ownerType, ownerId, workspace)}
+    ${renderPetitionResponses(ownerType, ownerId, workspace)}
+  </div>`;
+}
+
+function renderPublicPetitionAddressField(field, page, pending) {
+  const value =
+    page.values[field.id] && typeof page.values[field.id] === "object"
+      ? page.values[field.id]
+      : {};
+  const lookup = page.addressLookup || {};
+  const activeLookup = lookup.fieldId === field.id;
+  const key = `field:${field.id}`;
+  return `<div class="shared-petition-public-field shared-petition-public-address">
+    <label class="is-wide"><span>${escapeHtml(field.label)}${field.required ? " *" : ""}</span><input name="${escapeHtml(key)}:line1" value="${escapeHtml(value.line1 || "")}" autocomplete="address-line1" data-petition-address-field="${escapeHtml(field.id)}"${field.required ? " required" : ""}${disabledAttr(pending)} /></label>
+    <label><span>Address line 2</span><input name="${escapeHtml(key)}:line2" value="${escapeHtml(value.line2 || "")}" autocomplete="address-line2"${disabledAttr(pending)} /></label>
+    <label><span>City</span><input name="${escapeHtml(key)}:city" value="${escapeHtml(value.city || "")}" autocomplete="address-level2"${field.required ? " required" : ""}${disabledAttr(pending)} /></label>
+    <label><span>State</span><input name="${escapeHtml(key)}:state" value="${escapeHtml(value.state || "")}" autocomplete="address-level1"${field.required ? " required" : ""}${disabledAttr(pending)} /></label>
+    <label><span>Postal code</span><input name="${escapeHtml(key)}:postalCode" value="${escapeHtml(value.postalCode || "")}" autocomplete="postal-code"${field.required ? " required" : ""}${disabledAttr(pending)} /></label>
+    <input type="hidden" name="${escapeHtml(key)}:placeId" value="${escapeHtml(value.placeId || "")}" />
+    <input type="hidden" name="${escapeHtml(key)}:formattedAddress" value="${escapeHtml(value.formattedAddress || "")}" />
+    <input type="hidden" name="${escapeHtml(key)}:lat" value="${escapeHtml(value.lat || "")}" />
+    <input type="hidden" name="${escapeHtml(key)}:lng" value="${escapeHtml(value.lng || "")}" />
+    ${
+      activeLookup && lookup.loading
+        ? '<div class="shared-event-address-lookup__status">Searching addresses...</div>'
+        : ""
+    }
+    ${
+      activeLookup && lookup.error
+        ? `<div class="shared-event-address-lookup__error">${escapeHtml(lookup.error)}</div>`
+        : ""
+    }
+    ${
+      activeLookup && lookup.items?.length
+        ? `<div class="shared-event-address-lookup__results">
+            ${lookup.items
+              .map(
+                (item, index) => `<button class="shared-event-address-option" type="button" data-action="petition-address-select" data-index="${escapeHtml(String(index))}">
+                  <strong>${escapeHtml(item.mainText || eventAddressSuggestionLabel(item))}</strong>
+                  <span>${escapeHtml(item.secondaryText || "")}</span>
+                </button>`,
+              )
+              .join("")}
+          </div>`
+        : ""
+    }
+  </div>`;
+}
+
+function renderPublicPetitionField(field, page, pending) {
+  const key = `field:${field.id}`;
+  const required = field.required ? " required" : "";
+  const label = `${field.label}${field.required ? " *" : ""}`;
+  const help = field.helpText ? `<em>${escapeHtml(field.helpText)}</em>` : "";
+  if (field.type === "name") {
+    return `<div class="shared-petition-public-field">
+      <label><span>First name *</span><input name="${escapeHtml(key)}:firstName" autocomplete="given-name"${required}${disabledAttr(pending)} /></label>
+      <label><span>Last name *</span><input name="${escapeHtml(key)}:lastName" autocomplete="family-name"${required}${disabledAttr(pending)} /></label>
+      ${help}
+    </div>`;
+  }
+  if (field.type === "address") {
+    return renderPublicPetitionAddressField(field, page, pending);
+  }
+  if (field.type === "checkbox") {
+    return `<label class="shared-form__checkbox shared-petition-public-checkbox"><input type="checkbox" name="${escapeHtml(key)}"${required}${disabledAttr(pending)} /> ${escapeHtml(label)}</label>`;
+  }
+  if (field.type === "select") {
+    return `<label class="shared-petition-public-field"><span>${escapeHtml(label)}</span><select name="${escapeHtml(key)}"${required}${disabledAttr(pending)}><option value="">Choose...</option>${(field.options || []).map((option) => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`).join("")}</select>${help}</label>`;
+  }
+  if (field.type === "cta_video") {
+    const previewUrl = normalizeString(page.videoPreviews[field.id]);
+    const hasFile = Boolean(page.videoFiles[field.id] || page.videoUploads[field.id]);
+    return `<div class="shared-petition-public-field shared-petition-video-field">
+      <div>
+        <strong>${escapeHtml(field.label)}</strong>
+        ${field.config?.instructions ? `<p>${escapeHtml(field.config.instructions)}</p>` : ""}
+      </div>
+      ${previewUrl ? `<video controls src="${escapeHtml(previewUrl)}"></video>` : ""}
+      <label><span>Upload video</span><input type="file" accept="video/*" data-petition-video-field="${escapeHtml(field.id)}"${disabledAttr(pending)} /></label>
+      <label class="shared-form__checkbox"><input type="checkbox" name="${escapeHtml(key)}:consent"${required}${disabledAttr(pending || !hasFile)} /> ${escapeHtml(field.config?.consentCopy || "I understand this video response may be used as part of this CTA.")}</label>
+    </div>`;
+  }
+  if (field.type === "long_text") {
+    return `<label class="shared-petition-public-field"><span>${escapeHtml(label)}</span><textarea name="${escapeHtml(key)}" rows="5"${required}${disabledAttr(pending)}></textarea>${help}</label>`;
+  }
+  if (field.type === "signature") {
+    return `<label class="shared-petition-public-field"><span>${escapeHtml(label)}</span><input name="${escapeHtml(key)}" autocomplete="name"${required}${disabledAttr(pending)} /><em>Type your signer name.</em></label>`;
+  }
+  const inputType = field.type === "email" ? "email" : field.type === "phone" ? "tel" : "text";
+  const autocomplete = field.type === "email" ? "email" : field.type === "phone" ? "tel" : "off";
+  return `<label class="shared-petition-public-field"><span>${escapeHtml(label)}</span><input type="${escapeHtml(inputType)}" name="${escapeHtml(key)}" autocomplete="${escapeHtml(autocomplete)}"${required}${disabledAttr(pending)} />${help}</label>`;
+}
+
+function renderPublicPetitionPage() {
+  const page = state.pages.petitions.public;
+  if (page.loading && !page.item) {
+    return `<section class="shared-page shared-petition-public-page">${renderTopChrome()}<div class="shared-page__content"><div class="shared-page__loading">Loading petition...</div></div></section>`;
+  }
+  if (page.error && !page.item) {
+    return `<section class="shared-page shared-petition-public-page">${renderTopChrome()}<div class="shared-page__content"><div class="shared-page__error">${escapeHtml(page.error)}</div></div></section>`;
+  }
+  const petition = page.item;
+  if (!petition) {
+    return `<section class="shared-page shared-petition-public-page">${renderTopChrome()}<div class="shared-page__content"><div class="shared-page__error">Petition unavailable.</div></div></section>`;
+  }
+  const pending = page.submitting;
+  return `<section class="shared-page shared-petition-public-page">
+    ${renderTopChrome()}
+    <div class="shared-page__content">
+      <section class="shared-petition-public-shell">
+        <div class="shared-page__header">
+          <div>
+            <div class="shared-card__meta"><span>Petition</span><span>Guest response</span></div>
+            <h1>${escapeHtml(petition.title || "Petition")}</h1>
+            ${petition.bodyText ? `<p>${escapeHtml(petition.bodyText)}</p>` : ""}
+          </div>
+        </div>
+        ${page.error ? `<div class="shared-page__error">${escapeHtml(page.error)}</div>` : ""}
+        ${page.notice ? `<div class="shared-page__notice">${escapeHtml(page.notice)}</div>` : ""}
+        <form class="shared-petition-public-form" data-route-form="petition-public-submit">
+          ${(petition.fieldSchema || []).map((field) => renderPublicPetitionField(field, page, pending)).join("")}
+          <div class="shared-card__actions">
+            <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(pending)}>${pending ? "Submitting..." : "Submit"}</button>
+          </div>
+        </form>
+      </section>
+    </div>
+  </section>`;
+}
+
 function renderCandidateDashboardSection(detail, candidateId, access, activeSection) {
   const section =
     CANDIDATE_DASHBOARD_SECTION_CONFIG.find(
@@ -58906,6 +60398,14 @@ function renderCandidateDashboardSection(detail, candidateId, access, activeSect
   }
   if (section.key === "missions") {
     return renderCandidateDashboardMissions(detail, candidateId, access);
+  }
+  if (section.key === "petitions") {
+    return renderPetitionsWorkspace(
+      "candidate",
+      candidateId,
+      "Campaign Petitions",
+      detail.petitionsWorkspace || createPetitionsWorkspaceState(),
+    );
   }
   if (section.key === "messaging") {
     return renderCandidateDashboardMessaging(detail, candidateId, access);
@@ -65196,6 +66696,14 @@ function renderCoalitionSection(detail, coalition, membership, activeSection) {
   }
   if (section.key === "missions") {
     return renderCoalitionMissions(detail, coalition, membership);
+  }
+  if (section.key === "petitions") {
+    return renderPetitionsWorkspace(
+      "coalition",
+      coalition.coalitionId,
+      "Coalition Petitions",
+      detail.petitionsWorkspace || createPetitionsWorkspaceState(),
+    );
   }
   if (section.key === "voter-map") {
     return renderCoalitionVoterMap(coalition, membership, detail);
@@ -86446,6 +87954,9 @@ function renderRouteStage() {
   if (routeKey === ROUTE_KEY_CTA_INVITE) {
     return renderCtaInvitePage();
   }
+  if (routeKey === ROUTE_KEY_PUBLIC_PETITION) {
+    return renderPublicPetitionPage();
+  }
   if (routeKey === ROUTE_KEY_SEARCH) {
     return renderSearchLandingPage();
   }
@@ -88032,6 +89543,151 @@ function handleRootClick(event) {
     redeemCtaInvite().catch(() => {
       showToast("Invitation could not be accepted.");
     });
+    return;
+  }
+
+  if (action === "petition-new") {
+    const ownerType = normalizeString(target.getAttribute("data-owner-type"));
+    const workspace = petitionWorkspaceForOwner(ownerType);
+    workspace.selectedPetitionId = "";
+    workspace.draft = createPetitionDraft();
+    workspace.responses = [];
+    workspace.duplicateGroups = [];
+    workspace.error = "";
+    workspace.notice = "";
+    scheduleRender();
+    return;
+  }
+
+  if (action === "petition-select") {
+    const ownerType = normalizeString(target.getAttribute("data-owner-type"));
+    const petitionId = normalizeString(target.getAttribute("data-petition-id"));
+    const workspace = petitionWorkspaceForOwner(ownerType);
+    const item = workspace.items.find((entry) => entry.petitionId === petitionId);
+    if (item) {
+      workspace.selectedPetitionId = petitionId;
+      workspace.draft = createPetitionDraft(item);
+      workspace.responses = [];
+      workspace.duplicateGroups = [];
+      workspace.error = "";
+      workspace.notice = "";
+      scheduleRender();
+    }
+    return;
+  }
+
+  if (action === "petition-add-field") {
+    const form = target.closest('[data-route-form="petition-builder"]');
+    const ownerType =
+      normalizeString(form?.getAttribute("data-owner-type")) ||
+      normalizeString(target.getAttribute("data-owner-type")) ||
+      "candidate";
+    const draft = syncPetitionBuilderDraftFromDom(ownerType);
+    const nextType = normalizePetitionFieldType(target.getAttribute("data-field-type"));
+    draft.fieldSchema = [
+      ...(draft.fieldSchema || []),
+      createPetitionFieldDraft(nextType, draft.fieldSchema?.length || 0),
+    ];
+    scheduleRender();
+    return;
+  }
+
+  if (action === "petition-field-remove") {
+    const form = target.closest('[data-route-form="petition-builder"]');
+    const ownerType =
+      normalizeString(form?.getAttribute("data-owner-type")) ||
+      normalizeString(target.getAttribute("data-owner-type")) ||
+      "candidate";
+    const draft = syncPetitionBuilderDraftFromDom(ownerType);
+    const fieldId = normalizeString(target.getAttribute("data-field-id"));
+    draft.fieldSchema = (draft.fieldSchema || []).filter(
+      (field) => field.id !== fieldId,
+    );
+    scheduleRender();
+    return;
+  }
+
+  if (action === "petition-field-move") {
+    const form = target.closest('[data-route-form="petition-builder"]');
+    const ownerType =
+      normalizeString(form?.getAttribute("data-owner-type")) ||
+      normalizeString(target.getAttribute("data-owner-type")) ||
+      "candidate";
+    const draft = syncPetitionBuilderDraftFromDom(ownerType);
+    const fieldId = normalizeString(target.getAttribute("data-field-id"));
+    const direction = normalizeString(target.getAttribute("data-direction"));
+    const fields = [...(draft.fieldSchema || [])];
+    const index = fields.findIndex((field) => field.id === fieldId);
+    const nextIndex = direction === "up" ? index - 1 : index + 1;
+    if (index >= 0 && nextIndex >= 0 && nextIndex < fields.length) {
+      const [field] = fields.splice(index, 1);
+      fields.splice(nextIndex, 0, field);
+      draft.fieldSchema = fields.map((entry, fieldIndex) => ({
+        ...entry,
+        order: fieldIndex,
+      }));
+      scheduleRender();
+    }
+    return;
+  }
+
+  if (action === "petition-responses-load") {
+    loadPetitionResponses(
+      target.getAttribute("data-owner-type"),
+      target.getAttribute("data-owner-id"),
+      target.getAttribute("data-petition-id"),
+      { refresh: true },
+    ).catch(() => {});
+    return;
+  }
+
+  if (action === "petition-copy-share") {
+    const shareUrl = normalizeString(target.getAttribute("data-share-url"));
+    if (shareUrl) {
+      navigator.clipboard?.writeText(shareUrl).then(
+        () => showToast("Petition link copied."),
+        () => showToast(shareUrl),
+      );
+    }
+    return;
+  }
+
+  if (action === "petition-merge-group") {
+    mergePetitionDuplicateGroup(
+      target.getAttribute("data-owner-type"),
+      target.getAttribute("data-owner-id"),
+      target.getAttribute("data-petition-id"),
+      target.getAttribute("data-group-key"),
+    ).catch(() => {});
+    return;
+  }
+
+  if (action === "petition-delete-response") {
+    const responseId = normalizeString(target.getAttribute("data-response-id"));
+    if (responseId && window.confirm("Delete this petition response?")) {
+      deletePetitionResponse(
+        target.getAttribute("data-owner-type"),
+        target.getAttribute("data-owner-id"),
+        target.getAttribute("data-petition-id"),
+        responseId,
+      ).catch(() => {});
+    }
+    return;
+  }
+
+  if (action === "petition-export-csv") {
+    downloadPetitionResponsesCsv(
+      target.getAttribute("data-owner-type"),
+      target.getAttribute("data-owner-id"),
+      target.getAttribute("data-petition-id"),
+    ).catch(() => {});
+    return;
+  }
+
+  if (action === "petition-address-select") {
+    selectPetitionAddressSuggestion(target.getAttribute("data-index")).catch(
+      () => {},
+    );
     return;
   }
 
@@ -91345,6 +93001,22 @@ function handleRootInput(event) {
     return;
   }
 
+  const petitionAddressField = event.target.closest("[data-petition-address-field]");
+  if (petitionAddressField) {
+    const fieldId = normalizeString(
+      petitionAddressField.getAttribute("data-petition-address-field"),
+    );
+    const page = state.pages.petitions.public;
+    page.values[fieldId] = {
+      ...(page.values[fieldId] && typeof page.values[fieldId] === "object"
+        ? page.values[fieldId]
+        : {}),
+      line1: petitionAddressField.value,
+    };
+    queuePetitionAddressLookup(fieldId, petitionAddressField.value);
+    return;
+  }
+
   const candidateAccessField = event.target.closest(
     "[data-candidate-access-field]",
   );
@@ -91691,6 +93363,41 @@ function handleRootChange(event) {
     return;
   }
 
+  const petitionBuilderField = event.target.closest("[data-petition-builder-field]");
+  if (petitionBuilderField) {
+    const form = petitionBuilderField.closest('[data-route-form="petition-builder"]');
+    const ownerType =
+      normalizeString(form?.getAttribute("data-owner-type")) || "candidate";
+    syncPetitionBuilderDraftFromDom(ownerType);
+    if (petitionBuilderField.tagName === "SELECT") {
+      scheduleRender();
+    }
+    return;
+  }
+
+  const petitionVideoField = event.target.closest("[data-petition-video-field]");
+  if (petitionVideoField) {
+    const fieldId = normalizeString(
+      petitionVideoField.getAttribute("data-petition-video-field"),
+    );
+    const file = petitionVideoField.files?.[0] || null;
+    const page = state.pages.petitions.public;
+    if (page.videoPreviews[fieldId]) {
+      window.URL.revokeObjectURL(page.videoPreviews[fieldId]);
+    }
+    if (file) {
+      page.videoFiles[fieldId] = file;
+      page.videoUploads[fieldId] = null;
+      page.videoPreviews[fieldId] = window.URL.createObjectURL(file);
+    } else {
+      delete page.videoFiles[fieldId];
+      delete page.videoUploads[fieldId];
+      delete page.videoPreviews[fieldId];
+    }
+    scheduleRender();
+    return;
+  }
+
   const attachmentFileInput = event.target.closest(
     "[data-messaging-attachment-file]",
   );
@@ -92012,6 +93719,20 @@ function handleCommentSubmit(event) {
     }
     if (formKind === "feed-candidate-opt-in") {
       submitFeedCandidateOptIn(formData).catch(() => {});
+      return;
+    }
+    if (formKind === "petition-builder") {
+      const ownerType = normalizeString(routeForm.getAttribute("data-owner-type"));
+      const ownerId = normalizeString(routeForm.getAttribute("data-owner-id"));
+      const petitionAction = normalizeString(formData.get("petitionAction"));
+      savePetitionDraft(ownerType, ownerId, formData, {
+        publish: petitionAction === "publish",
+        close: petitionAction === "close",
+      }).catch(() => {});
+      return;
+    }
+    if (formKind === "petition-public-submit") {
+      submitPublicPetitionForm(formData).catch(() => {});
       return;
     }
     if (formKind === "topics-filter") {
