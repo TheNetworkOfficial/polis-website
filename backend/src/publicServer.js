@@ -26,6 +26,63 @@ const frontendDistPath = resolveFrontendDistPath();
 const defaultIndexPath = fileIfExists(frontendDistPath, "index.html");
 const default404Path = fileIfExists(frontendDistPath, "404.html");
 
+const frontendRouteRewrites = [
+  [/^\/auth\/signup\/email(?:\/.*)?$/u, "auth/signup/email/index.html"],
+  [/^\/auth\/signup\/password(?:\/.*)?$/u, "auth/signup/password/index.html"],
+  [/^\/auth\/confirm-code(?:\/.*)?$/u, "auth/confirm-code/index.html"],
+  [/^\/auth\/forgot-password\/confirm(?:\/.*)?$/u, "auth/forgot-password/confirm/index.html"],
+  [/^\/auth\/forgot-password(?:\/.*)?$/u, "auth/forgot-password/index.html"],
+  [/^\/auth(?:\/.*)?$/u, "auth/index.html"],
+  [/^\/social-return(?:\/.*)?$/u, "social-return/index.html"],
+  [/^\/oauth\/complete(?:\/.*)?$/u, "oauth/complete/index.html"],
+  [/^\/calendar-return(?:\/.*)?$/u, "calendar-return/index.html"],
+  [/^\/settings\/voter-intelligence(?:\/.*)?$/u, "settings/voter-intelligence/index.html"],
+  [/^\/messages(?:\/.*)?$/u, "messages/index.html"],
+  [/^\/candidate-dashboard(?:\/.*)?$/u, "candidate-dashboard/index.html"],
+  [/^\/coalitions(?:\/.*)?$/u, "coalitions/index.html"],
+  [/^\/cta-invite(?:\/.*)?$/u, "cta-invite/index.html"],
+  [/^\/petitions(?:\/.*)?$/u, "petitions/index.html"],
+  [/^\/election-day(?:\/.*)?$/u, "election-day/index.html"],
+  [/^\/feed(?:\/.*)?$/u, "feed/index.html"],
+  [/^\/posts(?:\/.*)?$/u, "posts/index.html"],
+  [/^\/create(?:\/.*)?$/u, "create/index.html"],
+  [/^\/create-tab$/u, "create/index.html"],
+  [/^\/discover(?:\/.*)?$/u, "discover/index.html"],
+  [/^\/achievements(?:\/.*)?$/u, "achievements/index.html"],
+  [/^\/search(?:\/.*)?$/u, "search/index.html"],
+  [/^\/candidates(?:\/.*)?$/u, "candidates/index.html"],
+  [/^\/officials(?:\/.*)?$/u, "officials/index.html"],
+  [/^\/auto-candidates(?:\/.*)?$/u, "auto-candidates/index.html"],
+  [/^\/candidate\/voter-map(?:\/.*)?$/u, "candidate/voter-map/index.html"],
+  [/^\/missions(?:\/.*)?$/u, "missions/index.html"],
+  [/^\/events(?:\/.*)?$/u, "events/index.html"],
+  [/^\/manage-events(?:\/.*)?$/u, "manage-events/index.html"],
+  [/^\/profile(?:\/.*)?$/u, "profile/index.html"],
+  [/^\/profile-tab$/u, "profile/index.html"],
+  [/^\/settings(?:\/.*)?$/u, "settings/index.html"],
+  [/^\/onboarding(?:\/.*)?$/u, "onboarding/index.html"],
+  [/^\/topics(?:\/.*)?$/u, "topics/index.html"],
+  [/^\/questions(?:\/.*)?$/u, "questions/index.html"],
+  [/^\/account-deletion-requested(?:\/.*)?$/u, "account-deletion-requested/index.html"],
+  [/^\/admin(?:\/.*)?$/u, "admin/index.html"],
+];
+
+function sendFrontendRoute(req, res, next) {
+  const rewrite = frontendRouteRewrites.find(([pattern]) =>
+    pattern.test(req.path || ""),
+  );
+  if (!rewrite) {
+    next();
+    return;
+  }
+  const filePath = fileIfExists(frontendDistPath, rewrite[1]);
+  if (filePath) {
+    res.sendFile(filePath);
+    return;
+  }
+  next();
+}
+
 app.set("trust proxy", 1);
 app.disable("x-powered-by");
 
@@ -48,6 +105,8 @@ if (fs.existsSync(frontendDistPath)) {
     }),
   );
 }
+
+app.get(frontendRouteRewrites.map(([pattern]) => pattern), sendFrontendRoute);
 
 app.get("/", (_req, res) => {
   if (defaultIndexPath) {
