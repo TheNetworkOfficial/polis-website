@@ -16,6 +16,67 @@ const candidateApplicationJsonParser = express.json({
 });
 const candidateApplicationStore = new Map();
 const APP_SHELL_ROUTE_DEFINITIONS = [
+  { routeKey: "auth", pattern: /^\/auth$/u, params: [], requiresAuth: false },
+  {
+    routeKey: "auth",
+    pattern: /^\/auth\/signup\/email$/u,
+    params: [],
+    requiresAuth: false,
+  },
+  {
+    routeKey: "auth",
+    pattern: /^\/auth\/signup\/password$/u,
+    params: [],
+    requiresAuth: false,
+  },
+  {
+    routeKey: "auth",
+    pattern: /^\/auth\/confirm-code$/u,
+    params: [],
+    requiresAuth: false,
+  },
+  {
+    routeKey: "auth",
+    pattern: /^\/auth\/forgot-password$/u,
+    params: [],
+    requiresAuth: false,
+  },
+  {
+    routeKey: "auth",
+    pattern: /^\/auth\/forgot-password\/confirm$/u,
+    params: [],
+    requiresAuth: false,
+  },
+  {
+    routeKey: "account-deletion-requested",
+    pattern: /^\/account-deletion-requested$/u,
+    params: [],
+    requiresAuth: false,
+  },
+  {
+    routeKey: "settings-section",
+    pattern: /^\/social-return$/u,
+    params: [],
+    routeParams: { settingsPath: "connected-accounts" },
+  },
+  {
+    routeKey: "settings-section",
+    pattern: /^\/calendar-return$/u,
+    params: [],
+    routeParams: { settingsPath: "connected-accounts" },
+  },
+  {
+    routeKey: "cta-invite",
+    pattern: /^\/cta-invite$/u,
+    params: [],
+    requiresAuth: false,
+  },
+  {
+    routeKey: "cta-invite",
+    pattern: /^\/cta-invite\/([^/]+)$/u,
+    params: ["token"],
+    requiresAuth: false,
+  },
   {
     routeKey: "post-analytics",
     pattern: /^\/posts\/([^/]+)\/analytics$/u,
@@ -28,7 +89,12 @@ const APP_SHELL_ROUTE_DEFINITIONS = [
   { routeKey: "search", pattern: /^\/search$/u, params: [] },
   { routeKey: "search-results", pattern: /^\/search\/results$/u, params: [] },
   { routeKey: "candidates", pattern: /^\/candidates$/u, params: [] },
-  { routeKey: "election-day", pattern: /^\/election-day$/u, params: [] },
+  {
+    routeKey: "election-day",
+    pattern: /^\/election-day$/u,
+    params: [],
+    requiresAuth: false,
+  },
   {
     routeKey: "congressional-report-card",
     pattern: /^\/officials\/congressional-report-card$/u,
@@ -134,6 +200,16 @@ const APP_SHELL_ROUTE_DEFINITIONS = [
     pattern: /^\/events\/([^/]+)$/u,
     params: ["eventId"],
   },
+  {
+    routeKey: "event-signup",
+    pattern: /^\/events\/([^/]+)\/signup$/u,
+    params: ["eventId"],
+  },
+  {
+    routeKey: "event-payment",
+    pattern: /^\/events\/([^/]+)\/payment$/u,
+    params: ["eventId"],
+  },
   { routeKey: "manage-events", pattern: /^\/manage-events$/u, params: [] },
   {
     routeKey: "manage-events-new",
@@ -169,8 +245,34 @@ const APP_SHELL_ROUTE_DEFINITIONS = [
   { routeKey: "settings", pattern: /^\/settings$/u, params: [] },
   {
     routeKey: "settings-section",
+    pattern: /^\/settings\/connected-accounts\/social-return$/u,
+    params: [],
+    routeParams: { settingsPath: "connected-accounts" },
+  },
+  {
+    routeKey: "settings-section",
     pattern: /^\/settings\/(.+)$/u,
     params: ["settingsPath"],
+  },
+  {
+    routeKey: "onboarding-profile",
+    pattern: /^\/onboarding\/profile$/u,
+    params: [],
+  },
+  {
+    routeKey: "onboarding-photo",
+    pattern: /^\/onboarding\/photo$/u,
+    params: [],
+  },
+  {
+    routeKey: "onboarding-location",
+    pattern: /^\/onboarding\/location$/u,
+    params: [],
+  },
+  {
+    routeKey: "onboarding-address",
+    pattern: /^\/onboarding\/address$/u,
+    params: [],
   },
   { routeKey: "messages-root", pattern: /^\/messages$/u, params: [] },
   {
@@ -529,7 +631,10 @@ function matchAppShellRoute(pathname) {
     if (!match) {
       continue;
     }
-    const routeParams = {};
+    const routeParams =
+      definition.routeParams && typeof definition.routeParams === "object"
+        ? { ...definition.routeParams }
+        : {};
     definition.params.forEach((paramName, index) => {
       routeParams[paramName] = normalizeString(match[index + 1]);
     });
@@ -537,6 +642,7 @@ function matchAppShellRoute(pathname) {
       routeKey: definition.routeKey,
       routePath: normalizedPath,
       routeParams,
+      requiresAuth: definition.requiresAuth !== false,
     };
   }
   return null;
@@ -914,9 +1020,97 @@ function renderSharePage({
 
 function getAppShellPageMeta(routeMatch) {
   const routeKey = normalizeString(routeMatch?.routeKey);
+  const routePath = normalizeString(routeMatch?.routePath);
   const routeParams = routeMatch?.routeParams || {};
 
+  if (
+    routePath === "/social-return" ||
+    routePath === "/settings/connected-accounts/social-return"
+  ) {
+    return {
+      title: "Connected Accounts | Polis",
+      description:
+        "Return to Polis connected-account settings after a social account connection.",
+      eyebrow: "Connected Accounts",
+      headline: "Returning to connected accounts",
+      supportingCopy:
+        "Review the social account connection result and continue managing publishing targets from the browser.",
+    };
+  }
+  if (routePath === "/calendar-return") {
+    return {
+      title: "Calendar Connected | Polis",
+      description: "Return to Polis after connecting a calendar account.",
+      eyebrow: "Calendar",
+      headline: "Returning from calendar setup",
+      supportingCopy:
+        "Review the calendar connection result and continue managing account or campaign calendar tools from the browser.",
+    };
+  }
+
   switch (routeKey) {
+    case "auth":
+      if (routePath === "/auth/signup/email" || routePath === "/auth/signup/password") {
+        return {
+          title: "Create Account | Polis",
+          description: "Create a Polis account from the browser.",
+          eyebrow: "Account",
+          headline: "Create your Polis account",
+          supportingCopy:
+            "Start sign-up, verify your account, and continue into the Polis web app.",
+        };
+      }
+      if (routePath === "/auth/confirm-code") {
+        return {
+          title: "Confirm Account | Polis",
+          description: "Confirm a Polis account verification code from the browser.",
+          eyebrow: "Account",
+          headline: "Confirm your Polis account",
+          supportingCopy:
+            "Enter your verification code and continue into the Polis web app.",
+        };
+      }
+      if (
+        routePath === "/auth/forgot-password" ||
+        routePath === "/auth/forgot-password/confirm"
+      ) {
+        return {
+          title: "Reset Password | Polis",
+          description: "Reset a Polis account password from the browser.",
+          eyebrow: "Account",
+          headline: "Reset your password",
+          supportingCopy:
+            "Request a reset code, set a new password, and return to your Polis account.",
+        };
+      }
+      return {
+        title: "Account | Polis",
+        description:
+          "Open Polis account sign-in, sign-up, password reset, and account recovery flows.",
+        eyebrow: "Account",
+        headline: "Opening your account",
+        supportingCopy:
+          "Use sign-in, sign-up, verification, password reset, and account recovery tools from the browser.",
+      };
+    case "account-deletion-requested":
+      return {
+        title: "Account Deletion Requested | Polis",
+        description: "Review Polis account deletion request status.",
+        eyebrow: "Account",
+        headline: "Account deletion requested",
+        supportingCopy:
+          "Review the account deletion request status and next steps from the browser.",
+      };
+    case "cta-invite":
+      return {
+        title: "CTA Invitation | Polis",
+        description:
+          "Preview and accept a coalition call-to-action invitation in Polis.",
+        eyebrow: "CTA Invitation",
+        headline: "Opening your invitation",
+        supportingCopy:
+          "Review event details, sign in, and accept your coalition invitation from the browser.",
+      };
     case "post-analytics":
       return {
         title: "Post analytics | Polis",
@@ -1007,9 +1201,9 @@ function getAppShellPageMeta(routeMatch) {
         title: "Campaigns | Polis",
         description: "Open the Polis candidate campaign dashboard in the browser.",
         eyebrow: "Campaigns",
-        headline: "Campaign Command Center",
+        headline: "Candidate dashboard",
         supportingCopy:
-          "Sign in to manage candidate analytics, events, calendar, staff, missions, messaging, and voter operations.",
+          "Sign in to manage candidate reporting, events, calendar, engagement, voter prompts, registry tools, CampaignQuest, donations, staff, missions, and messaging.",
       };
     case "candidate-voter-map":
     case "candidate-voter-map-section":
@@ -1029,9 +1223,9 @@ function getAppShellPageMeta(routeMatch) {
         title: "Coalitions | Polis",
         description: "Open Polis coalition workspaces in the browser.",
         eyebrow: "Coalitions",
-        headline: "Coalition Workspace",
+        headline: "Coalition workspace",
         supportingCopy:
-          "Sign in to open coalition rooms, members, missions, voter map tools, governance, calendar, and amplify requests.",
+          "Sign in to open coalition members, rooms, missions, voter map tools, calendar, governance, and amplify requests.",
       };
     case "coalition-start":
       return {
@@ -1096,6 +1290,8 @@ function getAppShellPageMeta(routeMatch) {
       };
     case "events":
     case "event-detail":
+    case "event-signup":
+    case "event-payment":
     case "manage-events":
     case "manage-events-new":
     case "manage-events-edit":
@@ -1126,6 +1322,10 @@ function getAppShellPageMeta(routeMatch) {
       };
     case "settings":
     case "settings-section":
+    case "onboarding-profile":
+    case "onboarding-photo":
+    case "onboarding-location":
+    case "onboarding-address":
       return {
         title: "Settings | Polis",
         description:
@@ -1141,9 +1341,9 @@ function getAppShellPageMeta(routeMatch) {
         title: "Messages | Polis",
         description: "Open Polis messaging in the browser.",
         eyebrow: "Messages",
-        headline: "Messaging on the web",
+        headline: "Secure Polis messaging",
         supportingCopy:
-          "Sign in to open your inbox, requests, conversations, device security, and server spaces.",
+          "Sign in to open direct messages, requests, campaign and coalition rooms, trusted devices, recovery, moderation, and room access controls.",
       };
     case "admin":
     case "admin-section":
@@ -1178,7 +1378,7 @@ function renderAppShellPage(req, routeMatch) {
     routeParams: routeMatch.routeParams,
     canonicalUrl,
     requestUrl,
-    requiresAuth: routeMatch.routeKey !== "election-day",
+    requiresAuth: routeMatch.requiresAuth !== false,
   });
 
   return renderWebShellPage({
@@ -1321,19 +1521,6 @@ function buildRedirectQuery(req, omittedKeys = []) {
   return query ? `?${query}` : "";
 }
 
-function buildRedirectTarget(path, req, { extraParams = {}, omittedKeys = [] } = {}) {
-  const query = buildRedirectQuery(req, omittedKeys);
-  const params = new URLSearchParams(query ? query.slice(1) : "");
-  Object.entries(extraParams).forEach(([key, value]) => {
-    const normalized = normalizeString(value);
-    if (normalized) {
-      params.set(key, normalized);
-    }
-  });
-  const nextQuery = params.toString();
-  return `${path}${nextQuery ? `?${nextQuery}` : ""}`;
-}
-
 router.get("/api/candidateApplications/me", (req, res) => {
   const userKey = candidateApplicationUserKey(req);
   if (!userKey) {
@@ -1404,72 +1591,6 @@ router.get("/posts/view", (req, res) => {
   res.redirect(302, `/feed${query}`);
 });
 
-router.get(
-  [
-    "/auth",
-    "/auth/signup/email",
-    "/auth/signup/password",
-    "/auth/confirm-code",
-    "/auth/forgot-password",
-    "/auth/forgot-password/confirm",
-  ],
-  (req, res) => {
-    const path = normalizeString(req.path);
-    const mode = path.includes("/signup")
-      ? "signup"
-      : path.includes("/confirm-code")
-        ? "confirm"
-        : "login";
-    res.redirect(
-      302,
-      buildRedirectTarget("/feed", req, {
-        extraParams: { auth: mode },
-        omittedKeys: ["auth"],
-      }),
-    );
-  },
-);
-
-router.get("/onboarding/profile", (req, res) => {
-  res.redirect(
-    302,
-    buildRedirectTarget("/settings/voter-profile", req, {
-      extraParams: { onboarding: "profile" },
-      omittedKeys: ["onboarding"],
-    }),
-  );
-});
-
-router.get("/onboarding/photo", (req, res) => {
-  res.redirect(
-    302,
-    buildRedirectTarget("/profile/edit", req, {
-      extraParams: { onboarding: "photo" },
-      omittedKeys: ["onboarding"],
-    }),
-  );
-});
-
-router.get(["/onboarding/location", "/onboarding/address"], (req, res) => {
-  res.redirect(
-    302,
-    buildRedirectTarget("/settings/voter-profile/home-location", req, {
-      extraParams: { onboarding: req.path.endsWith("/address") ? "address" : "location" },
-      omittedKeys: ["onboarding"],
-    }),
-  );
-});
-
-router.get("/account-deletion-requested", (req, res) => {
-  res.redirect(
-    302,
-    buildRedirectTarget("/delete-account.html", req, {
-      extraParams: { requested: "1" },
-      omittedKeys: ["requested"],
-    }),
-  );
-});
-
 router.get("/create-tab", (req, res) => {
   res.redirect(302, `/create${buildRedirectQuery(req)}`);
 });
@@ -1483,6 +1604,17 @@ router.get("/profile-tab", (req, res) => {
 
 router.get(
   [
+    "/auth",
+    "/auth/signup/email",
+    "/auth/signup/password",
+    "/auth/confirm-code",
+    "/auth/forgot-password",
+    "/auth/forgot-password/confirm",
+    "/account-deletion-requested",
+    "/social-return",
+    "/calendar-return",
+    "/cta-invite",
+    "/cta-invite/:token",
     "/posts/:postId/analytics",
     "/feed",
     "/create",
@@ -1512,11 +1644,17 @@ router.get(
     "/missions",
     "/missions/:missionId",
     "/topics",
+    "/onboarding/profile",
+    "/onboarding/photo",
+    "/onboarding/location",
+    "/onboarding/address",
     "/onboarding/topics",
     "/questions",
     "/questions/:questionId",
     "/events",
     "/events/:eventId",
+    "/events/:eventId/signup",
+    "/events/:eventId/payment",
     "/manage-events",
     "/manage-events/new",
     "/manage-events/:eventId/edit",
@@ -1526,6 +1664,7 @@ router.get(
     "/profile/notifications",
     "/profile/:userId",
     "/settings",
+    "/settings/connected-accounts/social-return",
     "/settings/*",
     "/messages",
     "/messages/*",

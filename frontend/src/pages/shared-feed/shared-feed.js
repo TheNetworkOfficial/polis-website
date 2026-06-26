@@ -115,7 +115,7 @@ const MESSAGING_WORKFLOW_SCHEDULE_OPTIONS = [
 ];
 const MESSAGING_WORKFLOW_ACTION_OPTIONS = [
   ["notify_moderators", "Notify safety team", "Send a clear review alert."],
-  ["call_webhook", "Notify external tool", "Send the event to a webhook URL."],
+  ["call_webhook", "Notify external tool", "Send the event to a connected URL."],
   ["send_message", "Post room message", "Share a prepared message in a room."],
   ["create_moderation_task", "Open safety review", "Create a review item for the team."],
 ];
@@ -254,6 +254,8 @@ const CANDIDATE_PARTY_COLLAPSE_STORAGE_KEY =
   "polis:candidates:collapsed-party-groups";
 const FRIEND_ACTIVITY_SHARING_STORAGE_KEY =
   "prefs.discover.friendActivitySharing.v1";
+const DISCOVER_OPENED_CALENDAR_DATES_STORAGE_KEY =
+  "polis.discover.openedCalendarDates.v1";
 const CANDIDATE_VOTER_MAP_PIN_CAP_STORAGE_KEY =
   "prefs.candidateVoterMap.pinCap.v1";
 const CANDIDATE_VOTER_MAP_OFFLINE_CELLULAR_STORAGE_KEY =
@@ -310,7 +312,7 @@ const CANDIDATE_DASHBOARD_SECTION_CONFIG = [
   },
   {
     key: "voter-contact-prompt",
-    label: "Contact Prompt",
+    label: "Voter Contact Prompt",
     icon: "candidate",
     permissions: [],
     ownerOnly: true,
@@ -362,17 +364,17 @@ const CANDIDATE_DASHBOARD_SECTION_CONFIG = [
 ];
 const CANDIDATE_DASHBOARD_FEATURE_ORDER = [
   "overview",
-  "missions",
-  "messaging",
-  "calendar",
-  "voter-registry",
-  "campaign-quest",
-  "staff",
-  "donations",
   "analytics",
   "events",
+  "calendar",
   "engagement",
   "voter-contact-prompt",
+  "voter-registry",
+  "campaign-quest",
+  "donations",
+  "staff",
+  "missions",
+  "messaging",
 ];
 const CANDIDATE_DASHBOARD_FEATURE_COPY = {
   overview: {
@@ -432,7 +434,7 @@ const CANDIDATE_DASHBOARD_FEATURE_COPY = {
   staff: {
     eyebrow: "Access",
     description:
-      "Invite staff, assign roles, and manage campaign permissions for each workspace.",
+      "Invite staff, assign access groups, and manage campaign workspace access.",
     cta: "Manage staff",
   },
   missions: {
@@ -442,9 +444,9 @@ const CANDIDATE_DASHBOARD_FEATURE_COPY = {
     cta: "Open missions",
   },
   messaging: {
-    eyebrow: "Rooms",
+    eyebrow: "Messaging",
     description:
-      "Open campaign chat, volunteer coordination rooms, moderation tools, roles, and access lists.",
+      "Manage campaign conversations, volunteer rooms, requests, announcements, and safety review from one inbox.",
     cta: "Open messaging",
   },
 };
@@ -1326,6 +1328,62 @@ const CANDIDATE_CALENDAR_COMPOSER_PRESETS = [
     description: "Private hold or unavailable time.",
   },
 ];
+const COALITION_CALENDAR_COMPOSER_PRESETS = [
+  {
+    itemType: "campaign_event",
+    label: "Coalition event",
+    title: "Coalition event",
+    labels: "coalition, public",
+    locationName: "Coalition office",
+    privacy: "details",
+    description: "Public coalition event details, partner notes, and promotion copy.",
+  },
+  {
+    itemType: "volunteer_shift",
+    label: "Field shift",
+    title: "Coalition field shift",
+    labels: "field, partners",
+    locationName: "Field office",
+    privacy: "details",
+    description: "Shift role, arrival point, partner handoff, and field lead.",
+  },
+  {
+    itemType: "scheduled_promotion",
+    label: "Promotion",
+    title: "Coalition promotion window",
+    labels: "promotion, amplify",
+    locationName: "",
+    privacy: "details",
+    description: "Approved coalition messaging window and amplify handoff.",
+  },
+  {
+    itemType: "appointment",
+    label: "Partner meeting",
+    title: "Partner meeting",
+    labels: "partners, meeting",
+    locationName: "Coalition office",
+    privacy: "details",
+    description: "Partner agenda, attendees, and follow-up owner.",
+  },
+  {
+    itemType: "travel",
+    label: "Travel",
+    title: "Coalition travel",
+    labels: "travel, logistics",
+    locationName: "Travel",
+    privacy: "busy_only",
+    description: "Travel block, routing note, or logistics hold.",
+  },
+  {
+    itemType: "busy",
+    label: "Shared hold",
+    title: "Shared hold",
+    labels: "hold",
+    locationName: "",
+    privacy: "busy_only",
+    description: "Private coalition hold or unavailable time.",
+  },
+];
 const CANDIDATE_CALENDAR_PROVIDER_LABELS = {
   google: "Google Calendar",
   microsoft: "Microsoft Outlook",
@@ -1479,13 +1537,13 @@ const COALITION_FEATURE_COPY = {
   members: {
     eyebrow: "Access",
     description:
-      "Review members, approve requests, assign roles, and tune coalition permissions for field and communications work.",
+      "Review members, approve requests, assign access groups, and tune coalition staff access for field and communications work.",
     cta: "Open members",
   },
   rooms: {
     eyebrow: "Messaging",
     description:
-      "Open coalition chat rooms with the same server-style structure used by the Polis app.",
+      "Open coalition chat rooms with the same workspace structure used by the Polis app.",
     cta: "Open rooms",
   },
   missions: {
@@ -2394,6 +2452,35 @@ function createVoterMapNotesState() {
   };
 }
 
+function createCoalitionTerritoryAssignmentsState() {
+  return {
+    territoryId: "",
+    items: [],
+    loaded: false,
+    loading: false,
+    error: "",
+    notice: "",
+    actionPendingKey: "",
+  };
+}
+
+function createCoalitionTerritoryAdminState() {
+  return {
+    activeTab: "wizard",
+    unitSets: [],
+    selectedUnitSetId: "",
+    unitSetsLoaded: false,
+    unitSetsLoading: false,
+    unitSetsError: "",
+    generationJob: null,
+    generationDistrictId: "",
+    actionPendingKey: "",
+    error: "",
+    notice: "",
+    editorResult: null,
+  };
+}
+
 function createCoalitionVoterMapWorkspaceState() {
   return {
     access: null,
@@ -2484,6 +2571,8 @@ function createCoalitionVoterMapWorkspaceState() {
     },
     templates: createVoterMapOutreachTemplatesState(),
     notes: createVoterMapNotesState(),
+    assignments: createCoalitionTerritoryAssignmentsState(),
+    territoryAdmin: createCoalitionTerritoryAdminState(),
   };
 }
 
@@ -2580,6 +2669,12 @@ function createCandidateDashboardCampaignQuestState() {
     loaded: false,
     actionPendingKey: "",
     lastCompletion: null,
+    categoryFilter: "all",
+    selectedTargetId: "",
+    shiftActive: false,
+    locationPending: false,
+    locationStatus: "",
+    lastKnownLocation: null,
   };
 }
 
@@ -2621,6 +2716,8 @@ function createCandidateDashboardVoterMapState() {
     offlineCellular: readCandidateVoterMapOfflineCellularPreference(),
     templates: createVoterMapOutreachTemplatesState(),
     notes: createVoterMapNotesState(),
+    assignments: createCoalitionTerritoryAssignmentsState(),
+    territoryAdmin: createCoalitionTerritoryAdminState(),
   };
 }
 
@@ -2916,10 +3013,15 @@ function createPostComposerPageState() {
     },
     description: "",
     visibility: "public",
+    audienceGroupIds: "",
     issueIds: "",
     allowComments: true,
     allowReuseContent: false,
     aiGeneratedContent: false,
+    saveToDevice: false,
+    savePostsWithWatermark: true,
+    brandingOverlayEnabled: true,
+    publishingDefaultsApplied: false,
     pending: false,
     stage: "",
     error: "",
@@ -2990,6 +3092,29 @@ function createCoalitionImageUploadState() {
   };
 }
 
+function createFeedPromptState() {
+  return {
+    actionPendingKey: "",
+    savedKeys: {},
+    savedMessages: {},
+    dismissedKeys: {},
+    errors: {},
+    missingFieldsByKey: {},
+  };
+}
+
+function createDiscoverCalendarPreviewState() {
+  return {
+    candidateId: "",
+    access: null,
+    items: [],
+    todayItems: [],
+    loading: false,
+    loaded: false,
+    error: "",
+  };
+}
+
 const state = {
   route: getInitialRoute(),
   mode: FEED_MODE_FOR_YOU,
@@ -3033,6 +3158,7 @@ const state = {
     },
   },
   pages: {
+    feedPrompts: createFeedPromptState(),
     create: createPostComposerPageState(),
     discover: {
       feed: createPagedState(),
@@ -3041,6 +3167,10 @@ const state = {
       communityServers: createPagedState(),
       standaloneServers: createPagedState(),
       friendActivity: createPagedState(),
+      policyQuestions: createPagedState(),
+      campaigns: createPagedState(),
+      coalitions: createPagedState(),
+      calendarPreview: createDiscoverCalendarPreviewState(),
       loading: false,
       error: "",
       loaded: false,
@@ -3167,6 +3297,8 @@ const state = {
         loaded: false,
         actionPendingKey: "",
         actionDraft: null,
+        artifactPendingKey: "",
+        followUpPendingKey: "",
       },
     },
     elections: {
@@ -4381,6 +4513,57 @@ async function finalizeAuthSuccess({
   scheduleRender();
 }
 
+function focusCalendarComposer(selector) {
+  const composer = document.querySelector(selector);
+  const input = composer?.querySelector('input[name="title"]');
+  if (composer) {
+    composer.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  if (input && typeof input.focus === "function") {
+    setTimeout(() => input.focus(), 220);
+  }
+}
+
+function applyCalendarPresetButton(target) {
+  const form = target.closest("form");
+  if (!form) {
+    return;
+  }
+  const setValue = (name, value, { onlyIfEmpty = false } = {}) => {
+    const field = form.elements.namedItem(name);
+    if (!field || typeof field.value === "undefined") {
+      return;
+    }
+    if (onlyIfEmpty && normalizeString(field.value)) {
+      return;
+    }
+    field.value = value;
+    field.dispatchEvent(new Event("change", { bubbles: true }));
+  };
+  setValue("itemType", normalizeString(target.getAttribute("data-item-type")));
+  setValue("privacy", normalizeString(target.getAttribute("data-privacy")));
+  setValue("title", normalizeString(target.getAttribute("data-title")), {
+    onlyIfEmpty: true,
+  });
+  setValue("labels", normalizeString(target.getAttribute("data-labels")));
+  setValue(
+    "locationName",
+    normalizeString(target.getAttribute("data-location-name")),
+    { onlyIfEmpty: true },
+  );
+  const description = form.elements.namedItem("description");
+  const descriptionText = normalizeString(
+    target.getAttribute("data-description"),
+  );
+  if (description && descriptionText) {
+    description.setAttribute("placeholder", descriptionText);
+  }
+  form
+    .querySelectorAll(".shared-campaign-calendar-preset")
+    .forEach((button) => button.classList.remove("is-selected"));
+  target.classList.add("is-selected");
+}
+
 function showToast(message) {
   state.ui.toast = normalizeString(message);
   if (toastTimer) {
@@ -5525,6 +5708,366 @@ function normalizeComment(raw = {}) {
   };
 }
 
+function objectValue(value) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : null;
+}
+
+function looksLikeCandidatePromptCandidate(value = {}) {
+  const source = objectValue(value);
+  if (!source) {
+    return false;
+  }
+  return [
+    "candidateId",
+    "candidate_id",
+    "displayName",
+    "display_name",
+    "fullName",
+    "name",
+  ].some((key) => Object.prototype.hasOwnProperty.call(source, key));
+}
+
+function isCandidateOptInPromptType(value) {
+  const normalized = normalizeString(value).toLowerCase();
+  return (
+    normalized === "candidate_optin_prompt" ||
+    normalized === "candidate_opt_in_prompt"
+  );
+}
+
+function isCandidateOptInPromptFeedItem(raw = {}) {
+  const payload = objectValue(raw.payload);
+  return [
+    raw.type,
+    raw.entityType,
+    raw.entity_type,
+    payload?.type,
+    payload?.entityType,
+    payload?.entity_type,
+  ].some(isCandidateOptInPromptType);
+}
+
+function isCivicPromptType(value) {
+  const normalized = normalizeString(value).toLowerCase();
+  return normalized === "civic_prompt" || normalized === "civicprompt";
+}
+
+function isCivicPromptFeedItem(raw = {}) {
+  const payload = objectValue(raw.payload);
+  const civicPrompt =
+    objectValue(raw.civicPrompt) || objectValue(raw.civic_prompt);
+  return (
+    Boolean(civicPrompt) ||
+    [
+      raw.type,
+      raw.entityType,
+      raw.entity_type,
+      raw.itemType,
+      raw.item_type,
+      payload?.type,
+      payload?.entityType,
+      payload?.entity_type,
+      civicPrompt?.type,
+      civicPrompt?.entityType,
+      civicPrompt?.entity_type,
+    ].some(isCivicPromptType)
+  );
+}
+
+function normalizeCivicPromptChoice(raw = {}, index = 0) {
+  const source = objectValue(raw) || {};
+  const scalar = objectValue(raw) ? "" : normalizeString(raw);
+  const value =
+    normalizeString(source.value || source.id || source.key || source.slug) ||
+    scalar;
+  const label =
+    normalizeString(source.label || source.title || source.text || source.name) ||
+    value;
+  if (!value && !label) {
+    return null;
+  }
+  return {
+    value: value || label || `choice_${index + 1}`,
+    label: label || value || `Choice ${index + 1}`,
+  };
+}
+
+function normalizeCivicPromptChoices(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const seen = new Set();
+  return value
+    .map(normalizeCivicPromptChoice)
+    .filter(Boolean)
+    .filter((choice) => {
+      const key = choice.value.toLowerCase();
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+}
+
+function normalizeCivicPromptDestinationPath(value) {
+  const normalized = normalizeString(value);
+  return normalized.startsWith("/") ? normalized : "";
+}
+
+function normalizeCivicPromptFeedItem(raw = {}, index = 0) {
+  const payload = objectValue(raw.payload) || {};
+  const civicPrompt =
+    objectValue(raw.civicPrompt) || objectValue(raw.civic_prompt) || {};
+  const promptFamily =
+    normalizeString(
+      raw.promptFamily ||
+        raw.prompt_family ||
+        civicPrompt.promptFamily ||
+        civicPrompt.prompt_family ||
+        payload.promptFamily ||
+        payload.prompt_family ||
+        raw.family ||
+        civicPrompt.family ||
+        payload.family,
+    ) || "civic_micro_prompt";
+  const promptId = normalizeString(
+    raw.promptId ||
+      raw.prompt_id ||
+      civicPrompt.promptId ||
+      civicPrompt.prompt_id ||
+      payload.promptId ||
+      payload.prompt_id ||
+      raw.id ||
+      civicPrompt.id ||
+      payload.id ||
+      raw.dedupeKey ||
+      raw.dedupe_key ||
+      civicPrompt.dedupeKey ||
+      payload.dedupeKey,
+  );
+  const promptKind =
+    normalizeString(
+      raw.promptKind ||
+        raw.prompt_kind ||
+        civicPrompt.promptKind ||
+        civicPrompt.prompt_kind ||
+        payload.promptKind ||
+        payload.prompt_kind ||
+        raw.kind ||
+        civicPrompt.kind ||
+        payload.kind,
+    ) || "issue_stance";
+  const impressionToken = normalizeString(
+    raw.impressionToken ||
+      raw.impression_token ||
+      civicPrompt.impressionToken ||
+      civicPrompt.impression_token ||
+      payload.impressionToken ||
+      payload.impression_token,
+  );
+  const title =
+    normalizeString(raw.title || civicPrompt.title || payload.title) ||
+    "Civic prompt";
+  const body =
+    normalizeString(
+      raw.body ||
+        raw.message ||
+        civicPrompt.body ||
+        civicPrompt.message ||
+        payload.body ||
+        payload.message,
+    ) || "Answer this prompt to improve your Polis civic recommendations.";
+  const destinationPath = normalizeCivicPromptDestinationPath(
+    raw.destinationPath ||
+      raw.destination_path ||
+      civicPrompt.destinationPath ||
+      civicPrompt.destination_path ||
+      payload.destinationPath ||
+      payload.destination_path,
+  );
+  const choices = normalizeCivicPromptChoices(
+    raw.choices || civicPrompt.choices || payload.choices,
+  );
+
+  return {
+    kind: "civicPrompt",
+    key: `civicPrompt:${promptFamily}:${promptId || impressionToken || index}`,
+    promptFamily,
+    promptId,
+    promptKind,
+    title,
+    body,
+    destinationPath,
+    choices,
+    payload,
+    impressionToken,
+    raw,
+  };
+}
+
+function normalizeCandidatePromptVariant(value) {
+  const normalized = normalizeString(value).toLowerCase();
+  return normalized === "community" ? "community" : "preferences";
+}
+
+function readCandidatePromptCommunityServerFromSource(source = {}) {
+  const direct =
+    objectValue(source.communityServer) || objectValue(source.community_server);
+  const legacyKeys = [
+    "communityEnabled",
+    "community_enabled",
+    "communityJoinAvailable",
+    "community_join_available",
+    "communityServerName",
+    "community_server_name",
+    "communityServerPath",
+    "community_server_path",
+  ];
+  const communitySource =
+    direct ||
+    (legacyKeys.some((key) => Object.prototype.hasOwnProperty.call(source, key))
+      ? {
+          enabled: source.communityEnabled ?? source.community_enabled,
+          canJoin:
+            source.communityJoinAvailable ?? source.community_join_available,
+          name: source.communityServerName ?? source.community_server_name,
+          path: source.communityServerPath ?? source.community_server_path,
+        }
+      : null);
+  if (!communitySource) {
+    return null;
+  }
+
+  const joined = parseBoolean(
+    communitySource.joined ??
+      communitySource.isMember ??
+      communitySource.is_member ??
+      communitySource.hasJoined ??
+      communitySource.has_joined,
+    false,
+  );
+  const canJoin = parseBoolean(
+    communitySource.canJoin ??
+      communitySource.can_join ??
+      communitySource.joinAvailable ??
+      communitySource.join_available ??
+      communitySource.communityJoinAvailable ??
+      communitySource.community_join_available,
+    false,
+  );
+  const enabled = parseBoolean(
+    communitySource.enabled ??
+      communitySource.communityEnabled ??
+      communitySource.community_enabled,
+    false,
+  );
+  const name = normalizeString(
+    communitySource.name ||
+      communitySource.serverName ||
+      communitySource.server_name ||
+      communitySource.title,
+  );
+  const path = normalizeString(
+    communitySource.path ||
+      communitySource.serverPath ||
+      communitySource.server_path ||
+      communitySource.href,
+  );
+  if (!enabled && !canJoin && !joined) {
+    return null;
+  }
+  return {
+    enabled: true,
+    canJoin,
+    joined,
+    name,
+    path,
+  };
+}
+
+function normalizeCandidatePromptCommunityServer(...sources) {
+  for (const source of sources) {
+    const server = readCandidatePromptCommunityServerFromSource(
+      objectValue(source) || {},
+    );
+    if (server) {
+      return server;
+    }
+  }
+  return null;
+}
+
+function normalizeCandidateOptInPromptFeedItem(raw = {}, index = 0) {
+  const payload = objectValue(raw.payload) || {};
+  const candidate =
+    objectValue(raw.candidate) ||
+    objectValue(payload.candidate) ||
+    (looksLikeCandidatePromptCandidate(raw) ? raw : null) ||
+    (looksLikeCandidatePromptCandidate(payload) ? payload : {});
+  const candidateId =
+    normalizeString(
+      candidate.candidateId ||
+        candidate.candidate_id ||
+        candidate.id ||
+        raw.candidateId ||
+        raw.candidate_id ||
+        payload.candidateId ||
+        payload.candidate_id,
+    ) || "";
+  const displayName =
+    normalizeString(
+      candidate.displayName ||
+        candidate.display_name ||
+        candidate.fullName ||
+        candidate.name ||
+        raw.displayName ||
+        raw.candidateName ||
+        payload.displayName ||
+        payload.candidateName,
+    ) || "Candidate";
+  const impressionToken = normalizeString(
+    raw.impressionToken ||
+      raw.impression_token ||
+      payload.impressionToken ||
+      payload.impression_token,
+  );
+  const enabledContactTypes = normalizeCandidateContactEnabledTypes(
+    objectValue(raw.enabledContactTypes) ||
+      objectValue(raw.enabled_contact_types) ||
+      objectValue(candidate.enabledContactTypes) ||
+      objectValue(candidate.enabled_contact_types) ||
+      objectValue(payload.enabledContactTypes) ||
+      objectValue(payload.enabled_contact_types) ||
+      {},
+  );
+
+  return {
+    kind: "candidatePrompt",
+    key: `candidatePrompt:${candidateId || impressionToken || index}`,
+    candidateId,
+    displayName,
+    avatarUrl: normalizeUrl(
+      candidate.avatarUrl ||
+        candidate.avatar_url ||
+        candidate.avatar ||
+        raw.avatarUrl ||
+        payload.avatarUrl,
+    ),
+    party: normalizeString(candidate.party || raw.party || payload.party),
+    variant: normalizeCandidatePromptVariant(raw.variant || payload.variant),
+    enabledContactTypes,
+    communityServer: normalizeCandidatePromptCommunityServer(
+      raw,
+      candidate,
+      payload,
+    ),
+    impressionToken,
+  };
+}
+
 function normalizeFeedItem(raw = {}, index = 0) {
   if (normalizeString(raw.eventId)) {
     return {
@@ -5542,14 +6085,12 @@ function normalizeFeedItem(raw = {}, index = 0) {
     };
   }
 
-  if (normalizeString(raw.type).toLowerCase() === "candidate_opt_in_prompt") {
-    return {
-      kind: "prompt",
-      key: `prompt:${normalizeString(raw.candidateId) || index}`,
-      title: "Candidate prompt",
-      description:
-        "Continue in the Polis app to complete this personalized feed step.",
-    };
+  if (isCandidateOptInPromptFeedItem(raw)) {
+    return normalizeCandidateOptInPromptFeedItem(raw, index);
+  }
+
+  if (isCivicPromptFeedItem(raw)) {
+    return normalizeCivicPromptFeedItem(raw, index);
   }
 
   const postId = normalizeString(raw.postId);
@@ -5991,6 +6532,387 @@ async function handleSavePost(postId) {
     }));
     scheduleRender();
     showToast("Save failed. Try again.");
+  }
+}
+
+function currentFeedPromptState() {
+  if (!state.pages.feedPrompts) {
+    state.pages.feedPrompts = createFeedPromptState();
+  }
+  return state.pages.feedPrompts;
+}
+
+function findFeedCandidatePrompt(promptKey, candidateId = "") {
+  const normalizedKey = normalizeString(promptKey);
+  const normalizedCandidateId = normalizeString(candidateId);
+  return (
+    getCurrentItems().find(
+      (item) =>
+        item?.kind === "candidatePrompt" &&
+        ((normalizedKey && item.key === normalizedKey) ||
+          (normalizedCandidateId && item.candidateId === normalizedCandidateId)),
+    ) || null
+  );
+}
+
+function findFeedCivicPrompt(promptKey) {
+  const normalizedKey = normalizeString(promptKey);
+  if (!normalizedKey) {
+    return null;
+  }
+  return (
+    getCurrentItems().find(
+      (item) => item?.kind === "civicPrompt" && item.key === normalizedKey,
+    ) || null
+  );
+}
+
+function normalizeFeedCandidatePromptMissingFields(payload = {}) {
+  const missing = objectValue(payload.missing) || {};
+  return {
+    address: parseBoolean(missing.address, false),
+    phone: parseBoolean(missing.phone, false),
+    email: parseBoolean(missing.email, false),
+  };
+}
+
+function hasFeedCandidatePromptMissingFields(missing = {}) {
+  return Boolean(missing.address || missing.phone || missing.email);
+}
+
+function feedCandidatePromptMissingFieldLabels(missing = {}) {
+  const labels = [];
+  if (missing.address) labels.push("home address");
+  if (missing.phone) labels.push("phone number");
+  if (missing.email) labels.push("email address");
+  return labels;
+}
+
+function setFeedPromptPending(promptKey, action) {
+  currentFeedPromptState().actionPendingKey = action
+    ? `${action}:${normalizeString(promptKey)}`
+    : "";
+}
+
+function clearFeedPromptFeedback(promptKey) {
+  const prompts = currentFeedPromptState();
+  delete prompts.errors[promptKey];
+  delete prompts.missingFieldsByKey[promptKey];
+}
+
+function requireFeedPromptAuth(title, message) {
+  openAuthModal("route-protected", {
+    targetPath: getCurrentPathWithQuery(),
+    title,
+    message,
+  });
+}
+
+function buildFeedCivicPromptEvent(item = {}, type, { choiceValue = "" } = {}) {
+  const promptPayload = objectValue(item.payload) || {};
+  const payload = {
+    ...promptPayload,
+    promptFamily: normalizeString(item.promptFamily),
+    promptId: normalizeString(item.promptId),
+    promptKind: normalizeString(item.promptKind),
+  };
+  if (type === "civic_prompt_answer") {
+    payload.answer = choiceValue;
+    payload.opinion = choiceValue;
+    if (normalizeString(item.impressionToken)) {
+      payload.impressionToken = normalizeString(item.impressionToken);
+    }
+  }
+
+  return {
+    type,
+    signalKind: "explicit",
+    confidence:
+      type === "civic_prompt_dismissed"
+        ? 0
+        : type === "civic_prompt_opened"
+          ? 0.25
+          : 0.9,
+    source: "feed_civic_prompt",
+    consentScope: "private",
+    payload,
+  };
+}
+
+async function postFeedCivicPromptEvent(item, type, options = {}) {
+  await fetchJson("/api/voter-intel/events", {
+    auth: true,
+    method: "POST",
+    body: {
+      events: [buildFeedCivicPromptEvent(item, type, options)],
+    },
+  });
+}
+
+function setFeedCivicPromptSaved(promptKey, message) {
+  const prompts = currentFeedPromptState();
+  prompts.savedKeys[promptKey] = true;
+  prompts.savedMessages[promptKey] = message;
+  delete prompts.dismissedKeys[promptKey];
+  clearFeedPromptFeedback(promptKey);
+}
+
+function setFeedCivicPromptDismissed(promptKey) {
+  const prompts = currentFeedPromptState();
+  prompts.dismissedKeys[promptKey] = true;
+  delete prompts.savedKeys[promptKey];
+  delete prompts.savedMessages[promptKey];
+  clearFeedPromptFeedback(promptKey);
+}
+
+async function answerFeedCivicPrompt(promptKey, choiceValue) {
+  const normalizedPromptKey = normalizeString(promptKey);
+  const normalizedChoiceValue = normalizeString(choiceValue);
+  const prompts = currentFeedPromptState();
+  const item = findFeedCivicPrompt(normalizedPromptKey);
+  const choice = item?.choices?.find(
+    (candidate) => candidate.value === normalizedChoiceValue,
+  );
+  if (!state.auth.session) {
+    requireFeedPromptAuth(
+      "Log in to answer civic prompts",
+      "Sign in to save civic prompt answers from the Polis web feed.",
+    );
+    return;
+  }
+  if (!item || !choice) {
+    prompts.errors[normalizedPromptKey] = "This civic prompt is unavailable.";
+    scheduleRender();
+    return;
+  }
+
+  setFeedPromptPending(normalizedPromptKey, "answer");
+  clearFeedPromptFeedback(normalizedPromptKey);
+  scheduleRender();
+  try {
+    await postFeedCivicPromptEvent(item, "civic_prompt_answer", {
+      choiceValue: choice.value,
+    });
+    setFeedCivicPromptSaved(normalizedPromptKey, "Answer recorded");
+    showToast("Civic prompt answer recorded.");
+  } catch (error) {
+    prompts.errors[normalizedPromptKey] =
+      normalizeString(error?.payload?.message || error?.message) ||
+      "This answer could not be recorded.";
+    scheduleRender();
+  } finally {
+    if (currentFeedPromptState().actionPendingKey === `answer:${normalizedPromptKey}`) {
+      setFeedPromptPending("", "");
+      scheduleRender();
+    }
+  }
+}
+
+async function openFeedCivicPrompt(promptKey) {
+  const normalizedPromptKey = normalizeString(promptKey);
+  const prompts = currentFeedPromptState();
+  const item = findFeedCivicPrompt(normalizedPromptKey);
+  if (!state.auth.session) {
+    requireFeedPromptAuth(
+      "Log in to continue",
+      "Sign in to continue this civic prompt from the Polis web feed.",
+    );
+    return;
+  }
+  if (!item || !item.destinationPath) {
+    prompts.errors[normalizedPromptKey] =
+      "This civic prompt does not have a web destination yet.";
+    scheduleRender();
+    return;
+  }
+
+  setFeedPromptPending(normalizedPromptKey, "open");
+  clearFeedPromptFeedback(normalizedPromptKey);
+  scheduleRender();
+  try {
+    await postFeedCivicPromptEvent(item, "civic_prompt_opened");
+    setFeedCivicPromptSaved(normalizedPromptKey, "Prompt opened");
+    navigateWithAuthGate(item.destinationPath);
+  } catch (error) {
+    prompts.errors[normalizedPromptKey] =
+      normalizeString(error?.payload?.message || error?.message) ||
+      "This prompt could not be opened.";
+    scheduleRender();
+  } finally {
+    if (currentFeedPromptState().actionPendingKey === `open:${normalizedPromptKey}`) {
+      setFeedPromptPending("", "");
+      scheduleRender();
+    }
+  }
+}
+
+async function dismissFeedCivicPrompt(promptKey) {
+  const normalizedPromptKey = normalizeString(promptKey);
+  const prompts = currentFeedPromptState();
+  const item = findFeedCivicPrompt(normalizedPromptKey);
+  if (!item) {
+    return;
+  }
+  if (!state.auth.session) {
+    setFeedCivicPromptDismissed(normalizedPromptKey);
+    scheduleRender();
+    return;
+  }
+
+  setFeedPromptPending(normalizedPromptKey, "dismiss");
+  clearFeedPromptFeedback(normalizedPromptKey);
+  scheduleRender();
+  try {
+    await postFeedCivicPromptEvent(item, "civic_prompt_dismissed");
+    setFeedCivicPromptDismissed(normalizedPromptKey);
+  } catch (error) {
+    prompts.errors[normalizedPromptKey] =
+      normalizeString(error?.payload?.message || error?.message) ||
+      "This prompt could not be dismissed.";
+    scheduleRender();
+  } finally {
+    if (currentFeedPromptState().actionPendingKey === `dismiss:${normalizedPromptKey}`) {
+      setFeedPromptPending("", "");
+      scheduleRender();
+    }
+  }
+}
+
+async function submitFeedCandidateOptIn(formData) {
+  const candidateId = normalizeString(formData.get("candidateId"));
+  const promptKey =
+    normalizeString(formData.get("promptKey")) ||
+    `candidatePrompt:${candidateId}`;
+  const prompts = currentFeedPromptState();
+  if (!state.auth.session) {
+    requireFeedPromptAuth(
+      "Log in to save campaign preferences",
+      "Sign in to choose how campaigns can contact you from the Polis web feed.",
+    );
+    return;
+  }
+  if (!candidateId) {
+    prompts.errors[promptKey] = "This campaign prompt is missing a candidate.";
+    scheduleRender();
+    return;
+  }
+
+  const item = findFeedCandidatePrompt(promptKey, candidateId);
+  const enabledTypes = normalizeCandidateContactEnabledTypes(
+    item?.enabledContactTypes || {},
+  );
+  const contactPreferences = {};
+  CANDIDATE_CONTACT_TYPE_CONFIG.forEach((type) => {
+    contactPreferences[type.key] =
+      enabledTypes[type.key] === true
+        ? normalizeVoterPreferenceChoice(formData.get(`contact:${type.key}`))
+        : "unset";
+  });
+
+  setFeedPromptPending(promptKey, "save");
+  clearFeedPromptFeedback(promptKey);
+  scheduleRender();
+  try {
+    await fetchJson(`/api/candidates/${encodeURIComponent(candidateId)}/opt-in`, {
+      auth: true,
+      method: "PUT",
+      body: { contactPreferences },
+    });
+    prompts.savedKeys[promptKey] = true;
+    prompts.savedMessages[promptKey] = "Preferences saved";
+    delete prompts.dismissedKeys[promptKey];
+    showToast("Campaign contact preferences saved.");
+  } catch (error) {
+    const missing = normalizeFeedCandidatePromptMissingFields(error?.payload);
+    if (
+      Number(error?.status) === 400 &&
+      normalizeString(error?.payload?.error) === "missing_required_fields" &&
+      hasFeedCandidatePromptMissingFields(missing)
+    ) {
+      prompts.missingFieldsByKey[promptKey] = missing;
+      prompts.errors[promptKey] = `Add your ${feedCandidatePromptMissingFieldLabels(
+        missing,
+      ).join(", ")} before sharing those preferences.`;
+    } else {
+      prompts.errors[promptKey] =
+        normalizeString(error?.payload?.message || error?.message) ||
+        "Preferences could not be saved.";
+    }
+    scheduleRender();
+  } finally {
+    if (currentFeedPromptState().actionPendingKey === `save:${promptKey}`) {
+      setFeedPromptPending("", "");
+      scheduleRender();
+    }
+  }
+}
+
+async function joinFeedCandidateCommunity(candidateId, promptKey) {
+  const normalizedCandidateId = normalizeString(candidateId);
+  const normalizedPromptKey =
+    normalizeString(promptKey) || `candidatePrompt:${normalizedCandidateId}`;
+  const prompts = currentFeedPromptState();
+  const item = findFeedCandidatePrompt(normalizedPromptKey, normalizedCandidateId);
+  const server = item?.communityServer || null;
+  if (!state.auth.session) {
+    requireFeedPromptAuth(
+      "Log in to join the campaign workspace",
+      "Sign in to join this campaign community from the Polis web feed.",
+    );
+    return;
+  }
+  if (!normalizedCandidateId) {
+    prompts.errors[normalizedPromptKey] =
+      "This campaign prompt is missing a candidate.";
+    scheduleRender();
+    return;
+  }
+  if (server?.joined && server.path) {
+    navigateWithAuthGate(server.path);
+    return;
+  }
+  if (server && server.canJoin !== true && !server.joined) {
+    prompts.errors[normalizedPromptKey] = "Community invites are unavailable.";
+    scheduleRender();
+    return;
+  }
+
+  setFeedPromptPending(normalizedPromptKey, "community");
+  clearFeedPromptFeedback(normalizedPromptKey);
+  scheduleRender();
+  try {
+    const payload = await fetchJson(
+      `/api/candidates/${encodeURIComponent(
+        normalizedCandidateId,
+      )}/contact-prompt/community-join`,
+      {
+        auth: true,
+        method: "POST",
+      },
+    );
+    prompts.savedKeys[normalizedPromptKey] = true;
+    prompts.savedMessages[normalizedPromptKey] = "Joined campaign workspace";
+    delete prompts.dismissedKeys[normalizedPromptKey];
+    const path =
+      normalizeString(payload.path) || normalizeString(payload.serverPath);
+    if (path) {
+      navigateWithAuthGate(path);
+    } else {
+      showToast("Joined campaign workspace.");
+    }
+  } catch (error) {
+    prompts.errors[normalizedPromptKey] =
+      normalizeString(error?.payload?.message || error?.message) ||
+      "Campaign workspace could not be joined.";
+    scheduleRender();
+  } finally {
+    if (
+      currentFeedPromptState().actionPendingKey ===
+      `community:${normalizedPromptKey}`
+    ) {
+      setFeedPromptPending("", "");
+      scheduleRender();
+    }
   }
 }
 
@@ -7232,6 +8154,10 @@ function normalizeCandidate(raw = {}) {
     donationsEnabled: raw.donationsEnabled === true,
     donationsAvailable: raw.donationsAvailable === true,
     donationDisabledReason: normalizeString(raw.donationDisabledReason),
+    voterMapEnabled: Object.prototype.hasOwnProperty.call(raw, "voterMapEnabled") ||
+      Object.prototype.hasOwnProperty.call(raw, "voter_map_enabled")
+      ? parseBoolean(raw.voterMapEnabled ?? raw.voter_map_enabled)
+      : null,
     activeElection: normalizeActiveElection(raw.activeElection),
     canEdit:
       state.auth.user?.userId &&
@@ -7675,6 +8601,262 @@ function setDiscoverSliceResult(slice, payload, items) {
   slice.loaded = true;
 }
 
+function discoverCalendarSectionConfig() {
+  return CANDIDATE_DASHBOARD_SECTION_CONFIG.find(
+    (section) => section.key === "calendar",
+  );
+}
+
+function discoverCalendarAccessCandidate() {
+  const calendarSection = discoverCalendarSectionConfig();
+  const candidates = [
+    ...(state.pages.discover.campaigns.items || []),
+    ...(state.pages.candidateDashboard.campaigns.items || []),
+  ].filter((access) => access?.candidateId);
+  return (
+    candidates.find(
+      (access) =>
+        access?.isOwner &&
+        canOpenCandidateDashboardSection(calendarSection, access),
+    ) ||
+    candidates.find((access) =>
+      canOpenCandidateDashboardSection(calendarSection, access),
+    ) ||
+    null
+  );
+}
+
+function discoverCalendarDateKey(value = Date.now()) {
+  return formatDateInputValue(value);
+}
+
+function readDiscoverOpenedCalendarDates() {
+  try {
+    const parsed = JSON.parse(
+      window.localStorage.getItem(DISCOVER_OPENED_CALENDAR_DATES_STORAGE_KEY) ||
+        "[]",
+    );
+    return new Set(
+      Array.isArray(parsed)
+        ? parsed.map(normalizeString).filter(Boolean)
+        : [],
+    );
+  } catch {
+    return new Set();
+  }
+}
+
+function markDiscoverCalendarOpened(value = Date.now()) {
+  const key = discoverCalendarDateKey(value);
+  if (!key) {
+    return;
+  }
+  const opened = readDiscoverOpenedCalendarDates();
+  opened.add(key);
+  try {
+    window.localStorage.setItem(
+      DISCOVER_OPENED_CALENDAR_DATES_STORAGE_KEY,
+      JSON.stringify(Array.from(opened).slice(-30)),
+    );
+  } catch {
+    // Local storage can be unavailable in private browsing.
+  }
+}
+
+function discoverCalendarItemIsActive(item = {}) {
+  const status = normalizeString(item.status).toLowerCase();
+  return !["canceled", "cancelled", "deleted", "declined"].includes(status);
+}
+
+function discoverCalendarItemStartsInRange(item = {}, start, end) {
+  const itemStart = Number(item.startAt);
+  if (!Number.isFinite(itemStart)) {
+    return false;
+  }
+  const itemEnd = Number(item.endAt) || itemStart;
+  return itemStart < end && (itemEnd > start || itemStart >= start);
+}
+
+function discoverCalendarItemIntersects(item = {}, start, end) {
+  const itemStart = Number(item.startAt);
+  if (!Number.isFinite(itemStart)) {
+    return false;
+  }
+  const itemEnd = Number(item.endAt) || itemStart;
+  return itemStart < end && (itemEnd > start || itemStart === start);
+}
+
+function compareDiscoverCalendarItems(left = {}, right = {}) {
+  const leftStart = Number(left.startAt);
+  const rightStart = Number(right.startAt);
+  if (Number.isFinite(leftStart) && Number.isFinite(rightStart)) {
+    const startCompare = leftStart - rightStart;
+    if (startCompare !== 0) {
+      return startCompare;
+    }
+  } else if (Number.isFinite(leftStart)) {
+    return -1;
+  } else if (Number.isFinite(rightStart)) {
+    return 1;
+  }
+  return normalizeString(left.title).localeCompare(normalizeString(right.title));
+}
+
+function discoverCalendarItemTitle(item = {}) {
+  return (
+    normalizeString(item.title) ||
+    candidateCalendarItemTypeLabel(item.itemType)
+  );
+}
+
+function discoverCalendarItemRoute(access, item = {}) {
+  const candidateId = normalizeString(access?.candidateId);
+  const baseRoute = candidateDashboardSectionPath(candidateId, "calendar");
+  if (!candidateId || !normalizeString(item.calendarItemId)) {
+    return baseRoute;
+  }
+  return buildRouteWithQuery(baseRoute, {
+    calendarItemId: item.calendarItemId,
+    calendarDate: item.startAt ? formatDateInputValue(item.startAt) : "",
+  });
+}
+
+function discoverCalendarItemTimeLabel(item = {}) {
+  if (item.allDay) {
+    return "All day";
+  }
+  const startAt = Number(item.startAt);
+  if (!Number.isFinite(startAt)) {
+    return "Time TBD";
+  }
+  const endAt = Number(item.endAt);
+  const startLabel = new Intl.DateTimeFormat(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(startAt));
+  if (!Number.isFinite(endAt) || endAt === startAt) {
+    return startLabel;
+  }
+  const startDate = new Date(startAt);
+  const endDate = new Date(endAt);
+  const sameDay =
+    startDate.getFullYear() === endDate.getFullYear() &&
+    startDate.getMonth() === endDate.getMonth() &&
+    startDate.getDate() === endDate.getDate();
+  const endLabel = new Intl.DateTimeFormat(undefined, {
+    ...(sameDay ? {} : { month: "short", day: "numeric" }),
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(endDate);
+  return `${startLabel}-${endLabel}`;
+}
+
+function extractDiscoverCalendarCityState(raw) {
+  const value = normalizeString(raw);
+  if (!value) {
+    return "";
+  }
+  const parts = value
+    .split(",")
+    .map((part) => normalizeString(part))
+    .filter(Boolean);
+  if (parts.length < 2) {
+    return "";
+  }
+  const statePattern = /\b([A-Z]{2})(?:\s+\d{5}(?:-\d{4})?)?\b/u;
+  for (let index = parts.length - 1; index > 0; index -= 1) {
+    const stateMatch = parts[index].toUpperCase().match(statePattern);
+    if (!stateMatch) {
+      continue;
+    }
+    const city = parts[index - 1];
+    if (/\d/u.test(city) || !/[A-Za-z]/u.test(city)) {
+      continue;
+    }
+    return `${city}, ${stateMatch[1]}`;
+  }
+  return "";
+}
+
+function discoverCalendarItemLocationLabel(item = {}) {
+  return (
+    extractDiscoverCalendarCityState(item.locationName) ||
+    extractDiscoverCalendarCityState(item.locationAddress) ||
+    "Location TBD"
+  );
+}
+
+async function loadDiscoverCalendarPreview({
+  refresh = false,
+  render = true,
+} = {}) {
+  const preview = state.pages.discover.calendarPreview;
+  const access = discoverCalendarAccessCandidate();
+  const candidateId = normalizeString(access?.candidateId);
+  if (preview.loading) {
+    return;
+  }
+  if (preview.loaded && !refresh && preview.candidateId === candidateId) {
+    return;
+  }
+  preview.candidateId = candidateId;
+  preview.access = access;
+  preview.items = [];
+  preview.todayItems = [];
+  preview.error = "";
+  preview.loaded = false;
+  if (!candidateId) {
+    preview.loaded = true;
+    if (render) scheduleRender();
+    return;
+  }
+
+  preview.loading = true;
+  if (render) scheduleRender();
+  const now = Date.now();
+  const today = new Date(now);
+  const todayStart = new Date(
+    today.getFullYear(),
+    today.getMonth(),
+    today.getDate(),
+  ).getTime();
+  const todayEnd = todayStart + 24 * 60 * 60 * 1000;
+  const rangeEnd = now + 7 * 24 * 60 * 60 * 1000;
+  const query = new URLSearchParams({
+    from: String(todayStart),
+    to: String(rangeEnd),
+    limit: "12",
+  });
+
+  try {
+    const payload = await fetchJson(
+      `/api/candidateDashboard/${encodeURIComponent(candidateId)}/calendar/items?${query.toString()}`,
+      { auth: true },
+    );
+    const loadedItems = readArrayPayload(payload, ["items", "calendar"])
+      .map(normalizeCandidateDashboardCalendarItem)
+      .filter(discoverCalendarItemIsActive);
+    const items = loadedItems
+      .filter((item) => discoverCalendarItemStartsInRange(item, now, rangeEnd))
+      .sort(compareDiscoverCalendarItems);
+    preview.items = items.slice(0, 8);
+    preview.todayItems = loadedItems
+      .filter((item) =>
+        discoverCalendarItemIntersects(item, todayStart, todayEnd),
+      )
+      .sort(compareDiscoverCalendarItems)
+      .slice(0, 4);
+    preview.loaded = true;
+  } catch (error) {
+    preview.error =
+      normalizeString(error?.message) || "Schedule could not be loaded.";
+    preview.loaded = true;
+  } finally {
+    preview.loading = false;
+    if (render) scheduleRender();
+  }
+}
+
 function discoverRequestConfigs() {
   return [
     {
@@ -7717,7 +8899,7 @@ function discoverRequestConfigs() {
     {
       key: "standaloneServers",
       path: "/api/messaging/servers/discover?limit=6",
-      label: "Public message servers could not be loaded.",
+      label: "Public message workspaces could not be loaded.",
       map: (payload) =>
         readArrayPayload(payload, ["servers", "items"])
           .map(normalizeDiscoverServer)
@@ -7733,6 +8915,46 @@ function discoverRequestConfigs() {
           .filter((item) => item.id)
           .slice(0, 6),
     },
+    {
+      key: "policyQuestions",
+      path: "/api/policy-questions?limit=6",
+      label: "Policy questions could not be loaded.",
+      map: (payload) =>
+        readArrayPayload(payload, ["items", "questions"])
+          .map(normalizePolicyQuestion)
+          .filter((item) => item.questionId)
+          .slice(0, 6),
+    },
+    {
+      key: "campaigns",
+      path: "/api/candidateDashboard/candidates",
+      label: "Campaign access could not be loaded.",
+      map: (payload) =>
+        readArrayPayload(payload, [
+          "items",
+          "candidates",
+          "campaigns",
+          "access",
+        ])
+          .map(normalizeCandidateDashboardAccess)
+          .filter((item) => item.candidateId)
+          .slice(0, 6),
+    },
+    {
+      key: "coalitions",
+      path: "/api/coalitions",
+      label: "Coalition access could not be loaded.",
+      map: (payload) =>
+        readArrayPayload(payload, [
+          "items",
+          "coalitions",
+          "memberships",
+          "access",
+        ])
+          .map(normalizeCoalitionDetail)
+          .filter((item) => item.coalition?.coalitionId)
+          .slice(0, 6),
+    },
   ];
 }
 
@@ -7746,6 +8968,9 @@ async function loadDiscoverPage({ refresh = false } = {}) {
   }
 
   const configs = discoverRequestConfigs();
+  const electionContextPromise = loadElectionContext({ refresh }).catch(
+    () => null,
+  );
   discover.loading = true;
   discover.error = "";
   configs.forEach((config) => {
@@ -7758,8 +8983,8 @@ async function loadDiscoverPage({ refresh = false } = {}) {
   });
   scheduleRender();
 
-  const results = await Promise.allSettled(
-    configs.map(async (config) => {
+  const results = await Promise.allSettled([
+    ...configs.map(async (config) => {
       const slice = discover[config.key];
       try {
         const payload = await fetchJson(config.path, { auth: true });
@@ -7776,13 +9001,15 @@ async function loadDiscoverPage({ refresh = false } = {}) {
         slice.loading = false;
       }
     }),
-  );
+    electionContextPromise.then(() => true, () => false),
+  ]);
 
   const failedCount = results.filter(
     (result) => result.status === "fulfilled" && result.value === false,
   ).length;
+  await loadDiscoverCalendarPreview({ refresh, render: false });
   discover.error =
-    failedCount === configs.length
+    failedCount >= configs.length
       ? "Discover could not reach Polis services right now."
       : "";
   discover.loaded = true;
@@ -12202,6 +13429,14 @@ function missionJobActionConfig(action, job = {}) {
       toast: "Help request sent.",
       requiredNote: true,
     },
+    post_update: {
+      label: "Post update",
+      title: "Post update",
+      noteLabel: "What changed?",
+      helper: "Add a mission update to the activity thread.",
+      toast: "Mission update posted.",
+      requiredNote: true,
+    },
     request_reassign: {
       label: "Request reassignment",
       title: "Request reassignment",
@@ -12352,6 +13587,213 @@ async function submitMissionJobAction(formData) {
   });
 }
 
+function missionFollowUpStartConditions(startWhen, startDelayHours) {
+  if (normalizeString(startWhen).toLowerCase() !== "time_reached") {
+    return [];
+  }
+  const hours = Math.max(1, Number(startDelayHours) || 1);
+  return [
+    {
+      type: "time_reached",
+      at: new Date(Date.now() + hours * 3600000).toISOString(),
+      label: "Scheduled start",
+    },
+  ];
+}
+
+function missionFollowUpPayloadFromForm(formData) {
+  const parentJobId = normalizeString(formData.get("parentJobId"));
+  const title = normalizeString(formData.get("title"));
+  const assignee = normalizeString(formData.get("assignee"));
+  const targetMode = normalizeString(formData.get("targetMode")) || "user";
+  const priority =
+    normalizeString(formData.get("priority")).toLowerCase() || "normal";
+  const presetKey =
+    normalizeString(formData.get("presetKey")).toLowerCase() || "general";
+  const startWhen =
+    normalizeString(formData.get("startWhen")).toLowerCase() ||
+    "parent_completed";
+  if (!parentJobId || !title || !assignee) {
+    return null;
+  }
+  const startConditions = missionFollowUpStartConditions(
+    startWhen,
+    formData.get("startDelayHours"),
+  );
+  return {
+    parentJobId,
+    startWhen,
+    ...(startConditions.length ? { startConditions } : {}),
+    title,
+    description: normalizeString(formData.get("description")),
+    priority,
+    target: candidateMissionTargetPayload(targetMode, assignee),
+    deadline: candidateMissionDeadlinePayload(
+      formData.get("deadlineMode"),
+      formData.get("dueHours"),
+    ),
+    timeout: candidateMissionTimeoutPayload(
+      formData.get("timeoutPolicy"),
+      formData.get("timeoutHours"),
+    ),
+    successConditions: missionPresetSuccessConditions(presetKey),
+  };
+}
+
+async function createMissionFollowUpJob(formData) {
+  const missionId = normalizeString(formData.get("missionId"));
+  const payload = missionFollowUpPayloadFromForm(formData);
+  const detail = state.pages.missions.detail;
+  if (!missionId || !payload) {
+    showToast("Follow-up title and owner are required.");
+    return false;
+  }
+  const pendingKey = `${missionId}:${payload.parentJobId}:follow-up`;
+  if (detail.followUpPendingKey || detail.actionPendingKey) {
+    return false;
+  }
+  detail.followUpPendingKey = pendingKey;
+  detail.error = "";
+  scheduleRender();
+  try {
+    await fetchJson(`/api/missions/${encodeURIComponent(missionId)}/jobs`, {
+      auth: true,
+      method: "POST",
+      body: payload,
+    });
+    showToast("Follow-up task added.");
+    await loadMissionDetail(missionId, { refresh: true });
+    const filters = readMissionListFilters();
+    if (filters.scopeType && filters.scopeId) {
+      await loadMissionsList({ refresh: true });
+    }
+    return true;
+  } catch (error) {
+    detail.error =
+      normalizeString(error?.message) || "Follow-up task could not be added.";
+    showToast(detail.error);
+    return false;
+  } finally {
+    if (detail.followUpPendingKey === pendingKey) {
+      detail.followUpPendingKey = "";
+    }
+    scheduleRender();
+  }
+}
+
+function missionArtifactFileFromForm(formData) {
+  const file = formData.get("artifactFile");
+  return file && typeof file === "object" && Number(file.size) > 0
+    ? file
+    : null;
+}
+
+async function uploadMissionArtifact(formData) {
+  const missionId = normalizeString(formData.get("missionId"));
+  const jobId = normalizeString(formData.get("jobId"));
+  const file = missionArtifactFileFromForm(formData);
+  const detail = state.pages.missions.detail;
+  if (!missionId || !jobId || !file) {
+    showToast("Choose a mission file to upload.");
+    return false;
+  }
+  const pendingKey = `${missionId}:${jobId}:artifact-upload`;
+  if (detail.artifactPendingKey) {
+    return false;
+  }
+  detail.artifactPendingKey = pendingKey;
+  scheduleRender();
+  try {
+    const fileName = normalizeString(file.name) || "mission-file";
+    const contentType = normalizeString(file.type) || "application/octet-stream";
+    const payload = await fetchJson(
+      `/api/missions/${encodeURIComponent(missionId)}/artifacts/upload-url`,
+      {
+        auth: true,
+        method: "POST",
+        body: {
+          jobId,
+          fileName,
+          contentType,
+          sizeBytes: Number(file.size) || 0,
+        },
+      },
+    );
+    const upload = payload.upload && typeof payload.upload === "object"
+      ? payload.upload
+      : payload;
+    const uploadUrl = normalizeUrl(upload.uploadUrl || upload.url);
+    if (!uploadUrl) {
+      throw new Error("Mission upload URL was not returned.");
+    }
+    const response = await fetch(uploadUrl, {
+      method: normalizeString(upload.method).toUpperCase() || "PUT",
+      headers:
+        upload.headers && typeof upload.headers === "object"
+          ? upload.headers
+          : { "Content-Type": contentType },
+      body: file,
+    });
+    if (!response.ok) {
+      throw new Error(`Mission file upload failed: ${response.status}`);
+    }
+    showToast("Mission file uploaded.");
+    await loadMissionDetail(missionId, { refresh: true });
+    return true;
+  } catch (error) {
+    showToast(normalizeString(error?.message) || "Mission file upload failed.");
+    return false;
+  } finally {
+    if (detail.artifactPendingKey === pendingKey) {
+      detail.artifactPendingKey = "";
+    }
+    scheduleRender();
+  }
+}
+
+async function openMissionArtifact(missionId, artifactId) {
+  const normalizedMissionId = normalizeString(missionId);
+  const normalizedArtifactId = normalizeString(artifactId);
+  const detail = state.pages.missions.detail;
+  if (!normalizedMissionId || !normalizedArtifactId) {
+    showToast("Mission file unavailable.");
+    return;
+  }
+  const pendingKey = `${normalizedMissionId}:${normalizedArtifactId}:artifact-open`;
+  if (detail.artifactPendingKey) {
+    return;
+  }
+  detail.artifactPendingKey = pendingKey;
+  scheduleRender();
+  try {
+    const payload = await fetchJson(
+      `/api/missions/${encodeURIComponent(normalizedMissionId)}/artifacts/${encodeURIComponent(normalizedArtifactId)}/download-url`,
+      { auth: true },
+    );
+    const url = normalizeUrl(payload.downloadUrl || payload.url);
+    if (!url) {
+      throw new Error("Mission file URL was not returned.");
+    }
+    window.open(url, "_blank", "noopener,noreferrer");
+  } catch (error) {
+    showToast(normalizeString(error?.message) || "Mission file could not be opened.");
+  } finally {
+    if (detail.artifactPendingKey === pendingKey) {
+      detail.artifactPendingKey = "";
+    }
+    scheduleRender();
+  }
+}
+
+async function openMissionLeadMessage(leadUserId) {
+  const normalizedLeadUserId = normalizeString(leadUserId);
+  if (!normalizedLeadUserId) {
+    showToast("Mission lead unavailable.");
+    return;
+  }
+  await createMessagingDmFromTarget({ recipientId: normalizedLeadUserId });
+}
+
 function candidateDashboardSectionForRoute(route = state.route) {
   const section = normalizeString(route?.routeParams?.section).toLowerCase();
   return (
@@ -12448,6 +13890,24 @@ function canManageCandidateMessaging(access = null) {
     return true;
   }
   return candidateDashboardPermissionSet(access).has("messaging_manage");
+}
+
+function hasCandidateVoterMapAccess(access = null) {
+  if (access?.isOwner) {
+    return true;
+  }
+  const permissions = candidateDashboardPermissionSet(access);
+  return (
+    permissions.has("voter_map_manager") ||
+    permissions.has("voter_map_territory")
+  );
+}
+
+function canOpenCandidateVoterMap(access = null, candidate = null) {
+  if (!hasCandidateVoterMapAccess(access)) {
+    return false;
+  }
+  return candidate?.voterMapEnabled !== false;
 }
 
 function canManageCandidateStaff(access = null) {
@@ -12882,7 +14342,7 @@ function normalizeMessagingRequest(raw = {}) {
           raw.description,
       ) ||
       (normalizeString(raw.type) === "server_invite"
-        ? "Open this invite in your server workspace."
+        ? "Open this invite in your workspace."
         : "Review this request."),
     conversationId: normalizeString(
       conversation.conversationId ||
@@ -13092,7 +14552,7 @@ function normalizeMessagingAutomodKeywords(value) {
 function normalizeMessagingAutomodRule(raw = {}) {
   return {
     ruleId: normalizeString(raw.ruleId || raw.id),
-    name: normalizeString(raw.name) || "Automod rule",
+    name: normalizeString(raw.name) || "Keyword guardrail",
     enabled: raw.enabled !== false,
     keywords: normalizeMessagingAutomodKeywords(raw.keywords),
     action: normalizeMessagingAutomodAction(raw.action),
@@ -13256,18 +14716,83 @@ function normalizeConnectionEntry(raw = {}) {
   };
 }
 
+function normalizeCandidateDirectoryFeed(value) {
+  const normalized = normalizeString(value).toLowerCase();
+  return normalized === "officials" ||
+    normalized === "elected_officials" ||
+    normalized === "elected-officials"
+    ? "officials"
+    : "candidates";
+}
+
+function candidateDirectoryFeedLabel(feed) {
+  return normalizeCandidateDirectoryFeed(feed) === "officials"
+    ? "elected officials"
+    : "candidates";
+}
+
+function candidateDirectoryFeedTitle(feed) {
+  return normalizeCandidateDirectoryFeed(feed) === "officials"
+    ? "Elected official directory"
+    : "Candidate directory";
+}
+
+function candidateDirectoryFeedDescription(feed) {
+  return normalizeCandidateDirectoryFeed(feed) === "officials"
+    ? "Browse elected officials, open report cards, review votes, follow offices, and move into congressional bill context from the same web surface."
+    : "Browse candidates, follow campaigns, open race profiles, filter by district or tags, and jump into Election Day context from the same web surface.";
+}
+
+function candidateDirectoryEmptyMessage(feed) {
+  return normalizeCandidateDirectoryFeed(feed) === "officials"
+    ? "No elected officials match these filters."
+    : "No candidates match these filters.";
+}
+
+function candidateDirectoryOptionsFromParams(params = readCurrentSearchParams()) {
+  const hideRaw = normalizeString(params.get("hideAutoGenerated")).toLowerCase();
+  return {
+    feed: normalizeCandidateDirectoryFeed(params.get("feed") || params.get("mode")),
+    hideAutoGenerated: ["true", "1", "yes", "on"].includes(hideRaw),
+  };
+}
+
+function buildCandidateDirectoryRoute(overrides = {}) {
+  const params = readCurrentSearchParams();
+  const hasOverride = (key) => Object.prototype.hasOwnProperty.call(overrides, key);
+  const feed = normalizeCandidateDirectoryFeed(
+    hasOverride("feed") ? overrides.feed : params.get("feed"),
+  );
+  const hideAutoGenerated = hasOverride("hideAutoGenerated")
+    ? overrides.hideAutoGenerated === true
+    : candidateDirectoryOptionsFromParams(params).hideAutoGenerated;
+  return buildRouteWithQuery("/candidates", {
+    feed,
+    q: params.get("q"),
+    level: params.get("level"),
+    district: params.get("district"),
+    tags: params.get("tags"),
+    hideAutoGenerated: hideAutoGenerated ? "true" : "",
+  });
+}
+
 async function loadCandidateList({ refresh = false } = {}) {
   const list = state.pages.candidates.list;
   if (list.loading || list.loadingMore) {
     return;
   }
   const params = readCurrentSearchParams();
+  const directoryOptions = candidateDirectoryOptionsFromParams(params);
   if (refresh) {
     list.items = [];
     list.nextCursor = null;
     list.loaded = false;
   }
-  list.filters = Object.fromEntries(params.entries());
+  list.filters = {
+    ...Object.fromEntries(params.entries()),
+    feed: directoryOptions.feed,
+    hideAutoGenerated: directoryOptions.hideAutoGenerated,
+  };
   list.loading = true;
   list.error = "";
   scheduleRender();
@@ -13279,6 +14804,8 @@ async function loadCandidateList({ refresh = false } = {}) {
       ...(params.get("level") ? { level: params.get("level") } : {}),
       ...(params.get("district") ? { district: params.get("district") } : {}),
       ...(params.get("tags") ? { tags: params.get("tags") } : {}),
+      feed: directoryOptions.feed,
+      ...(directoryOptions.hideAutoGenerated ? { hideAutoGenerated: "true" } : {}),
     });
     const payload = await fetchJson(`/api/candidates?${query.toString()}`, {
       auth: true,
@@ -13306,8 +14833,13 @@ async function loadMoreCandidateList() {
   }
 
   const params = readCurrentSearchParams();
+  const directoryOptions = candidateDirectoryOptionsFromParams(params);
   const previousCursor = list.nextCursor;
-  list.filters = Object.fromEntries(params.entries());
+  list.filters = {
+    ...Object.fromEntries(params.entries()),
+    feed: directoryOptions.feed,
+    hideAutoGenerated: directoryOptions.hideAutoGenerated,
+  };
   list.loadingMore = true;
   list.error = "";
   scheduleRender();
@@ -13320,6 +14852,8 @@ async function loadMoreCandidateList() {
       ...(params.get("level") ? { level: params.get("level") } : {}),
       ...(params.get("district") ? { district: params.get("district") } : {}),
       ...(params.get("tags") ? { tags: params.get("tags") } : {}),
+      feed: directoryOptions.feed,
+      ...(directoryOptions.hideAutoGenerated ? { hideAutoGenerated: "true" } : {}),
     });
     const payload = await fetchJson(`/api/candidates?${query.toString()}`, {
       auth: true,
@@ -15068,8 +16602,19 @@ function coalitionSocialsFromForm(formData) {
   );
 }
 
+function coalitionPacAssociatedFromForm(formData) {
+  const value = normalizeString(formData.get("pacAssociated")).toLowerCase();
+  if (["true", "yes", "1"].includes(value)) {
+    return true;
+  }
+  if (["false", "no", "0"].includes(value)) {
+    return false;
+  }
+  return formData.has("pacAssociated");
+}
+
 function coalitionProfilePayloadFromForm(formData) {
-  const pacAssociated = formData.has("pacAssociated");
+  const pacAssociated = coalitionPacAssociatedFromForm(formData);
   const socials = coalitionSocialsFromForm(formData);
   return {
     name: normalizeString(formData.get("name")),
@@ -15145,7 +16690,10 @@ async function updateCoalitionProfile(formData) {
   }
 }
 
-function validateCoalitionProfilePayload(body) {
+function validateCoalitionProfilePayload(
+  body,
+  { requirePacSelection = false, hasPacSelection = true } = {},
+) {
   if (
     !body.name ||
     !body.description ||
@@ -15162,6 +16710,9 @@ function validateCoalitionProfilePayload(body) {
   if (!["simple", "constitutional"].includes(body.coalitionType)) {
     return "Choose a coalition type.";
   }
+  if (requirePacSelection && !hasPacSelection) {
+    return "Choose whether the coalition is PAC-associated.";
+  }
   if (body.pacAssociated && !body.fecNumber) {
     return "Add the FEC number for PAC-associated coalitions.";
   }
@@ -15174,7 +16725,10 @@ async function createCoalitionFromForm(formData) {
     return false;
   }
   const body = coalitionProfilePayloadFromForm(formData);
-  const validationError = validateCoalitionProfilePayload(body);
+  const validationError = validateCoalitionProfilePayload(body, {
+    requirePacSelection: true,
+    hasPacSelection: formData.has("pacAssociated"),
+  });
   if (validationError) {
     onboarding.error = validationError;
     showToast(validationError);
@@ -15678,6 +17232,14 @@ function coalitionVoterMapWorkspace() {
   if (!detail.voterMapWorkspace.templates) {
     detail.voterMapWorkspace.templates = createVoterMapOutreachTemplatesState();
   }
+  if (!detail.voterMapWorkspace.assignments) {
+    detail.voterMapWorkspace.assignments =
+      createCoalitionTerritoryAssignmentsState();
+  }
+  if (!detail.voterMapWorkspace.territoryAdmin) {
+    detail.voterMapWorkspace.territoryAdmin =
+      createCoalitionTerritoryAdminState();
+  }
   return detail.voterMapWorkspace;
 }
 
@@ -15793,6 +17355,1494 @@ async function refreshCoalitionVoterMapAccess() {
     showToast(workspace.error);
   } finally {
     workspace.loading = false;
+    scheduleRender();
+  }
+}
+
+function coalitionTerritoryAssignmentsWorkspace() {
+  const workspace = coalitionVoterMapWorkspace();
+  if (!workspace.assignments) {
+    workspace.assignments = createCoalitionTerritoryAssignmentsState();
+  }
+  return workspace.assignments;
+}
+
+function coalitionTerritoryOptionId(access = {}, preferredId = "") {
+  const territories = access?.territories || [];
+  const normalizedPreferredId = normalizeString(preferredId);
+  if (
+    normalizedPreferredId &&
+    territories.some((territory) => territory.territoryId === normalizedPreferredId)
+  ) {
+    return normalizedPreferredId;
+  }
+  const defaultTerritoryId = normalizeString(access?.defaultTerritoryId);
+  if (
+    defaultTerritoryId &&
+    territories.some((territory) => territory.territoryId === defaultTerritoryId)
+  ) {
+    return defaultTerritoryId;
+  }
+  return territories[0]?.territoryId || "";
+}
+
+function selectedCoalitionAssignmentTerritoryId(access = {}) {
+  const assignments = coalitionTerritoryAssignmentsWorkspace();
+  return coalitionTerritoryOptionId(access, assignments.territoryId);
+}
+
+function coalitionTerritoryAdminWorkspace() {
+  const workspace = coalitionVoterMapWorkspace();
+  if (!workspace.territoryAdmin) {
+    workspace.territoryAdmin = createCoalitionTerritoryAdminState();
+  }
+  return workspace.territoryAdmin;
+}
+
+function setCoalitionTerritoryAdminTab(tab) {
+  const normalized = normalizeString(tab);
+  if (!["wizard", "editor", "assignments"].includes(normalized)) {
+    return;
+  }
+  coalitionTerritoryAdminWorkspace().activeTab = normalized;
+  scheduleRender();
+}
+
+function parseCoalitionTerritoryCsvIds(value) {
+  return Array.from(
+    new Set(
+      normalizeString(value)
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
+function positiveIntegerFromForm(formData, key, fallback = null) {
+  const value = Number(normalizeString(formData.get(key)));
+  if (!Number.isFinite(value) || value <= 0) {
+    return fallback;
+  }
+  return Math.trunc(value);
+}
+
+function numberFromForm(formData, key, fallback = 0) {
+  const value = Number(normalizeString(formData.get(key)));
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function coalitionTerritoryAdminDistrictId(formData) {
+  return normalizeString(formData.get("districtId")).toUpperCase();
+}
+
+function selectedCoalitionTerritoryUnitSetId(formData, admin) {
+  return (
+    normalizeString(formData.get("unitSetId")) ||
+    normalizeString(admin.selectedUnitSetId) ||
+    admin.unitSets[0]?.unitSetId ||
+    ""
+  );
+}
+
+async function loadCoalitionTerritoryUnitSets(
+  formData,
+  { refresh = false } = {},
+) {
+  const coalitionId = currentCoalitionDetailId();
+  const admin = coalitionTerritoryAdminWorkspace();
+  const districtId = coalitionTerritoryAdminDistrictId(formData);
+  if (!coalitionId || !districtId) {
+    admin.unitSetsError = "Enter a district ID before loading unit sets.";
+    scheduleRender();
+    return false;
+  }
+  if (admin.unitSetsLoading && !refresh) {
+    return false;
+  }
+  if (admin.unitSetsLoaded && !refresh) {
+    return true;
+  }
+  admin.unitSetsLoading = true;
+  admin.unitSetsError = "";
+  admin.error = "";
+  scheduleRender();
+  try {
+    const payload = await fetchJson(
+      `/api/coalitions/${encodeURIComponent(coalitionId)}/voter-map/districts/${encodeURIComponent(districtId)}/unit-sets`,
+      { auth: true },
+    );
+    admin.unitSets = readArrayPayload(payload, ["unitSets", "items", "data"]).map(
+      normalizeCoalitionDistrictUnitSet,
+    );
+    admin.unitSetsLoaded = true;
+    admin.selectedUnitSetId =
+      selectedCoalitionTerritoryUnitSetId(formData, admin) ||
+      admin.unitSets[0]?.unitSetId ||
+      "";
+    admin.generationDistrictId = districtId;
+    return true;
+  } catch (error) {
+    admin.unitSetsError = settingsErrorMessage(
+      error,
+      "Territory unit sets could not be loaded.",
+    );
+    showToast(admin.unitSetsError);
+    return false;
+  } finally {
+    admin.unitSetsLoading = false;
+    scheduleRender();
+  }
+}
+
+async function createCoalitionTerritoryUnitSet(formData) {
+  const coalitionId = currentCoalitionDetailId();
+  const admin = coalitionTerritoryAdminWorkspace();
+  const districtId = coalitionTerritoryAdminDistrictId(formData);
+  const sourceType = normalizeString(formData.get("sourceType")) || "precinct";
+  if (!coalitionId || !districtId) {
+    admin.error = "Enter a district ID before building a unit set.";
+    showToast(admin.error);
+    scheduleRender();
+    return false;
+  }
+  admin.actionPendingKey = "unit-set:create";
+  admin.error = "";
+  admin.notice = "";
+  scheduleRender();
+  try {
+    const payload = await fetchJson(
+      `/api/coalitions/${encodeURIComponent(coalitionId)}/voter-map/districts/${encodeURIComponent(districtId)}/unit-sets`,
+      {
+        auth: true,
+        method: "POST",
+        body: {
+          sourceType,
+          districtName: normalizeString(formData.get("districtName")),
+          ...(sourceType === "hex"
+            ? {
+                hexResolution:
+                  positiveIntegerFromForm(formData, "hexResolution", 9) || 9,
+              }
+            : {}),
+        },
+      },
+    );
+    const created = normalizeCoalitionDistrictUnitSet(
+      readObjectPayload(payload.unitSet || payload.item || payload),
+    );
+    admin.selectedUnitSetId = created.unitSetId;
+    admin.notice = "Territory unit set build started.";
+    showToast(admin.notice);
+    await loadCoalitionTerritoryUnitSets(formData, { refresh: true });
+    return true;
+  } catch (error) {
+    admin.error = settingsErrorMessage(
+      error,
+      "Territory unit set could not be built.",
+    );
+    showToast(admin.error);
+    return false;
+  } finally {
+    admin.actionPendingKey = "";
+    scheduleRender();
+  }
+}
+
+async function startCoalitionTerritoryGeneration(formData) {
+  const coalitionId = currentCoalitionDetailId();
+  const admin = coalitionTerritoryAdminWorkspace();
+  const districtId = coalitionTerritoryAdminDistrictId(formData);
+  const unitSetId = selectedCoalitionTerritoryUnitSetId(formData, admin);
+  if (!coalitionId || !districtId || !unitSetId) {
+    admin.error = "Choose a district and unit set before generating territories.";
+    showToast(admin.error);
+    scheduleRender();
+    return false;
+  }
+  const mode = normalizeString(formData.get("mode")) || "target_count";
+  admin.actionPendingKey = "generation:start";
+  admin.error = "";
+  admin.notice = "";
+  scheduleRender();
+  try {
+    const payload = await fetchJson(
+      `/api/coalitions/${encodeURIComponent(coalitionId)}/voter-map/districts/${encodeURIComponent(districtId)}/generation-jobs`,
+      {
+        auth: true,
+        method: "POST",
+        body: {
+          unitSetId,
+          mode,
+          metric: normalizeString(formData.get("metric")) || "addressCount",
+          targetCount:
+            mode === "target_count"
+              ? positiveIntegerFromForm(formData, "targetCount", 12)
+              : undefined,
+          targetWorkload:
+            mode === "target_workload"
+              ? positiveIntegerFromForm(formData, "targetWorkload", 250)
+              : undefined,
+          seed: normalizeString(formData.get("seed")),
+          constraints: {
+            avoidIslands: formData.get("avoidIslands") === "on",
+            compactnessWeight: numberFromForm(formData, "compactnessWeight", 0.25),
+            keepSubareasIntact: parseCoalitionTerritoryCsvIds(
+              formData.get("keepSubareasIntact"),
+            ),
+          },
+        },
+      },
+    );
+    admin.generationJob = normalizeCoalitionGenerationJob(payload);
+    admin.generationDistrictId = districtId;
+    admin.selectedUnitSetId = unitSetId;
+    admin.notice = "Territory generation started.";
+    showToast(admin.notice);
+    await refreshCoalitionVoterMapAccess();
+    return true;
+  } catch (error) {
+    admin.error = settingsErrorMessage(
+      error,
+      "Territory generation could not be started.",
+    );
+    showToast(admin.error);
+    return false;
+  } finally {
+    admin.actionPendingKey = "";
+    scheduleRender();
+  }
+}
+
+async function loadCoalitionTerritoryGenerationJob({ refresh = false } = {}) {
+  const coalitionId = currentCoalitionDetailId();
+  const admin = coalitionTerritoryAdminWorkspace();
+  const districtId = normalizeString(admin.generationDistrictId);
+  const jobId = normalizeString(admin.generationJob?.jobId);
+  if (!coalitionId || !districtId || !jobId) {
+    return false;
+  }
+  if (admin.actionPendingKey === "generation:refresh" && !refresh) {
+    return false;
+  }
+  admin.actionPendingKey = "generation:refresh";
+  admin.error = "";
+  scheduleRender();
+  try {
+    const payload = await fetchJson(
+      `/api/coalitions/${encodeURIComponent(coalitionId)}/voter-map/districts/${encodeURIComponent(districtId)}/generation-jobs/${encodeURIComponent(jobId)}`,
+      { auth: true },
+    );
+    admin.generationJob = normalizeCoalitionGenerationJob(payload);
+    return true;
+  } catch (error) {
+    admin.error = settingsErrorMessage(
+      error,
+      "Territory generation job could not be refreshed.",
+    );
+    showToast(admin.error);
+    return false;
+  } finally {
+    admin.actionPendingKey = "";
+    scheduleRender();
+  }
+}
+
+async function completeCoalitionTerritoryGenerationJob(action) {
+  const normalizedAction = normalizeString(action);
+  const coalitionId = currentCoalitionDetailId();
+  const admin = coalitionTerritoryAdminWorkspace();
+  const districtId = normalizeString(admin.generationDistrictId);
+  const jobId = normalizeString(admin.generationJob?.jobId);
+  if (
+    !coalitionId ||
+    !districtId ||
+    !jobId ||
+    !["accept", "cancel"].includes(normalizedAction)
+  ) {
+    return false;
+  }
+  admin.actionPendingKey = `generation:${normalizedAction}`;
+  admin.error = "";
+  admin.notice = "";
+  scheduleRender();
+  try {
+    await fetchJson(
+      `/api/coalitions/${encodeURIComponent(coalitionId)}/voter-map/districts/${encodeURIComponent(districtId)}/generation-jobs/${encodeURIComponent(jobId)}/${normalizedAction}`,
+      {
+        auth: true,
+        method: "POST",
+      },
+    );
+    admin.notice =
+      normalizedAction === "accept"
+        ? "Generation preview accepted."
+        : "Generation job canceled.";
+    showToast(admin.notice);
+    await Promise.all([
+      loadCoalitionTerritoryGenerationJob({ refresh: true }),
+      refreshCoalitionVoterMapAccess(),
+    ]);
+    return true;
+  } catch (error) {
+    admin.error = settingsErrorMessage(
+      error,
+      normalizedAction === "accept"
+        ? "Generation preview could not be accepted."
+        : "Generation job could not be canceled.",
+    );
+    showToast(admin.error);
+    return false;
+  } finally {
+    admin.actionPendingKey = "";
+    scheduleRender();
+  }
+}
+
+async function runCoalitionTerritoryEditorAction(actionKey, request) {
+  const admin = coalitionTerritoryAdminWorkspace();
+  admin.actionPendingKey = `editor:${actionKey}`;
+  admin.error = "";
+  admin.notice = "";
+  scheduleRender();
+  try {
+    const payload = await request();
+    admin.editorResult = readObjectPayload(payload);
+    admin.notice = "Territory action completed.";
+    showToast(admin.notice);
+    await refreshCoalitionVoterMapAccess();
+    return true;
+  } catch (error) {
+    admin.error = settingsErrorMessage(
+      error,
+      "Territory action could not be completed.",
+    );
+    showToast(admin.error);
+    return false;
+  } finally {
+    admin.actionPendingKey = "";
+    scheduleRender();
+  }
+}
+
+async function submitCoalitionTerritoryEdit(formData) {
+  const coalitionId = currentCoalitionDetailId();
+  const territoryId = normalizeString(formData.get("territoryId"));
+  const unitIds = parseCoalitionTerritoryCsvIds(formData.get("unitIds"));
+  const baseVersion = positiveIntegerFromForm(formData, "baseVersion");
+  if (!coalitionId || !territoryId || !baseVersion || !unitIds.length) {
+    const admin = coalitionTerritoryAdminWorkspace();
+    admin.error = "Choose a territory, base version, and at least one unit ID.";
+    showToast(admin.error);
+    scheduleRender();
+    return false;
+  }
+  const op = normalizeString(formData.get("operation")) || "move_units";
+  return runCoalitionTerritoryEditorAction("edit", () =>
+    fetchJson(
+      `/api/coalitions/${encodeURIComponent(coalitionId)}/voter-map/territories/${encodeURIComponent(territoryId)}/edits`,
+      {
+        auth: true,
+        method: "POST",
+        body: {
+          baseVersion,
+          operations: [
+            {
+              op,
+              unitIds,
+              ...(op === "move_units" &&
+              normalizeString(formData.get("toTerritoryId"))
+                ? { toTerritoryId: normalizeString(formData.get("toTerritoryId")) }
+                : {}),
+            },
+          ],
+          ...(normalizeString(formData.get("reason"))
+            ? { reason: normalizeString(formData.get("reason")) }
+            : {}),
+        },
+      },
+    ),
+  );
+}
+
+async function submitCoalitionTerritoryQuickAction(formData) {
+  const coalitionId = currentCoalitionDetailId();
+  const territoryId = normalizeString(formData.get("territoryId"));
+  const baseVersion = positiveIntegerFromForm(formData, "baseVersion");
+  const action = normalizeString(formData.get("editorAction"));
+  if (!coalitionId || !territoryId || !["rebalance", "publish"].includes(action)) {
+    return false;
+  }
+  if (action === "publish") {
+    return runCoalitionTerritoryEditorAction("publish", () =>
+      fetchJson(
+        `/api/coalitions/${encodeURIComponent(coalitionId)}/voter-map/territories/${encodeURIComponent(territoryId)}/publish`,
+        { auth: true, method: "POST" },
+      ),
+    );
+  }
+  if (!baseVersion) {
+    const admin = coalitionTerritoryAdminWorkspace();
+    admin.error = "Base version must be a positive integer.";
+    showToast(admin.error);
+    scheduleRender();
+    return false;
+  }
+  return runCoalitionTerritoryEditorAction("rebalance", () =>
+    fetchJson(
+      `/api/coalitions/${encodeURIComponent(coalitionId)}/voter-map/territories/${encodeURIComponent(territoryId)}/rebalance`,
+      {
+        auth: true,
+        method: "POST",
+        body: { baseVersion },
+      },
+    ),
+  );
+}
+
+async function submitCoalitionTerritorySplit(formData) {
+  const coalitionId = currentCoalitionDetailId();
+  const territoryId = normalizeString(formData.get("territoryId"));
+  const baseVersion = positiveIntegerFromForm(formData, "baseVersion");
+  const splitUnitIds = parseCoalitionTerritoryCsvIds(formData.get("splitUnitIds"));
+  if (!coalitionId || !territoryId || !baseVersion || !splitUnitIds.length) {
+    const admin = coalitionTerritoryAdminWorkspace();
+    admin.error = "Choose a territory, base version, and split unit IDs.";
+    showToast(admin.error);
+    scheduleRender();
+    return false;
+  }
+  return runCoalitionTerritoryEditorAction("split", () =>
+    fetchJson(
+      `/api/coalitions/${encodeURIComponent(coalitionId)}/voter-map/territories/${encodeURIComponent(territoryId)}/split`,
+      {
+        auth: true,
+        method: "POST",
+        body: {
+          baseVersion,
+          splitUnitIds,
+          newTerritoryName: normalizeString(formData.get("newTerritoryName")),
+          publish: formData.get("publish") === "on",
+        },
+      },
+    ),
+  );
+}
+
+async function submitCoalitionTerritoryMerge(formData) {
+  const coalitionId = currentCoalitionDetailId();
+  const territoryIds = parseCoalitionTerritoryCsvIds(formData.get("territoryIds"));
+  if (!coalitionId || territoryIds.length < 2) {
+    const admin = coalitionTerritoryAdminWorkspace();
+    admin.error = "Enter at least two territory IDs to merge.";
+    showToast(admin.error);
+    scheduleRender();
+    return false;
+  }
+  return runCoalitionTerritoryEditorAction("merge", () =>
+    fetchJson(
+      `/api/coalitions/${encodeURIComponent(coalitionId)}/voter-map/territories/merge`,
+      {
+        auth: true,
+        method: "POST",
+        body: {
+          territoryIds,
+          name: normalizeString(formData.get("name")),
+          publish: formData.get("publish") === "on",
+        },
+      },
+    ),
+  );
+}
+
+async function loadCoalitionTerritoryAssignments(
+  coalitionId = currentCoalitionDetailId(),
+  { territoryId = "", refresh = false } = {},
+) {
+  const normalizedCoalitionId = normalizeString(coalitionId);
+  const detail = state.pages.coalitions.detail;
+  const workspace = coalitionVoterMapWorkspace();
+  const assignments = coalitionTerritoryAssignmentsWorkspace();
+  const access =
+    workspace.access || detail.voterMapAccess || normalizeCoalitionVoterMapAccess({});
+  const selectedTerritoryId = coalitionTerritoryOptionId(
+    access,
+    normalizeString(territoryId) || assignments.territoryId,
+  );
+  if (!normalizedCoalitionId || !selectedTerritoryId) {
+    assignments.error = "Choose a territory before loading assignments.";
+    scheduleRender();
+    return false;
+  }
+  if (assignments.loading && !refresh) {
+    return false;
+  }
+  if (
+    assignments.loaded &&
+    assignments.territoryId === selectedTerritoryId &&
+    !refresh
+  ) {
+    return true;
+  }
+  assignments.territoryId = selectedTerritoryId;
+  assignments.loading = true;
+  assignments.error = "";
+  assignments.notice = "";
+  scheduleRender();
+  try {
+    const payload = await fetchJson(
+      `/api/coalitions/${encodeURIComponent(normalizedCoalitionId)}/voter-map/territories/${encodeURIComponent(selectedTerritoryId)}/assignments`,
+      { auth: true },
+    );
+    assignments.items = readArrayPayload(payload, [
+      "assignments",
+      "items",
+      "data",
+    ]).map(normalizeCoalitionTerritoryAssignment);
+    assignments.loaded = true;
+    return true;
+  } catch (error) {
+    assignments.error = settingsErrorMessage(
+      error,
+      "Territory assignments could not be loaded.",
+    );
+    showToast(assignments.error);
+    return false;
+  } finally {
+    assignments.loading = false;
+    scheduleRender();
+  }
+}
+
+async function createCoalitionTerritoryAssignment(formData) {
+  const coalitionId = currentCoalitionDetailId();
+  const detail = state.pages.coalitions.detail;
+  const access =
+    detail.voterMapWorkspace?.access ||
+    detail.voterMapAccess ||
+    normalizeCoalitionVoterMapAccess({});
+  const assignments = coalitionTerritoryAssignmentsWorkspace();
+  const territoryId = coalitionTerritoryOptionId(
+    access,
+    normalizeString(formData.get("territoryId")),
+  );
+  const userId = normalizeString(formData.get("userId"));
+  if (!coalitionId || !territoryId || !userId) {
+    assignments.error = "Choose a territory and enter a user ID.";
+    showToast(assignments.error);
+    scheduleRender();
+    return false;
+  }
+  assignments.actionPendingKey = "assignment:create";
+  assignments.error = "";
+  assignments.notice = "";
+  scheduleRender();
+  try {
+    await fetchJson(
+      `/api/coalitions/${encodeURIComponent(coalitionId)}/voter-map/territories/${encodeURIComponent(territoryId)}/assignments`,
+      {
+        auth: true,
+        method: "POST",
+        body: {
+          userId,
+          ...(normalizeString(formData.get("startsAt"))
+            ? { startsAt: normalizeString(formData.get("startsAt")) }
+            : {}),
+          ...(normalizeString(formData.get("endsAt"))
+            ? { endsAt: normalizeString(formData.get("endsAt")) }
+            : {}),
+        },
+      },
+    );
+    assignments.notice = "Territory assignment created.";
+    showToast(assignments.notice);
+    await Promise.all([
+      loadCoalitionTerritoryAssignments(coalitionId, {
+        territoryId,
+        refresh: true,
+      }),
+      refreshCoalitionVoterMapAccess(),
+    ]);
+    return true;
+  } catch (error) {
+    assignments.error = settingsErrorMessage(
+      error,
+      "Territory assignment could not be created.",
+    );
+    showToast(assignments.error);
+    return false;
+  } finally {
+    assignments.actionPendingKey = "";
+    scheduleRender();
+  }
+}
+
+async function revokeCoalitionTerritoryAssignment({
+  territoryId = "",
+  assignmentId = "",
+  userId = "",
+} = {}) {
+  const coalitionId = currentCoalitionDetailId();
+  const assignments = coalitionTerritoryAssignmentsWorkspace();
+  const normalizedTerritoryId = normalizeString(territoryId) || assignments.territoryId;
+  const normalizedAssignmentId = normalizeString(assignmentId);
+  const normalizedUserId = normalizeString(userId);
+  if (!coalitionId || !normalizedTerritoryId || !normalizedAssignmentId || !normalizedUserId) {
+    assignments.error = "Assignment unavailable.";
+    showToast(assignments.error);
+    scheduleRender();
+    return false;
+  }
+  if (
+    typeof window.confirm === "function" &&
+    !window.confirm("Revoke this territory assignment?")
+  ) {
+    return false;
+  }
+  const actionKey = `assignment:revoke:${normalizedAssignmentId}`;
+  assignments.actionPendingKey = actionKey;
+  assignments.error = "";
+  assignments.notice = "";
+  scheduleRender();
+  try {
+    await fetchJson(
+      `/api/coalitions/${encodeURIComponent(coalitionId)}/voter-map/territories/${encodeURIComponent(normalizedTerritoryId)}/assignments/${encodeURIComponent(normalizedAssignmentId)}/revoke`,
+      {
+        auth: true,
+        method: "POST",
+        body: { userId: normalizedUserId },
+      },
+    );
+    assignments.notice = "Territory assignment revoked.";
+    showToast(assignments.notice);
+    await Promise.all([
+      loadCoalitionTerritoryAssignments(coalitionId, {
+        territoryId: normalizedTerritoryId,
+        refresh: true,
+      }),
+      refreshCoalitionVoterMapAccess(),
+    ]);
+    return true;
+  } catch (error) {
+    assignments.error = settingsErrorMessage(
+      error,
+      "Territory assignment could not be revoked.",
+    );
+    showToast(assignments.error);
+    return false;
+  } finally {
+    if (assignments.actionPendingKey === actionKey) {
+      assignments.actionPendingKey = "";
+    }
+    scheduleRender();
+  }
+}
+
+async function reassignCoalitionTerritoryAssignment(formData) {
+  const coalitionId = currentCoalitionDetailId();
+  const detail = state.pages.coalitions.detail;
+  const access =
+    detail.voterMapWorkspace?.access ||
+    detail.voterMapAccess ||
+    normalizeCoalitionVoterMapAccess({});
+  const assignments = coalitionTerritoryAssignmentsWorkspace();
+  const territoryId = coalitionTerritoryOptionId(
+    access,
+    normalizeString(formData.get("territoryId")),
+  );
+  const fromUserId = normalizeString(formData.get("fromUserId"));
+  const toUserId = normalizeString(formData.get("toUserId"));
+  if (!coalitionId || !territoryId || !fromUserId || !toUserId) {
+    assignments.error = "Choose a territory and enter both user IDs.";
+    showToast(assignments.error);
+    scheduleRender();
+    return false;
+  }
+  assignments.actionPendingKey = "assignment:reassign";
+  assignments.error = "";
+  assignments.notice = "";
+  scheduleRender();
+  try {
+    await fetchJson(
+      `/api/coalitions/${encodeURIComponent(coalitionId)}/voter-map/assignments/reassign`,
+      {
+        auth: true,
+        method: "POST",
+        body: { territoryId, fromUserId, toUserId },
+      },
+    );
+    assignments.notice = "Territory assignment reassigned.";
+    showToast(assignments.notice);
+    await Promise.all([
+      loadCoalitionTerritoryAssignments(coalitionId, {
+        territoryId,
+        refresh: true,
+      }),
+      refreshCoalitionVoterMapAccess(),
+    ]);
+    return true;
+  } catch (error) {
+    assignments.error = settingsErrorMessage(
+      error,
+      "Territory assignment could not be reassigned.",
+    );
+    showToast(assignments.error);
+    return false;
+  } finally {
+    assignments.actionPendingKey = "";
+    scheduleRender();
+  }
+}
+
+function candidateVoterMapWorkspace() {
+  const detail = state.pages.candidateDashboard.detail;
+  if (!detail.voterMap) {
+    detail.voterMap = createCandidateDashboardVoterMapState();
+  }
+  if (!detail.voterMap.templates) {
+    detail.voterMap.templates = createVoterMapOutreachTemplatesState();
+  }
+  if (!detail.voterMap.notes) {
+    detail.voterMap.notes = createVoterMapNotesState();
+  }
+  if (!detail.voterMap.assignments) {
+    detail.voterMap.assignments = createCoalitionTerritoryAssignmentsState();
+  }
+  if (!detail.voterMap.territoryAdmin) {
+    detail.voterMap.territoryAdmin = createCoalitionTerritoryAdminState();
+  }
+  return detail.voterMap;
+}
+
+function candidateTerritoryAssignmentsWorkspace() {
+  const workspace = candidateVoterMapWorkspace();
+  if (!workspace.assignments) {
+    workspace.assignments = createCoalitionTerritoryAssignmentsState();
+  }
+  return workspace.assignments;
+}
+
+function selectedCandidateAssignmentTerritoryId(access = {}) {
+  const assignments = candidateTerritoryAssignmentsWorkspace();
+  return coalitionTerritoryOptionId(access, assignments.territoryId);
+}
+
+function candidateTerritoryAdminWorkspace() {
+  const workspace = candidateVoterMapWorkspace();
+  if (!workspace.territoryAdmin) {
+    workspace.territoryAdmin = createCoalitionTerritoryAdminState();
+  }
+  return workspace.territoryAdmin;
+}
+
+function setCandidateTerritoryAdminTab(tab) {
+  const normalized = normalizeString(tab);
+  if (!["wizard", "editor", "assignments"].includes(normalized)) {
+    return;
+  }
+  candidateTerritoryAdminWorkspace().activeTab = normalized;
+  scheduleRender();
+}
+
+function candidateVoterMapApiPath(path, candidateId = currentCandidateDashboardId()) {
+  const normalizedCandidateId = normalizeString(candidateId);
+  if (!normalizedCandidateId) {
+    return path;
+  }
+  const separator = path.includes("?") ? "&" : "?";
+  return `${path}${separator}candidateId=${encodeURIComponent(normalizedCandidateId)}`;
+}
+
+async function refreshCandidateVoterMapAccess(candidateId = currentCandidateDashboardId()) {
+  const normalizedCandidateId = normalizeString(candidateId);
+  if (!normalizedCandidateId) {
+    return false;
+  }
+  await loadCandidateDashboardVoterMapAccess(normalizedCandidateId, {
+    refresh: true,
+  });
+  return true;
+}
+
+async function loadCandidateTerritoryUnitSets(
+  formData,
+  { refresh = false } = {},
+) {
+  const candidateId = currentCandidateDashboardId();
+  const admin = candidateTerritoryAdminWorkspace();
+  const districtId = coalitionTerritoryAdminDistrictId(formData);
+  if (!candidateId || !districtId) {
+    admin.unitSetsError = "Enter a district ID before loading unit sets.";
+    scheduleRender();
+    return false;
+  }
+  if (admin.unitSetsLoading && !refresh) {
+    return false;
+  }
+  if (admin.unitSetsLoaded && !refresh) {
+    return true;
+  }
+  admin.unitSetsLoading = true;
+  admin.unitSetsError = "";
+  admin.error = "";
+  scheduleRender();
+  try {
+    const payload = await fetchJson(
+      candidateVoterMapApiPath(
+        `/api/candidate-dashboard/voter-map/districts/${encodeURIComponent(districtId)}/unit-sets`,
+        candidateId,
+      ),
+      { auth: true },
+    );
+    admin.unitSets = readArrayPayload(payload, ["unitSets", "items", "data"]).map(
+      normalizeCoalitionDistrictUnitSet,
+    );
+    admin.unitSetsLoaded = true;
+    admin.selectedUnitSetId =
+      selectedCoalitionTerritoryUnitSetId(formData, admin) ||
+      admin.unitSets[0]?.unitSetId ||
+      "";
+    admin.generationDistrictId = districtId;
+    return true;
+  } catch (error) {
+    admin.unitSetsError = settingsErrorMessage(
+      error,
+      "Candidate territory unit sets could not be loaded.",
+    );
+    showToast(admin.unitSetsError);
+    return false;
+  } finally {
+    admin.unitSetsLoading = false;
+    scheduleRender();
+  }
+}
+
+async function createCandidateTerritoryUnitSet(formData) {
+  const candidateId = currentCandidateDashboardId();
+  const admin = candidateTerritoryAdminWorkspace();
+  const districtId = coalitionTerritoryAdminDistrictId(formData);
+  const sourceType = normalizeString(formData.get("sourceType")) || "precinct";
+  if (!candidateId || !districtId) {
+    admin.error = "Enter a district ID before building a unit set.";
+    showToast(admin.error);
+    scheduleRender();
+    return false;
+  }
+  admin.actionPendingKey = "unit-set:create";
+  admin.error = "";
+  admin.notice = "";
+  scheduleRender();
+  try {
+    const payload = await fetchJson(
+      candidateVoterMapApiPath(
+        `/api/candidate-dashboard/voter-map/districts/${encodeURIComponent(districtId)}/unit-sets`,
+        candidateId,
+      ),
+      {
+        auth: true,
+        method: "POST",
+        body: {
+          sourceType,
+          districtName: normalizeString(formData.get("districtName")),
+          ...(sourceType === "hex"
+            ? {
+                hexResolution:
+                  positiveIntegerFromForm(formData, "hexResolution", 9) || 9,
+              }
+            : {}),
+        },
+      },
+    );
+    const created = normalizeCoalitionDistrictUnitSet(
+      readObjectPayload(payload.unitSet || payload.item || payload),
+    );
+    admin.selectedUnitSetId = created.unitSetId;
+    admin.notice = "Candidate territory unit set build started.";
+    showToast(admin.notice);
+    await loadCandidateTerritoryUnitSets(formData, { refresh: true });
+    return true;
+  } catch (error) {
+    admin.error = settingsErrorMessage(
+      error,
+      "Candidate territory unit set could not be built.",
+    );
+    showToast(admin.error);
+    return false;
+  } finally {
+    admin.actionPendingKey = "";
+    scheduleRender();
+  }
+}
+
+async function startCandidateTerritoryGeneration(formData) {
+  const candidateId = currentCandidateDashboardId();
+  const admin = candidateTerritoryAdminWorkspace();
+  const districtId = coalitionTerritoryAdminDistrictId(formData);
+  const unitSetId = selectedCoalitionTerritoryUnitSetId(formData, admin);
+  if (!candidateId || !districtId || !unitSetId) {
+    admin.error = "Choose a district and unit set before generating territories.";
+    showToast(admin.error);
+    scheduleRender();
+    return false;
+  }
+  const mode = normalizeString(formData.get("mode")) || "target_count";
+  admin.actionPendingKey = "generation:start";
+  admin.error = "";
+  admin.notice = "";
+  scheduleRender();
+  try {
+    const payload = await fetchJson(
+      candidateVoterMapApiPath(
+        `/api/candidate-dashboard/voter-map/districts/${encodeURIComponent(districtId)}/generation-jobs`,
+        candidateId,
+      ),
+      {
+        auth: true,
+        method: "POST",
+        body: {
+          unitSetId,
+          mode,
+          metric: normalizeString(formData.get("metric")) || "addressCount",
+          targetCount:
+            mode === "target_count"
+              ? positiveIntegerFromForm(formData, "targetCount", 12)
+              : undefined,
+          targetWorkload:
+            mode === "target_workload"
+              ? positiveIntegerFromForm(formData, "targetWorkload", 250)
+              : undefined,
+          seed: normalizeString(formData.get("seed")),
+          constraints: {
+            avoidIslands: formData.get("avoidIslands") === "on",
+            compactnessWeight: numberFromForm(formData, "compactnessWeight", 0.25),
+            keepSubareasIntact: parseCoalitionTerritoryCsvIds(
+              formData.get("keepSubareasIntact"),
+            ),
+          },
+        },
+      },
+    );
+    admin.generationJob = normalizeCoalitionGenerationJob(payload);
+    admin.generationDistrictId = districtId;
+    admin.selectedUnitSetId = unitSetId;
+    admin.notice = "Candidate territory generation started.";
+    showToast(admin.notice);
+    await refreshCandidateVoterMapAccess(candidateId);
+    return true;
+  } catch (error) {
+    admin.error = settingsErrorMessage(
+      error,
+      "Candidate territory generation could not be started.",
+    );
+    showToast(admin.error);
+    return false;
+  } finally {
+    admin.actionPendingKey = "";
+    scheduleRender();
+  }
+}
+
+async function loadCandidateTerritoryGenerationJob({ refresh = false } = {}) {
+  const candidateId = currentCandidateDashboardId();
+  const admin = candidateTerritoryAdminWorkspace();
+  const districtId = normalizeString(admin.generationDistrictId);
+  const jobId = normalizeString(admin.generationJob?.jobId);
+  if (!candidateId || !districtId || !jobId) {
+    return false;
+  }
+  if (admin.actionPendingKey === "generation:refresh" && !refresh) {
+    return false;
+  }
+  admin.actionPendingKey = "generation:refresh";
+  admin.error = "";
+  scheduleRender();
+  try {
+    const payload = await fetchJson(
+      candidateVoterMapApiPath(
+        `/api/candidate-dashboard/voter-map/districts/${encodeURIComponent(districtId)}/generation-jobs/${encodeURIComponent(jobId)}`,
+        candidateId,
+      ),
+      { auth: true },
+    );
+    admin.generationJob = normalizeCoalitionGenerationJob(payload);
+    return true;
+  } catch (error) {
+    admin.error = settingsErrorMessage(
+      error,
+      "Candidate territory generation job could not be refreshed.",
+    );
+    showToast(admin.error);
+    return false;
+  } finally {
+    admin.actionPendingKey = "";
+    scheduleRender();
+  }
+}
+
+async function completeCandidateTerritoryGenerationJob(action) {
+  const normalizedAction = normalizeString(action);
+  const candidateId = currentCandidateDashboardId();
+  const admin = candidateTerritoryAdminWorkspace();
+  const districtId = normalizeString(admin.generationDistrictId);
+  const jobId = normalizeString(admin.generationJob?.jobId);
+  if (
+    !candidateId ||
+    !districtId ||
+    !jobId ||
+    !["accept", "cancel"].includes(normalizedAction)
+  ) {
+    return false;
+  }
+  admin.actionPendingKey = `generation:${normalizedAction}`;
+  admin.error = "";
+  admin.notice = "";
+  scheduleRender();
+  try {
+    await fetchJson(
+      candidateVoterMapApiPath(
+        `/api/candidate-dashboard/voter-map/districts/${encodeURIComponent(districtId)}/generation-jobs/${encodeURIComponent(jobId)}/${normalizedAction}`,
+        candidateId,
+      ),
+      {
+        auth: true,
+        method: "POST",
+      },
+    );
+    admin.notice =
+      normalizedAction === "accept"
+        ? "Candidate generation preview accepted."
+        : "Candidate generation job canceled.";
+    showToast(admin.notice);
+    await Promise.all([
+      loadCandidateTerritoryGenerationJob({ refresh: true }),
+      refreshCandidateVoterMapAccess(candidateId),
+    ]);
+    return true;
+  } catch (error) {
+    admin.error = settingsErrorMessage(
+      error,
+      normalizedAction === "accept"
+        ? "Candidate generation preview could not be accepted."
+        : "Candidate generation job could not be canceled.",
+    );
+    showToast(admin.error);
+    return false;
+  } finally {
+    admin.actionPendingKey = "";
+    scheduleRender();
+  }
+}
+
+async function runCandidateTerritoryEditorAction(actionKey, request) {
+  const candidateId = currentCandidateDashboardId();
+  const admin = candidateTerritoryAdminWorkspace();
+  if (!candidateId) {
+    return false;
+  }
+  admin.actionPendingKey = `editor:${actionKey}`;
+  admin.error = "";
+  admin.notice = "";
+  scheduleRender();
+  try {
+    const payload = await request(candidateId);
+    admin.editorResult = readObjectPayload(payload);
+    admin.notice = "Candidate territory action completed.";
+    showToast(admin.notice);
+    await refreshCandidateVoterMapAccess(candidateId);
+    return true;
+  } catch (error) {
+    admin.error = settingsErrorMessage(
+      error,
+      "Candidate territory action could not be completed.",
+    );
+    showToast(admin.error);
+    return false;
+  } finally {
+    admin.actionPendingKey = "";
+    scheduleRender();
+  }
+}
+
+async function submitCandidateTerritoryEdit(formData) {
+  const territoryId = normalizeString(formData.get("territoryId"));
+  const unitIds = parseCoalitionTerritoryCsvIds(formData.get("unitIds"));
+  const baseVersion = positiveIntegerFromForm(formData, "baseVersion");
+  if (!territoryId || !baseVersion || !unitIds.length) {
+    const admin = candidateTerritoryAdminWorkspace();
+    admin.error = "Choose a territory, base version, and at least one unit ID.";
+    showToast(admin.error);
+    scheduleRender();
+    return false;
+  }
+  const op = normalizeString(formData.get("operation")) || "move_units";
+  return runCandidateTerritoryEditorAction("edit", (candidateId) =>
+    fetchJson(
+      candidateVoterMapApiPath(
+        `/api/candidate-dashboard/voter-map/territories/${encodeURIComponent(territoryId)}/edits`,
+        candidateId,
+      ),
+      {
+        auth: true,
+        method: "POST",
+        body: {
+          baseVersion,
+          operations: [
+            {
+              op,
+              unitIds,
+              ...(op === "move_units" &&
+              normalizeString(formData.get("toTerritoryId"))
+                ? { toTerritoryId: normalizeString(formData.get("toTerritoryId")) }
+                : {}),
+            },
+          ],
+          ...(normalizeString(formData.get("reason"))
+            ? { reason: normalizeString(formData.get("reason")) }
+            : {}),
+        },
+      },
+    ),
+  );
+}
+
+async function submitCandidateTerritoryQuickAction(formData) {
+  const territoryId = normalizeString(formData.get("territoryId"));
+  const baseVersion = positiveIntegerFromForm(formData, "baseVersion");
+  const action = normalizeString(formData.get("editorAction"));
+  if (!territoryId || !["rebalance", "publish"].includes(action)) {
+    return false;
+  }
+  if (action === "publish") {
+    return runCandidateTerritoryEditorAction("publish", (candidateId) =>
+      fetchJson(
+        candidateVoterMapApiPath(
+          `/api/candidate-dashboard/voter-map/territories/${encodeURIComponent(territoryId)}/publish`,
+          candidateId,
+        ),
+        { auth: true, method: "POST" },
+      ),
+    );
+  }
+  if (!baseVersion) {
+    const admin = candidateTerritoryAdminWorkspace();
+    admin.error = "Base version must be a positive integer.";
+    showToast(admin.error);
+    scheduleRender();
+    return false;
+  }
+  return runCandidateTerritoryEditorAction("rebalance", (candidateId) =>
+    fetchJson(
+      candidateVoterMapApiPath(
+        `/api/candidate-dashboard/voter-map/territories/${encodeURIComponent(territoryId)}/rebalance`,
+        candidateId,
+      ),
+      {
+        auth: true,
+        method: "POST",
+        body: { baseVersion },
+      },
+    ),
+  );
+}
+
+async function submitCandidateTerritorySplit(formData) {
+  const territoryId = normalizeString(formData.get("territoryId"));
+  const baseVersion = positiveIntegerFromForm(formData, "baseVersion");
+  const splitUnitIds = parseCoalitionTerritoryCsvIds(formData.get("splitUnitIds"));
+  if (!territoryId || !baseVersion || !splitUnitIds.length) {
+    const admin = candidateTerritoryAdminWorkspace();
+    admin.error = "Choose a territory, base version, and split unit IDs.";
+    showToast(admin.error);
+    scheduleRender();
+    return false;
+  }
+  return runCandidateTerritoryEditorAction("split", (candidateId) =>
+    fetchJson(
+      candidateVoterMapApiPath(
+        `/api/candidate-dashboard/voter-map/territories/${encodeURIComponent(territoryId)}/split`,
+        candidateId,
+      ),
+      {
+        auth: true,
+        method: "POST",
+        body: {
+          baseVersion,
+          splitUnitIds,
+          newTerritoryName: normalizeString(formData.get("newTerritoryName")),
+          publish: formData.get("publish") === "on",
+        },
+      },
+    ),
+  );
+}
+
+async function submitCandidateTerritoryMerge(formData) {
+  const territoryIds = parseCoalitionTerritoryCsvIds(formData.get("territoryIds"));
+  if (territoryIds.length < 2) {
+    const admin = candidateTerritoryAdminWorkspace();
+    admin.error = "Enter at least two territory IDs to merge.";
+    showToast(admin.error);
+    scheduleRender();
+    return false;
+  }
+  return runCandidateTerritoryEditorAction("merge", (candidateId) =>
+    fetchJson(
+      candidateVoterMapApiPath(
+        "/api/candidate-dashboard/voter-map/territories/merge",
+        candidateId,
+      ),
+      {
+        auth: true,
+        method: "POST",
+        body: {
+          territoryIds,
+          name: normalizeString(formData.get("name")),
+          publish: formData.get("publish") === "on",
+        },
+      },
+    ),
+  );
+}
+
+async function loadCandidateTerritoryAssignments(
+  candidateId = currentCandidateDashboardId(),
+  { territoryId = "", refresh = false } = {},
+) {
+  const normalizedCandidateId = normalizeString(candidateId);
+  const workspace = candidateVoterMapWorkspace();
+  const assignments = candidateTerritoryAssignmentsWorkspace();
+  const access = workspace.access || normalizeCandidateVoterMapAccess({});
+  const selectedTerritoryId = coalitionTerritoryOptionId(
+    access,
+    normalizeString(territoryId) || assignments.territoryId,
+  );
+  if (!normalizedCandidateId || !selectedTerritoryId) {
+    assignments.error = "Choose a territory before loading assignments.";
+    scheduleRender();
+    return false;
+  }
+  if (assignments.loading && !refresh) {
+    return false;
+  }
+  if (
+    assignments.loaded &&
+    assignments.territoryId === selectedTerritoryId &&
+    !refresh
+  ) {
+    return true;
+  }
+  assignments.territoryId = selectedTerritoryId;
+  assignments.loading = true;
+  assignments.error = "";
+  assignments.notice = "";
+  scheduleRender();
+  try {
+    const payload = await fetchJson(
+      candidateVoterMapApiPath(
+        `/api/candidate-dashboard/voter-map/territories/${encodeURIComponent(selectedTerritoryId)}/assignments`,
+        normalizedCandidateId,
+      ),
+      { auth: true },
+    );
+    assignments.items = readArrayPayload(payload, [
+      "assignments",
+      "items",
+      "data",
+    ]).map(normalizeCoalitionTerritoryAssignment);
+    assignments.loaded = true;
+    return true;
+  } catch (error) {
+    assignments.error = settingsErrorMessage(
+      error,
+      "Candidate territory assignments could not be loaded.",
+    );
+    showToast(assignments.error);
+    return false;
+  } finally {
+    assignments.loading = false;
+    scheduleRender();
+  }
+}
+
+async function createCandidateTerritoryAssignment(formData) {
+  const candidateId = currentCandidateDashboardId();
+  const workspace = candidateVoterMapWorkspace();
+  const access = workspace.access || normalizeCandidateVoterMapAccess({});
+  const assignments = candidateTerritoryAssignmentsWorkspace();
+  const territoryId = coalitionTerritoryOptionId(
+    access,
+    normalizeString(formData.get("territoryId")),
+  );
+  const userId = normalizeString(formData.get("userId"));
+  if (!candidateId || !territoryId || !userId) {
+    assignments.error = "Choose a territory and enter a user ID.";
+    showToast(assignments.error);
+    scheduleRender();
+    return false;
+  }
+  assignments.actionPendingKey = "assignment:create";
+  assignments.error = "";
+  assignments.notice = "";
+  scheduleRender();
+  try {
+    await fetchJson(
+      candidateVoterMapApiPath(
+        `/api/candidate-dashboard/voter-map/territories/${encodeURIComponent(territoryId)}/assignments`,
+        candidateId,
+      ),
+      {
+        auth: true,
+        method: "POST",
+        body: {
+          userId,
+          ...(normalizeString(formData.get("startsAt"))
+            ? { startsAt: normalizeString(formData.get("startsAt")) }
+            : {}),
+          ...(normalizeString(formData.get("endsAt"))
+            ? { endsAt: normalizeString(formData.get("endsAt")) }
+            : {}),
+        },
+      },
+    );
+    assignments.notice = "Candidate territory assignment created.";
+    showToast(assignments.notice);
+    await Promise.all([
+      loadCandidateTerritoryAssignments(candidateId, {
+        territoryId,
+        refresh: true,
+      }),
+      refreshCandidateVoterMapAccess(candidateId),
+    ]);
+    return true;
+  } catch (error) {
+    assignments.error = settingsErrorMessage(
+      error,
+      "Candidate territory assignment could not be created.",
+    );
+    showToast(assignments.error);
+    return false;
+  } finally {
+    assignments.actionPendingKey = "";
+    scheduleRender();
+  }
+}
+
+async function revokeCandidateTerritoryAssignment({
+  territoryId = "",
+  assignmentId = "",
+  userId = "",
+} = {}) {
+  const candidateId = currentCandidateDashboardId();
+  const assignments = candidateTerritoryAssignmentsWorkspace();
+  const normalizedTerritoryId = normalizeString(territoryId) || assignments.territoryId;
+  const normalizedAssignmentId = normalizeString(assignmentId);
+  const normalizedUserId = normalizeString(userId);
+  if (!candidateId || !normalizedTerritoryId || !normalizedAssignmentId || !normalizedUserId) {
+    assignments.error = "Assignment unavailable.";
+    showToast(assignments.error);
+    scheduleRender();
+    return false;
+  }
+  if (
+    typeof window.confirm === "function" &&
+    !window.confirm("Revoke this territory assignment?")
+  ) {
+    return false;
+  }
+  const actionKey = `assignment:revoke:${normalizedAssignmentId}`;
+  assignments.actionPendingKey = actionKey;
+  assignments.error = "";
+  assignments.notice = "";
+  scheduleRender();
+  try {
+    await fetchJson(
+      candidateVoterMapApiPath(
+        `/api/candidate-dashboard/voter-map/territories/${encodeURIComponent(normalizedTerritoryId)}/assignments/${encodeURIComponent(normalizedAssignmentId)}/revoke`,
+        candidateId,
+      ),
+      {
+        auth: true,
+        method: "POST",
+        body: { userId: normalizedUserId },
+      },
+    );
+    assignments.notice = "Candidate territory assignment revoked.";
+    showToast(assignments.notice);
+    await Promise.all([
+      loadCandidateTerritoryAssignments(candidateId, {
+        territoryId: normalizedTerritoryId,
+        refresh: true,
+      }),
+      refreshCandidateVoterMapAccess(candidateId),
+    ]);
+    return true;
+  } catch (error) {
+    assignments.error = settingsErrorMessage(
+      error,
+      "Candidate territory assignment could not be revoked.",
+    );
+    showToast(assignments.error);
+    return false;
+  } finally {
+    if (assignments.actionPendingKey === actionKey) {
+      assignments.actionPendingKey = "";
+    }
+    scheduleRender();
+  }
+}
+
+async function reassignCandidateTerritoryAssignment(formData) {
+  const candidateId = currentCandidateDashboardId();
+  const workspace = candidateVoterMapWorkspace();
+  const access = workspace.access || normalizeCandidateVoterMapAccess({});
+  const assignments = candidateTerritoryAssignmentsWorkspace();
+  const territoryId = coalitionTerritoryOptionId(
+    access,
+    normalizeString(formData.get("territoryId")),
+  );
+  const fromUserId = normalizeString(formData.get("fromUserId"));
+  const toUserId = normalizeString(formData.get("toUserId"));
+  if (!candidateId || !territoryId || !fromUserId || !toUserId) {
+    assignments.error = "Choose a territory and enter both user IDs.";
+    showToast(assignments.error);
+    scheduleRender();
+    return false;
+  }
+  assignments.actionPendingKey = "assignment:reassign";
+  assignments.error = "";
+  assignments.notice = "";
+  scheduleRender();
+  try {
+    await fetchJson(
+      candidateVoterMapApiPath(
+        "/api/candidate-dashboard/voter-map/assignments/reassign",
+        candidateId,
+      ),
+      {
+        auth: true,
+        method: "POST",
+        body: { territoryId, fromUserId, toUserId },
+      },
+    );
+    assignments.notice = "Candidate territory assignment reassigned.";
+    showToast(assignments.notice);
+    await Promise.all([
+      loadCandidateTerritoryAssignments(candidateId, {
+        territoryId,
+        refresh: true,
+      }),
+      refreshCandidateVoterMapAccess(candidateId),
+    ]);
+    return true;
+  } catch (error) {
+    assignments.error = settingsErrorMessage(
+      error,
+      "Candidate territory assignment could not be reassigned.",
+    );
+    showToast(assignments.error);
+    return false;
+  } finally {
+    assignments.actionPendingKey = "";
     scheduleRender();
   }
 }
@@ -19180,13 +22230,28 @@ async function loadCandidateDashboardCampaignQuest(
     if (progressResult.status === "fulfilled") {
       quest.progress = normalizeCampaignQuestProgress(progressResult.value);
     }
-    if (mapResult.status === "fulfilled") {
-      const page = normalizeCampaignQuestMapPage(mapResult.value);
-      quest.targets = page.targets;
-      quest.clusters = page.clusters;
-      if (page.config.outcomeFields.length || page.config.questTemplates.length) {
-        quest.config = page.config;
-      }
+      if (mapResult.status === "fulfilled") {
+        const page = normalizeCampaignQuestMapPage(mapResult.value);
+        quest.targets = page.targets;
+        quest.clusters = page.clusters;
+        if (
+          quest.selectedTargetId &&
+          !quest.targets.some((target) => target.recordId === quest.selectedTargetId)
+        ) {
+          quest.selectedTargetId = "";
+        }
+        if (
+          quest.categoryFilter !== "all" &&
+          !quest.targets.some((target) => target.targetCategory === quest.categoryFilter)
+        ) {
+          quest.categoryFilter = "all";
+        }
+        if (!quest.selectedTargetId && quest.targets[0]) {
+          quest.selectedTargetId = quest.targets[0].recordId;
+        }
+        if (page.config.outcomeFields.length || page.config.questTemplates.length) {
+          quest.config = page.config;
+        }
       if (page.progress.level || page.progress.lifetimeXp) {
         quest.progress = page.progress;
       }
@@ -19652,6 +22717,102 @@ async function saveCandidateCampaignQuestConfig(formData) {
   }
 }
 
+function setCampaignQuestCategoryFilter(category) {
+  const quest = state.pages.candidateDashboard.detail.campaignQuest;
+  const normalized = normalizeString(category) || "all";
+  const available = new Set([
+    "all",
+    ...quest.targets.map((target) => target.targetCategory).filter(Boolean),
+  ]);
+  quest.categoryFilter = available.has(normalized) ? normalized : "all";
+  const filtered = campaignQuestFilteredTargets(quest);
+  if (
+    quest.selectedTargetId &&
+    !filtered.some((target) => target.recordId === quest.selectedTargetId)
+  ) {
+    quest.selectedTargetId = "";
+  }
+  if (!quest.selectedTargetId && filtered[0]) {
+    quest.selectedTargetId = filtered[0].recordId;
+  }
+  scheduleRender();
+}
+
+function selectCampaignQuestTarget(recordId) {
+  const quest = state.pages.candidateDashboard.detail.campaignQuest;
+  const normalizedRecordId = normalizeString(recordId);
+  if (!normalizedRecordId) {
+    return false;
+  }
+  const target = quest.targets.find((item) => item.recordId === normalizedRecordId);
+  if (!target) {
+    showToast("Campaign Quest target unavailable.");
+    return false;
+  }
+  quest.selectedTargetId = target.recordId;
+  scheduleRender();
+  return true;
+}
+
+function stopCampaignQuestShift() {
+  const quest = state.pages.candidateDashboard.detail.campaignQuest;
+  quest.shiftActive = false;
+  quest.locationStatus = quest.lastKnownLocation
+    ? "Shift ended. Location retained for map context."
+    : "Shift ended.";
+  showToast("Campaign Quest shift ended.");
+  scheduleRender();
+}
+
+function requestCampaignQuestLocation({ startShift = false } = {}) {
+  const quest = state.pages.candidateDashboard.detail.campaignQuest;
+  if (!navigator.geolocation) {
+    quest.locationPending = false;
+    quest.locationStatus = "Browser location is unavailable.";
+    if (startShift) {
+      quest.shiftActive = false;
+    }
+    showToast("Browser location is unavailable.");
+    scheduleRender();
+    return false;
+  }
+  quest.locationPending = true;
+  quest.locationStatus = startShift ? "Starting shift..." : "Checking location...";
+  scheduleRender();
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      quest.locationPending = false;
+      quest.lastKnownLocation = {
+        lat: Number(position.coords.latitude),
+        lng: Number(position.coords.longitude),
+        accuracy: Number(position.coords.accuracy),
+        capturedAt: new Date().toISOString(),
+      };
+      quest.locationStatus = campaignQuestLocationCopy(quest);
+      if (startShift) {
+        quest.shiftActive = true;
+      }
+      showToast(startShift ? "Campaign Quest shift started." : "Location updated.");
+      scheduleRender();
+    },
+    () => {
+      quest.locationPending = false;
+      quest.locationStatus = "Location permission is blocked.";
+      if (startShift) {
+        quest.shiftActive = false;
+      }
+      showToast("Location permission is blocked.");
+      scheduleRender();
+    },
+    {
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 30000,
+    },
+  );
+  return true;
+}
+
 function findCampaignQuestTarget(recordId) {
   const normalizedRecordId = normalizeString(recordId);
   if (!normalizedRecordId) {
@@ -19881,6 +23042,56 @@ function candidateDonationHasLinkedPayoutBank(status = null) {
   );
 }
 
+function candidateDonationPayoutStatusTone(status = null) {
+  const payoutBank = candidateDonationPayoutBank(status);
+  const payoutStatus = normalizeString(payoutBank.status).toLowerCase();
+  if (
+    [
+      "pending",
+      "pending_verification",
+      "processing",
+      "requires_microdeposits",
+      "verification_pending",
+    ].includes(payoutStatus)
+  ) {
+    return "pending";
+  }
+  if (["failed", "rejected", "errored", "disabled"].includes(payoutStatus)) {
+    return "bad";
+  }
+  if (candidateDonationHasLinkedPayoutBank(status)) return "good";
+  return "pending";
+}
+
+function candidateDonationPayoutStatusCopy(status = null) {
+  const payoutBank = candidateDonationPayoutBank(status);
+  const payoutStatus = normalizeString(payoutBank.status).toLowerCase();
+  if (
+    [
+      "pending",
+      "pending_verification",
+      "processing",
+      "requires_microdeposits",
+      "verification_pending",
+    ].includes(payoutStatus)
+  ) {
+    return "Stripe has bank details and is still verifying the payout account.";
+  }
+  if (["failed", "rejected", "errored", "disabled"].includes(payoutStatus)) {
+    return "Stripe could not use this payout account. Link a different bank or complete remediation.";
+  }
+  if (candidateDonationHasLinkedPayoutBank(status)) {
+    return "Payout bank is linked and ready for campaign disbursements.";
+  }
+  if (
+    !candidateFinanceSectionComplete(status, "committee") ||
+    !candidateFinanceSectionComplete(status, "representative")
+  ) {
+    return "Committee and representative details are required before bank linking.";
+  }
+  return "Link a payout bank account to complete campaign finance setup.";
+}
+
 function candidateDonationReadinessReason(status = null) {
   const readinessReason = normalizeString(status?.readiness?.autoDisabledReason);
   const settingsReason = normalizeString(status?.settings?.autoDisabledReason);
@@ -20021,6 +23232,62 @@ async function collectCandidateDonationPayoutBankAccount(session, status = null)
     throw new Error("Bank linking was canceled.");
   }
   return setupIntent;
+}
+
+async function collectAndAttachCandidateDonationPayoutSession(session) {
+  const donations = state.pages.candidateDashboard.detail.donations;
+  const normalizedSession = normalizeCandidateDonationSession(session);
+  donations.pendingPayoutSession = normalizedSession;
+  if (!normalizedSession.clientSecret) {
+    showToast("Stripe bank-link client secret unavailable.");
+    return;
+  }
+  donations.actionPendingKey = "payout-collect";
+  donations.error = "";
+  scheduleRender();
+  try {
+    const collectionResult = await collectCandidateDonationPayoutBankAccount(
+      normalizedSession,
+      donations.status,
+    );
+    donations.pendingPayoutSession = {
+      ...normalizedSession,
+      clientCollectionError: "",
+      setupIntentStatus: normalizeString(collectionResult?.status),
+    };
+    showToast("Bank details collected. Checking payout status...");
+    await attachCandidateDonationPayoutSession();
+  } catch (error) {
+    const message = settingsErrorMessage(
+      error,
+      "Bank account collection could not be completed.",
+    );
+    donations.pendingPayoutSession = {
+      ...normalizedSession,
+      clientCollectionError: message,
+    };
+    donations.error = message;
+    showToast(message);
+  } finally {
+    if (donations.actionPendingKey === "payout-collect") {
+      donations.actionPendingKey = "";
+    }
+    scheduleRender();
+  }
+}
+
+async function resumeCandidateDonationPayoutCollection() {
+  const donations = state.pages.candidateDashboard.detail.donations;
+  const session = donations.pendingPayoutSession;
+  if (!session?.clientSecret) {
+    showToast("No browser bank-link session is waiting.");
+    return;
+  }
+  if (!hasStripeBrowserConfig()) {
+    showToast("Stripe bank linking is not configured for this website.");
+    return;
+  }
+  await collectAndAttachCandidateDonationPayoutSession(session);
 }
 
 async function fetchCandidateDonationStatus(candidateId) {
@@ -20403,19 +23670,12 @@ async function startCandidateDonationPayoutSession() {
       window.open(session.url, "_blank", "noopener,noreferrer");
       showToast("Payout bank link opened. Refresh status after completion.");
     } else if (session.clientSecret) {
-      donations.actionPendingKey = "payout-collect";
-      scheduleRender();
-      showToast("Secure Stripe bank link opened. Finish the modal to continue.");
-      const collectionResult = await collectCandidateDonationPayoutBankAccount(
-        session,
-        donations.status,
-      );
-      donations.pendingPayoutSession = {
-        ...session,
-        setupIntentStatus: normalizeString(collectionResult?.status),
-      };
-      showToast("Bank details collected. Checking payout status...");
-      await attachCandidateDonationPayoutSession();
+      if (!hasStripeBrowserConfig()) {
+        showToast("Stripe bank linking needs the website publishable key.");
+      } else {
+        showToast("Secure Stripe bank link opened.");
+        await collectAndAttachCandidateDonationPayoutSession(session);
+      }
     } else {
       showToast("Stripe bank linking is unavailable on web for this session.");
     }
@@ -20793,7 +24053,7 @@ function candidateDonationReturnUrl(status = "") {
       url.searchParams.set("donation", normalizeString(status));
     }
     return url.href;
-  } catch (_) {
+  } catch {
     return window.location.href;
   }
 }
@@ -21162,7 +24422,7 @@ async function startCandidateDonationCheckout() {
         "_blank",
         "noopener,noreferrer",
       );
-    } catch (_) {
+    } catch {
       opened = null;
     }
     if (opened) {
@@ -21511,7 +24771,7 @@ async function loadCandidateVoterMapPage({ refresh = false } = {}) {
   ) {
     await loadCandidateDashboardCampaignQuest(candidateId, { refresh });
   }
-  if (activeSection === "connected" || activeSection === "add") {
+  if (activeSection === "map" || activeSection === "connected" || activeSection === "add") {
     await loadCandidateDashboardVoterRegistry(candidateId, { refresh });
   }
   if (activeSection === "scripts") {
@@ -22300,6 +25560,70 @@ function normalizeCoalitionVoterMapAccess(raw = {}) {
   };
 }
 
+function normalizeCoalitionTerritoryAssignment(raw = {}) {
+  return {
+    assignmentId: normalizeString(raw.assignmentId || raw.assignment_id || raw.id),
+    userId: normalizeString(raw.userId || raw.user_id),
+    territoryId: normalizeString(raw.territoryId || raw.territory_id),
+    status: normalizeString(raw.status) || "active",
+    territoryVersion: Number.isFinite(
+      Number(raw.territoryVersion || raw.territory_version),
+    )
+      ? Number(raw.territoryVersion || raw.territory_version)
+      : null,
+    assignmentTokenVersion: Number.isFinite(
+      Number(raw.assignmentTokenVersion || raw.assignment_token_version),
+    )
+      ? Number(raw.assignmentTokenVersion || raw.assignment_token_version)
+      : null,
+    startsAt: normalizeString(raw.startsAt || raw.starts_at),
+    endsAt: normalizeString(raw.endsAt || raw.ends_at),
+    revokedAt: normalizeString(raw.revokedAt || raw.revoked_at),
+    raw,
+  };
+}
+
+function normalizeCoalitionDistrictUnitSet(raw = {}) {
+  return {
+    unitSetId:
+      normalizeString(raw.unitSetId || raw.unit_set_id || raw.id) || "unit-set",
+    sourceType: normalizeString(raw.sourceType || raw.source_type) || "precinct",
+    status: normalizeString(raw.status) || "unknown",
+    hexResolution: Number.isFinite(
+      Number(raw.hexResolution || raw.hex_resolution),
+    )
+      ? Number(raw.hexResolution || raw.hex_resolution)
+      : null,
+    unitCount: Number(raw.unitCount || raw.unit_count) || 0,
+    datasetVersion: normalizeString(
+      raw.datasetVersion || raw.dataset_version,
+    ),
+    createdAt: normalizeString(raw.createdAt || raw.created_at),
+    updatedAt: normalizeString(raw.updatedAt || raw.updated_at),
+    raw,
+  };
+}
+
+function normalizeCoalitionGenerationJob(raw = {}) {
+  const source = readObjectPayload(raw.job || raw);
+  return {
+    jobId: normalizeString(source.jobId || source.job_id || source.id),
+    status: normalizeString(source.status) || "unknown",
+    phase: normalizeString(source.phase),
+    progressPct: Number.isFinite(
+      Number(source.progressPct || source.progress_pct),
+    )
+      ? Number(source.progressPct || source.progress_pct)
+      : 0,
+    previewTerritoryIds: normalizeStringList(
+      source.previewTerritoryIds || source.preview_territory_ids,
+    ),
+    errorCode: normalizeString(source.errorCode || source.error_code),
+    errorMessage: normalizeString(source.errorMessage || source.error_message),
+    raw: source,
+  };
+}
+
 function normalizeCandidateVoterMapAccess(raw = {}) {
   return normalizeCoalitionVoterMapAccess(raw);
 }
@@ -23012,6 +26336,18 @@ async function loadCoalitionsPage({ refresh = false } = {}) {
       }
       if (voterMapSection === "members") {
         await loadCoalitionDirectory(coalitionId, { refresh });
+      }
+      if (voterMapSection === "territories/admin") {
+        const voterMapAccess =
+          state.pages.coalitions.detail.voterMapWorkspace?.access ||
+          state.pages.coalitions.detail.voterMapAccess ||
+          normalizeCoalitionVoterMapAccess({});
+        const canManageTerritories =
+          voterMapAccess.canManageTerritories === true ||
+          state.pages.coalitions.detail.membership?.isAdmin;
+        if (canManageTerritories) {
+          await loadCoalitionTerritoryAssignments(coalitionId, { refresh });
+        }
       }
       if (voterMapSection === "scripts") {
         await loadCoalitionVoterMapOutreachTemplates(coalitionId, { refresh });
@@ -24857,8 +28193,9 @@ async function loadManageEvents({ refresh = false } = {}) {
     return;
   }
   const params = readCurrentSearchParams();
-  const status =
-    normalizeString(params.get("status")) || manage.status || "active";
+  const status = normalizeManageEventsStatus(
+    normalizeString(params.get("status")) || manage.status,
+  );
   if (refresh) {
     manage.items = [];
     manage.nextCursor = null;
@@ -25287,7 +28624,7 @@ async function deleteEventById(eventId) {
       method: "DELETE",
     });
     showToast("Event deleted.");
-    navigateTo("/manage-events");
+    navigateTo(manageEventsStatusRoute(state.pages.events.manage.status));
   } catch (error) {
     showToast(normalizeString(error?.message) || "Event delete failed.");
   }
@@ -26836,6 +30173,16 @@ async function loadMessagingRecovery() {
   }
 }
 
+async function loadMessagingSecureBrowserContextIfNeeded() {
+  if (!state.pages.messaging.conversation.item?.isEncrypted) {
+    return;
+  }
+  await Promise.all([
+    loadMessagingDevices().catch(() => {}),
+    loadMessagingRecovery().catch(() => {}),
+  ]);
+}
+
 async function loadMessagingSecurity() {
   const security = state.pages.messaging.security;
   security.loading = true;
@@ -27262,7 +30609,7 @@ async function createMessagingServerAsset(formData) {
   const imageUrl = normalizeUrl(formData.get("imageUrl"));
   const assetState = state.pages.messaging.serverAssets;
   if (!scopeType || !scopeId || !type) {
-    showToast("Asset server unavailable.");
+    showToast("Workspace asset tools unavailable.");
     return false;
   }
   if (!name || !imageUrl) {
@@ -27517,7 +30864,7 @@ async function updateMessagingServerSecurityPolicy(formData) {
   const policyState = state.pages.messaging.serverSecurityPolicy;
   const pendingKey = "security:policy";
   if (!scopeType || !scopeId) {
-    showToast("Security policy server unavailable.");
+    showToast("Safety policy unavailable.");
     return false;
   }
   if (policyState.saving || policyState.actionPendingKey) {
@@ -27663,7 +31010,7 @@ async function loadMessagingServerRoleDetail(
       : [];
   } catch (error) {
     rolesState.error =
-      normalizeString(error?.message) || "Role detail unavailable.";
+      normalizeString(error?.message) || "Access group unavailable.";
   } finally {
     rolesState.loading = false;
     scheduleRender();
@@ -27702,7 +31049,7 @@ async function createMessagingServerRole(formData) {
   const color = normalizeString(formData.get("color"));
   const rolesState = state.pages.messaging.serverRoles;
   if (!scopeType || !scopeId) {
-    showToast("Role server unavailable.");
+    showToast("Access group tools unavailable.");
     return false;
   }
   if (!name) {
@@ -27870,13 +31217,13 @@ async function deleteMessagingServerRole(scopeType, scopeId, roleId) {
       rolesState.members = [];
       rolesState.candidates = [];
     }
-    showToast("Role deleted.");
+    showToast("Access group removed.");
     if (scopeType && scopeId) {
       navigateTo(buildMessagingServerRoute(scopeType, scopeId, "/roles"));
     }
     return true;
   } catch (error) {
-    rolesState.error = normalizeString(error?.message) || "Role delete failed.";
+    rolesState.error = normalizeString(error?.message) || "Access group remove failed.";
     showToast(rolesState.error);
     return false;
   } finally {
@@ -27992,7 +31339,7 @@ async function loadMessagingServerBans(
     bansState.loaded = true;
   } catch (error) {
     bansState.error =
-      normalizeString(error?.message) || "Member restrictions unavailable.";
+      normalizeString(error?.message) || "Blocked access unavailable.";
   } finally {
     bansState.loading = false;
     scheduleRender();
@@ -28078,7 +31425,7 @@ async function loadMessagingServerAutomodRules(
     automodState.loaded = true;
   } catch (error) {
     automodState.error =
-      normalizeString(error?.message) || "Automod rules unavailable.";
+      normalizeString(error?.message) || "Keyword guardrails unavailable.";
   } finally {
     automodState.loading = false;
     scheduleRender();
@@ -28113,7 +31460,7 @@ async function createMessagingAutomodRule(formData) {
   const action = normalizeMessagingAutomodAction(formData.get("action"));
   const automodState = state.pages.messaging.serverAutomod;
   if (!scopeType || !scopeId) {
-    showToast("Automod server unavailable.");
+    showToast("Safety automation tools unavailable.");
     return false;
   }
   if (!keywords.length) {
@@ -28141,11 +31488,11 @@ async function createMessagingAutomodRule(formData) {
       },
     });
     upsertMessagingAutomodRule(payload.rule || {});
-    showToast("Automod rule created.");
+    showToast("Keyword guardrail created.");
     return true;
   } catch (error) {
     automodState.error =
-      normalizeString(error?.message) || "Automod rule create failed.";
+      normalizeString(error?.message) || "Keyword guardrail create failed.";
     showToast(automodState.error);
     return false;
   } finally {
@@ -28165,7 +31512,7 @@ async function updateMessagingAutomodRuleEnabled(
   const normalizedRuleId = normalizeString(ruleId);
   const automodState = state.pages.messaging.serverAutomod;
   if (!normalizedScopeType || !normalizedScopeId || !normalizedRuleId) {
-    showToast("Automod rule unavailable.");
+    showToast("Keyword guardrail unavailable.");
     return false;
   }
   const pendingKey = `${normalizedRuleId}:toggle`;
@@ -28188,11 +31535,11 @@ async function updateMessagingAutomodRuleEnabled(
       },
     );
     upsertMessagingAutomodRule(payload.rule || {});
-    showToast(enabled === true ? "Automod rule enabled." : "Automod rule disabled.");
+    showToast(enabled === true ? "Keyword guardrail enabled." : "Keyword guardrail disabled.");
     return true;
   } catch (error) {
     automodState.error =
-      normalizeString(error?.message) || "Automod rule update failed.";
+      normalizeString(error?.message) || "Keyword guardrail update failed.";
     showToast(automodState.error);
     return false;
   } finally {
@@ -28209,7 +31556,7 @@ async function deleteMessagingAutomodRule(scopeType, scopeId, ruleId) {
   const normalizedRuleId = normalizeString(ruleId);
   const automodState = state.pages.messaging.serverAutomod;
   if (!normalizedScopeType || !normalizedScopeId || !normalizedRuleId) {
-    showToast("Automod rule unavailable.");
+    showToast("Keyword guardrail unavailable.");
     return false;
   }
   const pendingKey = `${normalizedRuleId}:delete`;
@@ -28233,11 +31580,11 @@ async function deleteMessagingAutomodRule(scopeType, scopeId, ruleId) {
     automodState.items = automodState.items.filter(
       (item) => item.ruleId !== normalizedRuleId,
     );
-    showToast("Automod rule deleted.");
+    showToast("Keyword guardrail removed.");
     return true;
   } catch (error) {
     automodState.error =
-      normalizeString(error?.message) || "Automod rule delete failed.";
+      normalizeString(error?.message) || "Keyword guardrail remove failed.";
     showToast(automodState.error);
     return false;
   } finally {
@@ -29975,7 +33322,7 @@ async function createMessagingServerInvite(formData) {
   const settingsState = state.pages.messaging.serverSettings;
   const pendingKey = "invite:create";
   if (!scopeType || !scopeId) {
-    showToast("Invite server unavailable.");
+    showToast("Invite tools unavailable.");
     return false;
   }
   if (!inviteeUserId) {
@@ -31139,8 +34486,8 @@ async function sendMessagingDraft(
   }
   if (conversation?.isEncrypted) {
     state.pages.messaging.conversation.error =
-      "Encrypted replies require mobile app message keys. Use the secure options below.";
-    showToast("Open the app or restore a trusted device to reply.");
+      "Encrypted replies need a trusted message key for this browser. Use the secure options below.";
+    showToast("Secure messaging options are below.");
     scheduleRender();
     return false;
   }
@@ -35502,6 +38849,44 @@ async function loadAdminPage({ refresh = false } = {}) {
   }
 }
 
+function applyPostComposerPublishingDefaults() {
+  const composer = state.pages.create;
+  const publishing = state.pages.settings.publishing;
+  if (!publishing.loaded || composer.publishingDefaultsApplied) {
+    return;
+  }
+  const defaults = publishing.item || defaultPublishingDefaults();
+  const preferences = normalizePostReviewPreferences(
+    defaults.postReviewPreferences || {},
+  );
+  composer.visibility = normalizePostComposerVisibility(
+    defaults.defaultPostVisibility,
+  );
+  composer.audienceGroupIds =
+    composer.visibility === "custom"
+      ? normalizeStringList(defaults.defaultAudienceGroupIds).join(", ")
+      : "";
+  composer.allowComments = preferences.allowComments;
+  composer.allowReuseContent = preferences.allowReuseContent;
+  composer.aiGeneratedContent = preferences.aiGeneratedContent;
+  composer.saveToDevice = preferences.saveToDevice;
+  composer.savePostsWithWatermark = preferences.savePostsWithWatermark !== false;
+  composer.brandingOverlayEnabled = preferences.brandingOverlayEnabled !== false;
+  composer.publishingDefaultsApplied = true;
+}
+
+async function loadPostComposerPage({ refresh = false } = {}) {
+  scheduleRender();
+  await Promise.all([
+    loadPublishingDefaults({ refresh }).catch(() => {}),
+    loadCrosspostDefaults({ refresh }).catch(() => {}),
+    loadSettingsSocialConnections({ refresh }).catch(() => {}),
+    loadSettingsAudienceGroups({ refresh }).catch(() => {}),
+  ]);
+  applyPostComposerPublishingDefaults();
+  scheduleRender();
+}
+
 function adminPendingKey(itemId, actionKey) {
   return `${normalizeString(itemId) || "section"}:${normalizeString(actionKey)}`;
 }
@@ -37705,13 +41090,18 @@ function updatePostComposerField(field, value) {
       "allowComments",
       "allowReuseContent",
       "aiGeneratedContent",
+      "saveToDevice",
     ].includes(normalizedField)
   ) {
     composer[normalizedField] = Boolean(value);
     return;
   }
   if (normalizedField === "visibility") {
-    composer.visibility = normalizeString(value) === "private" ? "private" : "public";
+    composer.visibility = normalizePostComposerVisibility(value);
+    return;
+  }
+  if (normalizedField === "audienceGroupIds") {
+    composer.audienceGroupIds = normalizeString(value).slice(0, 420);
     return;
   }
   if (normalizedField === "description") {
@@ -37963,6 +41353,17 @@ function readPostComposerIssueIds(value) {
         .filter(Boolean),
     ),
   ).slice(0, 3);
+}
+
+function normalizePostComposerVisibility(value) {
+  const normalized = normalizeString(value).toLowerCase();
+  return ["public", "followers", "private", "custom"].includes(normalized)
+    ? normalized
+    : "public";
+}
+
+function readPostComposerAudienceGroupIds(value) {
+  return Array.from(new Set(normalizeStringList(value))).slice(0, 12);
 }
 
 function normalizeCreateUploadPayload(payload = {}) {
@@ -38326,6 +41727,7 @@ async function submitPostComposer(formData) {
   updatePostComposerField("description", formData.get("description"));
   updatePostComposerField("issueIds", formData.get("issueIds"));
   updatePostComposerField("visibility", formData.get("visibility"));
+  updatePostComposerField("audienceGroupIds", formData.get("audienceGroupIds"));
   updatePostComposerField("allowComments", formData.has("allowComments"));
   updatePostComposerField("allowReuseContent", formData.has("allowReuseContent"));
   updatePostComposerField(
@@ -38389,6 +41791,10 @@ async function submitPostComposer(formData) {
 
     const description = normalizeString(composer.description);
     const issueIds = readPostComposerIssueIds(composer.issueIds);
+    const audienceGroupIds =
+      composer.visibility === "custom"
+        ? readPostComposerAudienceGroupIds(composer.audienceGroupIds)
+        : [];
     const postId = upload.postId || upload.uid;
     composer.stage = "Saving post details";
     scheduleRender();
@@ -38429,6 +41835,7 @@ async function submitPostComposer(formData) {
         postId,
         description,
         visibility: composer.visibility,
+        ...(composer.visibility === "custom" ? { audienceGroupIds } : {}),
         issueIds,
         allowComments: composer.allowComments,
         allowReuseContent: composer.allowReuseContent,
@@ -40968,8 +44375,12 @@ async function loadCurrentRoute({ refresh = false } = {}) {
   if (routeKey !== ROUTE_KEY_ELECTION_DAY) {
     clearElectionPolling();
   }
-  if (routeKey === ROUTE_KEY_CREATE) {
+  if (isPublicAccountRoute(route)) {
     scheduleRender();
+    return;
+  }
+  if (routeKey === ROUTE_KEY_CREATE) {
+    await loadPostComposerPage({ refresh });
     return;
   }
   if (routeKey === ROUTE_KEY_POST_ANALYTICS) {
@@ -41437,6 +44848,7 @@ async function loadCurrentRoute({ refresh = false } = {}) {
         loadMessagingServers(),
         loadMessagingConversation(subroute.conversationId, { refresh }),
       ]);
+      await loadMessagingSecureBrowserContextIfNeeded();
       return;
     }
     if (subroute.view === "conversation-people") {
@@ -41450,6 +44862,7 @@ async function loadCurrentRoute({ refresh = false } = {}) {
         }).catch(() => {}),
         loadMessagingGroupPeopleFriends({ refresh }).catch(() => {}),
       ]);
+      await loadMessagingSecureBrowserContextIfNeeded();
       return;
     }
     if (subroute.view === "server-room") {
@@ -41464,6 +44877,7 @@ async function loadCurrentRoute({ refresh = false } = {}) {
           refresh,
         }).catch(() => {}),
       ]);
+      await loadMessagingSecureBrowserContextIfNeeded();
       return;
     }
     if (
@@ -41699,6 +45113,7 @@ function renderIcon(name) {
       '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a4 4 0 1 1 0 8 4 4 0 0 1 0-8Zm0 10c4.97 0 9 2.687 9 6v2H3v-2c0-3.313 4.03-6 9-6Z"></path></svg>',
     search:
       '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 4a6.5 6.5 0 1 1 0 13 6.5 6.5 0 0 1 0-13Zm0 2a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9Zm8.646 10.232L21 18.086 19.586 19.5l-1.854-1.854 1.414-1.414Z"></path></svg>',
+    tag: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.59 13.41 12 22l-9-9V4h9l8.59 8.59a1 1 0 0 1 0 1.41ZM5 12.17l7 7 6.46-6.46L11.17 5H5v7.17ZM8 7a2 2 0 1 1 0 4 2 2 0 0 1 0-4Z"></path></svg>',
     messages:
       '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H8l-4 4V5Zm2 2v8.172L7.172 14H18V7H6Z"></path></svg>',
     reply:
@@ -41708,6 +45123,8 @@ function renderIcon(name) {
       '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 20 18-8L3 4v6l11 2-11 2v6Z"></path></svg>',
     upload:
       '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 16h2V7.83l2.59 2.58L17 9l-5-5-5 5 1.41 1.41L11 7.83V16Zm-5 2h12v2H6v-2Z"></path></svg>',
+    download:
+      '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 4h2v8.17l2.59-2.58L17 11l-5 5-5-5 1.41-1.41L11 12.17V4Zm-5 14h12v2H6v-2Z"></path></svg>',
     phone:
       '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.62 10.79c1.44 2.83 3.76 5.15 6.59 6.59l2.2-2.2 5.01 1.67V21C10.82 21 3 13.18 3 3h4.15l1.67 5.01-2.2 2.78Z"></path></svg>',
     mail:
@@ -42028,6 +45445,18 @@ function renderPromptItem(item, index) {
   </article>`;
 }
 
+function renderCandidatePromptFeedItem(item, index) {
+  return `<article class="shared-feed-item shared-feed-item--candidate-prompt" data-index="${index}">
+    ${renderFeedCandidateOptInCard(item)}
+  </article>`;
+}
+
+function renderCivicPromptFeedItem(item, index) {
+  return `<article class="shared-feed-item shared-feed-item--civic-prompt" data-index="${index}">
+    ${renderFeedCivicPromptCard(item)}
+  </article>`;
+}
+
 function renderFeedItems(items) {
   if (!items.length) {
     return `<div class="shared-feed-empty">
@@ -42043,6 +45472,12 @@ function renderFeedItems(items) {
       }
       if (item.kind === "prompt") {
         return renderPromptItem(item, index);
+      }
+      if (item.kind === "candidatePrompt") {
+        return renderCandidatePromptFeedItem(item, index);
+      }
+      if (item.kind === "civicPrompt") {
+        return renderCivicPromptFeedItem(item, index);
       }
       return renderPostItem(item, index);
     })
@@ -42088,211 +45523,1311 @@ function renderFeedStage() {
   </section>`;
 }
 
-function renderFeatureAuthGate({
-  pageClass = "shared-discover-page",
-  authClass = "",
-  eyebrow,
-  title,
-  copy,
-  tiles = [],
-} = {}) {
-  const classes = ["shared-discover-auth", authClass].filter(Boolean).join(" ");
-  return `<section class="shared-page ${escapeHtml(pageClass)}">
+function renderFeedAuthGate() {
+  const actions = [
+    { icon: "heartOutline", label: "Likes", value: "18K" },
+    { icon: "comment", label: "Comments", value: "240" },
+    { icon: "save", label: "Saved", value: "8" },
+    { icon: "share", label: "Shares", value: "42" },
+  ];
+  const modules = [
+    {
+      icon: "calendar",
+      label: "Event card",
+      title: "Town hall tonight",
+      copy: "RSVP, mark interested, and open event details from the same feed.",
+    },
+    {
+      icon: "candidate",
+      label: "Candidate prompt",
+      title: "Connect with a campaign",
+      copy: "Save contact preferences, join communities, and dismiss prompts.",
+    },
+  ];
+
+  return `<section class="shared-page shared-feed-auth-page">
     ${renderTopChrome()}
     <div class="shared-page__content">
-      <section class="${escapeHtml(classes)}">
-        <div>
-          <span class="shared-discover-eyebrow">${escapeHtml(eyebrow)}</span>
-          <h1>${escapeHtml(title)}</h1>
-          <p>${escapeHtml(copy)}</p>
+      <section class="shared-feed-auth" aria-labelledby="shared-feed-auth-title">
+        <div class="shared-feed-auth__copy">
+          <span class="shared-discover-eyebrow">Feed</span>
+          <h1 id="shared-feed-auth-title">Open the full Polis feed from the browser.</h1>
+          <p>Sign in to use For You and Following, watch posts, join comment threads, save and share updates, respond to event cards, and continue candidate and civic prompts from the web.</p>
           <div class="shared-auth-modal__actions">
             <button class="shared-feed-chip shared-feed-chip--primary" data-action="auth-login-inline">Sign in</button>
             <button class="shared-feed-chip" data-action="auth-signup-inline">Create account</button>
             <button class="shared-feed-chip" data-action="open-app-shell">Open app</button>
           </div>
+          <div class="shared-feed-auth__coverage" aria-label="Feed surfaces available after sign in">
+            <span>${renderIcon("feed")} For You</span>
+            <span>${renderIcon("team")} Following</span>
+            <span>${renderIcon("comment")} Replies</span>
+            <span>${renderIcon("election")} Civic prompts</span>
+          </div>
         </div>
-        <div class="shared-discover-auth__grid" aria-hidden="true">
-          ${tiles
-            .map(
-              (label) =>
-                `<span class="shared-discover-auth__tile">${escapeHtml(label)}</span>`,
-            )
-            .join("")}
+        <div class="shared-feed-auth__preview" aria-label="Feed preview">
+          <div class="shared-feed-auth__preview-top">
+            <div class="shared-feed-auth__segments" aria-hidden="true">
+              <span class="is-active">For You</span>
+              <span>Following</span>
+            </div>
+            <div class="shared-feed-auth__tools" aria-hidden="true">
+              <span>${renderIcon("search")}</span>
+              <span>${renderIcon("bell")}</span>
+            </div>
+          </div>
+          <div class="shared-feed-auth__workspace">
+            <article class="shared-feed-auth-post">
+              <header class="shared-feed-auth-post__header">
+                <div class="shared-feed-auth-post__avatar">A</div>
+                <div>
+                  <strong>Alex Morgan</strong>
+                  <span>Candidate update &middot; HD 42</span>
+                </div>
+                <em>Following</em>
+              </header>
+              <div class="shared-feed-auth-post__media">
+                <span>${renderIcon("play")}</span>
+                <div>
+                  <strong>60 sec</strong>
+                  <small>Video post</small>
+                </div>
+              </div>
+              <p>New field office hours, volunteer shift notes, and a quick policy answer for this week.</p>
+              <div class="shared-feed-auth-post__actions" aria-label="Post actions">
+                ${actions
+                  .map(
+                    (action) =>
+                      `<span>${renderIcon(action.icon)} <strong>${escapeHtml(action.value)}</strong><small>${escapeHtml(action.label)}</small></span>`,
+                  )
+                  .join("")}
+              </div>
+            </article>
+            <aside class="shared-feed-auth__side">
+              <article class="shared-feed-auth-comment">
+                <div>
+                  <span>${renderIcon("comment")}</span>
+                  <strong>Comments</strong>
+                </div>
+                <p><b>Maya</b> Can you post the bus route for Saturday?</p>
+                <small>${renderIcon("reply")} Reply from the web</small>
+              </article>
+              ${modules
+                .map(
+                  (module) => `<article class="shared-feed-auth-module">
+                    <span>${renderIcon(module.icon)}</span>
+                    <div>
+                      <em>${escapeHtml(module.label)}</em>
+                      <strong>${escapeHtml(module.title)}</strong>
+                      <p>${escapeHtml(module.copy)}</p>
+                    </div>
+                  </article>`,
+                )
+                .join("")}
+            </aside>
+          </div>
         </div>
       </section>
     </div>
   </section>`;
 }
 
-function renderFeedAuthGate() {
-  return renderFeatureAuthGate({
-    eyebrow: "Feed",
-    title: "Follow the live Polis feed from the browser.",
-    copy: "Sign in to open your For You and Following feeds, view shared posts, join comment threads, and pick up where the mobile app leaves off.",
-    tiles: [
-      "For You",
-      "Following",
-      "Shared posts",
-      "Comments",
-      "Reposts",
-      "Saved activity",
-    ],
-  });
-}
-
 function renderDiscoverAuthGate() {
-  return renderFeatureAuthGate({
-    eyebrow: "Discover",
-    title: "Find the next civic action.",
-    copy: "Sign in to browse Polis feed trends, people, campaign events, community rooms, friend activity, ballot tools, and volunteer work from the browser.",
-    tiles: [
-      "Trending feed",
-      "Candidates",
-      "Events",
-      "Communities",
-      "Ballot tools",
-      "Friend activity",
-    ],
-  });
+  const quickPaths = [
+    {
+      label: "People and organizations",
+      copy: "Find candidates, officials, coalitions, and civic profiles.",
+      route: "/candidates",
+      icon: "candidate",
+    },
+    {
+      label: "Events near you",
+      copy: "Open post-style event cards, map view, RSVP, and transport.",
+      route: "/events",
+      icon: "calendar",
+    },
+    {
+      label: "Mission work",
+      copy: "Jump into claimable campaign and coalition tasks.",
+      route: "/missions",
+      icon: "mission",
+    },
+  ];
+  const previewCards = [
+    {
+      title: "Ballot guide",
+      copy: "Rank races, compare issue signals, and continue voter-intelligence work.",
+      meta: "Voter tools",
+      icon: "ballot",
+    },
+    {
+      title: "Friend activity",
+      copy: "See follows, likes, event activity, posts, and question answers from people you know.",
+      meta: "Social proof",
+      icon: "team",
+    },
+    {
+      title: "Schedule",
+      copy: "Surface events, mission deadlines, and calendar-linked civic work.",
+      meta: "Next 7 days",
+      icon: "calendar",
+    },
+  ];
+  return `<section class="shared-page shared-discover-page shared-discover-page--auth">
+    ${renderTopChrome()}
+    <div class="shared-page__content">
+      <section class="shared-discover-hero">
+        <div>
+          <span class="shared-discover-eyebrow">Discover</span>
+          <h1>Find the next civic action from the web.</h1>
+          <p>Sign in to browse Polis feed trends, people and organizations, campaign events, community rooms, friend activity, ballot tools, schedule cards, and mission work without falling back to a generic directory.</p>
+          <div class="shared-auth-modal__actions">
+            <button class="shared-feed-chip shared-feed-chip--primary" data-action="auth-login-inline">Sign in</button>
+            <button class="shared-feed-chip" data-action="auth-signup-inline">Create account</button>
+            <button class="shared-feed-chip" data-action="open-app-shell">Open app</button>
+          </div>
+        </div>
+        <form class="shared-discover-search" aria-hidden="true">
+          <input type="search" value="candidates, events, missions" readonly />
+          <button class="shared-feed-chip shared-feed-chip--primary" type="button">Search</button>
+        </form>
+        <div class="shared-discover-stats" aria-hidden="true">
+          ${renderDiscoverStat("Posts", 18000)}
+          ${renderDiscoverStat("People", 240)}
+          ${renderDiscoverStat("Events", 42)}
+          ${renderDiscoverStat("Rooms", 8)}
+        </div>
+      </section>
+      <div class="shared-discover-paths" aria-hidden="true">
+        ${quickPaths.map(renderDiscoverQuickPath).join("")}
+      </div>
+      <div class="shared-discover-layout" aria-hidden="true">
+        <section class="shared-discover-section shared-discover-section--wide">
+          <div class="shared-discover-section__header">
+            <div>
+              <h2>Recommended now</h2>
+              <p>Preview the signed-in Discover mix of posts, events, people, and nearby work.</p>
+            </div>
+          </div>
+          <div class="shared-discover-list">
+            <article class="shared-discover-card shared-discover-card--post">
+              <div class="shared-discover-image shared-discover-image--wide"><span class="shared-image-fallback">${renderIcon("feed")}</span></div>
+              <div class="shared-discover-card__body">
+                <span class="shared-discover-eyebrow">Trending feed</span>
+                <h3>Campaign update with event lift</h3>
+                <p>Posts can lead directly into candidate profiles, event signups, and discussion threads.</p>
+                <div class="shared-discover-card__footer"><span>18K reach</span><span>Open feed</span></div>
+              </div>
+            </article>
+            <article class="shared-discover-card shared-discover-card--event">
+              <div class="shared-discover-image shared-discover-image--wide"><span class="shared-image-fallback">${renderIcon("calendar")}</span></div>
+              <div class="shared-discover-card__body">
+                <span class="shared-discover-eyebrow">Event</span>
+                <h3>Town hall and volunteer launch</h3>
+                <p>Event discovery connects cards, map context, RSVP, transport, and paid-event handoff.</p>
+                <div class="shared-discover-card__footer"><span>42 going</span><span>12 seats</span></div>
+              </div>
+            </article>
+          </div>
+        </section>
+        <section class="shared-discover-section">
+          <div class="shared-discover-section__header">
+            <div>
+              <h2>Voter tools</h2>
+              <p>Ballot, district, and voter-intelligence shortcuts.</p>
+            </div>
+          </div>
+          <div class="shared-discover-list">
+            ${previewCards
+              .map(
+                (card) => `<article class="shared-discover-card">
+                  <div class="shared-discover-image"><span class="shared-image-fallback">${renderIcon(card.icon)}</span></div>
+                  <div class="shared-discover-card__body">
+                    <span class="shared-discover-eyebrow">${escapeHtml(card.meta)}</span>
+                    <h3>${escapeHtml(card.title)}</h3>
+                    <p>${escapeHtml(card.copy)}</p>
+                  </div>
+                </article>`,
+              )
+              .join("")}
+          </div>
+        </section>
+        <section class="shared-discover-section">
+          <div class="shared-discover-section__header">
+            <div>
+              <h2>Friend activity</h2>
+              <p>Follows, likes, event activity, posts, and question answers provide lightweight social proof.</p>
+            </div>
+          </div>
+          <div class="shared-discover-empty">
+            <strong>Personalized after sign-in.</strong>
+            <span>Discover uses your profile, location, follows, and workspace access to decide what should be prominent.</span>
+          </div>
+        </section>
+      </div>
+    </div>
+  </section>`;
 }
 
 function renderAchievementsAuthGate() {
-  return renderFeatureAuthGate({
-    eyebrow: "Achievements",
-    title: "Track your civic progress from the browser.",
-    copy: "Sign in to review earned badges, streaks, mission milestones, voter-intelligence progress, and the activity that moves your Polis profile forward.",
-    tiles: [
-      "Badges",
-      "Streaks",
-      "Missions",
-      "Policy progress",
-      "Coalition work",
-      "Profile growth",
-    ],
-  });
+  const achievements = [
+    {
+      id: "first_policy_answer",
+      title: "First Answer",
+      description: "Answer one policy question.",
+      earnedDescription: "You answered your first policy question.",
+      icon: "search",
+      completed: true,
+      progress: 1,
+      target: 1,
+      status: "Earned",
+    },
+    {
+      id: "ballot_builder",
+      title: "Ballot Builder",
+      description: "Start one ballot contest.",
+      earnedDescription: "You started building your voter guide.",
+      icon: "election",
+      completed: false,
+      progress: 0,
+      target: 1,
+      status: "0/1",
+    },
+    {
+      id: "streak_starter",
+      title: "Streak Starter",
+      description: "Build a one-day civic streak.",
+      earnedDescription: "You started a daily civic streak.",
+      icon: "calendar",
+      completed: false,
+      progress: 0,
+      target: 1,
+      status: "0/1",
+    },
+  ];
+  const selected = achievements[0];
+  const completedCount = achievements.filter((achievement) => achievement.completed)
+    .length;
+  const totalCount = achievements.length;
+  const selectedPercent = achievementProgressPercent(selected);
+
+  return `<section class="shared-page shared-achievements-page shared-achievements-page--auth">
+    ${renderTopChrome()}
+    <div class="shared-page__content">
+      <section class="shared-achievements-auth" aria-labelledby="shared-achievements-auth-title">
+        <div class="shared-achievements-auth__copy">
+          <div>
+            <span class="shared-discover-eyebrow">Achievements</span>
+            <h1 id="shared-achievements-auth-title">Track the first civic wins that move your Polis profile forward.</h1>
+            <p>Sign in to review earned badges, continue progress toward ballot and streak milestones, open the activity that completes each achievement, and keep new badges marked as viewed across Discover.</p>
+          </div>
+          <div class="shared-auth-modal__actions">
+            <button class="shared-feed-chip shared-feed-chip--primary" data-action="auth-login-inline">Sign in</button>
+            <button class="shared-feed-chip" data-action="auth-signup-inline">Create account</button>
+            <button class="shared-feed-chip" data-action="open-app-shell">Open app</button>
+          </div>
+          <div class="shared-achievements-auth__coverage" aria-label="Achievement capabilities available after sign in">
+            <span>${renderIcon("search")} Policy answers</span>
+            <span>${renderIcon("election")} Ballot builder</span>
+            <span>${renderIcon("calendar")} Daily streaks</span>
+            <span>${renderIcon("check")} Earned state</span>
+            <span>${renderIcon("bell")} New badge notice</span>
+            <span>${renderIcon("profile")} Profile progress</span>
+          </div>
+        </div>
+        <div class="shared-achievements-auth__preview" aria-label="Achievements web preview">
+          <section class="shared-achievements-auth__summary">
+            <div>
+              <span class="shared-discover-eyebrow">Civic milestones</span>
+              <h2>Earned and in-progress badges stay visible.</h2>
+              <p>Achievements connect policy answers, ballot work, and daily action streaks back to the next useful place in Polis.</p>
+            </div>
+            <div class="shared-achievements-metrics">
+              <span><strong>${escapeHtml(formatCount(completedCount))}</strong><small>earned</small></span>
+              <span><strong>${escapeHtml(formatCount(totalCount - completedCount))}</strong><small>remaining</small></span>
+              <span><strong>4</strong><small>day streak</small></span>
+            </div>
+          </section>
+          <section class="shared-achievements-grid">
+            ${achievements
+              .map((achievement) => {
+                const percent = achievementProgressPercent(achievement);
+                return `<article class="shared-achievement-card${achievement.id === selected.id ? " is-selected" : ""}${achievement.completed ? " is-complete" : ""}">
+                  <span class="shared-achievement-card__icon">${renderIcon(achievement.icon)}</span>
+                  <span class="shared-achievement-card__body">
+                    <strong>${escapeHtml(achievement.title)}</strong>
+                    <small>${escapeHtml(achievement.status)}</small>
+                    <i><b style="--achievement-progress:${escapeHtml(percent.toFixed(2))}%"></b></i>
+                  </span>
+                </article>`;
+              })
+              .join("")}
+          </section>
+          <aside class="shared-achievements-detail shared-achievements-auth__detail">
+            <span class="shared-achievements-detail__icon">${renderIcon(selected.icon)}</span>
+            <div>
+              <span class="shared-discover-eyebrow">New badge</span>
+              <h2>${escapeHtml(selected.title)}</h2>
+              <p>${escapeHtml(selected.earnedDescription)}</p>
+            </div>
+            <div class="shared-achievements-detail__progress">
+              <div>
+                <strong>${escapeHtml(`${selected.progress}/${selected.target}`)}</strong>
+                <span>${escapeHtml(`${selectedPercent.toFixed(0)}% complete`)}</span>
+              </div>
+              <i><b style="--achievement-progress:${escapeHtml(selectedPercent.toFixed(2))}%"></b></i>
+            </div>
+            <div class="shared-achievements-auth__routes">
+              <span>${renderIcon("search")} Open questions</span>
+              <span>${renderIcon("election")} Build ballot guide</span>
+              <span>${renderIcon("calendar")} Continue Discover</span>
+            </div>
+          </aside>
+        </div>
+      </section>
+    </div>
+  </section>`;
 }
 
 function renderCandidatesAuthGate() {
-  return renderFeatureAuthGate({
-    eyebrow: "Candidates",
-    title: "Browse candidates and public officials from the browser.",
-    copy: "Sign in to compare candidate pages, follow campaigns, review official report cards, find related events, and continue candidate research inside Polis.",
-    tiles: [
-      "Candidate profiles",
-      "Followed races",
-      "Report cards",
-      "Donations",
-      "Related events",
-      "Campaign posts",
-    ],
-  });
+  const previewCards = [
+    {
+      name: "Maya Johnson",
+      label: "Candidate",
+      party: "IND",
+      office: "State Senate",
+      district: "District 12",
+      followers: "1.8K",
+      copy: "Housing, transit, climate resilience, and local jobs.",
+      tags: ["Housing", "Transit", "Events"],
+      actions: ["Open profile", "Follow", "Voter prompt"],
+      accent: "teal",
+    },
+    {
+      name: "Alex Rivera",
+      label: "Elected official",
+      party: "REP",
+      office: "US House",
+      district: "MT-01",
+      followers: "8.4K",
+      copy: "Office profile with bills, votes, report-card detail, and public links.",
+      tags: ["Bills", "Votes", "Report card"],
+      actions: ["Open profile", "Bills", "Follow"],
+      accent: "red",
+    },
+    {
+      name: "Jordan Lee",
+      label: "Race profile",
+      party: "DEM",
+      office: "Mayor",
+      district: "Missoula",
+      followers: "640",
+      copy: "Auto-generated race context that can connect to a claimed Polis profile.",
+      tags: ["Election Day", "Auto profile", "District"],
+      actions: ["Open profile", "Results", "Follow"],
+      accent: "blue",
+    },
+  ];
+  const workspaceItems = [
+    {
+      icon: "election",
+      title: "Election Day",
+      copy: "Open active election context from the candidate tab.",
+      value: "Live races",
+    },
+    {
+      icon: "file",
+      title: "Bills",
+      copy: "Jump from elected officials into congressional report cards.",
+      value: "Votes",
+    },
+    {
+      icon: "messages",
+      title: "Community",
+      copy: "Join visible campaign rooms when the candidate opens access.",
+      value: "Rooms",
+    },
+    {
+      icon: "registry",
+      title: "Voter prompt",
+      copy: "Open candidate contact prompts without leaving the web flow.",
+      value: "Opt in",
+    },
+  ];
+  return `<section class="shared-page shared-candidates-page shared-candidates-page--auth">
+    ${renderTopChrome()}
+    <div class="shared-page__content">
+      <section class="shared-candidates-auth">
+        <div class="shared-candidates-auth__copy">
+          <span class="shared-discover-eyebrow">Candidates</span>
+          <h1>Browse candidates, officials, and report cards from the web.</h1>
+          <p>Sign in to use the app's candidate discovery flow with filters, party-aware cards, follows, community rooms, Election Day links, and bill history.</p>
+          <div class="shared-auth-modal__actions">
+            <button class="shared-feed-chip shared-feed-chip--primary" data-action="auth-login-inline">Sign in</button>
+            <button class="shared-feed-chip" data-action="auth-signup-inline">Create account</button>
+            <button class="shared-feed-chip" data-action="open-app-shell">Open app</button>
+          </div>
+          <div class="shared-candidates-auth__metrics" aria-label="Candidate discovery web surfaces">
+            <span><strong>2</strong><small>Directory modes</small></span>
+            <span><strong>4</strong><small>Filter paths</small></span>
+            <span><strong>3</strong><small>Profile types</small></span>
+            <span><strong>Live</strong><small>Election links</small></span>
+          </div>
+        </div>
+        <div class="shared-candidates-auth__browser" aria-label="Candidate directory preview">
+          <div class="shared-candidates-auth__toolbar">
+            <div class="shared-candidates-auth__segments">
+              <span class="is-active">Candidates</span>
+              <span>Elected Officials</span>
+            </div>
+            <div class="shared-candidates-auth__tools">
+              <span title="Election Day">${renderIcon("election")}</span>
+              <span title="Search and filters">${renderIcon("search")}</span>
+            </div>
+          </div>
+          <div class="shared-candidates-auth__filters">
+            <span>Federal</span>
+            <span>District 12</span>
+            <span>Housing</span>
+            <span>Auto profiles hidden</span>
+          </div>
+          <div class="shared-candidates-auth__cards">
+            ${previewCards
+              .map(
+                (card) => `<article class="shared-candidates-auth-card is-${escapeHtml(card.accent)}">
+                  <div class="shared-candidates-auth-card__header">
+                    <div class="shared-candidates-auth-card__avatar">${escapeHtml(card.name.slice(0, 1))}</div>
+                    <div>
+                      <span>${escapeHtml(card.label)}</span>
+                      <h2>${escapeHtml(card.name)} <em>${escapeHtml(card.party)}</em></h2>
+                      <p>${escapeHtml(card.office)} - ${escapeHtml(card.district)}</p>
+                    </div>
+                  </div>
+                  <p>${escapeHtml(card.copy)}</p>
+                  <div class="shared-candidates-auth-card__meta">
+                    <span>${renderIcon("team")} ${escapeHtml(card.followers)} followers</span>
+                    ${card.tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")}
+                  </div>
+                  <div class="shared-candidates-auth-card__actions">
+                    ${card.actions.map((action, index) => `<span class="${index === 0 ? "is-primary" : ""}">${escapeHtml(action)}</span>`).join("")}
+                  </div>
+                </article>`,
+              )
+              .join("")}
+          </div>
+        </div>
+      </section>
+      <section class="shared-candidates-auth-workspace" aria-label="Candidate workspace shortcuts">
+        ${workspaceItems
+          .map(
+            (item) => `<article>
+              <span>${renderIcon(item.icon)}</span>
+              <div>
+                <strong>${escapeHtml(item.title)}</strong>
+                <p>${escapeHtml(item.copy)}</p>
+              </div>
+              <em>${escapeHtml(item.value)}</em>
+            </article>`,
+          )
+          .join("")}
+      </section>
+    </div>
+  </section>`;
 }
 
 function renderEventsAuthGate() {
-  return renderFeatureAuthGate({
-    eyebrow: "Events",
-    title: "Find civic events from the browser.",
-    copy: "Sign in to discover campaign events, view event details, RSVP, handle signup flows, and keep event activity connected to your Polis profile.",
-    tiles: [
-      "Event discovery",
-      "RSVPs",
-      "Signup flows",
-      "Ticketing",
-      "Candidate events",
-      "Coalition events",
-    ],
-  });
+  const surfaces = [
+    ["Cards", "Post-style discovery feed"],
+    ["Map", "Location-ready event browsing"],
+    ["Signup", "Free RSVP and attendee details"],
+    ["Payment", "Paid-event handoff"],
+    ["Transport", "Ride availability and disclaimers"],
+    ["Hosts", "Candidate and coalition events"],
+  ];
+  return `<section class="shared-page shared-events-page shared-events-page--auth">
+    ${renderTopChrome()}
+    <div class="shared-page__content">
+      <section class="shared-events-command">
+        <div class="shared-events-command__main">
+          <div class="shared-card__meta">
+            <span>Events</span>
+            <span>Discovery and signup</span>
+          </div>
+          <h1>Find civic events, open the map, and continue into RSVP flows.</h1>
+          <p>Sign in to browse post-style event cards, switch into the event map, open candidate and coalition events, reserve a spot, review transport options, and keep paid-event flows honest from the website.</p>
+          <div class="shared-events-command__actions">
+            <button class="shared-feed-chip shared-feed-chip--primary" data-action="auth-login-inline">Sign in</button>
+            <button class="shared-feed-chip" data-action="auth-signup-inline">Create account</button>
+            <button class="shared-feed-chip" data-action="open-app-shell">Open app</button>
+          </div>
+        </div>
+        <div class="shared-events-command__metrics" aria-hidden="true">
+          <div><span>Views</span><strong>2</strong><small>cards + map</small></div>
+          <div><span>RSVP</span><strong>Free</strong><small>instant signup</small></div>
+          <div><span>Paid</span><strong>Safe</strong><small>checkout handoff</small></div>
+          <div><span>Routes</span><strong>4</strong><small>detail + signup</small></div>
+          <div><span>Transport</span><strong>Ready</strong><small>seat status</small></div>
+          <div><span>Hosts</span><strong>2</strong><small>campaign + coalition</small></div>
+        </div>
+      </section>
+      <div class="shared-events-feed" aria-hidden="true">
+        <article class="shared-event-feed-card shared-event-feed-card--feature">
+          <div class="shared-event-feed-card__media">
+            <div class="shared-event-feed-card__fallback">${renderIcon("calendar")}</div>
+            <div class="shared-event-feed-card__date"><strong>Sat</strong><span>10:00 AM</span></div>
+          </div>
+          <div class="shared-event-feed-card__body">
+            <div class="shared-event-feed-card__pills">
+              <span class="shared-event-feed-card__pill is-good">Free</span>
+              <span class="shared-event-feed-card__pill is-route">12 seats available</span>
+              <span class="shared-event-feed-card__pill is-accent">Coalition CTA</span>
+            </div>
+            <h3>Town hall and volunteer launch</h3>
+            <p>Preview the signed-in web feed: rich event cards, detail pages, signup, payment-safe routing, transport labels, host context, and map-ready locations.</p>
+            <div class="shared-event-feed-card__facts">
+              <span>Sat, Oct 12, 10:00 AM</span>
+              <span>Field office</span>
+              <span>Hosted by campaign staff</span>
+            </div>
+            <div class="shared-event-feed-card__stats">
+              <span><strong>42</strong><small>going</small></span>
+              <span><strong>118</strong><small>interested</small></span>
+              <span><strong>Free</strong><small>cost</small></span>
+            </div>
+            <div class="shared-event-feed-card__tags">
+              ${surfaces.map(([label, detail]) => `<span title="${escapeHtml(detail)}">${escapeHtml(label)}</span>`).join("")}
+            </div>
+          </div>
+        </article>
+      </div>
+    </div>
+  </section>`;
 }
 
 function renderManageEventsAuthGate() {
-  return renderFeatureAuthGate({
-    eyebrow: "Manage events",
-    title: "Create and manage Polis events from the browser.",
-    copy: "Sign in with event access to draft events, edit details, review attendees, manage publishing state, and coordinate events across campaign and coalition work.",
-    tiles: [
-      "Draft events",
-      "Edit details",
-      "Attendees",
-      "Publishing",
-      "Campaign hosts",
-      "Coalition hosts",
-    ],
-  });
+  const surfaces = [
+    ["Active", "Upcoming events, RSVP readiness, and edits"],
+    ["Previous", "Past turnout, interest, and follow-up context"],
+    ["Editor", "Cover, dates, address lookup, contact, and ticket price"],
+    ["Signup", "Free RSVP, paid handoff, and attendee details"],
+    ["Map", "Coordinates, venue, town, and route-ready context"],
+    ["Hosts", "Campaign and coalition event ownership"],
+  ];
+  return `<section class="shared-page shared-events-page shared-manage-events-page--auth">
+    ${renderTopChrome()}
+    <div class="shared-page__content">
+      <section class="shared-manage-events-command">
+        <div class="shared-manage-events-command__main">
+          <div class="shared-card__meta">
+            <span>Manage events</span>
+            <span>Web workspace</span>
+          </div>
+          <h1>Create, review, and keep Polis events ready from the browser.</h1>
+          <p>Sign in with event access to manage active and previous events, update the public detail page, review attendee and interest signals, keep map data complete, and hand off free or paid signup paths cleanly.</p>
+          <div class="shared-auth-modal__actions">
+            <button class="shared-feed-chip shared-feed-chip--primary" data-action="auth-login-inline">Sign in</button>
+            <button class="shared-feed-chip" data-action="auth-signup-inline">Create account</button>
+            <button class="shared-feed-chip" data-action="open-app-shell">Open app</button>
+          </div>
+        </div>
+        <div class="shared-manage-events-command__metrics" aria-hidden="true">
+          ${renderManageEventsMetric("Tabs", "2", "active + previous")}
+          ${renderManageEventsMetric("Signals", "RSVP", "going + interested")}
+          ${renderManageEventsMetric("Map", "Ready", "location checks")}
+          ${renderManageEventsMetric("Checkout", "Paid", "honest handoff")}
+          ${renderManageEventsMetric("Editor", "Full", "cover + address")}
+          ${renderManageEventsMetric("Hosts", "2", "campaign + coalition")}
+        </div>
+      </section>
+      <div class="shared-manage-events-list" aria-hidden="true">
+        <article class="shared-manage-event-card">
+          <div class="shared-manage-event-card__media"><div>${renderIcon("calendar")}<span>Active event</span></div></div>
+          <div class="shared-manage-event-card__body">
+            <div class="shared-card__meta"><span>Active</span><span>Sat, 10:00 AM</span><span>Free</span></div>
+            <h3>Canvass launch and voter follow-up</h3>
+            <p>Preview the same manager structure used after sign-in: event details, public signup path, venue context, and response signals.</p>
+            <div class="shared-manage-event-card__facts">
+              <span>${renderIcon("map")} Map-ready venue</span>
+              <span>${renderIcon("candidate")} Campaign host</span>
+              <span>${renderIcon("calendar")} Transport available</span>
+            </div>
+            <div class="shared-manage-event-card__stats">
+              <span><strong>42</strong><small>going</small></span>
+              <span><strong>118</strong><small>interested</small></span>
+              <span><strong>Free</strong><small>cost</small></span>
+            </div>
+            <div class="shared-manage-event-card__readiness">
+              <span class="is-ready"><strong>Cover</strong><em>Ready</em></span>
+              <span class="is-ready"><strong>Map</strong><em>Ready</em></span>
+              <span class="is-ready"><strong>Contact</strong><em>Ready</em></span>
+              <span class="is-ready"><strong>Signup</strong><em>Free RSVP</em></span>
+            </div>
+          </div>
+        </article>
+        <article class="shared-manage-events-empty">
+          <div>${renderIcon("calendar")}</div>
+          <h2>Event surfaces included</h2>
+          <p>Active and previous lists, detail pages, edit/create workflow, RSVP signup, paid-event handoff, map readiness, attendee counts, interest signals, tags, host context, and delete protection all belong in the web manager.</p>
+          <div class="shared-event-feed-card__tags">
+            ${surfaces.map(([label, detail]) => `<span title="${escapeHtml(detail)}">${escapeHtml(label)}</span>`).join("")}
+          </div>
+        </article>
+      </div>
+    </div>
+  </section>`;
 }
 
 function renderProfileAuthGate() {
-  return renderFeatureAuthGate({
-    eyebrow: "Profile",
-    title: "Open your Polis profile from the browser.",
-    copy: "Sign in to edit your public profile, review followers and following, manage notifications, and keep your civic identity synced across Polis.",
-    tiles: [
-      "Profile basics",
-      "Followers",
-      "Following",
-      "Notifications",
-      "Public activity",
-      "Account links",
-    ],
-  });
+  const profileStats = [
+    ["128", "posts"],
+    ["2.4K", "followers"],
+    ["412", "following"],
+    ["18", "badges"],
+  ];
+  const connectionTabs = [
+    ["Following", "People and campaigns you follow"],
+    ["Followers", "People following your public activity"],
+    ["Friends", "Mutual follows and message-ready contacts"],
+  ];
+  const profileTools = [
+    {
+      icon: "bell",
+      title: "Notifications",
+      copy: "Mentions, follows, staff invites, coalition updates, missions, and replies.",
+      value: "14 unread",
+    },
+    {
+      icon: "election",
+      title: "Voter profile",
+      copy: "Home location, districts, political matrix, and ballot-guide readiness.",
+      value: "82%",
+    },
+    {
+      icon: "save",
+      title: "Activity history",
+      copy: "Saved, liked, watched, and commented activity stays easy to revisit.",
+      value: "Private",
+    },
+    {
+      icon: "shield",
+      title: "Safety",
+      copy: "Blocked and muted users, permissions, visibility, and account controls.",
+      value: "Ready",
+    },
+  ];
+
+  return `<section class="shared-page shared-profile-auth-page">
+    ${renderTopChrome()}
+    <div class="shared-page__content">
+      <section class="shared-profile-auth" aria-labelledby="shared-profile-auth-title">
+        <div class="shared-profile-auth__copy">
+          <span class="shared-discover-eyebrow">Profile</span>
+          <h1 id="shared-profile-auth-title">Manage your Polis identity from the browser.</h1>
+          <p>Sign in to edit your public profile, review posts and civic activity, manage followers and friends, respond to notifications, update voter profile data, and keep account safety controls close at hand.</p>
+          <div class="shared-auth-modal__actions">
+            <button class="shared-feed-chip shared-feed-chip--primary" data-action="auth-login-inline">Sign in</button>
+            <button class="shared-feed-chip" data-action="auth-signup-inline">Create account</button>
+            <button class="shared-feed-chip" data-action="open-app-shell">Open app</button>
+          </div>
+          <div class="shared-profile-auth__quick-links" aria-label="Profile web routes">
+            <span>${renderIcon("profile")} Public profile</span>
+            <span>${renderIcon("team")} Connections</span>
+            <span>${renderIcon("bell")} Notifications</span>
+            <span>${renderIcon("settings")} Settings</span>
+          </div>
+        </div>
+        <div class="shared-profile-auth__preview" aria-label="Profile workspace preview">
+          <article class="shared-profile-auth-card">
+            <div class="shared-profile-auth-card__banner"></div>
+            <div class="shared-profile-auth-card__body">
+              <div class="shared-profile-auth-card__avatar">P</div>
+              <div class="shared-profile-auth-card__heading">
+                <span>Public profile</span>
+                <h2>Polis voter</h2>
+                <p>@polisvoter &middot; Missoula, MT</p>
+              </div>
+              <button class="shared-feed-chip" data-action="auth-login-inline">Edit profile</button>
+              <div class="shared-profile-auth-card__stats" aria-label="Profile stats">
+                ${profileStats
+                  .map(
+                    ([value, label]) =>
+                      `<span><strong>${escapeHtml(value)}</strong><small>${escapeHtml(label)}</small></span>`,
+                  )
+                  .join("")}
+              </div>
+              <div class="shared-profile-auth-post-grid" aria-label="Profile post grid">
+                <span>${renderIcon("video")}</span>
+                <span>${renderIcon("camera")}</span>
+                <span>${renderIcon("calendar")}</span>
+                <span>${renderIcon("comment")}</span>
+                <span>${renderIcon("election")}</span>
+                <span>${renderIcon("mission")}</span>
+              </div>
+            </div>
+          </article>
+          <aside class="shared-profile-auth__side">
+            <article class="shared-profile-auth-connections">
+              <header>
+                <span>${renderIcon("team")}</span>
+                <div>
+                  <strong>Connections</strong>
+                  <small>Following, followers, and friends</small>
+                </div>
+              </header>
+              <div class="shared-profile-auth-connections__tabs">
+                ${connectionTabs
+                  .map(
+                    ([label, copy], index) =>
+                      `<span class="${index === 0 ? "is-active" : ""}"><strong>${escapeHtml(label)}</strong><small>${escapeHtml(copy)}</small></span>`,
+                  )
+                  .join("")}
+              </div>
+            </article>
+            <div class="shared-profile-auth-tools">
+              ${profileTools
+                .map(
+                  (tool) => `<article>
+                    <span>${renderIcon(tool.icon)}</span>
+                    <div>
+                      <em>${escapeHtml(tool.value)}</em>
+                      <strong>${escapeHtml(tool.title)}</strong>
+                      <p>${escapeHtml(tool.copy)}</p>
+                    </div>
+                  </article>`,
+                )
+                .join("")}
+            </div>
+          </aside>
+        </div>
+      </section>
+    </div>
+  </section>`;
 }
 
 function renderMessagesAuthGate() {
-  return renderFeatureAuthGate({
-    eyebrow: "Messages",
-    title: "Open Polis messaging from the browser.",
-    copy: "Sign in to use direct messages, campaign rooms, coalition channels, mentions, attachments, read receipts, and room settings without leaving the web app.",
-    tiles: [
-      "Direct messages",
-      "Campaign rooms",
-      "Coalition channels",
-      "Group threads",
-      "Mentions",
-      "Read receipts",
-    ],
-  });
+  const routeSurfaces = [
+    ["Inbox", "Direct and group threads", "messages"],
+    ["Requests", "DM requests and workspace invites", "bell"],
+    ["Compose", "New conversations", "send"],
+    ["Campaign rooms", "Candidate operations channels", "candidate"],
+    ["Coalition channels", "Member and mission rooms", "team"],
+    ["Room access", "Access groups, room access, and invites", "lock"],
+    ["Security", "Trusted devices and recovery", "shield"],
+    ["Safety review", "Reports and held messages", "flag"],
+  ];
+  const previewThreads = [
+    {
+      title: "Field operations",
+      scope: "Campaign room",
+      preview: "Canvass routes and voter follow-ups are ready for review.",
+      unread: "3",
+      tone: "cyan",
+    },
+    {
+      title: "Coalition organizers",
+      scope: "Coalition channel",
+      preview: "Mission approvals and volunteer coverage updates are in.",
+      unread: "1",
+      tone: "red",
+    },
+    {
+      title: "Jordan Lee",
+      scope: "Direct message",
+      preview: "Sent the event media package and RSVP list.",
+      unread: "",
+      tone: "neutral",
+    },
+  ];
+  const previewMessages = [
+    ["Maya", "Pinned the announcement copy and the walk-list handoff."],
+    ["Campaign staff", "Two moderation reports need a room decision."],
+    ["You", "I will review access, then push the update to the team."],
+  ];
+  return `<section class="shared-page shared-messaging-page shared-messaging-page--auth">
+    ${renderTopChrome()}
+    <div class="shared-page__content shared-messaging-page__content">
+      <section class="shared-messaging-auth">
+        <div class="shared-messaging-auth__copy">
+          <span class="shared-discover-eyebrow">Messages</span>
+          <h1>Open secure conversations and campaign rooms from the web.</h1>
+          <p>Sign in to continue with direct messages, requests, campaign and coalition room directories, trusted devices, recovery, moderation, and room access controls.</p>
+          <div class="shared-auth-modal__actions">
+            <button class="shared-feed-chip shared-feed-chip--primary" data-action="auth-login-inline">Sign in</button>
+            <button class="shared-feed-chip" data-action="auth-signup-inline">Create account</button>
+            <button class="shared-feed-chip" data-action="open-app-shell">Open app</button>
+          </div>
+          <div class="shared-messaging-auth__routes" role="list" aria-label="Messaging web surfaces">
+            ${routeSurfaces
+              .map(
+                ([label, detail, icon]) => `<span role="listitem">
+                  <i>${renderIcon(icon)}</i>
+                  <strong>${escapeHtml(label)}</strong>
+                  <small>${escapeHtml(detail)}</small>
+                </span>`,
+              )
+              .join("")}
+          </div>
+        </div>
+        <div class="shared-messaging-auth__preview" aria-label="Messaging workspace preview">
+          <aside class="shared-messaging-auth__thread-list">
+            <header>
+              <span>${renderIcon("messages")}</span>
+              <div>
+                <strong>Inbox</strong>
+                <small>Requests, DMs, and rooms</small>
+              </div>
+            </header>
+            ${previewThreads
+              .map(
+                (thread) => `<article class="shared-messaging-auth__thread is-${escapeHtml(thread.tone)}">
+                  <span>${escapeHtml(thread.title.slice(0, 1).toUpperCase())}</span>
+                  <div>
+                    <strong>${escapeHtml(thread.title)}</strong>
+                    <small>${escapeHtml(thread.scope)}</small>
+                    <p>${escapeHtml(thread.preview)}</p>
+                  </div>
+                  ${thread.unread ? `<em>${escapeHtml(thread.unread)}</em>` : ""}
+                </article>`,
+              )
+              .join("")}
+          </aside>
+          <article class="shared-messaging-auth__conversation">
+            <header>
+              <div>
+                <span>Campaign rooms</span>
+                <strong>#announcements</strong>
+              </div>
+              <small>Read receipts on</small>
+            </header>
+            <div class="shared-messaging-auth__message-stack">
+              ${previewMessages
+                .map(
+                  ([author, body], index) => `<div class="shared-messaging-auth__bubble${index === previewMessages.length - 1 ? " is-own" : ""}">
+                    <strong>${escapeHtml(author)}</strong>
+                    <p>${escapeHtml(body)}</p>
+                  </div>`,
+                )
+                .join("")}
+            </div>
+            <footer>
+              <span>${renderIcon("lock")} Sign in to send, react, pin, report, and manage access.</span>
+            </footer>
+          </article>
+        </div>
+      </section>
+    </div>
+  </section>`;
 }
 
 function renderTopicsAuthGate() {
-  return renderFeatureAuthGate({
-    eyebrow: "Topics",
-    title: "Choose the issues Polis should follow.",
-    copy: "Sign in to set topic preferences, tune policy-question coverage, and shape the recommendations, candidates, and civic actions Polis brings forward.",
-    tiles: [
-      "Topic picks",
-      "Policy areas",
-      "Question filters",
-      "Candidate context",
-      "Feed tuning",
-      "Issue alerts",
-    ],
-  });
+  const previewTopics = [
+    {
+      category: "Housing",
+      id: "housing-affordability",
+      label: "Affordable housing",
+      signal: "Guides feed, policy questions, and candidate context",
+      selected: true,
+    },
+    {
+      category: "Education",
+      id: "school-funding",
+      label: "School funding",
+      signal: "Adds district finance questions and local ballot coverage",
+      selected: true,
+    },
+    {
+      category: "Democracy",
+      id: "election-access",
+      label: "Election access",
+      signal: "Prioritizes voter access updates and election reminders",
+      selected: true,
+    },
+    {
+      category: "Transportation",
+      id: "public-transit",
+      label: "Public transit",
+      signal: "Surfaces mobility posts, measures, and candidate stances",
+      selected: false,
+    },
+    {
+      category: "Climate",
+      id: "resilience",
+      label: "Climate resilience",
+      signal: "Connects local preparedness policy to upcoming questions",
+      selected: false,
+    },
+    {
+      category: "Campaigns",
+      id: "campaign-finance",
+      label: "Campaign finance",
+      signal: "Adds spending and disclosure context to candidate discovery",
+      selected: false,
+    },
+  ];
+  const categories = [
+    ["All", previewTopics.length],
+    ["Housing", 1],
+    ["Education", 1],
+    ["Democracy", 1],
+    ["Transportation", 1],
+  ];
+  const selectedCount = previewTopics.filter((topic) => topic.selected).length;
+  return `<section class="shared-page shared-topics-page shared-topics-page--auth">
+    ${renderTopChrome()}
+    <div class="shared-page__content">
+      <section class="shared-topics-auth">
+        <article class="shared-topics-auth__copy">
+          <div>
+            <h1>Follow topics to tune the whole app.</h1>
+            <p>Pick the issues you want Polis to watch. The same topic choices personalize your feed, policy questions, Discover modules, candidate context, and local civic prompts.</p>
+          </div>
+          <div class="shared-topics-auth__actions">
+            <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="auth-login-inline">Log in to choose topics</button>
+            <button class="shared-feed-chip" type="button" data-action="auth-signup-inline">Create account</button>
+          </div>
+          <div class="shared-topics-auth__coverage" aria-label="Topic features">
+            <span>${renderIcon("tag")} Topic picks</span>
+            <span>${renderIcon("search")} Search and filters</span>
+            <span>${renderIcon("check")} 3-7 onboarding picks</span>
+            <span>${renderIcon("bell")} Issue alerts</span>
+            <span>${renderIcon("candidate")} Candidate context</span>
+            <span>${renderIcon("feed")} Feed tuning</span>
+          </div>
+        </article>
+        <section class="shared-topics-auth__preview" aria-label="Topics preview">
+          <section class="shared-topics-hero shared-topics-auth__hero">
+            <div>
+              <span class="shared-settings-eyebrow">Preferences</span>
+              <h2>Pick topics</h2>
+              <p>Choose 3-7 topics to tune your feed and discovery surfaces.</p>
+            </div>
+            <div class="shared-topics-metrics">
+              <span><strong>${escapeHtml(formatCount(selectedCount))}</strong><small>selected</small></span>
+              <span><strong>${escapeHtml(formatCount(previewTopics.length))}</strong><small>topics</small></span>
+              <span><strong>${escapeHtml(formatCount(5))}</strong><small>categories</small></span>
+            </div>
+          </section>
+          <section class="shared-topics-toolbar shared-topics-auth__toolbar">
+            <div class="shared-topics-search" aria-label="Search topics preview">
+              <span>${renderIcon("search")}</span>
+              <input value="housing, schools, access" readonly aria-label="Search topics" />
+              <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="auth-login-inline">Search</button>
+            </div>
+            <div class="shared-topics-actions">
+              <button class="shared-feed-chip" type="button" data-action="auth-login-inline">Refresh</button>
+              <button class="shared-feed-chip" type="button" data-action="auth-login-inline">Preferences</button>
+            </div>
+          </section>
+          <div class="shared-topics-category-strip shared-topics-auth__categories">
+            ${categories
+              .map(
+                ([label, count], index) =>
+                  `<button class="shared-feed-chip${index === 0 ? " shared-feed-chip--primary" : ""}" type="button" data-action="auth-login-inline">${escapeHtml(label)} <span>${escapeHtml(formatCount(count))}</span></button>`,
+              )
+              .join("")}
+          </div>
+          <section class="shared-topics-results shared-topics-auth__results">
+            <div class="shared-topics-results__header">
+              <div>
+                <h2>Available topics</h2>
+                <p>${escapeHtml(`${formatCount(previewTopics.length)} topics shown`)}</p>
+              </div>
+              <button class="shared-feed-chip" type="button" data-action="auth-login-inline">Clear filters</button>
+            </div>
+            <div class="shared-topics-grid">
+              ${previewTopics
+                .map(
+                  (topic) => `<article class="shared-topics-card shared-topics-auth__card${topic.selected ? " is-selected" : ""}">
+                    <div class="shared-topics-card__main">
+                      <span>${escapeHtml(topic.category)}</span>
+                      <strong>${escapeHtml(topic.label)}</strong>
+                      <small>${escapeHtml(topic.signal)}</small>
+                    </div>
+                    <button class="shared-feed-chip${topic.selected ? "" : " shared-feed-chip--primary"}" type="button" data-action="auth-login-inline">
+                      ${topic.selected ? `${renderIcon("check")} Following` : "Follow"}
+                    </button>
+                  </article>`,
+                )
+                .join("")}
+            </div>
+          </section>
+          <section class="shared-topics-footer shared-topics-auth__footer">
+            <div>
+              <strong>Ready to continue</strong>
+              <span>${escapeHtml(`${selectedCount} selected`)}</span>
+            </div>
+            <div class="shared-topics-footer__actions">
+              <button class="shared-feed-chip" type="button" data-action="auth-login-inline">Skip</button>
+              <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="auth-login-inline">Continue</button>
+            </div>
+          </section>
+        </section>
+      </section>
+    </div>
+  </section>`;
 }
 
 function renderPolicyQuestionsAuthGate() {
-  return renderFeatureAuthGate({
-    eyebrow: "Policy questions",
-    title: "Answer the issues that shape your ballot.",
-    copy: "Sign in to answer policy questions, compare your voter-intelligence profile, revisit explanations, and keep your civic preferences synced across Polis.",
-    tiles: [
-      "Issue prompts",
-      "Preference scoring",
-      "Candidate matching",
-      "Answer history",
-      "Topic filters",
-      "Voter profile",
-    ],
-  });
+  const categories = [
+    ["All", "38"],
+    ["Housing", "9"],
+    ["Education", "7"],
+    ["Climate", "6"],
+  ];
+  const cards = [
+    {
+      category: "Housing",
+      signals: "3 issue signals",
+      title: "Should cities expand zoning for duplexes and fourplexes?",
+      copy: "Review the tradeoffs, answer once, and keep the signal attached to your voter profile.",
+      answered: false,
+    },
+    {
+      category: "Schools",
+      signals: "2 issue signals",
+      title: "How should local districts prioritize school safety funding?",
+      copy: "Compare context, source notes, and local voter response before choosing your stance.",
+      answered: true,
+    },
+  ];
+  const options = [
+    ["Expand missing-middle zoning near transit", "Support", "52", true],
+    ["Keep existing zoning rules in place", "Oppose", "31", false],
+    ["Require city-by-city approval first", "Conditional", "17", false],
+  ];
+  const scores = [
+    ["74%", "Engagement"],
+    ["68%", "Profile"],
+    ["81%", "Guide"],
+  ];
+
+  return `<section class="shared-page shared-policy-questions-page shared-policy-questions-page--auth">
+    ${renderTopChrome()}
+    <div class="shared-page__content">
+      <section class="shared-policy-questions-auth" aria-labelledby="shared-policy-questions-auth-title">
+        <div class="shared-policy-questions-auth__copy">
+          <div>
+            <span class="shared-discover-eyebrow">Policy questions</span>
+            <h1 id="shared-policy-questions-auth-title">Answer issue questions and see how they shape your voter profile.</h1>
+            <p>Sign in to search policy questions, read the background and sources, save answers, compare aggregate results, and refresh the voter-intelligence matrix that powers candidate and ballot guidance.</p>
+          </div>
+          <div class="shared-auth-modal__actions">
+            <button class="shared-feed-chip shared-feed-chip--primary" data-action="auth-login-inline">Sign in</button>
+            <button class="shared-feed-chip" data-action="auth-signup-inline">Create account</button>
+            <button class="shared-feed-chip" data-action="open-app-shell">Open app</button>
+          </div>
+          <div class="shared-policy-questions-auth__coverage" aria-label="Policy question capabilities available after sign in">
+            <span>${renderIcon("search")} Searchable questions</span>
+            <span>${renderIcon("tag")} Category filters</span>
+            <span>${renderIcon("check")} Answer history</span>
+            <span>${renderIcon("chart")} Result bars</span>
+            <span>${renderIcon("file")} Sources</span>
+            <span>${renderIcon("profile")} Voter profile</span>
+          </div>
+        </div>
+        <div class="shared-policy-questions-auth__preview" aria-label="Policy question web preview">
+          <div class="shared-policy-questions-auth__toolbar">
+            <div class="shared-policy-questions-auth__search">
+              <span>${renderIcon("search")}</span>
+              <div>
+                <strong>Search policy questions</strong>
+                <em>Housing, schools, climate, ballot access</em>
+              </div>
+              <b>38</b>
+            </div>
+            <span class="shared-feed-chip shared-feed-chip--primary">Voter intelligence</span>
+          </div>
+          <div class="shared-policy-questions-category-strip shared-policy-questions-auth__categories">
+            ${categories
+              .map(
+                ([label, count], index) =>
+                  `<span class="shared-feed-chip${index === 0 ? " shared-feed-chip--primary" : ""}">${escapeHtml(label)} <span>${escapeHtml(count)}</span></span>`,
+              )
+              .join("")}
+          </div>
+          <div class="shared-policy-question-list shared-policy-questions-auth__list">
+            ${cards
+              .map(
+                (card) => `<article class="shared-policy-question-card">
+                  <div class="shared-policy-question-card__icon" aria-hidden="true">${renderIcon(card.answered ? "check" : "search")}</div>
+                  <div class="shared-policy-question-card__body">
+                    <div class="shared-card__meta">
+                      <span>${escapeHtml(card.category)}</span>
+                      <span>${escapeHtml(card.signals)}</span>
+                      ${card.answered ? "<span>Answered</span>" : ""}
+                    </div>
+                    <h3>${escapeHtml(card.title)}</h3>
+                    <p>${escapeHtml(card.copy)}</p>
+                  </div>
+                </article>`,
+              )
+              .join("")}
+          </div>
+          <div class="shared-policy-questions-auth__detail">
+            <section class="shared-policy-question-panel">
+              <span class="shared-discover-eyebrow">Question detail</span>
+              <h2>Background and sources stay with the answer.</h2>
+              <p>Each prompt can include a chart, plain-language background, citations, and the exact question text before you choose an option.</p>
+              <div class="shared-policy-questions-auth__chart-mini" aria-label="Example policy question chart">
+                <span style="--policy-question-bar-width:68%;--policy-question-bar-color:#26f4ee"><strong>Rent pressure</strong><em>68</em></span>
+                <span style="--policy-question-bar-width:44%;--policy-question-bar-color:#ff335f"><strong>Permit pace</strong><em>44</em></span>
+                <span style="--policy-question-bar-width:29%;--policy-question-bar-color:#f7c948"><strong>Vacancy</strong><em>29</em></span>
+              </div>
+            </section>
+            <aside class="shared-policy-question-answer-panel">
+              <div>
+                <span class="shared-discover-eyebrow">Your answer</span>
+                <h2>Which approach should your city prioritize?</h2>
+                <p>Answers update profile confidence and can be changed later.</p>
+              </div>
+              <div class="shared-policy-question-options">
+                ${options
+                  .map(
+                    ([text, stance, percent, selected]) =>
+                      `<div class="shared-policy-question-option${selected ? " is-selected" : ""}">
+                        <span class="shared-policy-question-option__radio">${selected ? renderIcon("check") : ""}</span>
+                        <span class="shared-policy-question-option__copy">
+                          <strong>${escapeHtml(text)}</strong>
+                          <small>${escapeHtml(stance)}</small>
+                          <i><b style="--policy-question-result-width:${escapeHtml(percent)}%"></b></i>
+                          <em>${escapeHtml(percent)}% of answers</em>
+                        </span>
+                        <span class="shared-policy-question-option__status">${selected ? "Selected" : "Choose"}</span>
+                      </div>`,
+                  )
+                  .join("")}
+              </div>
+            </aside>
+          </div>
+          <section class="shared-policy-questions-auth__intel">
+            <div class="shared-policy-questions-auth__scores">
+              ${scores
+                .map(
+                  ([value, label]) =>
+                    `<span><strong>${escapeHtml(value)}</strong><small>${escapeHtml(label)}</small></span>`,
+                )
+                .join("")}
+            </div>
+            <div class="shared-policy-questions-auth__matrix">
+              <span class="shared-policy-questions-auth__matrix-point"></span>
+              <strong>Political matrix</strong>
+              <em>Issue and bill answers increase confidence.</em>
+            </div>
+          </section>
+        </div>
+      </section>
+    </div>
+  </section>`;
 }
 
 function renderSearchAuthGate() {
-  return renderFeatureAuthGate({
-    pageClass: "shared-search-page",
-    authClass: "shared-search-auth",
-    eyebrow: "Search",
-    title: "Find people, posts, and tags.",
-    copy: "Sign in to search the live Polis graph from the browser and move straight into profiles, posts, conversations, campaign work, and civic actions.",
-    tiles: ["Posts", "People", "Tags", "Campaigns", "Coalitions", "Events"],
-  });
+  const resultTabs = [
+    ["Top", "12"],
+    ["Posts", "48"],
+    ["Users", "19"],
+    ["Tags", "7"],
+  ];
+  const suggestions = [
+    ["housing", "Trending"],
+    ["school", "Recent"],
+    ["volunteer", "Suggestion"],
+    ["#transit", "Tag"],
+  ];
+  const resultCards = [
+    {
+      icon: "profile",
+      label: "User",
+      title: "Maya Johnson",
+      copy: "Candidate profile, campaign updates, and public posts.",
+    },
+    {
+      icon: "feed",
+      label: "Post",
+      title: "Transit plan Q&A",
+      copy: "Video post with comments, saves, and shared civic context.",
+    },
+    {
+      icon: "search",
+      label: "Tag",
+      title: "#housing",
+      copy: "Issue tag connecting questions, candidates, and feed posts.",
+    },
+  ];
+
+  return `<section class="shared-page shared-search-page shared-search-auth-page">
+    ${renderTopChrome()}
+    <div class="shared-page__content">
+      <section class="shared-search-auth" aria-labelledby="shared-search-auth-title">
+        <div class="shared-search-auth__copy">
+          <span class="shared-discover-eyebrow">Search</span>
+          <h1 id="shared-search-auth-title">Search the live Polis graph from the browser.</h1>
+          <p>Sign in to use recent searches, trending queries, remote suggestions, editable result searches, and tabs for top matches, posts, users, and tags.</p>
+          <div class="shared-auth-modal__actions">
+            <button class="shared-feed-chip shared-feed-chip--primary" data-action="auth-login-inline">Sign in</button>
+            <button class="shared-feed-chip" data-action="auth-signup-inline">Create account</button>
+            <button class="shared-feed-chip" data-action="open-app-shell">Open app</button>
+          </div>
+          <div class="shared-search-auth__coverage" aria-label="Search surfaces available after sign in">
+            <span>${renderIcon("search")} Suggestions</span>
+            <span>${renderIcon("feed")} Posts</span>
+            <span>${renderIcon("profile")} Users</span>
+            <span>${renderIcon("tag")} Tags</span>
+          </div>
+        </div>
+        <div class="shared-search-auth__preview" aria-label="Search preview">
+          <div class="shared-search-auth__bar">
+            <span>${renderIcon("search")}</span>
+            <strong>housing</strong>
+            <em>Search</em>
+          </div>
+          <div class="shared-search-auth__suggestions" aria-label="Search suggestions">
+            ${suggestions
+              .map(
+                ([label, meta]) =>
+                  `<span><strong>${escapeHtml(label)}</strong><small>${escapeHtml(meta)}</small></span>`,
+              )
+              .join("")}
+          </div>
+          <div class="shared-search-auth__tabs" aria-label="Result tabs">
+            ${resultTabs
+              .map(
+                ([label, count], index) =>
+                  `<span class="${index === 0 ? "is-active" : ""}"><strong>${escapeHtml(label)}</strong><small>${escapeHtml(count)}</small></span>`,
+              )
+              .join("")}
+          </div>
+          <div class="shared-search-auth__results">
+            <article class="shared-search-auth__post-grid" aria-label="Top posts preview">
+              <header>
+                <strong>Top posts</strong>
+                <small>Media grid</small>
+              </header>
+              <div>
+                <span>${renderIcon("video")}</span>
+                <span>${renderIcon("camera")}</span>
+                <span>${renderIcon("calendar")}</span>
+                <span>${renderIcon("comment")}</span>
+              </div>
+            </article>
+            <div class="shared-search-auth__result-list" aria-label="Mixed search results">
+              ${resultCards
+                .map(
+                  (item) => `<article>
+                    <span>${renderIcon(item.icon)}</span>
+                    <div>
+                      <em>${escapeHtml(item.label)}</em>
+                      <strong>${escapeHtml(item.title)}</strong>
+                      <p>${escapeHtml(item.copy)}</p>
+                    </div>
+                  </article>`,
+                )
+                .join("")}
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </section>`;
 }
 
 function buildSearchResultsRoute(query) {
@@ -42832,6 +47367,288 @@ function renderPostComposerMediaPreview(composer) {
   return `<img src="${escapeHtml(composer.previewUrl)}" alt="${escapeHtml(fileName || "Selected image")}" />`;
 }
 
+function postComposerVisibilityCopy(visibility) {
+  switch (normalizePostComposerVisibility(visibility)) {
+    case "followers":
+      return "Followers can see this post after it publishes.";
+    case "private":
+      return "Only you can see this post.";
+    case "custom":
+      return "Only selected private audience groups can see this post.";
+    case "public":
+    default:
+      return "Everyone on Polis can see this post.";
+  }
+}
+
+function renderPostComposerTopicChips(composer) {
+  const issueIds = readPostComposerIssueIds(composer.issueIds);
+  if (!issueIds.length) {
+    return `<div class="shared-create-topic-empty">
+      <span>${renderIcon("tag")}</span>
+      <p>Add up to three issue tags so the post lands in the right civic context.</p>
+    </div>`;
+  }
+  return `<div class="shared-create-topic-chips">
+    ${issueIds
+      .map((issueId) => `<span>${renderIcon("tag")} ${escapeHtml(issueId)}</span>`)
+      .join("")}
+    <small>${escapeHtml(`${formatCount(issueIds.length)}/3`)}</small>
+  </div>`;
+}
+
+function renderPostComposerAudienceGroups(composer) {
+  if (normalizePostComposerVisibility(composer.visibility) !== "custom") {
+    return "";
+  }
+  const audienceGroups = state.pages.settings.audienceGroups;
+  const groupIds = readPostComposerAudienceGroupIds(composer.audienceGroupIds);
+  const selected = new Set(groupIds);
+  const knownGroups = Array.isArray(audienceGroups.items)
+    ? audienceGroups.items
+    : [];
+  const selectedKnownGroups = knownGroups.filter((group) =>
+    selected.has(group.groupId),
+  );
+  return `<div class="shared-create-custom-audience">
+    <label>
+      <span>Audience group IDs</span>
+      <input name="audienceGroupIds" data-create-field="audienceGroupIds" value="${escapeHtml(composer.audienceGroupIds)}" placeholder="group-id-1, group-id-2"${disabledAttr(composer.pending)} />
+    </label>
+    ${
+      audienceGroups.loading
+        ? '<div class="shared-create-inline-status">Loading audience groups...</div>'
+        : ""
+    }
+    ${
+      audienceGroups.error
+        ? `<div class="shared-create-inline-status is-error">${escapeHtml(audienceGroups.error)}</div>`
+        : ""
+    }
+    ${
+      selectedKnownGroups.length
+        ? `<div class="shared-create-audience-preview">
+            ${selectedKnownGroups
+              .map(
+                (group) => `<span>
+                  <strong>${escapeHtml(group.name)}</strong>
+                  <small>${escapeHtml(`${formatCount(group.memberUserIds.length)} member ID${group.memberUserIds.length === 1 ? "" : "s"}`)}</small>
+                </span>`,
+              )
+              .join("")}
+          </div>`
+        : ""
+    }
+    <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/settings/audience-groups">${renderIcon("team")} <span>Manage groups</span></button>
+  </div>`;
+}
+
+function renderPostComposerAudiencePanel(composer, pending) {
+  const visibility = normalizePostComposerVisibility(composer.visibility);
+  return `<section class="shared-create-review-section">
+    <div class="shared-create-review-section__header">
+      <span>${renderIcon(visibility === "private" || visibility === "custom" ? "lock" : "team")}</span>
+      <div>
+        <strong>Audience</strong>
+        <small>${escapeHtml(postComposerVisibilityCopy(visibility))}</small>
+      </div>
+    </div>
+    <label>
+      <span>Visibility</span>
+      <select name="visibility" data-create-field="visibility"${disabledAttr(pending)}>
+        <option value="public"${selectedAttr(visibility === "public")}>Public</option>
+        <option value="followers"${selectedAttr(visibility === "followers")}>Followers</option>
+        <option value="private"${selectedAttr(visibility === "private")}>Private</option>
+        <option value="custom"${selectedAttr(visibility === "custom")}>Custom audience</option>
+      </select>
+    </label>
+    ${renderPostComposerAudienceGroups(composer)}
+  </section>`;
+}
+
+function renderPostComposerTopicsPanel(composer, pending) {
+  return `<section class="shared-create-review-section">
+    <div class="shared-create-review-section__header">
+      <span>${renderIcon("tag")}</span>
+      <div>
+        <strong>Topics</strong>
+        <small>Attach issue signals before publishing.</small>
+      </div>
+    </div>
+    <label>
+      <span>Issue tags</span>
+      <input name="issueIds" data-create-field="issueIds" value="${escapeHtml(composer.issueIds)}" placeholder="housing, transit, schools"${disabledAttr(pending)} />
+    </label>
+    ${renderPostComposerTopicChips(composer)}
+  </section>`;
+}
+
+function renderPostComposerOptionRow({
+  name,
+  checked,
+  title,
+  copy,
+  icon = "check",
+  pending = false,
+  disabled = false,
+  locked = false,
+}) {
+  const disabledText = disabled || locked ? " is-disabled" : "";
+  return `<label class="shared-create-option-row${disabledText}">
+    <span class="shared-create-option-row__icon">${renderIcon(icon)}</span>
+    <span>
+      <strong>${escapeHtml(title)}</strong>
+      <small>${escapeHtml(copy)}</small>
+    </span>
+    <input type="checkbox"${name ? ` name="${escapeHtml(name)}" data-create-field="${escapeHtml(name)}"` : ""}${checkedAttr(checked)}${disabledAttr(pending || disabled || locked)} />
+  </label>`;
+}
+
+function renderPostComposerOptionsPanel(composer, pending) {
+  return `<section class="shared-create-review-section">
+    <div class="shared-create-review-section__header">
+      <span>${renderIcon("settings")}</span>
+      <div>
+        <strong>Review options</strong>
+        <small>Match the app review controls before the post goes live.</small>
+      </div>
+    </div>
+    <div class="shared-create-options-list">
+      ${renderPostComposerOptionRow({
+        name: "allowComments",
+        checked: composer.allowComments,
+        title: "Allow comments",
+        copy: "Let people reply under this post.",
+        icon: "comment",
+        pending,
+      })}
+      ${renderPostComposerOptionRow({
+        name: "allowReuseContent",
+        checked: composer.allowReuseContent,
+        title: "Allow reuse",
+        copy: "Permit reuse in Polis civic surfaces.",
+        icon: "share",
+        pending,
+      })}
+      ${renderPostComposerOptionRow({
+        name: "aiGeneratedContent",
+        checked: composer.aiGeneratedContent,
+        title: "AI-generated content",
+        copy: "Show the AI disclosure label with this post.",
+        icon: "file",
+        pending,
+      })}
+      ${renderPostComposerOptionRow({
+        checked: composer.saveToDevice,
+        title: "Save to this device",
+        copy: "Managed in mobile review; web publish keeps the upload in Polis.",
+        icon: "download",
+        locked: true,
+      })}
+      ${renderPostComposerOptionRow({
+        checked: composer.savePostsWithWatermark,
+        title: "Save with watermark",
+        copy: "Locked on while premium export controls are unavailable.",
+        icon: "save",
+        locked: true,
+      })}
+    </div>
+  </section>`;
+}
+
+function renderPostComposerBrandingPanel(composer) {
+  return `<section class="shared-create-branding">
+    <span>${renderIcon("shield")}</span>
+    <div>
+      <strong>Branding overlay locked on</strong>
+      <p>Posts keep Polis review branding and watermark behavior aligned with the app until premium export controls are available on web.</p>
+    </div>
+    <span class="shared-create-lock-pill">${escapeHtml(composer.brandingOverlayEnabled ? "On" : "Locked")}</span>
+  </section>`;
+}
+
+function renderPostComposerCrosspostPanel(composer) {
+  const visibility = normalizePostComposerVisibility(composer.visibility);
+  const social = state.pages.settings.social;
+  const crosspost = state.pages.settings.crosspost;
+  const connections = Array.isArray(social.connections) ? social.connections : [];
+  const targetCount = connections.reduce(
+    (count, connection) => count + (Array.isArray(connection.targets) ? connection.targets.length : 0),
+    0,
+  );
+  const defaults = crosspost.item || defaultCrosspostDefaults();
+  const selectedTargets = normalizeStringList(defaults.selectedTargetKeys);
+  const providerNames = connections
+    .map((connection) => connection.providerLabel || providerLabel(connection.provider))
+    .filter(Boolean)
+    .slice(0, 3);
+  let statusTitle = "Connect accounts";
+  let statusCopy = "Share to Instagram, Threads, YouTube, and other connected services from the app review flow.";
+  let tone = "setup";
+  if (visibility !== "public") {
+    statusTitle = "Crossposting unavailable";
+    statusCopy = "Only public posts can be crossposted to connected accounts.";
+    tone = "blocked";
+  } else if (social.loading || crosspost.loading) {
+    statusTitle = "Checking publishing setup";
+    statusCopy = "Loading connected accounts and saved crosspost defaults.";
+    tone = "loading";
+  } else if (social.error || crosspost.error) {
+    statusTitle = "Publishing setup unavailable";
+    statusCopy = social.error || crosspost.error;
+    tone = "blocked";
+  } else if (connections.length) {
+    statusTitle = "Connected accounts ready";
+    statusCopy = `${formatCount(connections.length)} account${connections.length === 1 ? "" : "s"} and ${formatCount(targetCount || selectedTargets.length)} target${(targetCount || selectedTargets.length) === 1 ? "" : "s"} are available in publishing settings.`;
+    tone = "ready";
+  }
+  return `<section class="shared-create-crosspost shared-create-crosspost--${escapeHtml(tone)}">
+    <div class="shared-create-review-section__header">
+      <span>${renderIcon("share")}</span>
+      <div>
+        <strong>Crosspost readiness</strong>
+        <small>${escapeHtml(statusTitle)}</small>
+      </div>
+    </div>
+    <p>${escapeHtml(statusCopy)}</p>
+    ${
+      providerNames.length
+        ? `<div class="shared-create-crosspost__providers">${providerNames.map((name) => `<span>${escapeHtml(name)}</span>`).join("")}</div>`
+        : ""
+    }
+    ${
+      defaults.youtubeTitle || defaults.youtubePrivacy
+        ? `<div class="shared-create-youtube-defaults">
+            <span>YouTube</span>
+            <strong>${escapeHtml(defaults.youtubeTitle || "Use caption as title")}</strong>
+            <small>${escapeHtml(humanizeLabel(defaults.youtubePrivacy || "private"))}</small>
+          </div>`
+        : ""
+    }
+    <div class="shared-create-crosspost__actions">
+      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/settings/connected-accounts">${renderIcon("settings")} <span>Accounts</span></button>
+      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/settings/publishing-social">${renderIcon("share")} <span>Defaults</span></button>
+    </div>
+  </section>`;
+}
+
+function renderPostComposerReviewPanel(composer, pending) {
+  return `<div class="shared-create-review">
+    <div class="shared-create-review__header">
+      <div>
+        <span class="shared-discover-eyebrow">Review</span>
+        <h2>Ready to publish</h2>
+      </div>
+      <span>${escapeHtml(normalizePostComposerVisibility(composer.visibility))}</span>
+    </div>
+    ${renderPostComposerAudiencePanel(composer, pending)}
+    ${renderPostComposerTopicsPanel(composer, pending)}
+    ${renderPostComposerOptionsPanel(composer, pending)}
+    ${renderPostComposerBrandingPanel(composer)}
+    ${renderPostComposerCrosspostPanel(composer)}
+  </div>`;
+}
+
 function renderPostComposerPage() {
   const composer = state.pages.create;
   const fileName = normalizeString(composer.file?.name);
@@ -42912,24 +47729,7 @@ function renderPostComposerPage() {
             <span>Caption</span>
             <textarea name="description" rows="6" maxlength="2200" data-create-field="description" placeholder="Add context for the feed"${disabledAttr(pending)}>${escapeHtml(composer.description)}</textarea>
           </label>
-          <div class="shared-create-grid">
-            <label>
-              <span>Visibility</span>
-              <select name="visibility" data-create-field="visibility"${disabledAttr(pending)}>
-                <option value="public"${selectedAttr(composer.visibility === "public")}>Public</option>
-                <option value="private"${selectedAttr(composer.visibility === "private")}>Private</option>
-              </select>
-            </label>
-            <label>
-              <span>Issue tags</span>
-              <input name="issueIds" data-create-field="issueIds" value="${escapeHtml(composer.issueIds)}" placeholder="housing, transit, schools"${disabledAttr(pending)} />
-            </label>
-          </div>
-          <div class="shared-create-checks">
-            <label><input type="checkbox" name="allowComments" data-create-field="allowComments"${checkedAttr(composer.allowComments)}${disabledAttr(pending)} /> <span>Allow comments</span></label>
-            <label><input type="checkbox" name="allowReuseContent" data-create-field="allowReuseContent"${checkedAttr(composer.allowReuseContent)}${disabledAttr(pending)} /> <span>Allow reuse</span></label>
-            <label><input type="checkbox" name="aiGeneratedContent" data-create-field="aiGeneratedContent"${checkedAttr(composer.aiGeneratedContent)}${disabledAttr(pending)} /> <span>AI-generated content</span></label>
-          </div>
+          ${renderPostComposerReviewPanel(composer, pending)}
           ${
             composer.error
               ? `<div class="shared-page__error">${escapeHtml(composer.error)}</div>`
@@ -43940,6 +48740,341 @@ function renderDiscoverActivityCard(item) {
   </article>`;
 }
 
+function discoverPrimaryCampaign() {
+  return (
+    state.pages.discover.campaigns.items[0] ||
+    state.pages.candidateDashboard.campaigns.items[0] ||
+    null
+  );
+}
+
+function discoverPrimaryCoalition() {
+  return (
+    state.pages.discover.coalitions.items[0] ||
+    state.pages.coalitions.list.items[0] ||
+    null
+  );
+}
+
+function discoverNextElection(context = state.pages.elections.context) {
+  if (!context) {
+    return null;
+  }
+  const userStateId = normalizeString(context.userStateId).toUpperCase();
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return (context.states || [])
+    .map((option) => ({
+      ...option,
+      electionTime: Date.parse(option.electionDate || ""),
+    }))
+    .filter((option) => {
+      if (!Number.isFinite(option.electionTime)) {
+        return false;
+      }
+      if (
+        userStateId &&
+        normalizeString(option.stateId).toUpperCase() !== userStateId
+      ) {
+        return false;
+      }
+      return option.electionTime >= today.getTime();
+    })
+    .sort((left, right) => left.electionTime - right.electionTime)[0] || null;
+}
+
+function renderDiscoverActionCard({
+  icon = "search",
+  eyebrow,
+  title,
+  body,
+  route,
+  actionLabel,
+  meta = [],
+  stateClass = "",
+}) {
+  return `<article class="shared-discover-action-card${stateClass ? ` ${escapeHtml(stateClass)}` : ""}">
+    <div class="shared-discover-action-card__icon" aria-hidden="true">${renderIcon(icon)}</div>
+    <div class="shared-discover-action-card__body">
+      <span class="shared-discover-action-card__eyebrow">${escapeHtml(eyebrow)}</span>
+      <h3>${escapeHtml(title)}</h3>
+      <p>${escapeHtml(body)}</p>
+      ${
+        meta.length
+          ? `<div class="shared-discover-action-card__meta">${meta
+              .map((item) => `<span>${escapeHtml(item)}</span>`)
+              .join("")}</div>`
+          : ""
+      }
+    </div>
+    <button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="${escapeHtml(route)}">${escapeHtml(actionLabel)}</button>
+  </article>`;
+}
+
+function renderDiscoverCalendarCard() {
+  const discover = state.pages.discover;
+  const preview = discover.calendarPreview || createDiscoverCalendarPreviewState();
+  const access = preview.access;
+  const todayItems = Array.isArray(preview.todayItems) ? preview.todayItems : [];
+  const scheduleItems = Array.isArray(preview.items) ? preview.items : [];
+  const openedDates = readDiscoverOpenedCalendarDates();
+  const todayKey = discoverCalendarDateKey();
+  const hasUnopenedToday = todayItems.length > 0 && !openedDates.has(todayKey);
+  if (access?.candidateId) {
+    const campaignName =
+      normalizeString(access.profile?.displayName) || "Campaign";
+    const route = candidateDashboardSectionPath(access.candidateId, "calendar");
+    const firstToday = todayItems[0];
+    const title = preview.loading
+      ? "Checking today's calendar"
+      : firstToday
+        ? `${formatCount(todayItems.length)} item${todayItems.length === 1 ? "" : "s"} today`
+        : "Nothing scheduled today";
+    const body = firstToday
+      ? `${discoverCalendarItemTitle(firstToday)} starts ${discoverCalendarItemTimeLabel(firstToday)}.`
+      : `Open ${campaignName}'s calendar for upcoming campaign events, shifts, meetings, and promotion windows.`;
+    const meta = [
+      campaignName,
+      `${formatCount(scheduleItems.length)} next 7 days`,
+      hasUnopenedToday ? "New today" : "Calendar ready",
+    ];
+    if (preview.error) {
+      meta.push("Refresh available");
+    }
+    return renderDiscoverActionCard({
+      icon: "calendar",
+      eyebrow: "Calendar",
+      title,
+      body: preview.error || body,
+      route,
+      actionLabel: "Open calendar",
+      meta,
+      stateClass: preview.error ? "is-warning" : hasUnopenedToday ? "has-alert" : "",
+    }).replace(
+      'data-action="navigate"',
+      'data-action="discover-calendar-open"',
+    );
+  }
+
+  const campaign = discoverPrimaryCampaign();
+  const events = discover.events.items || [];
+  const upcomingEvents = events
+    .slice()
+    .sort((left, right) => (Number(left.startAt) || 0) - (Number(right.startAt) || 0));
+  const nextEvent = upcomingEvents.find((event) => Number(event.startAt) >= Date.now()) || upcomingEvents[0];
+  const campaignName =
+    normalizeString(campaign?.displayName || campaign?.candidateName) ||
+    "Campaign";
+  const route = campaign?.candidateId
+    ? candidateDashboardSectionPath(campaign.candidateId, "calendar")
+    : "/events";
+  const title = nextEvent?.startAt
+    ? `Next event ${formatAbsoluteDateTime(nextEvent.startAt)}`
+    : "Open today's civic calendar";
+  const body = nextEvent
+    ? `${normalizeString(nextEvent.title) || "Upcoming event"}${campaign?.candidateId ? ` sits beside ${campaignName}'s campaign calendar.` : " is ready in the event workspace."}`
+    : campaign?.candidateId
+      ? `${campaignName}'s campaign calendar is available from the browser.`
+      : "Browse event listings while campaign calendar access loads.";
+  const meta = [
+    `${formatCount(events.length)} event${events.length === 1 ? "" : "s"}`,
+    campaign?.candidateId ? "Campaign calendar" : "Public events",
+  ];
+  if (discover.events.loading && !events.length) {
+    meta.push("Loading events");
+  }
+  return renderDiscoverActionCard({
+    icon: "calendar",
+    eyebrow: "Calendar",
+    title,
+    body,
+    route,
+    actionLabel: campaign?.candidateId ? "Open calendar" : "Browse events",
+    meta,
+  });
+}
+
+function renderDiscoverScheduleItem(item, access) {
+  const route = discoverCalendarItemRoute(access, item);
+  const dateLabel = item.startAt
+    ? formatCalendarDate(item.startAt).replace(/,.*$/u, "")
+    : "Date TBD";
+  return `<button class="shared-discover-schedule-item" type="button" data-action="discover-calendar-open" data-route="${escapeHtml(route)}">
+    <span class="shared-discover-schedule-item__date">${escapeHtml(dateLabel)}</span>
+    <span class="shared-discover-schedule-item__body">
+      <strong>${escapeHtml(discoverCalendarItemTitle(item))}</strong>
+      <small>${escapeHtml(`${discoverCalendarItemTimeLabel(item)} / ${discoverCalendarItemLocationLabel(item)}`)}</small>
+    </span>
+  </button>`;
+}
+
+function renderDiscoverScheduleCard() {
+  const preview =
+    state.pages.discover.calendarPreview || createDiscoverCalendarPreviewState();
+  const access = preview.access;
+  const route = access?.candidateId
+    ? candidateDashboardSectionPath(access.candidateId, "calendar")
+    : "/candidate-dashboard";
+  const items = Array.isArray(preview.items) ? preview.items : [];
+  const campaignName =
+    normalizeString(access?.profile?.displayName) || "Campaign calendar";
+  const content = preview.loading
+    ? '<div class="shared-discover-schedule-empty">Loading the next 7 days...</div>'
+    : preview.error
+      ? `<div class="shared-discover-schedule-empty">${escapeHtml(preview.error)}</div>`
+      : items.length
+        ? `<div class="shared-discover-schedule-list">${items
+            .slice(0, 3)
+            .map((item) => renderDiscoverScheduleItem(item, access))
+            .join("")}</div>`
+        : `<div class="shared-discover-schedule-empty">${escapeHtml(access?.candidateId ? "No scheduled items in the next 7 days." : "Open a campaign dashboard to view schedule items.")}</div>`;
+  const meta = [
+    access?.candidateId ? campaignName : "Calendar access",
+    `${formatCount(items.length)} item${items.length === 1 ? "" : "s"}`,
+  ];
+  return `<article class="shared-discover-action-card shared-discover-action-card--schedule${preview.error ? " is-warning" : ""}">
+    <div class="shared-discover-action-card__icon" aria-hidden="true">${renderIcon("calendar")}</div>
+    <div class="shared-discover-action-card__body">
+      <span class="shared-discover-action-card__eyebrow">Schedule</span>
+      <h3>Next 7 days</h3>
+      <p>${escapeHtml(access?.candidateId ? "Campaign calendar items you can open directly from Discover." : "Calendar access appears here when a campaign workspace is available.")}</p>
+      <div class="shared-discover-action-card__meta">${meta
+        .map((item) => `<span>${escapeHtml(item)}</span>`)
+        .join("")}</div>
+      ${content}
+    </div>
+    <button class="shared-feed-chip shared-feed-chip--primary" data-action="discover-calendar-open" data-route="${escapeHtml(route)}">${escapeHtml(access?.candidateId ? "Open calendar" : "Open dashboard")}</button>
+  </article>`;
+}
+
+function renderDiscoverCivicChallengeCard() {
+  const questions = state.pages.discover.policyQuestions.items || [];
+  const unanswered =
+    questions.find((question) => !question.selectedAnswer?.optionId) || null;
+  const answeredCount = questions.filter(
+    (question) => question.selectedAnswer?.optionId,
+  ).length;
+  const loading =
+    state.pages.discover.policyQuestions.loading && !questions.length;
+  const error = state.pages.discover.policyQuestions.error;
+  const route = unanswered?.questionId
+    ? `/questions/${encodeURIComponent(unanswered.questionId)}`
+    : "/questions";
+  const title = loading
+    ? "Loading civic challenge"
+    : unanswered
+      ? unanswered.title
+      : "Keep your voter signal current";
+  const body = error
+    ? "Question recommendations could not load, but the policy question workspace is available."
+    : loading
+      ? "Fetching the next policy question for your voter-intelligence profile."
+      : unanswered
+        ? normalizeString(unanswered.shortBackground || unanswered.categoryLabel) ||
+          "Answer one question to improve Polis candidate and ballot guidance."
+        : "Review policy questions or answer another issue prompt from the browser.";
+  return renderDiscoverActionCard({
+    icon: unanswered ? "search" : "check",
+    eyebrow: "Civic challenge",
+    title,
+    body,
+    route,
+    actionLabel: unanswered ? "Answer" : "Open questions",
+    meta: [
+      `${formatCount(answeredCount)} answered`,
+      `${formatCount(Math.max(questions.length - answeredCount, 0))} open`,
+    ],
+    stateClass: error ? "is-warning" : "",
+  });
+}
+
+function renderDiscoverDeadlineCard() {
+  const context = state.pages.elections.context;
+  const nextElection = discoverNextElection(context);
+  const stateLabel =
+    normalizeString(context?.userStateId || nextElection?.stateId) ||
+    "your area";
+  const route = nextElection
+    ? buildElectionDayRoute({
+        scope: nextElection.scope,
+        stateId: nextElection.stateId,
+        electionId: nextElection.electionId,
+      })
+    : context?.defaultDestination?.path || "/settings/preferences/my-districts";
+  const title = nextElection
+    ? `Next election: ${formatElectionDate(nextElection.electionDate) || "date pending"}`
+    : `Check deadlines for ${stateLabel}`;
+  const body = nextElection
+    ? [nextElection.electionName, nextElection.stateName]
+        .map(normalizeString)
+        .filter(Boolean)
+        .join(" - ") || "Open election guidance, races, and ballot context."
+    : "Keep registration, ballot, district, and polling-place details close.";
+  const meta = [
+    state.pages.elections.contextLoading ? "Loading election context" : "Election context",
+    nextElection?.status ? humanizeLabel(nextElection.status) : "District aware",
+  ];
+  return renderDiscoverActionCard({
+    icon: "election",
+    eyebrow: "Voter deadlines",
+    title,
+    body,
+    route,
+    actionLabel: nextElection ? "Open election" : "Open districts",
+    meta,
+  });
+}
+
+function renderDiscoverVolunteerCard() {
+  const discover = state.pages.discover;
+  const campaign = discoverPrimaryCampaign();
+  const coalitionDetail = discoverPrimaryCoalition();
+  const coalition = coalitionDetail?.coalition || null;
+  const route = campaign?.candidateId
+    ? candidateDashboardSectionPath(campaign.candidateId, "missions")
+    : coalition?.coalitionId
+      ? `/coalitions/${encodeURIComponent(coalition.coalitionId)}/missions`
+      : "/missions";
+  const title = "Volunteer opportunities";
+  const body = campaign?.candidateId
+    ? `${normalizeString(campaign.displayName || campaign.candidateName) || "This campaign"} mission work is available from the campaign dashboard.`
+    : coalition?.coalitionId
+      ? `${coalition.name} mission work is available from the coalition workspace.`
+      : "Join a campaign or coalition to unlock claimable mission work.";
+  const loading =
+    (discover.campaigns.loading && !discover.campaigns.items.length) ||
+    (discover.coalitions.loading && !discover.coalitions.items.length);
+  const meta = [
+    `${formatCount(discover.campaigns.items.length)} campaign${discover.campaigns.items.length === 1 ? "" : "s"}`,
+    `${formatCount(discover.coalitions.items.length)} coalition${discover.coalitions.items.length === 1 ? "" : "s"}`,
+  ];
+  if (loading) {
+    meta.push("Loading access");
+  }
+  return renderDiscoverActionCard({
+    icon: "mission",
+    eyebrow: "Mission work",
+    title,
+    body,
+    route,
+    actionLabel:
+      campaign?.candidateId || coalition?.coalitionId
+        ? "Open missions"
+        : "Find work",
+    meta,
+  });
+}
+
+function renderDiscoverActionDeck() {
+  return `<section class="shared-discover-action-deck" aria-label="Discover app modules">
+    ${renderDiscoverCalendarCard()}
+    ${renderDiscoverScheduleCard()}
+    ${renderDiscoverCivicChallengeCard()}
+    ${renderDiscoverDeadlineCard()}
+    ${renderDiscoverVolunteerCard()}
+  </section>`;
+}
+
 function renderDiscoverPage() {
   const discover = state.pages.discover;
   const communityServers = [
@@ -43986,11 +49121,13 @@ function renderDiscoverPage() {
           : ""
       }
 
+      ${renderDiscoverActionDeck()}
+
       <div class="shared-discover-paths">
         ${[
           {
             label: "Campaigns",
-            copy: "Open candidate dashboards, staff, analytics, calendar, and voter work.",
+            copy: "Open candidate reporting, events, calendar, voter tools, staff, missions, and messaging.",
             route: "/candidate-dashboard",
             icon: "dashboard",
           },
@@ -44026,7 +49163,7 @@ function renderDiscoverPage() {
           },
           {
             label: "Messages",
-            copy: "Jump into DMs, requests, rooms, and server spaces.",
+            copy: "Jump into DMs, requests, campaign rooms, and coalition rooms.",
             route: "/messages",
             icon: "messages",
           },
@@ -44198,7 +49335,398 @@ function getFeedGridItems(items = []) {
 }
 
 function getFeedPromptItems(items = []) {
-  return items.filter((item) => item?.kind === "prompt");
+  return items.filter(
+    (item) =>
+      item?.kind === "prompt" ||
+      item?.kind === "candidatePrompt" ||
+      item?.kind === "civicPrompt",
+  );
+}
+
+function feedCandidatePromptContactDescription(key) {
+  const descriptions = {
+    doorKnock: "Allow campaign volunteers to request in-person outreach.",
+    mailPhysical: "Allow campaign mailers, postcards, and yard-sign follow-up.",
+    mailEmail: "Allow campaign email updates and voter information.",
+    phoneCall: "Allow a campaign phone call when a person needs to reach you.",
+    textMessage: "Allow SMS outreach for campaign updates and reminders.",
+    yardSign: "Allow the campaign to follow up about a yard sign.",
+  };
+  return descriptions[key] || candidateContactTypeDescription(key);
+}
+
+function renderFeedCandidatePromptAvatar(item = {}) {
+  const name = normalizeString(item.displayName) || "Candidate";
+  if (item.avatarUrl) {
+    return `<img class="shared-candidate-optin-card__avatar" src="${escapeHtml(item.avatarUrl)}" alt="" loading="lazy" />`;
+  }
+  return `<div class="shared-candidate-optin-card__avatar shared-candidate-optin-card__avatar--placeholder" aria-hidden="true">${escapeHtml(
+    name.slice(0, 1).toUpperCase() || "C",
+  )}</div>`;
+}
+
+function renderFeedCandidatePromptChoice(type, pending) {
+  const name = `contact:${type.key}`;
+  const options = [
+    ["yes", "Yes"],
+    ["unset", "Unset"],
+    ["no", "No"],
+  ];
+  return `<fieldset class="shared-candidate-optin-choice">
+    <legend>
+      <strong>${escapeHtml(type.label)}</strong>
+      <span>${escapeHtml(feedCandidatePromptContactDescription(type.key))}</span>
+    </legend>
+    <div class="shared-candidate-optin-choice__segmented">
+      ${options
+        .map(
+          ([value, label]) => `<label>
+            <input type="radio" name="${escapeHtml(name)}" value="${escapeHtml(value)}"${checkedAttr(value === "unset")}${disabledAttr(pending)} />
+            <span>${escapeHtml(label)}</span>
+          </label>`,
+        )
+        .join("")}
+    </div>
+  </fieldset>`;
+}
+
+function feedCandidatePromptCommunityActionLabel(item = {}) {
+  const server = item.communityServer || {};
+  const serverName = normalizeString(server.name) || "campaign";
+  if (server.joined) {
+    return `Enter ${serverName}'s workspace`;
+  }
+  if (server.name) {
+    return `Join ${serverName}'s workspace`;
+  }
+  return item.variant === "community" ? "Join community" : "Join campaign workspace";
+}
+
+function renderFeedCandidatePromptCommunityAction(item, promptKey, pending) {
+  const server = item.communityServer || null;
+  const visible = item.variant === "community" || Boolean(server?.enabled);
+  if (!visible) {
+    return "";
+  }
+  const disabled =
+    pending ||
+    !item.candidateId ||
+    Boolean(server && !server.joined && server.canJoin !== true);
+  const title = server?.name || "Campaign community";
+  const description =
+    item.variant === "community"
+      ? "Follow updates, ask questions, and stay close to this campaign in its community workspace."
+      : "This campaign also has a community workspace you can join from the web.";
+  return `<div class="shared-candidate-optin-community">
+    <div>
+      <strong>${escapeHtml(title)}</strong>
+      <span>${escapeHtml(description)}</span>
+    </div>
+    <button class="shared-feed-chip" type="button" data-action="feed-candidate-community-join" data-candidate-id="${escapeHtml(item.candidateId)}" data-prompt-key="${escapeHtml(promptKey)}"${disabledAttr(disabled)}>
+      ${renderIcon("messages")}
+      <span>${escapeHtml(feedCandidatePromptCommunityActionLabel(item))}</span>
+    </button>
+  </div>`;
+}
+
+function renderFeedCandidatePromptMissingActions(missing = {}) {
+  if (!hasFeedCandidatePromptMissingFields(missing)) {
+    return "";
+  }
+  const actions = [];
+  if (missing.address) {
+    actions.push(
+      `<button class="shared-feed-chip" type="button" data-action="navigate" data-route="/settings/voter-profile/home-location">Add address</button>`,
+    );
+  }
+  if (missing.phone || missing.email) {
+    actions.push(
+      `<button class="shared-feed-chip" type="button" data-action="navigate" data-route="/settings/voter-profile">Update profile</button>`,
+    );
+  }
+  return `<div class="shared-candidate-optin-card__repair">${actions.join("")}</div>`;
+}
+
+function renderFeedCandidatePromptCompactState(item, promptKey, status) {
+  const prompts = currentFeedPromptState();
+  const saved = status === "saved";
+  const text = saved
+    ? normalizeString(prompts.savedMessages[promptKey]) ||
+      (item.variant === "community" ? "Joined campaign workspace" : "Preferences saved")
+    : "No problem";
+  const detail = saved
+    ? "Your choice was recorded for this campaign prompt."
+    : "This prompt is dismissed for this visit.";
+  return `<article class="shared-card shared-candidate-optin-card shared-candidate-optin-card--compact">
+    <div class="shared-candidate-optin-compact__icon" aria-hidden="true">${renderIcon(saved ? "check" : "close")}</div>
+    <div>
+      <strong>${escapeHtml(text)}</strong>
+      <span>${escapeHtml(detail)}</span>
+    </div>
+  </article>`;
+}
+
+function feedCivicPromptIcon(item = {}) {
+  const kind = normalizeString(item.promptKind).toLowerCase();
+  const destination = normalizeString(item.destinationPath).toLowerCase();
+  if (kind.includes("district") || destination.includes("home-location")) {
+    return "map";
+  }
+  if (
+    kind.includes("ballot") ||
+    kind.includes("election") ||
+    kind.includes("rank") ||
+    destination.includes("voter-intel")
+  ) {
+    return "election";
+  }
+  if (kind.includes("policy") || kind.includes("issue") || kind.includes("stance")) {
+    return "flag";
+  }
+  return "election";
+}
+
+function feedCivicPromptActionLabel(item = {}) {
+  const kind = normalizeString(item.promptKind).toLowerCase();
+  const destination = normalizeString(item.destinationPath).toLowerCase();
+  if (kind.includes("district") || destination.includes("home-location")) {
+    return "Set voting area";
+  }
+  if (
+    kind.includes("ballot") ||
+    kind.includes("rank") ||
+    destination.includes("voter-intel")
+  ) {
+    return "Rank a race";
+  }
+  return "Start";
+}
+
+function renderFeedCivicPromptCompactState(item, promptKey, status) {
+  const prompts = currentFeedPromptState();
+  const saved = status === "saved";
+  const text = saved
+    ? normalizeString(prompts.savedMessages[promptKey]) || "Civic prompt recorded"
+    : "Prompt dismissed";
+  const detail = saved
+    ? "Your action was recorded for voter intelligence."
+    : "This prompt is hidden for this visit.";
+  return `<article class="shared-card shared-civic-prompt-card shared-civic-prompt-card--compact">
+    <div class="shared-civic-prompt-card__compact-icon" aria-hidden="true">${renderIcon(saved ? "check" : "close")}</div>
+    <div>
+      <strong>${escapeHtml(text)}</strong>
+      <span>${escapeHtml(detail)}</span>
+    </div>
+  </article>`;
+}
+
+function renderFeedCivicPromptChoices(item, promptKey, pending) {
+  const choices = Array.isArray(item.choices) ? item.choices : [];
+  if (!choices.length) {
+    return "";
+  }
+  return `<div class="shared-civic-prompt-card__choices">
+    ${choices
+      .map(
+        (choice) => `<button class="shared-civic-prompt-choice" type="button" data-action="feed-civic-prompt-answer" data-prompt-key="${escapeHtml(promptKey)}" data-choice-value="${escapeHtml(choice.value)}"${disabledAttr(pending)}>
+          <span>${renderIcon("check")}</span>
+          <strong>${escapeHtml(choice.label)}</strong>
+        </button>`,
+      )
+      .join("")}
+  </div>`;
+}
+
+function renderFeedCivicPromptDestination(item, promptKey, pending) {
+  if (!item.destinationPath) {
+    return `<div class="shared-civic-prompt-card__destination is-disabled">
+      <span>${renderIcon("lock")}</span>
+      <strong>This prompt needs a web destination.</strong>
+    </div>`;
+  }
+  const pendingOpen =
+    currentFeedPromptState().actionPendingKey === `open:${promptKey}`;
+  return `<div class="shared-civic-prompt-card__destination">
+    <span>${renderIcon(feedCivicPromptIcon(item))}</span>
+    <div>
+      <strong>${escapeHtml(feedCivicPromptActionLabel(item))}</strong>
+      <em>${escapeHtml(item.destinationPath)}</em>
+    </div>
+    <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="feed-civic-prompt-open" data-prompt-key="${escapeHtml(promptKey)}"${disabledAttr(pending)}>
+      <span>${escapeHtml(pendingOpen ? "Opening..." : feedCivicPromptActionLabel(item))}</span>
+    </button>
+  </div>`;
+}
+
+function renderFeedCivicPromptCard(item = {}) {
+  const promptKey =
+    normalizeString(item.key) ||
+    `civicPrompt:${normalizeString(item.promptFamily)}:${normalizeString(item.promptId)}`;
+  const prompts = currentFeedPromptState();
+  if (prompts.savedKeys[promptKey]) {
+    return renderFeedCivicPromptCompactState(item, promptKey, "saved");
+  }
+  if (prompts.dismissedKeys[promptKey]) {
+    return renderFeedCivicPromptCompactState(item, promptKey, "dismissed");
+  }
+
+  const pendingKey = normalizeString(prompts.actionPendingKey);
+  const pending =
+    pendingKey === `answer:${promptKey}` ||
+    pendingKey === `open:${promptKey}` ||
+    pendingKey === `dismiss:${promptKey}`;
+  const error = normalizeString(prompts.errors[promptKey]);
+  const choices = Array.isArray(item.choices) ? item.choices : [];
+
+  return `<article class="shared-card shared-civic-prompt-card">
+    <div class="shared-civic-prompt-card__header">
+      <span class="shared-civic-prompt-card__icon" aria-hidden="true">${renderIcon(feedCivicPromptIcon(item))}</span>
+      <div>
+        <p class="shared-page__eyebrow">Civic prompt</p>
+        <h3>${escapeHtml(item.title || "Civic prompt")}</h3>
+        <p>${escapeHtml(item.body || "Answer this prompt to improve your Polis recommendations.")}</p>
+      </div>
+    </div>
+    <div class="shared-civic-prompt-card__body">
+      ${
+        choices.length
+          ? renderFeedCivicPromptChoices(item, promptKey, pending)
+          : renderFeedCivicPromptDestination(item, promptKey, pending)
+      }
+      ${
+        error
+          ? `<div class="shared-page__error shared-civic-prompt-card__error">${escapeHtml(error)}</div>`
+          : ""
+      }
+      <div class="shared-civic-prompt-card__actions">
+        <button class="shared-feed-chip" type="button" data-action="feed-civic-prompt-dismiss" data-prompt-key="${escapeHtml(promptKey)}"${disabledAttr(pending)}>
+          <span>${escapeHtml(pendingKey === `dismiss:${promptKey}` ? "Dismissing..." : "Not now")}</span>
+        </button>
+      </div>
+    </div>
+  </article>`;
+}
+
+function renderFeedCandidateOptInCard(item = {}) {
+  const promptKey = normalizeString(item.key) || `candidatePrompt:${item.candidateId}`;
+  const prompts = currentFeedPromptState();
+  if (prompts.savedKeys[promptKey]) {
+    return renderFeedCandidatePromptCompactState(item, promptKey, "saved");
+  }
+  if (prompts.dismissedKeys[promptKey]) {
+    return renderFeedCandidatePromptCompactState(item, promptKey, "dismissed");
+  }
+
+  const pendingKey = normalizeString(prompts.actionPendingKey);
+  const pending =
+    pendingKey === `save:${promptKey}` || pendingKey === `community:${promptKey}`;
+  const communityOnly = item.variant === "community";
+  const candidateName = normalizeString(item.displayName) || "Candidate";
+  const enabledTypes = normalizeCandidateContactEnabledTypes(
+    item.enabledContactTypes || {},
+  );
+  const contactTypes = CANDIDATE_CONTACT_TYPE_CONFIG.filter(
+    (type) => enabledTypes[type.key] === true,
+  );
+  const error = normalizeString(prompts.errors[promptKey]);
+  const missing = prompts.missingFieldsByKey[promptKey] || {};
+  const communityServer = item.communityServer || null;
+  const communityActionDisabled =
+    pending ||
+    !item.candidateId ||
+    Boolean(
+      communityServer &&
+        !communityServer.joined &&
+        communityServer.canJoin !== true,
+    );
+
+  return `<article class="shared-card shared-candidate-optin-card">
+    <div class="shared-candidate-optin-card__header">
+      ${renderFeedCandidatePromptAvatar(item)}
+      <div class="shared-candidate-optin-card__identity">
+        <p class="shared-page__eyebrow">Campaign prompt</p>
+        <h3>${escapeHtml(candidateName)}</h3>
+        <p>${escapeHtml(
+          communityOnly
+            ? "Join the campaign conversation from Polis web."
+            : `Choose how ${candidateName} can contact you.`,
+        )}</p>
+      </div>
+      ${
+        item.party
+          ? `<span class="shared-candidate-optin-card__party">${escapeHtml(item.party)}</span>`
+          : ""
+      }
+    </div>
+    ${
+      communityOnly
+        ? `<div class="shared-candidate-optin-card__body">
+            <p class="shared-candidate-optin-card__copy">Follow updates, ask questions, and stay close to this campaign in its community workspace.</p>
+          </div>`
+        : `<form class="shared-candidate-optin-card__body" data-route-form="feed-candidate-opt-in">
+            <input type="hidden" name="candidateId" value="${escapeHtml(item.candidateId)}" />
+            <input type="hidden" name="promptKey" value="${escapeHtml(promptKey)}" />
+            <div class="shared-candidate-optin-card__toolbar">
+              <strong>Contact preferences</strong>
+              <div>
+                <button class="shared-feed-chip" type="button" data-action="feed-candidate-prompt-set-all" data-choice="yes"${disabledAttr(pending)}>All yes</button>
+                <button class="shared-feed-chip" type="button" data-action="feed-candidate-prompt-set-all" data-choice="no"${disabledAttr(pending)}>All no</button>
+              </div>
+            </div>
+            ${
+              contactTypes.length
+                ? `<div class="shared-candidate-optin-choice-list">${contactTypes
+                    .map((type) =>
+                      renderFeedCandidatePromptChoice(type, pending),
+                    )
+                    .join("")}</div>`
+                : `<p class="shared-candidate-optin-card__copy">This campaign has not enabled any contact channels for this prompt.</p>`
+            }
+            ${renderFeedCandidatePromptCommunityAction(item, promptKey, pending)}
+            ${
+              error
+                ? `<div class="shared-page__error shared-candidate-optin-card__error">${escapeHtml(error)}${renderFeedCandidatePromptMissingActions(missing)}</div>`
+                : ""
+            }
+            <div class="shared-candidate-optin-card__actions">
+              <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(pending || !item.candidateId || !contactTypes.length)}>
+                ${renderIcon("check")}
+                <span>${escapeHtml(pendingKey === `save:${promptKey}` ? "Saving..." : "Save preferences")}</span>
+              </button>
+              <button class="shared-feed-chip" type="button" data-action="feed-candidate-prompt-dismiss" data-prompt-key="${escapeHtml(promptKey)}"${disabledAttr(pending)}>
+                <span>No thanks</span>
+              </button>
+            </div>
+          </form>`
+    }
+    ${
+      communityOnly && error
+        ? `<div class="shared-page__error shared-candidate-optin-card__error">${escapeHtml(error)}</div>`
+        : ""
+    }
+    ${
+      communityOnly
+        ? `<div class="shared-candidate-optin-card__actions shared-candidate-optin-card__actions--community">
+            <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="feed-candidate-community-join" data-candidate-id="${escapeHtml(item.candidateId)}" data-prompt-key="${escapeHtml(promptKey)}"${disabledAttr(communityActionDisabled)}>
+              ${renderIcon("messages")}
+              <span>${escapeHtml(pendingKey === `community:${promptKey}` ? "Joining..." : feedCandidatePromptCommunityActionLabel(item))}</span>
+            </button>
+            <button class="shared-feed-chip" type="button" data-action="feed-candidate-prompt-dismiss" data-prompt-key="${escapeHtml(promptKey)}"${disabledAttr(pending)}>Not now</button>
+          </div>`
+        : ""
+    }
+  </article>`;
+}
+
+function renderGenericFeedPromptCard(item = {}) {
+  return `<article class="shared-card">
+    <div class="shared-card__body">
+      <p class="shared-page__eyebrow">Prompt</p>
+      <h3>${escapeHtml(item.title || "Continue in Polis")}</h3>
+      <p class="shared-card__summary">${escapeHtml(item.description || "Continue this feed step from Polis web.")}</p>
+      <button class="shared-feed-chip shared-feed-chip--primary" data-action="open-app-shell">Open app</button>
+    </div>
+  </article>`;
 }
 
 function renderFeedPromptCards(items = []) {
@@ -44206,24 +49734,20 @@ function renderFeedPromptCards(items = []) {
     return "";
   }
 
-  return `<div>
-    <h2>More from Polis</h2>
-    <div class="shared-card-grid shared-card-grid--detail">
+  return `<section class="shared-feed-prompts" aria-label="Feed prompts">
+    <h2>Feed prompts</h2>
+    <div class="shared-card-grid shared-card-grid--detail shared-feed-prompt-grid">
       ${items
-        .map(
-          (item) => `<article class="shared-card">
-            <div class="shared-card__body">
-              <p class="shared-page__eyebrow">Prompt</p>
-              <h3>${escapeHtml(item.title || "Continue in Polis")}</h3>
-              <p class="shared-card__summary">${escapeHtml(item.description || "Open the app to continue this feed step.")}</p>
-                <button class="shared-feed-chip shared-feed-chip--primary" data-action="open-app-shell">Open app</button>
-              </div>
-            </div>
-          </article>`,
+        .map((item) =>
+          item?.kind === "candidatePrompt"
+            ? renderFeedCandidateOptInCard(item)
+            : item?.kind === "civicPrompt"
+              ? renderFeedCivicPromptCard(item)
+            : renderGenericFeedPromptCard(item),
         )
         .join("")}
     </div>
-  </div>`;
+  </section>`;
 }
 
 function renderFeedOverviewPage() {
@@ -44259,7 +49783,9 @@ function renderFeedOverviewPage() {
       }
       ${feed.error ? `<div class="shared-page__error">${escapeHtml(feed.error)}</div>` : ""}
       ${renderMediaThumbnailGrid(mediaItems, {
-        emptyMessage: "No feed items yet.",
+        emptyMessage: promptItems.length
+          ? "No posts or events in this feed yet."
+          : "No feed items yet.",
         gridClassName: "shared-media-grid--five-wide",
         getRoute: (item) => {
           if (item.kind === "event" && item.eventId) {
@@ -45454,31 +50980,73 @@ function renderCandidatePartyGroup(group, currentPath) {
 function renderCandidateListPage() {
   const list = state.pages.candidates.list;
   const currentPath = getCurrentPathWithQuery();
+  const directoryOptions = candidateDirectoryOptionsFromParams();
+  const feedMode = directoryOptions.feed;
+  const isOfficialsMode = feedMode === "officials";
+  const activeFeedLabel = candidateDirectoryFeedLabel(feedMode);
+  const actionRoute = isOfficialsMode
+    ? buildCongressionalReportCardRoute({ returnTo: currentPath })
+    : "/election-day";
   ensureCandidateCollapsedPartyGroupsLoaded();
   const groups = candidatePartyGroups(list.items);
+  const directoryModes = [
+    {
+      key: "candidates",
+      label: "Candidates",
+      copy: "Campaigns, races, and Election Day links.",
+    },
+    {
+      key: "officials",
+      label: "Elected Officials",
+      copy: "Report cards, votes, offices, and bills.",
+    },
+  ];
   return `<section class="shared-page">
     ${renderTopChrome()}
     <div class="shared-page__content">
       <div class="shared-page__header">
         <div>
-          <p class="shared-page__eyebrow">Candidates</p>
-          <h1>Candidate pages</h1>
-          <p>Browse candidates, follow campaigns, and open full candidate detail pages from the browser.</p>
+          <p class="shared-page__eyebrow">Officials</p>
+          <h1>Officials and candidates</h1>
+          <p>${escapeHtml(candidateDirectoryFeedDescription(feedMode))}</p>
         </div>
         <div class="shared-card__actions">
-          <button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="/election-day">${renderIcon("election")} Election Day</button>
+          <button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="${escapeHtml(actionRoute)}">${renderIcon(isOfficialsMode ? "file" : "election")} ${isOfficialsMode ? "Bills" : "Election Day"}</button>
         </div>
       </div>
+      <section class="shared-candidate-directory-toolbar" aria-label="Candidate directory mode">
+        <div class="shared-candidate-directory-mode" role="tablist" aria-label="Directory mode">
+          ${directoryModes
+            .map((mode) => {
+              const active = mode.key === feedMode;
+              return `<button type="button" role="tab" class="${active ? "is-active" : ""}" aria-selected="${active ? "true" : "false"}" data-action="navigate" data-route="${escapeHtml(buildCandidateDirectoryRoute({ feed: mode.key }))}">
+                <strong>${escapeHtml(mode.label)}</strong>
+                <span>${escapeHtml(mode.copy)}</span>
+              </button>`;
+            })
+            .join("")}
+        </div>
+        <div class="shared-candidate-directory-summary">
+          <span>${renderIcon(isOfficialsMode ? "file" : "candidate")} ${escapeHtml(activeFeedLabel)}</span>
+          <strong>${escapeHtml(formatCount(list.items.length))}</strong>
+          <small>${escapeHtml(candidateDirectoryFeedTitle(feedMode))} loaded in this view.</small>
+        </div>
+      </section>
       <form class="shared-form shared-form--inline" data-route-form="candidates-filter">
-        <input type="search" name="q" placeholder="Search candidates" value="${escapeHtml(list.filters.q || "")}" />
+        <input type="hidden" name="feed" value="${escapeHtml(feedMode)}" />
+        <input type="search" name="q" placeholder="${isOfficialsMode ? "Search elected officials" : "Search candidates"}" value="${escapeHtml(list.filters.q || "")}" />
         <input type="text" name="level" placeholder="Level" value="${escapeHtml(list.filters.level || "")}" />
         <input type="text" name="district" placeholder="District" value="${escapeHtml(list.filters.district || "")}" />
         <input type="text" name="tags" placeholder="Tags" value="${escapeHtml(list.filters.tags || "")}" />
+        <label class="shared-form__checkbox shared-candidate-directory-hide-auto">
+          <input type="checkbox" name="hideAutoGenerated"${checkedAttr(directoryOptions.hideAutoGenerated)} />
+          <span>Hide auto profiles</span>
+        </label>
         <button type="submit" class="shared-feed-chip shared-feed-chip--primary">Apply</button>
       </form>
       ${
         list.loading
-          ? '<div class="shared-page__loading">Loading candidates…</div>'
+          ? `<div class="shared-page__loading">Loading ${escapeHtml(activeFeedLabel)}...</div>`
           : ""
       }
       ${list.error ? `<div class="shared-page__error">${escapeHtml(list.error)}</div>` : ""}
@@ -45489,13 +51057,13 @@ function renderCandidateListPage() {
                 .map((group) => renderCandidatePartyGroup(group, currentPath))
                 .join("")
             : list.loaded && !list.loading
-              ? '<div class="shared-page__empty">No candidates match these filters.</div>'
+              ? `<div class="shared-page__empty">${escapeHtml(candidateDirectoryEmptyMessage(feedMode))}</div>`
               : ""
         }
       </div>
       ${
         list.loadingMore
-          ? '<div class="shared-page__hint">Loading more candidates…</div>'
+          ? `<div class="shared-page__hint">Loading more ${escapeHtml(activeFeedLabel)}...</div>`
           : ""
       }
       ${
@@ -46067,26 +51635,54 @@ function renderCandidateDetailPage() {
 }
 
 function renderCandidateDashboardAuthGate() {
+  const featureSections = candidateDashboardFeatureSections();
+  const featureItems = featureSections.map((section) => ({
+    key: section.key,
+    label: section.label,
+    icon: section.icon,
+    copy: candidateDashboardFeatureCopy(section),
+  }));
+  const voterMapPreview = {
+    key: "voter-map",
+    label: "Voter Map",
+    icon: "map",
+    copy: {
+      eyebrow: "Map tools",
+      description:
+        "Open mapping, territories, connected voter records, imports, outreach scripts, and field notes.",
+    },
+  };
+  const questIndex = featureItems.findIndex((item) => item.key === "campaign-quest");
+  featureItems.splice(questIndex >= 0 ? questIndex : featureItems.length, 0, voterMapPreview);
+  const features = featureItems
+    .map((item) => {
+      const copy = item.copy;
+      return `<article class="shared-campaign-auth__tile shared-campaign-auth__tile--feature" role="listitem">
+        <span class="shared-campaign-auth__tile-icon" aria-hidden="true">${renderIcon(item.icon)}</span>
+        <span class="shared-campaign-auth__tile-copy">
+          <span class="shared-card__meta"><span>${escapeHtml(copy.eyebrow)}</span></span>
+          <strong>${escapeHtml(item.label)}</strong>
+          <small>${escapeHtml(copy.description)}</small>
+        </span>
+      </article>`;
+    })
+    .join("");
   return `<section class="shared-page shared-campaign-dashboard">
     ${renderTopChrome()}
     <div class="shared-page__content">
-      <section class="shared-campaign-auth">
-        <div>
-          <h1>Campaign Command Center</h1>
-          <p>Manage candidate operations from the browser with the same campaign access model used in the Polis app.</p>
+      <section class="shared-campaign-auth shared-campaign-auth--dashboard">
+        <div class="shared-campaign-auth__copy">
+          <span class="shared-card__meta"><span>Candidate dashboard</span><span>${escapeHtml(formatCount(featureItems.length))} feature areas</span></span>
+          <h1>Run the campaign from the web.</h1>
+          <p>Sign in to open the same dashboard surfaces used in the Polis app: reporting, events, calendar, engagement, voter prompts, registry tools, Voter Map, Campaign Quest, donations, staff, missions, and messaging.</p>
           <div class="shared-card__actions">
             <button class="shared-feed-chip shared-feed-chip--primary" data-action="auth-login-inline">Sign in</button>
             <button class="shared-feed-chip" data-action="auth-signup-inline">Create account</button>
             <button class="shared-feed-chip" data-action="open-app-shell">Open app</button>
           </div>
         </div>
-        <div class="shared-campaign-auth__grid" aria-hidden="true">
-          ${["Analytics", "Missions", "Calendar", "Staff", "Messaging", "Voters"]
-            .map(
-              (label) =>
-                `<span class="shared-campaign-auth__tile">${escapeHtml(label)}</span>`,
-            )
-            .join("")}
+        <div class="shared-campaign-auth__grid shared-campaign-auth__grid--dashboard" role="list" aria-label="Candidate dashboard feature areas">
+          ${features}
         </div>
       </section>
     </div>
@@ -46168,7 +51764,7 @@ function candidateDashboardFeatureStatus(section, access) {
   };
 }
 
-function candidateDashboardCommandItems(candidateId, access) {
+function candidateDashboardCommandItems(candidateId, access, candidate = null) {
   const sectionByKey = new Map(
     CANDIDATE_DASHBOARD_SECTION_CONFIG.map((section) => [section.key, section]),
   );
@@ -46196,7 +51792,7 @@ function candidateDashboardCommandItems(candidateId, access) {
     makeSectionItem(
       "messaging",
       "Messaging",
-      "Manage campaign rooms and volunteer entitlements.",
+      "Manage campaign conversations and volunteer room access.",
       "primary",
     ),
     makeSectionItem(
@@ -46220,6 +51816,15 @@ function candidateDashboardCommandItems(candidateId, access) {
       "Voter registry",
       "Search, add, import, and manage voter records.",
     ),
+    canOpenCandidateVoterMap(access, candidate)
+      ? {
+          key: "voter-map",
+          label: "Voter Map",
+          copy: "Open mapping, territories, connected voters, scripts, and field notes.",
+          icon: "map",
+          route: candidateVoterMapPath("", candidateId),
+        }
+      : null,
     makeSectionItem(
       "campaign-quest",
       "Campaign Quest",
@@ -46253,8 +51858,8 @@ function candidateDashboardCommandItems(candidateId, access) {
   return items;
 }
 
-function renderCandidateDashboardCommandStrip(candidateId, access) {
-  const items = candidateDashboardCommandItems(candidateId, access);
+function renderCandidateDashboardCommandStrip(candidateId, access, candidate = null) {
+  const items = candidateDashboardCommandItems(candidateId, access, candidate);
   if (!items.length) {
     return "";
   }
@@ -46310,25 +51915,236 @@ function renderCandidateDashboardFeatureCard(section, candidateId, access) {
   return `<button class="shared-campaign-feature-card" type="button" data-action="navigate" data-route="${escapeHtml(route)}">${body}</button>`;
 }
 
+function renderCandidateVoterMapFeatureCard(candidateId, access, candidate = null) {
+  const enabled = canOpenCandidateVoterMap(access, candidate);
+  const disabledBecauseOff = hasCandidateVoterMapAccess(access) && candidate?.voterMapEnabled === false;
+  const statusLabel = enabled
+    ? access?.isOwner
+      ? "Owner access"
+      : "Included in your role"
+    : disabledBecauseOff
+      ? "Not enabled"
+      : "Permission required";
+  const cta = enabled
+    ? "Open Voter Map"
+    : disabledBecauseOff
+      ? "Voter map disabled"
+      : "Ask owner for map access";
+  const body = `
+    <span class="shared-campaign-feature-card__icon">${renderIcon(enabled ? "map" : "lock")}</span>
+    <span class="shared-campaign-feature-card__body">
+      <span class="shared-card__meta"><span>Map tools</span><span class="shared-campaign-feature-card__status${enabled ? " is-enabled" : " is-locked"}">${escapeHtml(statusLabel)}</span></span>
+      <strong>Voter Map</strong>
+      <small>Open mapping, territory access, connected voter records, add/import tools, outreach scripts, and field notes.</small>
+      <em>${escapeHtml(cta)}</em>
+    </span>`;
+  if (!enabled) {
+    return `<article class="shared-campaign-feature-card is-locked" aria-disabled="true">${body}</article>`;
+  }
+  return `<button class="shared-campaign-feature-card" type="button" data-action="navigate" data-route="${escapeHtml(candidateVoterMapPath("", candidateId))}">${body}</button>`;
+}
+
+function candidateDashboardAccessRootStats(campaigns = []) {
+  const sections = candidateDashboardFeatureSections();
+  const enabledSections = sections.filter((section) =>
+    campaigns.some((access) => canOpenCandidateDashboardSection(section, access)),
+  );
+  const lockedSections = sections.filter((section) =>
+    campaigns.some((access) => !canOpenCandidateDashboardSection(section, access)),
+  );
+  const fullAccessCount = campaigns.filter((access) =>
+    sections.every((section) => canOpenCandidateDashboardSection(section, access)),
+  ).length;
+  const ownerCount = campaigns.filter((item) => item.isOwner).length;
+  return {
+    ownerCount,
+    staffCount: Math.max(0, campaigns.length - ownerCount),
+    enabledSections,
+    lockedSections,
+    fullAccessCount,
+  };
+}
+
+function candidateDashboardRootActionItems(campaigns = []) {
+  const findAccessForSection = (key, predicate = canOpenCandidateDashboardSection) => {
+    const section = candidateDashboardSectionConfig(key);
+    return campaigns.find((access) => predicate(section, access));
+  };
+  const makeAction = ({
+    key,
+    label,
+    copy,
+    icon,
+    route,
+    primary = false,
+  }) => ({
+    key,
+    label,
+    copy,
+    icon,
+    route,
+    primary,
+  });
+  const actions = [];
+  const actionSpecs = [
+    {
+      key: "messaging",
+      label: "Open messaging",
+      copy: "Jump into campaign rooms, requests, and announcements.",
+      icon: "messages",
+      primary: true,
+    },
+    {
+      key: "engagement",
+      label: "Triage engagement",
+      copy: "Review public comments, likes, replies, and response mode.",
+      icon: "comment",
+      primary: true,
+    },
+    {
+      key: "calendar",
+      label: "Plan calendar",
+      copy: "Manage availability, events, shifts, approvals, and promotion.",
+      icon: "calendar",
+    },
+    {
+      key: "missions",
+      label: "Open missions",
+      copy: "Assign, claim, approve, and track campaign work.",
+      icon: "mission",
+    },
+    {
+      key: "staff",
+      label: "Tune access",
+      copy: "Invite staff and shape feature permissions.",
+      icon: "team",
+    },
+    {
+      key: "donations",
+      label: "Check donations",
+      copy: "Review finance setup, transactions, payouts, and exports.",
+      icon: "heart",
+    },
+  ];
+  actionSpecs.forEach((spec) => {
+    const access = findAccessForSection(spec.key);
+    if (!access) {
+      return;
+    }
+    actions.push(
+      makeAction({
+        ...spec,
+        route: candidateDashboardSectionPath(access.candidateId, spec.key),
+      }),
+    );
+  });
+  const voterMapAccess = campaigns.find((access) => hasCandidateVoterMapAccess(access));
+  if (voterMapAccess) {
+    actions.push(
+      makeAction({
+        key: "voter-map",
+        label: "Open voter map",
+        copy: "Review territories, voter records, scripts, and field notes.",
+        icon: "map",
+        route: candidateVoterMapPath("", voterMapAccess.candidateId),
+      }),
+    );
+  }
+  return actions.slice(0, 5);
+}
+
+function renderCandidateDashboardRootAction(action) {
+  return `<button class="shared-campaign-access-action${action.primary ? " is-primary" : ""}" type="button" data-action="navigate" data-route="${escapeHtml(action.route)}">
+    <span>${renderIcon(action.icon)}</span>
+    <strong>${escapeHtml(action.label)}</strong>
+    <small>${escapeHtml(action.copy)}</small>
+  </button>`;
+}
+
+function candidateDashboardCoverageGroups() {
+  return [
+    {
+      label: "Campaign operations",
+      copy: "Reporting, events, calendar, staff, missions, and donations.",
+      keys: ["analytics", "events", "calendar", "staff", "missions", "donations"],
+    },
+    {
+      label: "Voter response",
+      copy: "Engagement, voter prompts, registry, field map, and Campaign Quest.",
+      keys: [
+        "engagement",
+        "voter-contact-prompt",
+        "voter-registry",
+        "campaign-quest",
+      ],
+    },
+    {
+      label: "Communications",
+      copy: "Campaign rooms, volunteer coordination, announcements, and follow-up.",
+      keys: ["messaging"],
+    },
+  ];
+}
+
+function renderCandidateDashboardCoverageGroup(group, campaigns = []) {
+  const sections = group.keys
+    .map(candidateDashboardSectionConfig)
+    .filter(Boolean);
+  const availableCount = sections.filter((section) =>
+    campaigns.some((access) => canOpenCandidateDashboardSection(section, access)),
+  ).length;
+  const totalCount = sections.length;
+  return `<article class="shared-campaign-access-lane">
+    <div class="shared-campaign-access-lane__header">
+      <span>
+        <strong>${escapeHtml(group.label)}</strong>
+        <small>${escapeHtml(group.copy)}</small>
+      </span>
+      <em>${escapeHtml(`${formatCount(availableCount)}/${formatCount(totalCount)} live`)}</em>
+    </div>
+    <div class="shared-campaign-access-lane__items">
+      ${sections
+        .map((section) => {
+          const count = campaigns.filter((access) =>
+            canOpenCandidateDashboardSection(section, access),
+          ).length;
+          return `<span class="${count ? "is-live" : "is-locked"}">
+            <i>${renderIcon(count ? section.icon : "lock")}</i>
+            <strong>${escapeHtml(section.label)}</strong>
+            <small>${escapeHtml(count ? `${formatCount(count)} campaign${count === 1 ? "" : "s"}` : "Locked")}</small>
+          </span>`;
+        })
+        .join("")}
+    </div>
+  </article>`;
+}
+
 function renderCandidateDashboardRootSummary(campaigns = []) {
   if (!campaigns.length) {
     return "";
   }
-  const ownerCount = campaigns.filter((item) => item.isOwner).length;
-  const enabledSections = candidateDashboardFeatureSections().filter((section) =>
-    campaigns.some((access) => canOpenCandidateDashboardSection(section, access)),
-  );
-  const prioritySections = enabledSections.slice(0, 6);
-  return `<section class="shared-campaign-access-map">
+  const stats = candidateDashboardAccessRootStats(campaigns);
+  const prioritySections = stats.enabledSections.slice(0, 6);
+  const actions = candidateDashboardRootActionItems(campaigns);
+  return `<section class="shared-campaign-access-map shared-campaign-access-map--command">
     <div class="shared-campaign-access-map__intro">
-      <span class="shared-card__meta"><span>Web command center</span><span>${escapeHtml(formatCount(enabledSections.length))} feature areas</span></span>
-      <h2>Start from the campaign, then jump straight into the work.</h2>
-      <p>Each campaign card now exposes the same candidate dashboard areas used in the Polis app: missions, messaging, calendar, voter tools, staff access, donations, events, and reporting.</p>
+      <span class="shared-card__meta"><span>Web command center</span><span>${escapeHtml(formatCount(stats.enabledSections.length))} feature areas</span></span>
+      <h2>Start from access, then move directly into campaign work.</h2>
+      <p>Each campaign card exposes app-backed dashboard areas, while this map shows which workspaces are ready across every campaign attached to this account.</p>
+    </div>
+    <div class="shared-campaign-access-map__actions">
+      ${actions.map(renderCandidateDashboardRootAction).join("")}
     </div>
     <div class="shared-campaign-access-map__metrics">
       <span><strong>${escapeHtml(formatCount(campaigns.length))}</strong><small>campaign${campaigns.length === 1 ? "" : "s"}</small></span>
-      <span><strong>${escapeHtml(formatCount(ownerCount))}</strong><small>owner</small></span>
-      <span><strong>${escapeHtml(formatCount(Math.max(0, campaigns.length - ownerCount)))}</strong><small>staff</small></span>
+      <span><strong>${escapeHtml(formatCount(stats.ownerCount))}</strong><small>owner</small></span>
+      <span><strong>${escapeHtml(formatCount(stats.staffCount))}</strong><small>staff</small></span>
+      <span><strong>${escapeHtml(formatCount(stats.fullAccessCount))}</strong><small>full access</small></span>
+    </div>
+    <div class="shared-campaign-access-map__lanes">
+      ${candidateDashboardCoverageGroups()
+        .map((group) => renderCandidateDashboardCoverageGroup(group, campaigns))
+        .join("")}
     </div>
     ${
       prioritySections.length
@@ -46355,6 +52171,7 @@ function renderCandidateDashboardCampaignCard(access) {
   const profile = access.profile || {};
   const displayName = normalizeString(profile.displayName) || "Campaign";
   const dashboardPath = candidateDashboardSectionPath(access.candidateId);
+  const voterMapPath = candidateVoterMapPath("", access.candidateId);
   const permissionCount = access.isOwner
     ? "Owner"
     : `${formatCount(access.permissions.length)} permission${access.permissions.length === 1 ? "" : "s"}`;
@@ -46387,6 +52204,11 @@ function renderCandidateDashboardCampaignCard(access) {
       }
       <div class="shared-card__actions">
         <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="${escapeHtml(dashboardPath)}">Command center</button>
+        ${
+          hasCandidateVoterMapAccess(access)
+            ? `<button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(voterMapPath)}">Voter Map</button>`
+            : ""
+        }
         ${
           canManageCandidateMessaging(access)
             ? `<button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(candidateMessagingServerPath(access.candidateId))}">Messaging</button>`
@@ -46440,7 +52262,7 @@ function renderCandidateDashboardRoot() {
       <div class="shared-page__header">
         <div>
           <h1>Campaigns</h1>
-          <p>Open a candidate dashboard to manage campaign operations, rooms, staff access, missions, voters, events, and reporting.</p>
+          <p>Open a candidate dashboard to manage reporting, events, calendar, engagement, voter tools, Campaign Quest, donations, staff, missions, and messaging.</p>
         </div>
         <div class="shared-card__actions">
           <button class="shared-feed-chip" data-action="navigate" data-route="/candidates">Candidate directory</button>
@@ -46485,6 +52307,13 @@ function renderCandidateDashboardHero(candidate, access) {
           icon: "messages",
           route: candidateDashboardSectionPath(candidateId, "messaging"),
           primary: true,
+        }
+      : null,
+    canOpenCandidateVoterMap(access, candidate)
+      ? {
+          label: "Voter Map",
+          icon: "map",
+          route: candidateVoterMapPath("", candidateId),
         }
       : null,
     canOpenCandidateDashboardSection(sectionByKey.get("missions"), access)
@@ -46588,6 +52417,8 @@ function candidateDashboardContactOpsCards(detail, candidateId, access) {
   const preferredCount = voterRecords.filter(
     (item) => candidateVoterPreferredContactTypes(item).length > 0,
   ).length;
+  const voterMap = detail.voterMap || createCandidateDashboardVoterMapState();
+  const territoryCount = voterMap.access?.territories?.length || 0;
   const messaging =
     detail.messagingWorkspace || createCandidateDashboardMessagingState();
   const channels = Array.isArray(messaging.item?.channels)
@@ -46637,6 +52468,19 @@ function candidateDashboardContactOpsCards(detail, candidateId, access) {
       icon: "registry",
       route: candidateDashboardSectionPath(candidateId, "voter-registry"),
       enabled: canOpen("voter-registry"),
+    },
+    {
+      key: "voter-map",
+      label: "Voter Map",
+      metric: territoryCount
+        ? `${formatCount(territoryCount)} territories`
+        : voterMap.loaded
+          ? "Map tools ready"
+          : "Open map tools",
+      copy: "Use mapping, territory scope, connected voter records, add/import, outreach scripts, and field notes.",
+      icon: "map",
+      route: candidateVoterMapPath("", candidateId),
+      enabled: canOpenCandidateVoterMap(access, detail.candidate),
     },
     {
       key: "messaging",
@@ -46800,6 +52644,7 @@ function renderCandidateDashboardOverview(detail, candidateId, access) {
               renderCandidateDashboardFeatureCard(section, candidateId, access),
             )
             .join("")}
+          ${renderCandidateVoterMapFeatureCard(candidateId, access, detail.candidate)}
         </div>
       </article>
     </div>
@@ -49260,7 +55105,7 @@ function candidateVolunteerLabel(volunteer = {}) {
 
 function renderCandidateVolunteerTags(tags = []) {
   if (!tags.length) {
-    return '<span class="shared-campaign-volunteer-muted">General room access</span>';
+    return '<span class="shared-campaign-volunteer-muted">Default campaign rooms</span>';
   }
   return `<span class="shared-campaign-volunteer-tags">${tags
     .map((tag) => `<em>${escapeHtml(tag)}</em>`)
@@ -49270,9 +55115,9 @@ function renderCandidateVolunteerTags(tags = []) {
 function candidateVolunteerAccessSummary(volunteer = {}) {
   const tags = Array.isArray(volunteer.roleTags) ? volunteer.roleTags : [];
   if (!tags.length) {
-    return "Can join the default volunteer rooms for this campaign.";
+    return "Can join the campaign rooms open to volunteers.";
   }
-  return `Routed into ${formatCount(tags.length)} access group${tags.length === 1 ? "" : "s"}.`;
+  return `Routed into ${formatCount(tags.length)} room group${tags.length === 1 ? "" : "s"}.`;
 }
 
 function renderCandidateVolunteerRow(volunteer, resource, canManage) {
@@ -49301,7 +55146,7 @@ function renderCandidateVolunteerRow(volunteer, resource, canManage) {
         ? `<form class="shared-campaign-volunteer-edit" data-route-form="candidate-volunteer-update">
             <input type="hidden" name="userId" value="${escapeHtml(volunteer.userId)}" />
             <label>
-              <span>Access groups</span>
+              <span>Room groups</span>
               <input name="roleTags" value="${escapeHtml(tagValue)}" placeholder="field, canvass, events" autocomplete="off"${disabledAttr(pendingUpdate || pendingRemove)} />
             </label>
             <div class="shared-campaign-volunteer-actions">
@@ -49345,8 +55190,8 @@ function renderCandidateMessagingRoomCard(candidateId, channel, canManage) {
       <span><strong>${escapeHtml(coalitionRoomLastActivityLabel(channel))}</strong><small>activity</small></span>
     </div>
     <div class="shared-campaign-room-card__actions">
-      <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="${escapeHtml(roomRoute)}">Open room</button>
-      ${canManage || channel.canManage ? `<button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(settingsRoute)}">Room setup</button>` : ""}
+      <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="${escapeHtml(roomRoute)}">Open conversation</button>
+      ${canManage || channel.canManage ? `<button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(settingsRoute)}">Details</button>` : ""}
     </div>
   </article>`;
 }
@@ -49372,21 +55217,166 @@ function renderCandidateMessagingRoomGroup(candidateId, group, canManage) {
   </article>`;
 }
 
+function candidateMessagingFocusRoom(channels = []) {
+  return [...channels]
+    .filter((channel) => channel && channel.conversationId)
+    .sort((a, b) => {
+      const unreadDelta = (Number(b.unreadCount) || 0) - (Number(a.unreadCount) || 0);
+      if (unreadDelta) return unreadDelta;
+      const activityDelta = (Number(b.updatedAt) || 0) - (Number(a.updatedAt) || 0);
+      if (activityDelta) return activityDelta;
+      return (Number(b.participantCount) || 0) - (Number(a.participantCount) || 0);
+    })[0] || null;
+}
+
+function candidateMessagingActivityLabel(channel = {}) {
+  const relative = formatRelativeTime(channel.updatedAt);
+  if (!relative) {
+    return "No recent activity";
+  }
+  return relative === "now" ? "Active now" : `Active ${relative} ago`;
+}
+
+function renderCandidateMessagingFocusRoom(candidateId, channel) {
+  if (!channel?.conversationId) {
+    return `<article class="shared-campaign-messaging-focus is-empty">
+      <span class="shared-campaign-room-icon">${renderIcon("messages")}</span>
+      <div>
+        <h3>No campaign conversations yet</h3>
+        <p>Create or open the campaign messaging workspace to add candidate, staff, operations, announcement, and volunteer rooms.</p>
+      </div>
+    </article>`;
+  }
+  const roomRoute = buildMessagingRoomRoute(
+    "campaign",
+    candidateId,
+    channel.conversationId,
+  );
+  const settingsRoute = buildMessagingRoomRoute(
+    "campaign",
+    candidateId,
+    channel.conversationId,
+    "/settings",
+  );
+  const kind = normalizeString(channel.kind).toLowerCase();
+  return `<article class="shared-campaign-messaging-focus">
+    <div class="shared-campaign-messaging-focus__room">
+      <span class="shared-campaign-room-icon">${renderIcon(kind === "announcement" ? "bell" : "messages")}</span>
+      <div>
+        <div class="shared-campaign-room-pills">
+          <span>${escapeHtml(coalitionRoomKindLabel(channel))}</span>
+          ${channel.unreadCount ? `<span class="is-alert">${escapeHtml(formatCount(channel.unreadCount))} unread</span>` : '<span class="is-good">Current</span>'}
+        </div>
+        <h3>${escapeHtml(channel.title || "Campaign conversation")}</h3>
+        <p>${escapeHtml(channel.lastMessagePreview || channel.subtitle || "Open this room to keep the campaign conversation moving.")}</p>
+      </div>
+    </div>
+    <div class="shared-campaign-messaging-focus__meta">
+      <span><strong>${escapeHtml(formatCount(channel.participantCount || 0))}</strong><small>people</small></span>
+      <span><strong>${escapeHtml(candidateMessagingActivityLabel(channel))}</strong><small>status</small></span>
+    </div>
+    <div class="shared-campaign-room-card__actions">
+      <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="${escapeHtml(roomRoute)}">Open conversation</button>
+      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(settingsRoute)}">Details</button>
+    </div>
+  </article>`;
+}
+
+function renderCandidateMessagingActionCard(action) {
+  return `<button class="shared-campaign-messaging-action${action.tone ? ` is-${escapeHtml(action.tone)}` : ""}" type="button" data-action="navigate" data-route="${escapeHtml(action.route)}">
+    <span>${renderIcon(action.icon)}</span>
+    <strong>${escapeHtml(action.title)}</strong>
+    <small>${escapeHtml(action.copy)}</small>
+  </button>`;
+}
+
+function renderCandidateMessagingCommandCenter({
+  candidateId,
+  channels,
+  groups,
+  unreadCount,
+  canManage,
+  reach,
+  workspace,
+}) {
+  const roomsPath = candidateMessagingServerPath(candidateId);
+  const focusRoom = candidateMessagingFocusRoom(channels);
+  const actions = [
+    {
+      title: "Open conversations",
+      copy: "Jump into all campaign rooms and direct threads.",
+      route: roomsPath,
+      icon: "messages",
+      tone: "primary",
+    },
+    {
+      title: "Safety review",
+      copy: "Handle reports, restrictions, and message safety.",
+      route: `${roomsPath}/moderation`,
+      icon: "flag",
+      tone: unreadCount ? "attention" : "",
+    },
+    {
+      title: "Team access",
+      copy: "Invite staff and assign room groups.",
+      route: `${roomsPath}/roles`,
+      icon: "shield",
+    },
+    {
+      title: "Room defaults",
+      copy: "Set conversation names, visibility, and defaults.",
+      route: `${roomsPath}/settings`,
+      icon: "settings",
+    },
+    {
+      title: "Automations",
+      copy: "Configure saved replies and routing.",
+      route: `${roomsPath}/workflows`,
+      icon: "dashboard",
+    },
+  ];
+  return `<article class="shared-campaign-panel shared-campaign-panel--accent shared-campaign-messaging-command">
+    <div class="shared-campaign-panel__header shared-campaign-messaging-command__header">
+      <div>
+        <span class="shared-card__meta"><span>Campaign messaging</span><span>${escapeHtml(canManage ? "Manager access" : "Staff access")}</span></span>
+        <h2>Campaign messaging workspace</h2>
+        <p>Open conversations, coordinate volunteers, answer questions, and keep campaign rooms moving from one dashboard.</p>
+      </div>
+      <div class="shared-card__actions">
+        <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="${escapeHtml(roomsPath)}">Open conversations</button>
+        <button class="shared-feed-chip" type="button" data-action="candidate-messaging-refresh"${disabledAttr(workspace.loading)}>${workspace.loading ? "Refreshing..." : "Refresh"}</button>
+      </div>
+    </div>
+    <div class="shared-campaign-messaging-signals">
+      <span><strong>${escapeHtml(unreadCount ? formatCount(unreadCount) : "Clear")}</strong><small>unread</small></span>
+      <span><strong>${escapeHtml(formatCount(channels.length))}</strong><small>active rooms</small></span>
+      <span><strong>${escapeHtml(formatCount(groups.length))}</strong><small>room groups</small></span>
+      <span><strong>${escapeHtml(formatCount(reach))}</strong><small>people</small></span>
+    </div>
+    <div class="shared-campaign-messaging-command__body">
+      ${renderCandidateMessagingFocusRoom(candidateId, focusRoom)}
+      <div class="shared-campaign-messaging-action-grid">
+        ${actions.map(renderCandidateMessagingActionCard).join("")}
+      </div>
+    </div>
+  </article>`;
+}
+
 function renderCandidateMessagingAdminPanel(candidateId, directory, access) {
   const serverRoute = candidateMessagingServerPath(candidateId);
   const canManage = directory?.canManage || canManageCandidateMessaging(access);
   const actions = [
-    ["Settings", "Workspace defaults", `${serverRoute}/settings`, "settings"],
-    ["Groups", "Access groups", `${serverRoute}/roles`, "shield"],
+    ["Preferences", "Room defaults", `${serverRoute}/settings`, "settings"],
+    ["Team access", "Room groups", `${serverRoute}/roles`, "shield"],
     ["Members", "People and rooms", `${serverRoute}/members`, "team"],
-    ["Review", "Reports and restrictions", `${serverRoute}/moderation`, "flag"],
-    ["Automations", "Triggers and handoffs", `${serverRoute}/workflows`, "dashboard"],
+    ["Safety review", "Reports and restrictions", `${serverRoute}/moderation`, "flag"],
+    ["Automations", "Saved replies and routing", `${serverRoute}/workflows`, "dashboard"],
   ];
   return `<aside class="shared-campaign-room-admin">
     <div>
-      <span class="shared-card__meta"><span>${escapeHtml(canManage ? "Admin tools" : "Room tools")}</span></span>
-      <h2>${escapeHtml(canManage ? "Manage campaign messaging" : "Open campaign messaging")}</h2>
-      <p>${escapeHtml(canManage ? "Tune room defaults, access, moderation, and automations from the campaign dashboard." : "Open available campaign rooms and review the messaging tools included with your staff access.")}</p>
+      <span class="shared-card__meta"><span>${escapeHtml(canManage ? "Manager controls" : "Room tools")}</span></span>
+      <h2>${escapeHtml(canManage ? "Messaging controls" : "Open campaign messaging")}</h2>
+      <p>${escapeHtml(canManage ? "Adjust defaults, team access, safety review, and reply routing from the campaign dashboard." : "Open available campaign rooms and review the messaging tools included with your staff access.")}</p>
     </div>
     <div class="shared-campaign-room-admin__actions">
       ${actions
@@ -49408,22 +55398,22 @@ function renderCandidateMessagingVolunteerPanel(resource, canManage) {
     resource.items.flatMap((volunteer) => volunteer.roleTags || []),
   ).size;
   const emptyTitle = canManage
-    ? "No volunteers have room access yet."
-    : "No volunteer room roster has been shared yet.";
+    ? "No volunteers added to campaign rooms yet."
+    : "No volunteer room access has been shared yet.";
   const emptyCopy = canManage
-    ? "Add a volunteer by username, then use access groups to route them into field, canvass, event, or operations rooms."
-    : "A campaign messaging manager can add volunteers and assign access groups when this workspace is ready.";
+    ? "Add a volunteer by username, then use room groups to route them into field, canvass, event, or operations rooms."
+    : "A campaign messaging manager can add volunteers and assign room groups when this workspace is ready.";
   return `<article class="shared-campaign-panel shared-campaign-volunteer-panel">
     <div class="shared-campaign-panel__header">
       <div>
-        <h2>Volunteer access roster</h2>
-        <p>Control who can enter volunteer rooms and which campaign workstreams they should see.</p>
+        <h2>Volunteer room access</h2>
+        <p>Add volunteers, group them by campaign workstream, and keep room access aligned with field operations.</p>
       </div>
       <button class="shared-feed-chip" type="button" data-action="candidate-volunteers-refresh"${disabledAttr(resource.loading)}>Refresh</button>
     </div>
     <div class="shared-campaign-volunteer-summary">
       <span><strong>${escapeHtml(formatCount(resource.items.length))}</strong><small>volunteers</small></span>
-      <span><strong>${escapeHtml(formatCount(tagCount))}</strong><small>access groups</small></span>
+      <span><strong>${escapeHtml(formatCount(tagCount))}</strong><small>room groups</small></span>
     </div>
     ${
       canManage
@@ -49433,7 +55423,7 @@ function renderCandidateMessagingVolunteerPanel(resource, canManage) {
               <input name="username" placeholder="@username" autocomplete="off"${disabledAttr(resource.actionPendingKey === "add")} />
             </label>
             <label>
-              <span>Access groups</span>
+              <span>Room groups</span>
               <input name="roleTags" placeholder="field, canvass, events" autocomplete="off"${disabledAttr(resource.actionPendingKey === "add")} />
             </label>
             <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(resource.actionPendingKey === "add")}>${resource.actionPendingKey === "add" ? "Adding..." : "Add to rooms"}</button>
@@ -49496,19 +55486,15 @@ function renderCandidateDashboardMessaging(detail, candidateId, access) {
       ${renderCandidateDashboardMetric("Reach", formatCount(reach))}
       ${renderCandidateDashboardMetric("Access", canManage ? "Manage" : "View")}
     </div>
-    <article class="shared-campaign-panel shared-campaign-panel--accent shared-campaign-room-console">
-      <div class="shared-campaign-panel__header">
-        <div>
-          <span class="shared-card__meta"><span>Campaign messaging</span><span>${escapeHtml(canManage ? "Manager access" : "Staff access")}</span></span>
-          <h2>Messaging command center</h2>
-          <p>${escapeHtml(canManage ? "Review live campaign rooms, jump into priority channels, and open server administration without leaving the dashboard." : "Open campaign rooms available to your staff access and keep operations, volunteers, and announcements close to the dashboard.")}</p>
-        </div>
-        <div class="shared-card__actions">
-          <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="${escapeHtml(roomsPath)}">Open all rooms</button>
-          <button class="shared-feed-chip" type="button" data-action="candidate-messaging-refresh"${disabledAttr(workspace.loading)}>${workspace.loading ? "Refreshing..." : "Refresh"}</button>
-        </div>
-      </div>
-    </article>
+    ${renderCandidateMessagingCommandCenter({
+      candidateId,
+      channels,
+      groups,
+      unreadCount,
+      canManage,
+      reach,
+      workspace,
+    })}
     ${workspace.error ? `<div class="shared-page__error">${escapeHtml(workspace.error)}</div>` : ""}
     ${workspace.loading && !channels.length ? '<div class="shared-page__loading">Loading campaign rooms...</div>' : ""}
     <div class="shared-campaign-messaging-grid shared-campaign-messaging-grid--rooms">
@@ -49523,12 +55509,12 @@ function renderCandidateDashboardMessaging(detail, candidateId, access) {
             : `<article class="shared-campaign-panel shared-campaign-room-empty-panel">
                 <span>${renderIcon("messages")}</span>
                 <div>
-                  <h2>No campaign rooms loaded yet.</h2>
-                  <p>Refresh rooms or open the messaging server to create candidate, staff, operations, announcement, and volunteer channels.</p>
+                  <h2>No campaign conversations yet.</h2>
+                  <p>Create or open the campaign messaging workspace to add candidate, staff, operations, announcement, and volunteer rooms.</p>
                 </div>
                 <div class="shared-campaign-room-card__actions">
-                  <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="candidate-messaging-refresh"${disabledAttr(workspace.loading)}>Refresh rooms</button>
-                  <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(roomsPath)}">Open messaging server</button>
+                  <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="candidate-messaging-refresh"${disabledAttr(workspace.loading)}>Refresh</button>
+                  <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(roomsPath)}">Open messaging workspace</button>
                 </div>
               </article>`
         }
@@ -50535,6 +56521,62 @@ function campaignQuestTargetSubtitle(target = {}) {
   return location || target.privacyLabel || "Target";
 }
 
+function campaignQuestOutreachLabel(value) {
+  const normalized = normalizeString(value);
+  const labels = {
+    doorKnock: "Door",
+    yardSign: "Sign",
+    phoneCall: "Call",
+    phone: "Call",
+    sms: "Text",
+    text: "Text",
+    email: "Email",
+    litDrop: "Lit drop",
+  };
+  return labels[normalized] || humanizeLabel(normalized || "outreach");
+}
+
+function campaignQuestOutreachIcon(value) {
+  const normalized = normalizeString(value).toLowerCase();
+  if (normalized.includes("sign") || normalized.includes("flag")) {
+    return "flag";
+  }
+  if (normalized.includes("phone") || normalized.includes("call")) {
+    return "phone";
+  }
+  if (normalized.includes("sms") || normalized.includes("text")) {
+    return "messages";
+  }
+  if (normalized.includes("email") || normalized.includes("mail")) {
+    return "mail";
+  }
+  return "map";
+}
+
+function candidateVoterMapTargetIcon(target = {}) {
+  const outreachType = normalizeStringList(target.availableOutreachTypes)[0];
+  if (outreachType) {
+    return campaignQuestOutreachIcon(outreachType);
+  }
+  const category = normalizeString(target.targetCategory).toLowerCase();
+  if (category.includes("sign")) return "flag";
+  if (category.includes("gotv")) return "team";
+  if (category.includes("persuasion")) return "comment";
+  return "map";
+}
+
+function campaignQuestOutcomeChoicesForTarget(config, outreachTypes = []) {
+  const normalizedTypes = normalizeStringList(outreachTypes);
+  const fields = (config?.outcomeFields || []).filter((field) => {
+    if (field.enabled === false) return false;
+    if (!normalizedTypes.length || !field.outreachTypes.length) return true;
+    return field.outreachTypes.some((type) => normalizedTypes.includes(type));
+  });
+  return fields.length
+    ? fields
+    : campaignQuestOutcomesFor(config, normalizedTypes[0] || "");
+}
+
 function campaignQuestCategorySummary(targets = []) {
   const counts = targets.reduce((out, target) => {
     const key = normalizeString(target.targetCategory) || "standard_target";
@@ -50554,6 +56596,100 @@ function campaignQuestCategorySummary(targets = []) {
   ];
 }
 
+function campaignQuestCategoryOptions(targets = []) {
+  const summary = campaignQuestCategorySummary(targets);
+  return [
+    ["all", targets.length],
+    ...summary,
+  ].map(([key, count]) => ({
+    key,
+    count,
+    label: key === "all" ? "All" : humanizeLabel(key),
+  }));
+}
+
+function campaignQuestFilteredTargets(resource = {}) {
+  const targets = resource.targets || [];
+  const filter = normalizeString(resource.categoryFilter) || "all";
+  if (filter === "all") {
+    return targets;
+  }
+  return targets.filter((target) => target.targetCategory === filter);
+}
+
+function campaignQuestSelectedTarget(resource = {}, filteredTargets = null) {
+  const targets = resource.targets || [];
+  const filtered = filteredTargets || campaignQuestFilteredTargets(resource);
+  const selectedId = normalizeString(resource.selectedTargetId);
+  return (
+    targets.find((target) => target.recordId === selectedId) ||
+    filtered[0] ||
+    targets[0] ||
+    null
+  );
+}
+
+function campaignQuestCoordinateBounds(items = []) {
+  const points = items.filter(
+    (item) =>
+      Number.isFinite(item.lat) &&
+      Number.isFinite(item.lng) &&
+      (item.lat !== 0 || item.lng !== 0),
+  );
+  if (!points.length) {
+    return null;
+  }
+  return points.reduce(
+    (bounds, item) => ({
+      minLat: Math.min(bounds.minLat, item.lat),
+      maxLat: Math.max(bounds.maxLat, item.lat),
+      minLng: Math.min(bounds.minLng, item.lng),
+      maxLng: Math.max(bounds.maxLng, item.lng),
+    }),
+    {
+      minLat: points[0].lat,
+      maxLat: points[0].lat,
+      minLng: points[0].lng,
+      maxLng: points[0].lng,
+    },
+  );
+}
+
+function campaignQuestMapPosition(item, index, total, bounds) {
+  if (
+    bounds &&
+    Number.isFinite(item.lat) &&
+    Number.isFinite(item.lng) &&
+    (item.lat !== 0 || item.lng !== 0)
+  ) {
+    const latSpan = Math.max(0.0001, bounds.maxLat - bounds.minLat);
+    const lngSpan = Math.max(0.0001, bounds.maxLng - bounds.minLng);
+    return {
+      x: Math.max(5, Math.min(95, 5 + ((item.lng - bounds.minLng) / lngSpan) * 90)),
+      y: Math.max(5, Math.min(95, 95 - ((item.lat - bounds.minLat) / latSpan) * 90)),
+    };
+  }
+  const angle = ((index + 0.35) / Math.max(1, total)) * Math.PI * 2;
+  const radius = 31 + ((index % 3) * 7);
+  return {
+    x: 50 + Math.cos(angle) * radius,
+    y: 50 + Math.sin(angle) * radius,
+  };
+}
+
+function campaignQuestLocationCopy(resource = {}) {
+  if (resource.locationPending) {
+    return "Checking browser location...";
+  }
+  if (resource.lastKnownLocation) {
+    const accuracy = Number(resource.lastKnownLocation.accuracy);
+    return Number.isFinite(accuracy)
+      ? `Location ready within ${formatCount(Math.round(accuracy))}m`
+      : "Location ready";
+  }
+  return normalizeString(resource.locationStatus) || "Location not shared";
+}
+
 function renderCampaignQuestCommandCenter(resource, progress, config, canManage) {
   const candidateId = currentCandidateDashboardId();
   const targets = resource.targets || [];
@@ -50563,9 +56699,9 @@ function renderCampaignQuestCommandCenter(resource, progress, config, canManage)
   return `<article class="shared-campaign-quest-command">
     <div class="shared-campaign-quest-command__icon">${renderIcon("map")}</div>
     <div class="shared-campaign-quest-command__body">
-      <span>${escapeHtml(enabled ? "CampaignQuest active" : "CampaignQuest disabled")}</span>
+      <span>${escapeHtml(enabled ? "Campaign Quest active" : "Campaign Quest disabled")}</span>
       <h2>Field map console</h2>
-      <p>Run voter-map targets, track XP progress, and keep the browser route aligned with the native CampaignQuest workflow.</p>
+      <p>Run voter-map targets, track XP progress, and keep the browser route aligned with the native Campaign Quest workflow.</p>
       <div class="shared-campaign-quest-command__status">
         <span>${escapeHtml(formatCount(targets.length))} targets</span>
         <span>${escapeHtml(formatCount(clusters.length))} clusters</span>
@@ -50678,7 +56814,77 @@ function renderCampaignQuestBadges(config, progress) {
   </article>`;
 }
 
-function renderCampaignQuestTargetRow(target, config, pendingKey) {
+function renderCampaignQuestCategoryFilter(resource) {
+  const options = campaignQuestCategoryOptions(resource.targets || []);
+  const active = normalizeString(resource.categoryFilter) || "all";
+  return `<div class="shared-campaign-quest-filter" role="list" aria-label="Campaign Quest target filters">
+    ${options
+      .map(
+        (option) => `<button class="${option.key === active ? "is-active" : ""}" type="button" data-action="candidate-quest-category" data-category="${escapeHtml(option.key)}">
+          <strong>${escapeHtml(formatCount(option.count))}</strong>
+          <span>${escapeHtml(option.label)}</span>
+        </button>`,
+      )
+      .join("")}
+  </div>`;
+}
+
+function renderCampaignQuestMapCanvas(resource, selectedTarget, filteredTargets) {
+  const targets = (filteredTargets || []).slice(0, 28);
+  const clusters = (resource.clusters || []).slice(0, 10);
+  const bounds = campaignQuestCoordinateBounds([...targets, ...clusters]);
+  return `<div class="shared-campaign-quest-map" aria-label="Campaign Quest target map preview">
+    <div class="shared-campaign-quest-map__grid" aria-hidden="true"></div>
+    <div class="shared-campaign-quest-map__route" aria-hidden="true"></div>
+    ${clusters
+      .map((cluster, index) => {
+        const position = campaignQuestMapPosition(
+          cluster,
+          index,
+          Math.max(1, clusters.length),
+          bounds,
+        );
+        return `<span class="shared-campaign-quest-cluster" style="--x:${escapeHtml(position.x.toFixed(2))}%;--y:${escapeHtml(position.y.toFixed(2))}%">${escapeHtml(formatCount(cluster.count))}</span>`;
+      })
+      .join("")}
+    ${targets
+      .map((target, index) => {
+        const position = campaignQuestMapPosition(
+          target,
+          index + clusters.length,
+          Math.max(1, targets.length + clusters.length),
+          bounds,
+        );
+        const selected = selectedTarget?.recordId === target.recordId;
+        return `<button class="shared-campaign-quest-pin is-${escapeHtml(target.targetCategory)}${selected ? " is-selected" : ""}" style="--x:${escapeHtml(position.x.toFixed(2))}%;--y:${escapeHtml(position.y.toFixed(2))}%" type="button" data-action="candidate-quest-target-select" data-record-id="${escapeHtml(target.recordId)}" aria-label="${escapeHtml(`Select ${target.displayName || target.privacyLabel || "target"}`)}">
+          <span></span>
+        </button>`;
+      })
+      .join("")}
+    ${
+      resource.lastKnownLocation
+        ? `<span class="shared-campaign-quest-avatar" style="--x:50%;--y:50%" title="Your last shared location">Q</span>`
+        : ""
+    }
+    <div class="shared-campaign-quest-map__legend">
+      <span><i class="is-high_impact_persuasion"></i>Persuasion</span>
+      <span><i class="is-gotv_priority"></i>GOTV</span>
+      <span><i class="is-sign_delivery"></i>Signs</span>
+    </div>
+  </div>`;
+}
+
+function renderCampaignQuestSelectedTargetPanel(target, config, resource) {
+  if (!target) {
+    return `<aside class="shared-campaign-quest-selected">
+      <div class="shared-campaign-quest-selected__empty">
+        <span>${renderIcon("map")}</span>
+        <strong>Select a field target</strong>
+        <p>Choose a pin or queue item to claim the next visit, record an outcome, and keep Campaign Quest progress moving.</p>
+      </div>
+    </aside>`;
+  }
+  const pendingKey = resource.actionPendingKey;
   const pending =
     pendingKey === `start:${target.recordId}` ||
     pendingKey === `complete:${target.recordId}`;
@@ -50686,115 +56892,156 @@ function renderCampaignQuestTargetRow(target, config, pendingKey) {
     ? target.availableOutreachTypes
     : ["doorKnock", "yardSign"];
   const defaultOutreach = normalizeString(outreachTypes[0]);
-  const outcomes = (config?.outcomeFields || []).filter(
-    (outcome) =>
-      outcome.enabled !== false &&
-      (!outcome.outreachTypes.length ||
-        outcome.outreachTypes.includes(defaultOutreach)),
-  );
-  const categoryLabel = humanizeLabel(target.targetCategory);
-  const pinLabel = humanizeLabel(target.pinState);
-  return `<article class="shared-campaign-quest-target" data-quest-target-row="${escapeHtml(target.recordId)}">
-    <div class="shared-campaign-quest-target__top">
-      <div class="shared-campaign-quest-target__main">
-        <span class="shared-campaign-quest-dot is-${escapeHtml(target.targetCategory)}"></span>
-        <div>
-          <strong>${escapeHtml(target.displayName || target.addressLine1 || target.privacyLabel || "Campaign target")}</strong>
-          <p>${escapeHtml(campaignQuestTargetSubtitle(target))}</p>
-        </div>
-      </div>
-      <div class="shared-campaign-quest-target__summary">
-        <span>${escapeHtml(target.privacyLabel || "Target")}</span>
-        <strong>${escapeHtml(pinLabel)}</strong>
+  const outcomes = campaignQuestOutcomeChoicesForTarget(config, outreachTypes);
+  const notesRoute = candidateVoterMapNotesPath(currentCandidateDashboardId(), target);
+  const targetTitle =
+    target.displayName || target.addressLine1 || target.privacyLabel || "Campaign target";
+  const targetSubtitle = campaignQuestTargetSubtitle(target);
+  const selectedOutcomeId =
+    outcomes.find(
+      (outcome) =>
+        !outcome.outreachTypes.length ||
+        outcome.outreachTypes.includes(defaultOutreach),
+    )?.id ||
+    outcomes[0]?.id ||
+    "";
+  return `<aside class="shared-campaign-quest-selected" data-quest-target-row="${escapeHtml(target.recordId)}">
+    <div class="shared-campaign-quest-selected__header">
+      <span class="shared-campaign-quest-dot is-${escapeHtml(target.targetCategory)}"></span>
+      <div>
+        <small>Selected target</small>
+        <strong>${escapeHtml(targetTitle)}</strong>
+        <em>${escapeHtml(targetSubtitle)}</em>
       </div>
     </div>
-    <div class="shared-campaign-quest-target__body">
+    <div class="shared-campaign-quest-selected__meta">
+      <span>${escapeHtml(humanizeLabel(target.targetCategory))}</span>
+      <span>${escapeHtml(humanizeLabel(target.pinState))}</span>
+      <span>${escapeHtml(target.privacyLabel || "Target")}</span>
+    </div>
+    <div class="shared-campaign-quest-complete-sheet">
+      <div class="shared-campaign-quest-complete-sheet__section">
+        <span>Outreach</span>
+        <div class="shared-campaign-quest-choice-grid">
+          ${outreachTypes
+            .map(
+              (type, index) => `<label class="shared-campaign-quest-choice">
+                <input type="radio" name="quest-outreach-${escapeHtml(target.recordId)}" value="${escapeHtml(type)}" data-quest-outreach${checkedAttr(index === 0)}${disabledAttr(pending)} />
+                <span>${renderIcon(campaignQuestOutreachIcon(type))}<strong>${escapeHtml(campaignQuestOutreachLabel(type))}</strong></span>
+              </label>`,
+            )
+            .join("")}
+        </div>
+      </div>
+      <div class="shared-campaign-quest-complete-sheet__section">
+        <span>Outcome</span>
+        ${
+          outcomes.length
+            ? `<div class="shared-campaign-quest-outcome-grid" data-quest-outcomes>
+                ${outcomes
+                  .map((outcome) => {
+                    const outreachMatch =
+                      !outcome.outreachTypes.length ||
+                      outcome.outreachTypes.includes(defaultOutreach);
+                    const outreachLabel = outcome.outreachTypes.length
+                      ? outcome.outreachTypes.map(campaignQuestOutreachLabel).join(", ")
+                      : "Any outreach";
+                    return `<label class="shared-campaign-quest-outcome-choice${outreachMatch ? "" : " is-hidden"}" data-quest-outcome-choice data-outreach-types="${escapeHtml(outcome.outreachTypes.join(","))}"${outreachMatch ? "" : " hidden"}>
+                      <input type="radio" name="quest-outcome-${escapeHtml(target.recordId)}" value="${escapeHtml(outcome.id)}" data-quest-outcome${checkedAttr(outcome.id === selectedOutcomeId)}${disabledAttr(pending)} />
+                      <span>
+                        <strong>${escapeHtml(outcome.label)}</strong>
+                        <small>${escapeHtml(outreachLabel)}</small>
+                      </span>
+                    </label>`;
+                  })
+                  .join("")}
+              </div>`
+            : '<div class="shared-page__empty">No completion outcomes are configured for this target.</div>'
+        }
+      </div>
+      <label class="shared-campaign-quest-note">
+        <span>Field note</span>
+        <textarea data-quest-note rows="3" placeholder="Add context for the field team"${disabledAttr(pending)}></textarea>
+      </label>
+    </div>
+    <div class="shared-campaign-quest-selected__actions">
+      <button class="shared-feed-chip" type="button" data-action="candidate-quest-target-start" data-record-id="${escapeHtml(target.recordId)}"${disabledAttr(pending)}>${pendingKey === `start:${target.recordId}` ? "Claiming..." : "Claim"}</button>
+      <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="candidate-quest-target-complete" data-record-id="${escapeHtml(target.recordId)}"${disabledAttr(pending || !outcomes.length)}>${pendingKey === `complete:${target.recordId}` ? "Completing..." : "Complete"}</button>
+      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(notesRoute)}">Notes</button>
+    </div>
+  </aside>`;
+}
+
+function renderCampaignQuestFieldBoard(resource, progress, config) {
+  const filteredTargets = campaignQuestFilteredTargets(resource);
+  const selectedTarget = campaignQuestSelectedTarget(resource, filteredTargets);
+  const activeQuests = (progress?.quests || []).filter((quest) => quest.completed !== true);
+  return `<article class="shared-campaign-panel shared-campaign-quest-field">
+    <div class="shared-campaign-panel__header shared-campaign-quest-field__header">
       <div>
-        <div class="shared-campaign-quest-target__meta">
-          <span>${escapeHtml(categoryLabel)}</span>
-          <span>${escapeHtml(pinLabel)}</span>
-          <span>${escapeHtml(`${formatCount(outreachTypes.length)} outreach ${outreachTypes.length === 1 ? "type" : "types"}`)}</span>
-        </div>
+        <h2>Field map board</h2>
+        <p>Start a shift, filter nearby targets, and finish the same claim/complete flow used by the app.</p>
       </div>
-      <div class="shared-campaign-quest-target__actions">
-        <label>
-          <span>Outreach</span>
-          <select data-quest-outreach${disabledAttr(pending)}>
-            ${outreachTypes
-              .map(
-                (type, index) => `<option value="${escapeHtml(type)}"${selectedAttr(index === 0)}>${escapeHtml(humanizeLabel(type))}</option>`,
-              )
-              .join("")}
-          </select>
-        </label>
-        <label>
-          <span>Outcome</span>
-          <select data-quest-outcome${disabledAttr(pending || !outcomes.length)}>
-            ${
-              outcomes.length
-                ? outcomes
-                    .map(
-                      (outcome, index) => `<option value="${escapeHtml(outcome.id)}"${selectedAttr(index === 0)}>${escapeHtml(outcome.label)}</option>`,
-                    )
-                    .join("")
-                : '<option value="">No outcomes</option>'
-            }
-          </select>
-        </label>
-        <label>
-          <span>Note</span>
-          <input data-quest-note placeholder="Optional note"${disabledAttr(pending)} />
-        </label>
-        <div class="shared-campaign-quest-target__buttons">
-          <button class="shared-feed-chip" type="button" data-action="candidate-quest-target-start" data-record-id="${escapeHtml(target.recordId)}"${disabledAttr(pending)}>${pendingKey === `start:${target.recordId}` ? "Claiming..." : "Claim"}</button>
-          <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="candidate-quest-target-complete" data-record-id="${escapeHtml(target.recordId)}"${disabledAttr(pending || !outcomes.length)}>${pendingKey === `complete:${target.recordId}` ? "Completing..." : "Complete"}</button>
-        </div>
+      <div class="shared-campaign-quest-shift">
+        <span class="${resource.shiftActive ? "is-active" : ""}">${escapeHtml(resource.shiftActive ? "Shift active" : "Shift off")}</span>
+        <small>${escapeHtml(campaignQuestLocationCopy(resource))}</small>
       </div>
+    </div>
+    <div class="shared-campaign-quest-field__toolbar">
+      <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="candidate-quest-shift-start"${disabledAttr(resource.locationPending || resource.shiftActive)}>${resource.locationPending ? "Checking..." : resource.shiftActive ? "Shift running" : "Start shift"}</button>
+      <button class="shared-feed-chip" type="button" data-action="candidate-quest-follow-location"${disabledAttr(resource.locationPending)}>${resource.locationPending ? "Checking..." : "Use location"}</button>
+      <button class="shared-feed-chip" type="button" data-action="candidate-quest-shift-stop"${disabledAttr(!resource.shiftActive)}>End shift</button>
+      <span>${escapeHtml(`${formatCount(filteredTargets.length)} visible targets - ${formatCount(activeQuests.length)} active quests`)}</span>
+    </div>
+    ${renderCampaignQuestCategoryFilter(resource)}
+    <div class="shared-campaign-quest-field__layout">
+      ${renderCampaignQuestMapCanvas(resource, selectedTarget, filteredTargets)}
+      ${renderCampaignQuestSelectedTargetPanel(selectedTarget, config, resource)}
     </div>
   </article>`;
 }
 
-function renderCampaignQuestTargets(resource, config) {
-  const targets = resource.targets || [];
+function renderCampaignQuestTargetQueueItem(target, selected) {
+  return `<button class="shared-campaign-quest-queue-item${selected ? " is-selected" : ""}" type="button" data-action="candidate-quest-target-select" data-record-id="${escapeHtml(target.recordId)}">
+    <span class="shared-campaign-quest-dot is-${escapeHtml(target.targetCategory)}"></span>
+    <span>
+      <strong>${escapeHtml(target.displayName || target.addressLine1 || target.privacyLabel || "Campaign target")}</strong>
+      <small>${escapeHtml(campaignQuestTargetSubtitle(target))}</small>
+    </span>
+    <em>${escapeHtml(humanizeLabel(target.pinState))}</em>
+  </button>`;
+}
+
+function renderCampaignQuestTargets(resource) {
+  const targets = campaignQuestFilteredTargets(resource);
+  const selectedTarget = campaignQuestSelectedTarget(resource, targets);
   const clusterTotal = (resource.clusters || []).reduce(
     (sum, cluster) => sum + (Number(cluster.count) || 0),
     0,
   );
-  const categories = campaignQuestCategorySummary(targets);
   return `<article class="shared-campaign-panel shared-campaign-quest-targets">
     <div class="shared-campaign-panel__header">
       <div>
         <h2>Target queue</h2>
-        <p>Claim or complete voter-map targets from the browser without losing campaign context.</p>
+        <p>Pick the next voter-map target, then complete the action from the field board.</p>
       </div>
       <button class="shared-feed-chip" type="button" data-action="candidate-quest-refresh"${disabledAttr(resource.loading)}>Refresh</button>
     </div>
     <div class="shared-campaign-quest-clusters">
-      <span>${escapeHtml(formatCount(targets.length))} loaded targets</span>
+      <span>${escapeHtml(formatCount(targets.length))} visible targets</span>
       <span>${escapeHtml(formatCount(resource.clusters.length))} clusters</span>
       <span>${escapeHtml(formatCount(clusterTotal))} voters in clusters</span>
     </div>
     ${
-      categories.length
-        ? `<div class="shared-campaign-quest-category-strip">
-            ${categories
-              .map(
-                ([key, count]) => `<span>
-                  <strong>${escapeHtml(formatCount(count))}</strong>
-                  ${escapeHtml(humanizeLabel(key))}
-                </span>`,
-              )
-              .join("")}
-          </div>`
-        : ""
-    }
-    ${
       targets.length
-        ? `<div class="shared-campaign-quest-target-list">
+        ? `<div class="shared-campaign-quest-queue">
             ${targets
               .slice(0, 20)
               .map((target) =>
-                renderCampaignQuestTargetRow(target, config, resource.actionPendingKey),
+                renderCampaignQuestTargetQueueItem(
+                  target,
+                  selectedTarget?.recordId === target.recordId,
+                ),
               )
               .join("")}
           </div>`
@@ -50823,7 +57070,7 @@ function renderCampaignQuestConfigForm(config, resource, canManage) {
     <form data-route-form="candidate-quest-config" class="shared-campaign-quest-config-form">
       <div class="shared-campaign-quest-config-group">
         <strong>Availability</strong>
-        <p>Control when field teams can use CampaignQuest actions.</p>
+        <p>Control when field teams can use Campaign Quest actions.</p>
       </div>
       <label class="shared-campaign-quest-toggle">
         <input type="checkbox" name="enabled"${checkedAttr(config.enabled)}${disabledAttr(saving)} />
@@ -50918,10 +57165,11 @@ function renderCandidateDashboardCampaignQuest(detail, access) {
           </div>`
         : ""
     }
+    ${renderCampaignQuestFieldBoard(resource, progress, config)}
     <div class="shared-campaign-quest-grid">
       <div class="shared-campaign-quest-main">
         ${renderCampaignQuestProgress(progress)}
-        ${renderCampaignQuestTargets(resource, config)}
+        ${renderCampaignQuestTargets(resource)}
       </div>
       <div class="shared-campaign-quest-side">
         ${renderCampaignQuestQuests(progress)}
@@ -51030,16 +57278,9 @@ function renderCandidateVoterMapMenuCard(section, candidateId) {
   </button>`;
 }
 
-function renderCandidateVoterMapSettingsPanel(voterMap) {
+function renderCandidateVoterMapSettingsForm(voterMap) {
   const pinCap = Number(voterMap.pinCap) || 1250;
-  return `<article class="shared-campaign-panel shared-candidate-voter-map-settings">
-    <div class="shared-campaign-panel__header">
-      <div>
-        <h2>Map settings</h2>
-        <p>Tune browser map data usage and offline-pack behavior for this workstation.</p>
-      </div>
-    </div>
-    <form data-route-form="candidate-voter-map-settings" class="shared-candidate-voter-map-settings-form">
+  return `<form data-route-form="candidate-voter-map-settings" class="shared-candidate-voter-map-settings-form">
       <label>
         <span>Preloaded pin cap</span>
         <input name="pinCap" type="range" min="250" max="5000" step="250" value="${escapeHtml(String(pinCap))}" />
@@ -51052,7 +57293,18 @@ function renderCandidateVoterMapSettingsPanel(voterMap) {
       <div class="shared-card__actions">
         <button class="shared-feed-chip shared-feed-chip--primary" type="submit">Save map settings</button>
       </div>
-    </form>
+    </form>`;
+}
+
+function renderCandidateVoterMapSettingsPanel(voterMap) {
+  return `<article class="shared-campaign-panel shared-candidate-voter-map-settings">
+    <div class="shared-campaign-panel__header">
+      <div>
+        <h2>Map settings</h2>
+        <p>Tune browser map data usage and offline-pack behavior for this workstation.</p>
+      </div>
+    </div>
+    ${renderCandidateVoterMapSettingsForm(voterMap)}
   </article>`;
 }
 
@@ -51094,6 +57346,323 @@ function renderCandidateVoterMapMenu(detail, candidateId, access) {
   </div>`;
 }
 
+function candidateVoterMapPointLabel(point = {}) {
+  if (point.kind === "target") {
+    return (
+      normalizeString(point.target?.displayName) ||
+      normalizeString(point.target?.privacyLabel) ||
+      "Quest target"
+    );
+  }
+  return normalizeString(point.voter?.displayName) || "Connected voter";
+}
+
+function candidateVoterMapContactSummary(voter = {}) {
+  const prefs = voter.contactPreferences || {};
+  const wanted = CANDIDATE_CONTACT_TYPE_CONFIG.filter(
+    (type) => prefs[type.key] === "yes",
+  ).map((type) => type.label);
+  if (wanted.length) {
+    return wanted.slice(0, 3).join(", ");
+  }
+  const available = [
+    voter.phone ? "Phone" : "",
+    voter.email ? "Email" : "",
+    candidateVoterAddress(voter) ? "Address" : "",
+  ].filter(Boolean);
+  return available.length ? available.join(", ") : "No contact preference";
+}
+
+function candidateVoterMapPoints(detail = {}) {
+  const quest = detail.campaignQuest || createCandidateDashboardCampaignQuestState();
+  const registry = detail.voterRegistry || createCandidateDashboardVoterRegistryState();
+  const voters = registry.items || [];
+  const voterById = new Map(voters.map((voter) => [voter.recordId, voter]));
+  const targetIds = new Set();
+  const targetPoints = (quest.targets || []).map((target) => {
+    targetIds.add(target.recordId);
+    return {
+      kind: "target",
+      recordId: target.recordId,
+      lat: target.lat,
+      lng: target.lng,
+      target,
+      voter: voterById.get(target.recordId) || null,
+    };
+  });
+  const voterPoints = voters
+    .filter(
+      (voter) =>
+        !targetIds.has(voter.recordId) &&
+        Number.isFinite(voter.lat) &&
+        Number.isFinite(voter.lng),
+    )
+    .map((voter) => ({
+      kind: "voter",
+      recordId: voter.recordId,
+      lat: voter.lat,
+      lng: voter.lng,
+      target: null,
+      voter,
+    }));
+  return [...targetPoints, ...voterPoints];
+}
+
+function candidateVoterMapRecordsWithoutCoordinates(detail = {}) {
+  const registry = detail.voterRegistry || createCandidateDashboardVoterRegistryState();
+  return (registry.items || []).filter(
+    (voter) => !Number.isFinite(voter.lat) || !Number.isFinite(voter.lng),
+  );
+}
+
+function candidateVoterMapSelectedVoter(detail = {}, selectedTarget = null) {
+  const registry = detail.voterRegistry || createCandidateDashboardVoterRegistryState();
+  if (selectedTarget?.recordId) {
+    const match = registry.items.find(
+      (voter) => voter.recordId === selectedTarget.recordId,
+    );
+    if (match) return match;
+  }
+  return registry.items[0] || null;
+}
+
+function renderCandidateVoterMapPoint(point, index, total, bounds, candidateId, selectedId) {
+  const position = campaignQuestMapPosition(point, index, total, bounds);
+  const label = candidateVoterMapPointLabel(point);
+  const selected = point.kind === "target" && point.recordId === selectedId;
+  if (point.kind === "target") {
+    return `<button class="shared-candidate-voter-map-pin is-target is-${escapeHtml(point.target.targetCategory)}${selected ? " is-selected" : ""}" type="button" data-action="candidate-quest-target-select" data-record-id="${escapeHtml(point.recordId)}" style="--x:${escapeHtml(position.x.toFixed(2))}%; --y:${escapeHtml(position.y.toFixed(2))}%;" aria-label="${escapeHtml(`Select ${label}`)}">
+      <span>${renderIcon(candidateVoterMapTargetIcon(point.target))}</span>
+    </button>`;
+  }
+  const notesRoute = candidateVoterMapNotesPath(candidateId, point.voter || {});
+  return `<button class="shared-candidate-voter-map-pin is-voter" type="button" data-action="navigate" data-route="${escapeHtml(notesRoute)}" style="--x:${escapeHtml(position.x.toFixed(2))}%; --y:${escapeHtml(position.y.toFixed(2))}%;" aria-label="${escapeHtml(`Open notes for ${label}`)}">
+    <span>${escapeHtml(label.slice(0, 1).toUpperCase() || "V")}</span>
+  </button>`;
+}
+
+function renderCandidateVoterMapBrowserCanvas(detail, candidateId) {
+  const quest = detail.campaignQuest || createCandidateDashboardCampaignQuestState();
+  const points = candidateVoterMapPoints(detail);
+  const bounds = campaignQuestCoordinateBounds(points);
+  const selectedTarget = campaignQuestSelectedTarget(quest);
+  const selectedId = normalizeString(selectedTarget?.recordId);
+  const clusters = quest.clusters || [];
+  return `<article class="shared-candidate-voter-map-live">
+    <div class="shared-candidate-voter-map-live__map" aria-label="Campaign voter map preview">
+      <div class="shared-candidate-voter-map-live__grid" aria-hidden="true"></div>
+      <div class="shared-candidate-voter-map-live__scope" aria-hidden="true"></div>
+      ${clusters
+        .slice(0, 8)
+        .map((cluster, index) => {
+          const position = campaignQuestMapPosition(
+            cluster,
+            index,
+            Math.max(1, clusters.length),
+            bounds,
+          );
+          return `<span class="shared-candidate-voter-map-cluster" style="--x:${escapeHtml(position.x.toFixed(2))}%; --y:${escapeHtml(position.y.toFixed(2))}%;">${escapeHtml(formatCount(cluster.count))}</span>`;
+        })
+        .join("")}
+      ${points
+        .slice(0, 80)
+        .map((point, index) =>
+          renderCandidateVoterMapPoint(point, index, points.length, bounds, candidateId, selectedId),
+        )
+        .join("")}
+      ${
+        points.length
+          ? ""
+          : `<div class="shared-candidate-voter-map-live__empty">
+              <strong>No mapped voters loaded</strong>
+              <span>Load voter records with coordinates or import a CSV with lat/lng to populate the browser map.</span>
+            </div>`
+      }
+      <div class="shared-candidate-voter-map-live__legend">
+        <span><i class="is-target"></i>Quest target</span>
+        <span><i class="is-voter"></i>Connected voter</span>
+        <span><i class="is-cluster"></i>Cluster</span>
+      </div>
+    </div>
+  </article>`;
+}
+
+function renderCandidateVoterMapRecordFocus(voter, selectedTarget, candidateId) {
+  if (!voter && !selectedTarget) {
+    return `<article class="shared-candidate-voter-map-focus">
+      <div class="shared-candidate-voter-map-focus__empty">
+        <span>${renderIcon("registry")}</span>
+        <strong>Select a voter or target</strong>
+        <p>Choose a pin, target queue item, or connected voter to open notes and outreach context.</p>
+      </div>
+    </article>`;
+  }
+  const source = voter || selectedTarget || {};
+  const recordId = normalizeString(source.recordId);
+  const displayName =
+    normalizeString(source.displayName) ||
+    normalizeString(selectedTarget?.privacyLabel) ||
+    "Voter target";
+  const address =
+    voter ? candidateVoterAddress(voter) : [source.addressLine1, source.city, source.state, source.postalCode].map(normalizeString).filter(Boolean).join(", ");
+  const notesRoute = voter
+    ? candidateVoterMapNotesPath(candidateId, voter)
+    : buildRouteWithQuery(candidateVoterMapPath("notes", candidateId), {
+        recordId,
+        voterName: displayName,
+      });
+  return `<article class="shared-candidate-voter-map-focus">
+    <div class="shared-candidate-voter-map-focus__header">
+      <span>${escapeHtml(displayName.slice(0, 1).toUpperCase() || "V")}</span>
+      <div>
+        <small>${escapeHtml(recordId || "record pending")}</small>
+        <h3>${escapeHtml(displayName)}</h3>
+        <p>${escapeHtml(address || "Address hidden until voter context is loaded.")}</p>
+      </div>
+    </div>
+    <div class="shared-candidate-voter-map-focus__meta">
+      <span><strong>${escapeHtml(voter ? candidateVoterSourceLabel(voter) : humanizeLabel(selectedTarget?.targetCategory || "target"))}</strong><small>Source</small></span>
+      <span><strong>${escapeHtml(voter ? candidateVoterMapContactSummary(voter) : normalizeString(selectedTarget?.privacyLabel) || "Target")}</strong><small>Contact</small></span>
+    </div>
+    <div class="shared-candidate-voter-map-focus__actions">
+      <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="${escapeHtml(notesRoute)}">${renderIcon("comment")} <span>Notes</span></button>
+      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(candidateVoterMapPath("connected", candidateId))}">${renderIcon("registry")} <span>Voter record</span></button>
+    </div>
+  </article>`;
+}
+
+function renderCandidateVoterMapTargetQueue(detail, candidateId) {
+  const quest = detail.campaignQuest || createCandidateDashboardCampaignQuestState();
+  const registry = detail.voterRegistry || createCandidateDashboardVoterRegistryState();
+  const filteredTargets = campaignQuestFilteredTargets(quest);
+  const selectedTarget = campaignQuestSelectedTarget(quest, filteredTargets);
+  const missingCoordinates = candidateVoterMapRecordsWithoutCoordinates(detail);
+  return `<article class="shared-candidate-voter-map-queue">
+    <div class="shared-campaign-panel__header">
+      <div>
+        <h2>Field queue</h2>
+        <p>Prioritized map targets and connected voter records for this campaign scope.</p>
+      </div>
+      <button class="shared-feed-chip" type="button" data-action="candidate-quest-refresh"${disabledAttr(quest.loading)}>Refresh targets</button>
+    </div>
+    ${renderCampaignQuestCategoryFilter(quest)}
+    <div class="shared-candidate-voter-map-queue__list">
+      ${
+        filteredTargets.length
+          ? filteredTargets
+              .slice(0, 8)
+              .map((target) =>
+                renderCampaignQuestTargetQueueItem(
+                  target,
+                  selectedTarget?.recordId === target.recordId,
+                ),
+              )
+              .join("")
+          : `<div class="shared-page__empty">No quest targets loaded for the current browser map window.</div>`
+      }
+    </div>
+    <div class="shared-candidate-voter-map-record-strip">
+      <div>
+        <strong>${escapeHtml(formatCount(registry.items.length))} connected voters</strong>
+        <span>${escapeHtml(missingCoordinates.length ? `${formatCount(missingCoordinates.length)} need coordinates` : "All loaded records are map-ready")}</span>
+      </div>
+      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(candidateVoterMapPath("connected", candidateId))}">Open records</button>
+    </div>
+  </article>`;
+}
+
+function renderCandidateVoterMapScopePanel(detail, candidateId, dashboardAccess) {
+  const voterMap = detail.voterMap || createCandidateDashboardVoterMapState();
+  const access = voterMap.access || normalizeCandidateVoterMapAccess({});
+  const territories = access.territories || [];
+  const canManage =
+    access.canManageTerritories ||
+    dashboardAccess?.isOwner ||
+    candidateDashboardPermissionSet(dashboardAccess).has("voter_map_manager");
+  return `<article class="shared-candidate-voter-map-scope">
+    <div class="shared-campaign-panel__header">
+      <div>
+        <h2>Scope and offline readiness</h2>
+        <p>Use the same access token, territory scope, and map settings that the native field map depends on.</p>
+      </div>
+    </div>
+    <div class="shared-candidate-voter-map-scope__stats">
+      <span><strong>${escapeHtml(humanizeLabel(access.scope || "campaign"))}</strong><small>Scope</small></span>
+      <span><strong>${escapeHtml(formatCount(territories.length))}</strong><small>Territories</small></span>
+      <span><strong>${escapeHtml(formatCount(access.assignmentTokenVersion || 0))}</strong><small>Access token</small></span>
+      <span><strong>${escapeHtml(canManage ? "Manager" : "Field")}</strong><small>Controls</small></span>
+    </div>
+    ${
+      territories.length
+        ? `<div class="shared-candidate-voter-map-scope__territories">
+            ${territories
+              .slice(0, 4)
+              .map(
+                (territory) => `<span>
+                  <strong>${escapeHtml(territory.name || territory.territoryId)}</strong>
+                  <small>${escapeHtml(formatCount(territory.recordCount))} voters${territory.version ? ` - v${escapeHtml(String(territory.version))}` : ""}</small>
+                </span>`,
+              )
+              .join("")}
+          </div>`
+        : `<div class="shared-page__empty">No territory scope is attached to this campaign access yet.</div>`
+    }
+    ${renderCandidateVoterMapSettingsForm(voterMap)}
+    <div class="shared-candidate-voter-map-scope__actions">
+      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(candidateVoterMapPath("territories/admin", candidateId))}">Territories</button>
+      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(candidateVoterMapPath("add", candidateId))}">Add voters</button>
+    </div>
+  </article>`;
+}
+
+function renderCandidateVoterMapBrowserMap(detail, candidateId, dashboardAccess) {
+  const quest = detail.campaignQuest || createCandidateDashboardCampaignQuestState();
+  const registry = detail.voterRegistry || createCandidateDashboardVoterRegistryState();
+  const voterMap = detail.voterMap || createCandidateDashboardVoterMapState();
+  const access = voterMap.access || normalizeCandidateVoterMapAccess({});
+  const points = candidateVoterMapPoints(detail);
+  const selectedTarget = campaignQuestSelectedTarget(quest);
+  const selectedVoter = candidateVoterMapSelectedVoter(detail, selectedTarget);
+  const territories = access.territories || [];
+  const activeQuests = (quest.progress?.quests || []).filter(
+    (questItem) => questItem.completed !== true,
+  );
+  return `<div class="shared-campaign-section shared-candidate-voter-map-browser">
+    ${(quest.loading && !quest.loaded) || (registry.loading && !registry.loaded) || (voterMap.loading && !voterMap.loaded) ? `<div class="shared-page__loading">Loading campaign map...</div>` : ""}
+    ${quest.error ? `<div class="shared-page__error">${escapeHtml(quest.error)}</div>` : ""}
+    ${registry.error ? `<div class="shared-page__error">${escapeHtml(registry.error)}</div>` : ""}
+    ${voterMap.error ? `<div class="shared-page__error">${escapeHtml(voterMap.error)}</div>` : ""}
+    <div class="shared-campaign-metrics">
+      ${renderCandidateDashboardMetric("Mapped pins", formatCount(points.length), "cyan")}
+      ${renderCandidateDashboardMetric("Quest targets", formatCount(quest.targets.length))}
+      ${renderCandidateDashboardMetric("Connected voters", formatCount(registry.items.length))}
+      ${renderCandidateDashboardMetric("Territories", formatCount(territories.length))}
+    </div>
+    <article class="shared-candidate-voter-map-hero">
+      <div>
+        <span class="shared-card__meta"><span>${escapeHtml(candidateVoterMapAccessLabel(access, dashboardAccess))}</span><span>${escapeHtml(activeQuests.length ? `${formatCount(activeQuests.length)} active quests` : "No active quests")}</span></span>
+        <h2>Live voter map</h2>
+        <p>Review field pins, select the next voter, open notes, and move between connected records without leaving the browser workspace.</p>
+      </div>
+      <div class="shared-candidate-voter-map-hero__actions">
+        <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="candidate-quest-refresh"${disabledAttr(quest.loading)}>Refresh map</button>
+        <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(candidateVoterMapPath("connected", candidateId))}">Connected voters</button>
+      </div>
+    </article>
+    <div class="shared-candidate-voter-map-browser__grid">
+      <div class="shared-candidate-voter-map-browser__main">
+        ${renderCandidateVoterMapBrowserCanvas(detail, candidateId)}
+        ${renderCandidateVoterMapTargetQueue(detail, candidateId)}
+      </div>
+      <aside class="shared-candidate-voter-map-browser__side">
+        ${renderCandidateVoterMapRecordFocus(selectedVoter, selectedTarget, candidateId)}
+        ${renderCampaignQuestSelectedTargetPanel(selectedTarget, quest.config, quest)}
+        ${renderCandidateVoterMapScopePanel(detail, candidateId, dashboardAccess)}
+      </aside>
+    </div>
+  </div>`;
+}
+
 function renderCandidateVoterMapAddVoters(detail) {
   const resource = detail.voterRegistry;
   return `<div class="shared-campaign-section shared-candidate-voter-map-add">
@@ -51119,9 +57688,27 @@ function renderCandidateVoterMapAddVoters(detail) {
   </div>`;
 }
 
+function renderCandidateVoterMapTerritoryCoverage(voterMap, access) {
+  return `<article class="shared-coalition-panel">
+    <div class="shared-coalition-panel__header">
+      <div>
+        <h2>Territory coverage</h2>
+        <p>Review campaign territory scope, record counts, and assignment coverage returned by candidate voter-map access.</p>
+      </div>
+    </div>
+    ${voterMap.loading && !voterMap.loaded ? `<div class="shared-page__loading">Loading territory access...</div>` : renderCoalitionVoterMapTerritories(access, "candidate")}
+  </article>`;
+}
+
 function renderCandidateVoterMapTerritoryAdmin(detail, access, candidateId) {
-  const voterMap = detail.voterMap;
-  const voterMapAccess = voterMap.access || normalizeCandidateVoterMapAccess({});
+  const voterMap = detail.voterMap || createCandidateDashboardVoterMapState();
+  const voterMapAccess =
+    voterMap.access || normalizeCandidateVoterMapAccess({});
+  const assignments =
+    voterMap.assignments || createCoalitionTerritoryAssignmentsState();
+  const admin =
+    voterMap.territoryAdmin || createCoalitionTerritoryAdminState();
+  const activeTab = normalizeString(admin.activeTab) || "wizard";
   const territories = voterMapAccess.territories || [];
   const voterCount = territories.reduce(
     (total, territory) => total + (Number(territory.recordCount) || 0),
@@ -51139,108 +57726,56 @@ function renderCandidateVoterMapTerritoryAdmin(detail, access, candidateId) {
     ? "Manager access"
     : territories.length
       ? "Territory access"
-      : "Access pending";
-  const commandCopy = canManage
-    ? "Route field targets, audit voter records, and move staff to the right territory workflow from one browser workspace."
-    : territories.length
-      ? "Use your assigned territory set for map targets and voter records. Campaign managers can update staff access from the staff screen."
-      : "No campaign territory scope was returned yet. Check voter records or staff access to confirm the campaign setup.";
-  const operationSteps = [
-    {
-      icon: "map",
-      label: "Map targets",
-      value: territories.length
-        ? `${formatCount(territories.length)} active territory${territories.length === 1 ? "" : "ies"}`
-        : "Scope pending",
-      route: candidateVoterMapPath("map", candidateId),
-      primary: true,
-    },
-    {
-      icon: "registry",
-      label: "Voter records",
-      value: `${formatCount(voterCount)} record${voterCount === 1 ? "" : "s"} in scope`,
-      route: candidateVoterMapPath("connected", candidateId),
-    },
-    {
-      icon: "team",
-      label: canManage ? "Assign staff" : "Staff access",
-      value: canManage
-        ? `${formatCount(assignmentCount)} assignment${assignmentCount === 1 ? "" : "s"} tracked`
-        : "Manager required",
-      route: candidateDashboardSectionPath(candidateId, "staff"),
-    },
-    {
-      icon: "candidate",
-      label: "Add or import",
-      value: "Manual entry and CSV preview",
-      route: candidateVoterMapPath("add", candidateId),
-    },
-  ];
+      : "Setup pending";
+  let activeBody = "";
+  if (activeTab === "editor") {
+    activeBody = renderCoalitionTerritoryEditor(
+      voterMapAccess,
+      admin,
+      "candidate",
+    );
+  } else if (activeTab === "assignments") {
+    activeBody = renderCoalitionTerritoryAssignmentAdmin(
+      voterMapAccess,
+      assignments,
+      "candidate",
+    );
+  } else {
+    activeBody = renderCoalitionTerritoryWizard(admin, "candidate");
+  }
   return `<div class="shared-campaign-section shared-candidate-voter-map-territories">
-    ${voterMap.loading && !voterMap.loaded ? `<div class="shared-page__loading">Loading territory access...</div>` : ""}
     ${voterMap.error ? `<div class="shared-page__error">${escapeHtml(voterMap.error)}</div>` : ""}
-    <div class="shared-campaign-metrics">
-      ${renderCandidateDashboardMetric("Scope", humanizeLabel(voterMapAccess.scope || "campaign"), "cyan")}
-      ${renderCandidateDashboardMetric("Territories", formatCount(territories.length))}
-      ${renderCandidateDashboardMetric("Voters", formatCount(voterCount))}
-      ${renderCandidateDashboardMetric("Assignments", formatCount(assignmentCount))}
-    </div>
-    <div class="shared-candidate-voter-map-territory-grid">
-      <article class="shared-campaign-panel">
-        <div class="shared-campaign-panel__header">
+    <div class="shared-coalition-territory-admin-page shared-candidate-territory-admin-page">
+      <article class="shared-coalition-panel shared-coalition-territory-admin-hero">
+        <div class="shared-coalition-panel__header">
           <div>
-            <h2>Territory coverage</h2>
-            <p>Review the territory scope returned by candidate voter-map access.</p>
+            <span class="shared-card__meta"><span>Campaign voter map</span><span>${escapeHtml(accessLabel)}</span></span>
+            <h2>Territory Admin</h2>
+            <p>Generate campaign territory plans, edit unit membership, publish versions, and manage staff access from the browser.</p>
+          </div>
+          <div class="shared-card__actions">
+            <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="${escapeHtml(candidateVoterMapPath("map", candidateId))}">Open map</button>
+            <button class="shared-feed-chip" type="button" data-action="candidate-voter-map-refresh"${disabledAttr(voterMap.loading)}>${voterMap.loading ? "Refreshing..." : "Refresh access"}</button>
           </div>
         </div>
-        ${
-          territories.length
-            ? `<div class="shared-coalition-voter-map-territories">${territories
-                .map(
-                  (territory) => `<article class="shared-coalition-voter-map-territory">
-                    <div>
-                      <strong>${escapeHtml(territory.name)}</strong>
-                      <span>${escapeHtml(territory.territoryId)}${territory.version ? ` - version ${escapeHtml(String(territory.version))}` : ""}</span>
-                    </div>
-                    <div class="shared-coalition-voter-map-territory__stats">
-                      <span>${escapeHtml(formatCount(territory.recordCount))} voters</span>
-                      <span>${escapeHtml(formatCount(territory.assignmentCount))} assignments</span>
-                    </div>
-                  </article>`,
-                )
-                .join("")}</div>`
-            : `<div class="shared-page__empty">No territory assignments were returned for this campaign access.</div>`
-        }
-      </article>
-      <article class="shared-candidate-territory-command">
-        <div class="shared-candidate-territory-command__header">
-          <span class="shared-candidate-territory-command__icon">${renderIcon("team")}</span>
-          <div>
-            <small>${escapeHtml(accessLabel)}</small>
-            <h2>Territory command center</h2>
-            <p>${escapeHtml(commandCopy)}</p>
-          </div>
-        </div>
-        <div class="shared-candidate-territory-command__stats">
-          <span><strong>${escapeHtml(formatCount(voterMapAccess.assignmentTokenVersion || 0))}</strong><small>Access token</small></span>
-          <span><strong>${escapeHtml(canManage ? "Ready" : "Limited")}</strong><small>Staff controls</small></span>
-        </div>
-        <div class="shared-candidate-territory-command__steps">
-          ${operationSteps
-            .map(
-              (step) => `<button class="shared-candidate-territory-command__step${step.primary ? " is-primary" : ""}" type="button" data-action="navigate" data-route="${escapeHtml(step.route)}">
-                <span>${renderIcon(step.icon)}</span>
-                <strong>${escapeHtml(step.label)}</strong>
-                <em>${escapeHtml(step.value)}</em>
-              </button>`,
-            )
-            .join("")}
-        </div>
-        <div class="shared-candidate-territory-command__actions">
-          <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="${escapeHtml(candidateVoterMapPath("map", candidateId))}">Open map targets</button>
-          <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(candidateDashboardSectionPath(candidateId, "staff"))}">${escapeHtml(canManage ? "Manage staff" : "View staff")}</button>
+        <div class="shared-coalition-territory-admin-metrics">
+          ${renderCoalitionMetric("Territories", formatCount(territories.length), "cyan")}
+          ${renderCoalitionMetric("Voters", formatCount(voterCount))}
+          ${renderCoalitionMetric("Assignments", formatCount(assignmentCount))}
+          ${renderCoalitionMetric("Access token", formatCount(voterMapAccess.assignmentTokenVersion || 0))}
+          ${renderCoalitionMetric("Scope", humanizeLabel(voterMapAccess.scope || "campaign"))}
         </div>
       </article>
+      ${
+        !canManage
+          ? `<article class="shared-coalition-panel">
+              <div class="shared-page__empty">This campaign role can review territory coverage but cannot manage territory generation, editing, or assignments.</div>
+            </article>`
+          : `${renderCoalitionTerritoryAdminTabs(activeTab, "candidate")}
+            ${renderCoalitionTerritoryAdminStatus(admin)}
+            ${activeBody}`
+      }
+      ${renderCandidateVoterMapTerritoryCoverage(voterMap, voterMapAccess)}
     </div>
   </div>`;
 }
@@ -51511,7 +58046,7 @@ function renderCandidateVoterMapNotes(detail, candidateId) {
 
 function renderCandidateVoterMapBody(activeSection, detail, candidateId, access) {
   if (activeSection === "map") {
-    return renderCandidateDashboardCampaignQuest(detail, access);
+    return renderCandidateVoterMapBrowserMap(detail, candidateId, access);
   }
   if (activeSection === "connected") {
     return renderCandidateDashboardVoterRegistry(detail, candidateId);
@@ -51826,6 +58361,79 @@ function renderCandidateDonationRepresentativeForm(status, resource) {
   </article>`;
 }
 
+function renderCandidateDonationPayoutSession(status, resource) {
+  const session = resource.pendingPayoutSession;
+  if (!session) {
+    return "";
+  }
+  const pendingKey = normalizeString(resource.actionPendingKey);
+  const sessionId = normalizeString(session.sessionId);
+  const clientSecret = normalizeString(session.clientSecret);
+  const hostedUrl = normalizeString(session.url);
+  const stripeBrowserConfigured = hasStripeBrowserConfig();
+  const deliveryMode = hostedUrl
+    ? "Hosted Stripe"
+    : clientSecret
+      ? sessionId.startsWith("fcsess_")
+        ? "Financial Connections"
+        : "Secure bank collection"
+      : "Status check";
+  const collectionError = normalizeString(session.clientCollectionError);
+  const setupStatus = normalizeString(
+    session.setupIntentStatus || session.bankLinkStatus,
+  );
+  const canResume = Boolean(clientSecret && stripeBrowserConfigured);
+  const canAttach = Boolean(
+    sessionId && (hostedUrl || setupStatus || (!clientSecret && !hostedUrl)),
+  );
+  const pending = ["payout", "payout-collect", "payout-attach"].includes(
+    pendingKey,
+  );
+  const statusCopy = collectionError
+    ? collectionError
+    : setupStatus
+      ? `Stripe returned ${humanizeLabel(setupStatus)}.`
+      : hostedUrl
+        ? "Finish the hosted Stripe step, then check payout status."
+        : clientSecret && stripeBrowserConfigured
+          ? "Continue the secure bank collection in this browser."
+          : clientSecret
+            ? "This browser needs Stripe publishable-key config before embedded bank collection can open."
+            : "A payout session is waiting for a status check.";
+  return `<div class="shared-campaign-donations-session${collectionError ? " is-warning" : ""}">
+    <div class="shared-campaign-donations-session__header">
+      <div>
+        <span>Active bank-link session</span>
+        <strong>${escapeHtml(deliveryMode)}</strong>
+      </div>
+      ${renderCandidateDonationPill(setupStatus ? humanizeLabel(setupStatus) : hostedUrl ? "Hosted" : clientSecret ? "Browser" : "Open", collectionError ? "bad" : "pending")}
+    </div>
+    <p>${escapeHtml(statusCopy)}</p>
+    <div class="shared-campaign-donations-session__meta">
+      ${sessionId ? `<span>Session ${escapeHtml(sessionId)}</span>` : ""}
+      ${candidateDonationConnectedStripeAccountId(status, session) ? `<span>Stripe account ${escapeHtml(candidateDonationConnectedStripeAccountId(status, session))}</span>` : ""}
+    </div>
+    <div class="shared-card__actions">
+      ${
+        hostedUrl
+          ? `<a class="shared-feed-chip shared-feed-chip--primary" href="${escapeHtml(hostedUrl)}" target="_blank" rel="noopener noreferrer">Continue in Stripe</a>`
+          : ""
+      }
+      ${
+        canResume
+          ? `<button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="candidate-donation-payout-resume"${disabledAttr(pending)}>${pendingKey === "payout-collect" ? "Opening..." : "Open secure link"}</button>`
+          : ""
+      }
+      ${
+        canAttach
+          ? `<button class="shared-feed-chip" type="button" data-action="candidate-donation-payout-attach"${disabledAttr(pending)}>${pendingKey === "payout-attach" ? "Checking..." : "Check status"}</button>`
+          : ""
+      }
+      <button class="shared-feed-chip" type="button" data-action="candidate-donation-payout-clear"${disabledAttr(pending)}>Clear session</button>
+    </div>
+  </div>`;
+}
+
 function renderCandidateDonationPayoutPanel(status, resource) {
   const payoutBank = candidateDonationPayoutBank(status);
   const linked = candidateDonationHasLinkedPayoutBank(status);
@@ -51839,6 +58447,12 @@ function renderCandidateDonationPayoutPanel(status, resource) {
     candidateFinanceSectionComplete(status, "representative");
   const stripeBrowserConfigured = hasStripeBrowserConfig();
   const pendingSession = resource.pendingPayoutSession;
+  const payoutTone = candidateDonationPayoutStatusTone(status);
+  const payoutLabel = linked
+    ? payoutTone === "good"
+      ? "Linked"
+      : humanizeLabel(normalizeString(payoutBank.status) || "Pending")
+    : "Required";
   const primaryLabel =
     pendingKey === "payout"
       ? "Starting..."
@@ -51847,40 +58461,33 @@ function renderCandidateDonationPayoutPanel(status, resource) {
         : linked
           ? "Link different bank"
           : "Link bank account";
-  const sessionNote = pendingSession?.deliveryMode
-    ? `<p class="shared-campaign-donations-note">Current session: ${escapeHtml(humanizeLabel(pendingSession.deliveryMode))}${
-        pendingSession.clientSecret && stripeBrowserConfigured
-          ? ". Complete the secure Stripe modal in this browser."
-          : pendingSession.url
-            ? ". Finish the hosted Stripe window, then refresh status."
-            : ". Browser bank linking needs Stripe.js configuration, so use the Polis app if no Stripe modal opened."
-      }</p>`
-    : "";
   return `<article class="shared-campaign-panel shared-campaign-donations-payout">
     <div class="shared-campaign-panel__header">
       <div>
         <h2>Payout account</h2>
         <p>Bank status for campaign disbursements. Bank credentials stay inside Stripe.</p>
       </div>
-      ${renderCandidateDonationPill(linked ? "Linked" : "Required", linked ? "good" : "pending")}
+      ${renderCandidateDonationPill(payoutLabel, payoutTone)}
     </div>
-    <div class="shared-campaign-donations-bank">
-      <strong>${escapeHtml(linked ? `${normalizeString(payoutBank.bankName) || "Linked bank"} .... ${normalizeString(payoutBank.last4) || "----"}` : "No payout bank linked")}</strong>
-      <span>${escapeHtml(normalizeString(payoutBank.status) || (linked ? "linked" : "missing"))}</span>
+    <div class="shared-campaign-donations-bank is-${escapeHtml(payoutTone)}">
+      <div>
+        <span>Payout destination</span>
+        <strong>${escapeHtml(linked ? `${normalizeString(payoutBank.bankName) || "Linked bank"} .... ${normalizeString(payoutBank.last4) || "----"}` : "No payout bank linked")}</strong>
+      </div>
+      <div>
+        <span>Status</span>
+        <strong>${escapeHtml(humanizeLabel(normalizeString(payoutBank.status) || (linked ? "linked" : "missing")))}</strong>
+      </div>
+      <p>${escapeHtml(candidateDonationPayoutStatusCopy(status))}</p>
     </div>
     <div class="shared-card__actions">
-      <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="candidate-donation-payout-start"${disabledAttr(pending || !canStart || !stripeBrowserConfigured)}>${escapeHtml(primaryLabel)}</button>
+      <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="candidate-donation-payout-start"${disabledAttr(pending || !canStart)}>${escapeHtml(primaryLabel)}</button>
       <button class="shared-feed-chip" type="button" data-action="candidate-donations-refresh"${disabledAttr(resource.loading)}>Refresh status</button>
       <button class="shared-feed-chip" type="button" data-action="open-app-shell">Use app instead</button>
-      ${
-        pendingSession?.sessionId
-          ? `<button class="shared-feed-chip" type="button" data-action="candidate-donation-payout-attach"${disabledAttr(pending)}>${resource.actionPendingKey === "payout-attach" ? "Checking..." : "I completed bank link"}</button>`
-          : ""
-      }
     </div>
     ${!canStart ? `<p class="shared-campaign-donations-note">Save committee and representative details before payout linking.</p>` : ""}
-    ${canStart && !stripeBrowserConfigured ? `<p class="shared-campaign-donations-note shared-campaign-donations-note--warning">Browser bank linking needs STRIPE_PUBLISHABLE_KEY in the website runtime config.</p>` : ""}
-    ${sessionNote}
+    ${canStart && !stripeBrowserConfigured ? `<p class="shared-campaign-donations-note shared-campaign-donations-note--warning">Hosted Stripe links can still open. Embedded bank collection needs the website publishable key.</p>` : ""}
+    ${pendingSession ? renderCandidateDonationPayoutSession(status, resource) : ""}
   </article>`;
 }
 
@@ -52248,12 +58855,12 @@ function renderCandidateDashboardBuildoutPanel(section, candidateId) {
     <article class="shared-campaign-panel shared-campaign-panel--accent">
       <div class="shared-campaign-panel__header">
         <h2>${escapeHtml(section.label)}</h2>
-        <button class="shared-feed-chip" data-action="open-app-shell">Open app</button>
-      </div>
-      <p>${escapeHtml(actionBySection[section.key] || section.label)} is available from the Polis app while this browser workspace is being enabled for your campaign.</p>
-      <div class="shared-card__actions">
         <button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(candidateDashboardSectionPath(candidateId))}">Dashboard overview</button>
-        <button class="shared-feed-chip shared-feed-chip--primary" data-action="open-app-shell">Continue in app</button>
+      </div>
+      <p>${escapeHtml(actionBySection[section.key] || section.label)} is not mapped as a standalone browser section. Use the campaign overview to reach the dashboard tools that are available for this access level.</p>
+      <div class="shared-card__actions">
+        <button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="${escapeHtml(candidateDashboardSectionPath(candidateId))}">Back to overview</button>
+        <button class="shared-feed-chip" data-action="navigate" data-route="/messages">Messages</button>
       </div>
     </article>
   </div>`;
@@ -52333,7 +58940,7 @@ function renderCandidateDashboardPage() {
         <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/candidate-dashboard">All campaigns</button>
       </div>
       ${renderCandidateDashboardHero(candidate, access)}
-      ${renderCandidateDashboardCommandStrip(candidateId, access)}
+      ${renderCandidateDashboardCommandStrip(candidateId, access, candidate)}
       ${detail.error ? `<div class="shared-page__error">${escapeHtml(detail.error)}</div>` : ""}
       ${renderCandidateDashboardTabs(candidateId, activeSection, access)}
       ${renderCandidateDashboardSection(detail, candidateId, access, activeSection)}
@@ -52342,26 +58949,36 @@ function renderCandidateDashboardPage() {
 }
 
 function renderCoalitionsAuthGate() {
+  const featureSections = coalitionFeatureSections();
+  const features = featureSections
+    .map((section) => {
+      const copy = coalitionFeatureCopy(section);
+      return `<article class="shared-coalition-auth__tile shared-coalition-auth__tile--feature" role="listitem">
+        <span class="shared-coalition-auth__tile-icon" aria-hidden="true">${renderIcon(section.icon)}</span>
+        <span class="shared-coalition-auth__tile-copy">
+          <span class="shared-card__meta"><span>${escapeHtml(copy.eyebrow)}</span></span>
+          <strong>${escapeHtml(section.label)}</strong>
+          <small>${escapeHtml(copy.description)}</small>
+        </span>
+      </article>`;
+    })
+    .join("");
   return `<section class="shared-page shared-coalition-workspace">
     ${renderTopChrome()}
     <div class="shared-page__content">
-      <section class="shared-coalition-auth">
-        <div>
-          <h1>Coalition Workspace</h1>
-          <p>Open coalition rooms, member access, missions, voter map tools, governance, calendar, and amplify requests from the browser.</p>
+      <section class="shared-coalition-auth shared-coalition-auth--workspace">
+        <div class="shared-coalition-auth__copy">
+          <span class="shared-card__meta"><span>Coalition workspace</span><span>${escapeHtml(formatCount(featureSections.length))} feature areas</span></span>
+          <h1>Coordinate coalition work from the web.</h1>
+          <p>Sign in to open the same coalition surfaces used in the Polis app: members, rooms, missions, voter map tools, calendar, governance, and amplify requests.</p>
           <div class="shared-card__actions">
             <button class="shared-feed-chip shared-feed-chip--primary" data-action="auth-login-inline">Sign in</button>
             <button class="shared-feed-chip" data-action="auth-signup-inline">Create account</button>
             <button class="shared-feed-chip" data-action="open-app-shell">Open app</button>
           </div>
         </div>
-        <div class="shared-coalition-auth__grid" aria-hidden="true">
-          ${["Rooms", "Members", "Missions", "Voter Map", "Governance", "Amplify"]
-            .map(
-              (label) =>
-                `<span class="shared-coalition-auth__tile">${escapeHtml(label)}</span>`,
-            )
-            .join("")}
+        <div class="shared-coalition-auth__grid shared-coalition-auth__grid--workspace" role="list" aria-label="Coalition workspace feature areas">
+          ${features}
         </div>
       </section>
     </div>
@@ -52872,6 +59489,42 @@ function renderCoalitionOnboardingAccessList() {
   </div>`;
 }
 
+function renderCoalitionOnboardingChecklist(mode) {
+  const items =
+    mode === "start"
+      ? [
+          ["Profile", "Image, name, type, and public contact details."],
+          ["Compliance", "PAC decision and FEC number when required."],
+          ["Workspace", "Rooms, members, missions, voter tools, and governance."],
+        ]
+      : [
+          ["Coalition ID", "Request the exact workspace ID from an admin."],
+          ["Approval", "Admins approve requests before tools unlock."],
+          ["Workspace", "Rooms, member access, missions, and coalition tools."],
+        ];
+  return `<section class="shared-coalition-panel shared-coalition-onboarding-checklist">
+    <div class="shared-coalition-panel__header">
+      <div>
+        <h2>${mode === "start" ? "Creation path" : "Access path"}</h2>
+        <p>${mode === "start" ? "Set the public profile first, then open the workspace tools." : "Send the request, then return here after approval."}</p>
+      </div>
+    </div>
+    <ol>
+      ${items
+        .map(
+          ([label, copy], index) => `<li>
+            <span>${escapeHtml(String(index + 1))}</span>
+            <div>
+              <strong>${escapeHtml(label)}</strong>
+              <em>${escapeHtml(copy)}</em>
+            </div>
+          </li>`,
+        )
+        .join("")}
+    </ol>
+  </section>`;
+}
+
 function renderCoalitionOnboardingSide(mode) {
   const onboarding = state.pages.coalitions.onboarding;
   const requestedId = normalizeString(onboarding.requestedCoalitionId);
@@ -52882,6 +59535,7 @@ function renderCoalitionOnboardingSide(mode) {
         ? `<div class="shared-coalition-onboarding-status">
             <strong>Request sent for approval</strong>
             <span>${escapeHtml(requestedId)}</span>
+            <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="/coalitions">Review memberships</button>
           </div>`
         : ""
     }
@@ -52890,9 +59544,11 @@ function renderCoalitionOnboardingSide(mode) {
         ? `<div class="shared-coalition-onboarding-status">
             <strong>Coalition created</strong>
             <span>${escapeHtml(createdId)}</span>
+            <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(createdId))}">Open workspace</button>
           </div>`
         : ""
     }
+    ${renderCoalitionOnboardingChecklist(mode)}
     <section class="shared-coalition-panel">
       <div class="shared-coalition-panel__header">
         <div>
@@ -52929,6 +59585,31 @@ function renderCoalitionTypeChoices(pending) {
       <em>Add constitution setup, proposals, voting, and governance records.</em>
     </label>
   </fieldset>`;
+}
+
+function renderCoalitionPacChoices(pending) {
+  return `<div class="shared-coalition-pac-block is-full">
+    <fieldset class="shared-coalition-choice-grid shared-coalition-pac-choice-grid">
+      <legend>PAC association</legend>
+      <label class="shared-coalition-choice">
+        <input type="radio" name="pacAssociated" value="false" required${disabledAttr(pending)} />
+        <span>${renderIcon("check")}</span>
+        <strong>Not PAC-associated</strong>
+        <em>Use this for community, campaign-support, or issue coalitions without a connected PAC.</em>
+      </label>
+      <label class="shared-coalition-choice">
+        <input type="radio" name="pacAssociated" value="true" required${disabledAttr(pending)} />
+        <span>${renderIcon("election")}</span>
+        <strong>PAC-associated</strong>
+        <em>Add the FEC number so compliance fields move with the coalition profile.</em>
+      </label>
+    </fieldset>
+    <label class="shared-coalition-fec-field">
+      <span>FEC number</span>
+      <input name="fecNumber" autocomplete="off" placeholder="C00..."${disabledAttr(pending)} />
+      <em>Required only when the coalition is PAC-associated.</em>
+    </label>
+  </div>`;
 }
 
 function renderCoalitionSocialFields(pending) {
@@ -52999,14 +59680,7 @@ function renderCoalitionStartPage() {
             <span>Website</span>
             <input name="website" type="url" inputmode="url" placeholder="https://" autocomplete="url"${disabledAttr(pending)} />
           </label>
-          <label class="shared-coalition-profile-form__toggle">
-            <input type="checkbox" name="pacAssociated" value="true"${disabledAttr(pending)} />
-            <span>PAC associated</span>
-          </label>
-          <label>
-            <span>FEC number</span>
-            <input name="fecNumber" autocomplete="off"${disabledAttr(pending)} />
-          </label>
+          ${renderCoalitionPacChoices(pending)}
           ${renderCoalitionSocialFields(pending)}
           <div class="shared-coalition-profile-form__actions">
             <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(pending || imageUploading)}>${pending ? "Creating..." : imageUploading ? "Uploading image..." : "Create coalition"}</button>
@@ -53050,6 +59724,13 @@ function renderCoalitionJoinPage() {
             <span>Coalition ID</span>
             <input name="coalitionId" placeholder="coalition-id" autocomplete="off" required${disabledAttr(pending)} />
           </label>
+          <div class="shared-coalition-join-help">
+            <span>${renderIcon("messages")}</span>
+            <div>
+              <strong>Ask a coalition admin for the ID.</strong>
+              <em>After approval, the web workspace unlocks the same rooms, member access, missions, voter map, calendar, governance, and amplify areas.</em>
+            </div>
+          </div>
           <div class="shared-card__actions">
             <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(pending)}>${pending ? "Sending..." : "Send request"}</button>
           </div>
@@ -53060,29 +59741,332 @@ function renderCoalitionJoinPage() {
   </section>`;
 }
 
-function renderCoalitionsRootSummary(items = []) {
-  const visibleItems = items.filter((item) => !item.hidden);
-  if (!visibleItems.length) {
-    return "";
-  }
+function coalitionSectionByKey(key) {
+  const normalizedKey = normalizeString(key);
+  return (
+    COALITION_SECTION_CONFIG.find((section) => section.key === normalizedKey) ||
+    null
+  );
+}
+
+function coalitionsRootVisibleItems(items = []) {
+  return items.filter((item) => !item.hidden && item.coalition && item.membership);
+}
+
+function coalitionsRootAccessStats(items = []) {
+  const visibleItems = coalitionsRootVisibleItems(items);
   const activeItems = visibleItems.filter((item) => item.membership.isActive);
   const pendingItems = visibleItems.filter((item) => item.membership.isPending);
+  const leaderItems = visibleItems.filter(
+    (item) => item.membership.isLeader || item.membership.isAdmin,
+  );
   const enabledSections = coalitionFeatureSections().filter((section) =>
     visibleItems.some((item) =>
       canOpenCoalitionSection(section, item.coalition, item.membership),
     ),
   );
-  const prioritySections = enabledSections.slice(0, 6);
-  return `<section class="shared-coalition-access-map">
-    <div class="shared-coalition-access-map__intro">
-      <span class="shared-card__meta"><span>Coalition workspaces</span><span>${escapeHtml(formatCount(enabledSections.length))} feature areas</span></span>
-      <h2>Open the coalition, then jump straight into the work.</h2>
-      <p>Each workspace exposes the Polis app surfaces the browser can handle: rooms, member access, missions, voter tools, calendar, governance, and amplify requests.</p>
+  return {
+    visibleItems,
+    activeItems,
+    pendingItems,
+    leaderItems,
+    enabledSections,
+  };
+}
+
+function coalitionsRootActionItems(items = []) {
+  const visibleItems = coalitionsRootVisibleItems(items);
+  const findItemForSection = (key) => {
+    const section = coalitionSectionByKey(key);
+    return visibleItems.find((item) =>
+      canOpenCoalitionSection(section, item.coalition, item.membership),
+    );
+  };
+  const actionSpecs = [
+    {
+      key: "rooms",
+      label: "Open rooms",
+      copy: "Jump into coalition room messaging and workstreams.",
+      icon: "messages",
+      primary: true,
+      route: (item) =>
+        `/messages/servers/coalition/${encodeURIComponent(item.coalition.coalitionId)}`,
+    },
+    {
+      key: "members",
+      label: "Manage access",
+      copy: "Review members, approvals, roles, and permissions.",
+      icon: "team",
+      primary: true,
+      route: (item) =>
+        coalitionMembersCommandPath(item.coalition.coalitionId, item.membership),
+    },
+    {
+      key: "missions",
+      label: "Open missions",
+      copy: "Assign, claim, approve, and track coalition work.",
+      icon: "mission",
+    },
+    {
+      key: "voter-map",
+      label: "Open voter map",
+      copy: "Review districts, voter records, CTA events, and scripts.",
+      icon: "map",
+    },
+    {
+      key: "amplify",
+      label: "Open amplify",
+      copy: "Create requests and collect platform-response links.",
+      icon: "share",
+    },
+    {
+      key: "calendar",
+      label: "Plan calendar",
+      copy: "Coordinate events, shifts, availability, and promotion.",
+      icon: "calendar",
+    },
+    {
+      key: "governance",
+      label: "Open governance",
+      copy: "Review constitution, proposals, ballots, and results.",
+      icon: "election",
+    },
+  ];
+  const actions = [];
+  actionSpecs.forEach((spec) => {
+    const item = findItemForSection(spec.key);
+    if (!item) {
+      return;
+    }
+    actions.push({
+      key: spec.key,
+      label: spec.label,
+      copy: spec.copy,
+      icon: spec.icon,
+      primary: spec.primary === true,
+      route: spec.route
+        ? spec.route(item)
+        : coalitionSectionPath(item.coalition.coalitionId, spec.key),
+    });
+  });
+  return actions.slice(0, 5);
+}
+
+function renderCoalitionsRootAction(action) {
+  return `<button class="shared-coalition-access-action${action.primary ? " is-primary" : ""}" type="button" data-action="navigate" data-route="${escapeHtml(action.route)}">
+    <span>${renderIcon(action.icon)}</span>
+    <strong>${escapeHtml(action.label)}</strong>
+    <small>${escapeHtml(action.copy)}</small>
+  </button>`;
+}
+
+function coalitionsRootCoverageGroups() {
+  return [
+    {
+      label: "Member operations",
+      copy: "Membership, room messaging, missions, and shared calendar work.",
+      items: [
+        {
+          key: "members",
+          label: "Members",
+          icon: "team",
+          sectionKey: "members",
+          route: (item) =>
+            coalitionMembersCommandPath(
+              item.coalition.coalitionId,
+              item.membership,
+            ),
+        },
+        {
+          key: "rooms",
+          label: "Rooms",
+          icon: "messages",
+          sectionKey: "rooms",
+          route: (item) =>
+            `/messages/servers/coalition/${encodeURIComponent(item.coalition.coalitionId)}`,
+        },
+        {
+          key: "missions",
+          label: "Missions",
+          icon: "mission",
+          sectionKey: "missions",
+        },
+        {
+          key: "calendar",
+          label: "Calendar",
+          icon: "calendar",
+          sectionKey: "calendar",
+        },
+      ],
+    },
+    {
+      label: "Field and voters",
+      copy: "Voter map, records, calls to action, transport, and scripts.",
+      items: [
+        {
+          key: "voter-map",
+          label: "Voter map",
+          icon: "map",
+          sectionKey: "voter-map",
+        },
+        {
+          key: "voter-records",
+          label: "Voter records",
+          icon: "registry",
+          sectionKey: "voter-map",
+          route: (item) =>
+            coalitionSectionPath(item.coalition.coalitionId, "voter-map/connected"),
+        },
+        {
+          key: "cta",
+          label: "CTA events",
+          icon: "send",
+          sectionKey: "voter-map",
+          route: (item) =>
+            coalitionSectionPath(item.coalition.coalitionId, "voter-map/cta"),
+        },
+        {
+          key: "scripts",
+          label: "Scripts",
+          icon: "create",
+          sectionKey: "voter-map",
+          predicate: (item) => item.membership.isAdmin,
+          route: (item) =>
+            coalitionSectionPath(item.coalition.coalitionId, "voter-map/scripts"),
+        },
+      ],
+    },
+    {
+      label: "Governance and reach",
+      copy: "Constitutional workflows, votes, and promotion requests.",
+      items: [
+        {
+          key: "governance",
+          label: "Governance",
+          icon: "election",
+          sectionKey: "governance",
+        },
+        {
+          key: "constitution",
+          label: "Constitution",
+          icon: "file",
+          sectionKey: "governance",
+          predicate: (item) =>
+            item.coalition.coalitionType === "constitutional" ||
+            item.coalition.hasConstitution,
+          route: (item) =>
+            coalitionSectionPath(item.coalition.coalitionId, "constitution"),
+        },
+        {
+          key: "voting",
+          label: "Voting",
+          icon: "election",
+          sectionKey: "governance",
+          predicate: (item) => item.coalition.hasConstitution,
+          route: (item) =>
+            coalitionSectionPath(item.coalition.coalitionId, "voting"),
+        },
+        {
+          key: "amplify",
+          label: "Amplify",
+          icon: "share",
+          sectionKey: "amplify",
+        },
+      ],
+    },
+  ];
+}
+
+function coalitionRootCoverageItemMatches(coverageItem, item) {
+  const section = coalitionSectionByKey(coverageItem.sectionKey);
+  if (!canOpenCoalitionSection(section, item.coalition, item.membership)) {
+    return false;
+  }
+  return coverageItem.predicate ? coverageItem.predicate(item) : true;
+}
+
+function coalitionRootCoverageItemRoute(coverageItem, item) {
+  if (!item) {
+    return "";
+  }
+  if (coverageItem.route) {
+    return coverageItem.route(item);
+  }
+  return coalitionSectionPath(item.coalition.coalitionId, coverageItem.sectionKey);
+}
+
+function renderCoalitionsRootCoverageItem(coverageItem, visibleItems) {
+  const matches = visibleItems.filter((item) =>
+    coalitionRootCoverageItemMatches(coverageItem, item),
+  );
+  const count = matches.length;
+  const route = coalitionRootCoverageItemRoute(coverageItem, matches[0]);
+  const body = `
+    <i>${renderIcon(count ? coverageItem.icon : "lock")}</i>
+    <strong>${escapeHtml(coverageItem.label)}</strong>
+    <small>${escapeHtml(count ? `${formatCount(count)} workspace${count === 1 ? "" : "s"}` : "Locked")}</small>`;
+  if (!count || !route) {
+    return `<span class="is-locked">${body}</span>`;
+  }
+  return `<button class="is-live" type="button" data-action="navigate" data-route="${escapeHtml(route)}">${body}</button>`;
+}
+
+function renderCoalitionsRootCoverageGroup(group, visibleItems = []) {
+  const availableCount = group.items.filter((coverageItem) =>
+    visibleItems.some((item) =>
+      coalitionRootCoverageItemMatches(coverageItem, item),
+    ),
+  ).length;
+  const totalCount = group.items.length;
+  return `<article class="shared-coalition-access-lane">
+    <div class="shared-coalition-access-lane__header">
+      <span>
+        <strong>${escapeHtml(group.label)}</strong>
+        <small>${escapeHtml(group.copy)}</small>
+      </span>
+      <em>${escapeHtml(`${formatCount(availableCount)}/${formatCount(totalCount)} live`)}</em>
     </div>
-    <div class="shared-coalition-access-map__metrics">
-      <span><strong>${escapeHtml(formatCount(visibleItems.length))}</strong><small>coalition${visibleItems.length === 1 ? "" : "s"}</small></span>
-      <span><strong>${escapeHtml(formatCount(activeItems.length))}</strong><small>active</small></span>
-      <span><strong>${escapeHtml(formatCount(pendingItems.length))}</strong><small>pending</small></span>
+    <div class="shared-coalition-access-lane__items">
+      ${group.items
+        .map((coverageItem) =>
+          renderCoalitionsRootCoverageItem(coverageItem, visibleItems),
+        )
+        .join("")}
+    </div>
+  </article>`;
+}
+
+function renderCoalitionsRootSummary(items = []) {
+  const stats = coalitionsRootAccessStats(items);
+  const visibleItems = stats.visibleItems;
+  if (!visibleItems.length) {
+    return "";
+  }
+  const prioritySections = stats.enabledSections.slice(0, 6);
+  const actions = coalitionsRootActionItems(items);
+  return `<section class="shared-coalition-access-map shared-coalition-access-map--command">
+    <div class="shared-coalition-access-map__intro">
+      <span class="shared-card__meta"><span>Coalition command center</span><span>${escapeHtml(formatCount(stats.enabledSections.length))} feature areas</span></span>
+      <h2>Start from access, then move directly into coalition work.</h2>
+      <p>Each workspace exposes app-backed rooms, member access, missions, voter tools, calendar, governance, and amplify requests. This map shows what is live across every coalition attached to this account.</p>
+      <div class="shared-coalition-access-map__metrics">
+        <span><strong>${escapeHtml(formatCount(visibleItems.length))}</strong><small>coalition${visibleItems.length === 1 ? "" : "s"}</small></span>
+        <span><strong>${escapeHtml(formatCount(stats.activeItems.length))}</strong><small>active</small></span>
+        <span><strong>${escapeHtml(formatCount(stats.pendingItems.length))}</strong><small>pending</small></span>
+        <span><strong>${escapeHtml(formatCount(stats.leaderItems.length))}</strong><small>leader</small></span>
+      </div>
+    </div>
+    ${
+      actions.length
+        ? `<div class="shared-coalition-access-map__actions">
+            ${actions.map(renderCoalitionsRootAction).join("")}
+          </div>`
+        : ""
+    }
+    <div class="shared-coalition-access-map__lanes">
+      ${coalitionsRootCoverageGroups()
+        .map((group) => renderCoalitionsRootCoverageGroup(group, visibleItems))
+        .join("")}
     </div>
     ${
       prioritySections.length
@@ -54464,7 +61448,7 @@ function renderCoalitionRooms(coalition, membership, detail) {
       <div>
         <span class="shared-card__meta"><span>Coalition rooms</span><span>${escapeHtml(canManage ? "Manager access" : "Member access")}</span></span>
         <h2>Room command center</h2>
-        <p>${escapeHtml(canManage ? "Review live coalition rooms, jump into priority channels, and open server administration without leaving the coalition workspace." : "Open the coalition rooms available to your role and keep mission, governance, and field conversations close to the workspace.")}</p>
+        <p>${escapeHtml(canManage ? "Review live coalition rooms, jump into priority channels, and open workspace administration without leaving the coalition workspace." : "Open the coalition rooms available to your access group and keep mission, governance, and field conversations close to the workspace.")}</p>
       </div>
       <div class="shared-coalition-rooms-hero__actions">
         <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="${escapeHtml(serverRoute)}">Open all rooms</button>
@@ -54486,11 +61470,11 @@ function renderCoalitionRooms(coalition, membership, detail) {
                 <span>${renderIcon("messages")}</span>
                 <div>
                   <h2>No coalition rooms loaded yet.</h2>
-                  <p>Refresh rooms or open the messaging server to create the first coalition channels.</p>
+                  <p>Refresh rooms or open the messaging workspace to create the first coalition channels.</p>
                 </div>
                 <div class="shared-coalition-room-card__actions">
                   <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="coalition-rooms-refresh"${disabledAttr(workspace.loading)}>Refresh rooms</button>
-                  <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(serverRoute)}">Open messaging server</button>
+                  <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(serverRoute)}">Open messaging workspace</button>
                 </div>
               </article>`
         }
@@ -54528,6 +61512,70 @@ function renderCoalitionMissions(detail, coalition, membership) {
     formKind: "coalition-missions-create",
     noun: "coalition",
   });
+}
+
+function coalitionCalendarAccessLevel(membership) {
+  if (canManageCoalitionCalendar(membership)) {
+    return "Manager access";
+  }
+  if (canViewCoalitionCalendar(membership)) {
+    return "Schedule view";
+  }
+  return "Limited access";
+}
+
+function coalitionCalendarNextStep(resource, membership) {
+  const next = candidateCalendarNextItem(resource);
+  if (next?.startAt) {
+    return `${candidateCalendarItemTypeLabel(next.itemType)} - ${formatAbsoluteDateTime(next.startAt)}`;
+  }
+  if (canManageCoalitionCalendar(membership)) {
+    return "Create the next coalition meeting, field hold, promotion window, or shared availability block from this workspace.";
+  }
+  return "Review the coalition schedule, synced busy blocks, and shared operating windows available to your role.";
+}
+
+function renderCoalitionCalendarCommandCenter(resource, coalition, membership) {
+  const counts = candidateCalendarCounts(resource);
+  const next = candidateCalendarNextItem(resource);
+  const canManage = canManageCoalitionCalendar(membership);
+  const writeTargets = candidateCalendarWriteTargetOptions(resource);
+  const configuredLabel = resource.configured ? "Providers configured" : "Providers off";
+  const syncLabel = resource.connections.length
+    ? `${formatCount(resource.connections.length)} connected`
+    : configuredLabel;
+  return `<section class="shared-campaign-calendar-command shared-coalition-calendar-command">
+    <div class="shared-campaign-calendar-command__main">
+      <div class="shared-card__meta">
+        <span>${escapeHtml(coalitionCalendarAccessLevel(membership))}</span>
+        <span>${escapeHtml(syncLabel)}</span>
+      </div>
+      <h2>${escapeHtml(next?.title || "Coalition calendar")}</h2>
+      <p>${escapeHtml(coalitionCalendarNextStep(resource, membership))}</p>
+      <div class="shared-campaign-calendar-command__actions">
+        ${
+          canManage
+            ? `<button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="coalition-calendar-composer-focus">New item</button>`
+            : ""
+        }
+        <button class="shared-feed-chip" type="button" data-action="coalition-calendar-refresh"${disabledAttr(resource.loading)}>${resource.loading ? "Refreshing..." : "Refresh"}</button>
+        <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, "missions"))}">Missions</button>
+        <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, "rooms"))}">Rooms</button>
+      </div>
+      <div class="shared-campaign-calendar-focus shared-coalition-calendar-access">
+        ${renderIcon("calendar")}
+        <span>${escapeHtml(`${coalition.name || "Coalition"} schedule - ${writeTargets.length ? `${formatCount(writeTargets.length)} write target${writeTargets.length === 1 ? "" : "s"}` : "Polis-only schedule"}`)}</span>
+      </div>
+    </div>
+    <div class="shared-campaign-calendar-command__metrics">
+      ${renderCandidateCalendarCommandMetric("Upcoming", formatCount(counts.upcoming), "loaded")}
+      ${renderCandidateCalendarCommandMetric("Next 24h", formatCount(counts.nextDay), "ready")}
+      ${renderCandidateCalendarCommandMetric("Pending", formatCount(counts.pending), "approval")}
+      ${renderCandidateCalendarCommandMetric("Promotion", formatCount(counts.promotions), "scheduled")}
+      ${renderCandidateCalendarCommandMetric("Synced", formatCount(counts.synced), "external")}
+      ${renderCandidateCalendarCommandMetric("Access", canManage ? "Manage" : "View", "role")}
+    </div>
+  </section>`;
 }
 
 function renderCoalitionCalendarFilters(resource) {
@@ -54570,11 +61618,43 @@ function renderCoalitionCalendarFilters(resource) {
 }
 
 function renderCoalitionCalendarAgenda(resource, items) {
+  const pendingItems = items.filter(
+    (item) => item.status === "pending_approval",
+  );
+  const groupedItems = candidateCalendarGroupedItems(
+    items.filter((item) => item.status !== "pending_approval"),
+  );
+  const agendaMarkup = items.length
+    ? `<div class="shared-campaign-calendar-agenda-stack">
+        ${
+          pendingItems.length
+            ? `<section class="shared-campaign-calendar-day-group is-approval">
+                <div class="shared-campaign-calendar-day-group__header">
+                  <strong>Needs approval</strong>
+                  <span>${escapeHtml(formatCount(pendingItems.length))} request${pendingItems.length === 1 ? "" : "s"}</span>
+                </div>
+                <div class="shared-campaign-calendar-list">${pendingItems.map((item) => renderCandidateCalendarItemCard(item, resource, false)).join("")}</div>
+              </section>`
+            : ""
+        }
+        ${groupedItems
+          .map(
+            (group) => `<section class="shared-campaign-calendar-day-group">
+              <div class="shared-campaign-calendar-day-group__header">
+                <strong>${escapeHtml(group.label)}</strong>
+                <span>${escapeHtml(formatCount(group.items.length))} item${group.items.length === 1 ? "" : "s"}</span>
+              </div>
+              <div class="shared-campaign-calendar-list">${group.items.map((item) => renderCandidateCalendarItemCard(item, resource, false)).join("")}</div>
+            </section>`,
+          )
+          .join("")}
+      </div>`
+    : `<div class="shared-page__empty">No coalition calendar items match this window.</div>`;
   return `<article class="shared-campaign-panel shared-campaign-calendar-agenda">
     <div class="shared-campaign-panel__header">
       <div>
         <h2>Schedule</h2>
-        <p>Review coalition holds, meetings, promotion windows, and synced busy blocks.</p>
+        <p>Review coalition holds, meetings, promotion windows, and synced busy blocks grouped by operating day.</p>
       </div>
     </div>
     ${
@@ -54582,9 +61662,7 @@ function renderCoalitionCalendarAgenda(resource, items) {
         ? `<div class="shared-page__empty">Loading coalition calendar...</div>`
         : resource.error
           ? `<div class="shared-page__empty">${escapeHtml(resource.error)}</div>`
-          : items.length
-            ? `<div class="shared-campaign-calendar-list">${items.map((item) => renderCandidateCalendarItemCard(item, resource, false)).join("")}</div>`
-            : `<div class="shared-page__empty">No coalition calendar items match this window.</div>`
+          : agendaMarkup
     }
   </article>`;
 }
@@ -54608,16 +61686,30 @@ function renderCoalitionCalendarCreateForm(resource, membership) {
   const start = now.getTime() + 60 * 60 * 1000;
   const end = start + 60 * 60 * 1000;
   const writeTargets = candidateCalendarWriteTargetOptions(resource);
-  return `<article class="shared-campaign-panel shared-campaign-calendar-create">
+  return `<article class="shared-campaign-panel shared-campaign-calendar-create" id="coalition-calendar-composer">
     <div class="shared-campaign-panel__header">
       <div>
-        <h2>Create item</h2>
-        <p>Add coalition meetings, shared field holds, and communication promotion windows.</p>
+        <h2>Composer</h2>
+        <p>Start from a coalition-ready preset, then refine timing, visibility, labels, and external write targets.</p>
       </div>
     </div>
     <form class="shared-campaign-calendar-form" data-route-form="coalition-calendar-create">
+      <div class="shared-campaign-calendar-preset-rail" aria-label="Coalition calendar item presets">
+        ${COALITION_CALENDAR_COMPOSER_PRESETS.map(
+          (preset) => `<button class="shared-campaign-calendar-preset" type="button" data-action="coalition-calendar-preset"
+            data-item-type="${escapeHtml(preset.itemType)}"
+            data-title="${escapeHtml(preset.title)}"
+            data-labels="${escapeHtml(preset.labels)}"
+            data-location-name="${escapeHtml(preset.locationName)}"
+            data-privacy="${escapeHtml(preset.privacy)}"
+            data-description="${escapeHtml(preset.description)}">
+              <strong>${escapeHtml(preset.label)}</strong>
+              <span>${escapeHtml(candidateCalendarItemTypeLabel(preset.itemType))}</span>
+            </button>`,
+        ).join("")}
+      </div>
       <div class="shared-campaign-calendar-form-grid">
-        <label><span>Title</span><input name="title" placeholder="Coalition field briefing"${disabledAttr(pending)} required /></label>
+        <label class="shared-campaign-calendar-title-field"><span>Title</span><input name="title" placeholder="Coalition field briefing"${disabledAttr(pending)} required /></label>
         <label><span>Type</span><select name="itemType"${disabledAttr(pending)}>${CANDIDATE_CALENDAR_ITEM_TYPES.map(([key, label]) => `<option value="${escapeHtml(key)}">${escapeHtml(label)}</option>`).join("")}</select></label>
         <label><span>Start</span><input type="datetime-local" name="startAt" value="${escapeHtml(formatDateTimeInputValue(start))}"${disabledAttr(pending)} required /></label>
         <label><span>End</span><input type="datetime-local" name="endAt" value="${escapeHtml(formatDateTimeInputValue(end))}"${disabledAttr(pending)} required /></label>
@@ -54625,6 +61717,11 @@ function renderCoalitionCalendarCreateForm(resource, membership) {
         <label><span>Privacy</span><select name="privacy"${disabledAttr(pending)}>${CANDIDATE_CALENDAR_PRIVACY_OPTIONS.map(([key, label]) => `<option value="${escapeHtml(key)}">${escapeHtml(label)}</option>`).join("")}</select></label>
         <label><span>Location</span><input name="locationName" placeholder="Shared field office"${disabledAttr(pending)} /></label>
         <label><span>Labels</span><input name="labels" placeholder="field, partners"${disabledAttr(pending)} /></label>
+      </div>
+      <div class="shared-campaign-calendar-menu-grid">
+        <span><strong>Shared holds</strong><em>Use busy items for field offices, partner blocks, and leadership availability.</em></span>
+        <span><strong>Promotion windows</strong><em>Mark communications moments members need to see before amplify work.</em></span>
+        <span><strong>Mission handoff</strong><em>Pair scheduled work with missions when a task needs ownership.</em></span>
       </div>
       <label class="shared-campaign-calendar-textarea"><span>Description</span><textarea name="description" rows="3" placeholder="Notes members need before this item."${disabledAttr(pending)}></textarea></label>
       <label class="shared-campaign-calendar-check"><input type="checkbox" name="allDay"${disabledAttr(pending)} /> <span>All-day item</span></label>
@@ -54670,6 +61767,16 @@ function renderCoalitionCalendarConnection(connection) {
 }
 
 function renderCoalitionCalendarConnections(resource) {
+  const providerMarkup = resource.providers.length
+    ? `<div class="shared-campaign-calendar-providers shared-coalition-calendar-providers">
+        ${resource.providers
+          .map(
+            (provider) =>
+              `<span class="shared-feed-chip" aria-disabled="true">${escapeHtml(provider.label)} - ${escapeHtml(humanizeLabel(provider.status || "available"))}</span>`,
+          )
+          .join("")}
+      </div>`
+    : "";
   return `<article class="shared-campaign-panel shared-campaign-calendar-connections">
     <div class="shared-campaign-panel__header">
       <div>
@@ -54677,6 +61784,7 @@ function renderCoalitionCalendarConnections(resource) {
         <p>Read the external calendars this coalition is using for availability and write targets.</p>
       </div>
     </div>
+    ${providerMarkup}
     ${
       resource.connections.length
         ? `<div class="shared-campaign-calendar-connection-list">${resource.connections.map(renderCoalitionCalendarConnection).join("")}</div>`
@@ -54694,6 +61802,7 @@ function renderCoalitionCalendar(detail, coalition, membership) {
     return `<div class="shared-page__empty">This coalition role does not include calendar access.</div>`;
   }
   return `<div class="shared-coalition-section shared-campaign-calendar shared-coalition-calendar">
+    ${renderCoalitionCalendarCommandCenter(resource, coalition, membership)}
     <div class="shared-coalition-metrics">
       ${renderCoalitionMetric("Loaded items", formatCount(items.length), "cyan")}
       ${renderCoalitionMetric("Confirmed", formatCount(confirmedCount))}
@@ -54704,7 +61813,7 @@ function renderCoalitionCalendar(detail, coalition, membership) {
       <div class="shared-campaign-panel__header">
         <div>
           <h2>Coalition calendar</h2>
-          <p>Manage coalition-wide schedule items from the website using the same calendar data as the app.</p>
+          <p>Filter the shared coalition schedule and keep meetings, field holds, promotion windows, and synced availability in one browser view.</p>
         </div>
         <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, "missions"))}">Missions</button>
       </div>
@@ -54722,10 +61831,12 @@ function renderCoalitionCalendar(detail, coalition, membership) {
   </div>`;
 }
 
-function renderCoalitionVoterMapTerritories(access) {
+function renderCoalitionVoterMapTerritories(access, ownerKind = "coalition") {
   const territories = access?.territories || [];
+  const emptyScopeLabel =
+    ownerKind === "candidate" ? "campaign access" : "coalition role";
   if (!territories.length) {
-    return `<div class="shared-page__empty">No voter-map territories are assigned to this coalition role.</div>`;
+    return `<div class="shared-page__empty">No voter-map territories are assigned to this ${escapeHtml(emptyScopeLabel)}.</div>`;
   }
   return `<div class="shared-coalition-voter-map-territories">
     ${territories
@@ -54848,6 +61959,441 @@ function renderCoalitionVoterMapTerritoryPanel(workspace, access) {
     </div>
     ${workspace.loading && !workspace.loaded ? `<div class="shared-page__loading">Loading voter-map access...</div>` : renderCoalitionVoterMapTerritories(access)}
   </article>`;
+}
+
+function renderCoalitionTerritoryOptions(access = {}, selectedTerritoryId = "") {
+  const territories = access?.territories || [];
+  if (!territories.length) {
+    return '<option value="">No territories</option>';
+  }
+  return territories
+    .map(
+      (territory) =>
+        `<option value="${escapeHtml(territory.territoryId)}"${selectedAttr(territory.territoryId === selectedTerritoryId)}>${escapeHtml(territory.name || territory.territoryId)}</option>`,
+    )
+    .join("");
+}
+
+function coalitionTerritoryAssignmentTimeLabel(value) {
+  const normalized = normalizeString(value);
+  if (!normalized) {
+    return "Not set";
+  }
+  const parsed = Date.parse(normalized);
+  return Number.isFinite(parsed) ? formatAbsoluteDateTime(parsed) : normalized;
+}
+
+function territoryAdminOwnerPrefix(ownerKind = "coalition") {
+  return ownerKind === "candidate" ? "candidate" : "coalition";
+}
+
+function renderCoalitionTerritoryAssignmentRow(
+  assignment,
+  pending,
+  ownerKind = "coalition",
+) {
+  const prefix = territoryAdminOwnerPrefix(ownerKind);
+  const revokePending =
+    pending === `assignment:revoke:${assignment.assignmentId}`;
+  return `<article class="shared-coalition-territory-assignment">
+    <div class="shared-coalition-territory-assignment__main">
+      <span class="shared-coalition-territory-assignment__avatar">${escapeHtml((assignment.userId || "U").slice(0, 1).toUpperCase())}</span>
+      <div>
+        <strong>${escapeHtml(assignment.userId || "Unknown user")}</strong>
+        <span>${escapeHtml(humanizeLabel(assignment.status))}${assignment.assignmentId ? ` - ${escapeHtml(assignment.assignmentId)}` : ""}</span>
+      </div>
+    </div>
+    <div class="shared-coalition-territory-assignment__meta">
+      <span><strong>${escapeHtml(assignment.territoryVersion === null ? "-" : String(assignment.territoryVersion))}</strong><small>Territory version</small></span>
+      <span><strong>${escapeHtml(assignment.assignmentTokenVersion === null ? "-" : String(assignment.assignmentTokenVersion))}</strong><small>Token version</small></span>
+      <span><strong>${escapeHtml(coalitionTerritoryAssignmentTimeLabel(assignment.startsAt))}</strong><small>Starts</small></span>
+      <span><strong>${escapeHtml(coalitionTerritoryAssignmentTimeLabel(assignment.endsAt))}</strong><small>Ends</small></span>
+    </div>
+    <div class="shared-card__actions">
+      <button class="shared-feed-chip" type="button" data-action="${escapeHtml(prefix)}-territory-assignment-revoke" data-territory-id="${escapeHtml(assignment.territoryId)}" data-assignment-id="${escapeHtml(assignment.assignmentId)}" data-user-id="${escapeHtml(assignment.userId)}"${disabledAttr(pending || !assignment.assignmentId || !assignment.userId)}>${revokePending ? "Revoking..." : "Revoke"}</button>
+    </div>
+  </article>`;
+}
+
+function renderCoalitionTerritoryAssignmentList(
+  assignments,
+  selectedTerritoryId,
+  ownerKind = "coalition",
+) {
+  if (assignments.loading && !assignments.loaded) {
+    return '<div class="shared-page__loading">Loading territory assignments...</div>';
+  }
+  if (!assignments.loaded) {
+    return '<div class="shared-page__empty">Load a territory to review active assignment records.</div>';
+  }
+  if (!assignments.items.length) {
+    return `<div class="shared-page__empty">No assignments are active for ${escapeHtml(selectedTerritoryId || "this territory")}.</div>`;
+  }
+  return `<div class="shared-coalition-territory-assignment-list">
+    ${assignments.items
+      .map((assignment) =>
+        renderCoalitionTerritoryAssignmentRow(
+          assignment,
+          assignments.actionPendingKey,
+          ownerKind,
+        ),
+      )
+      .join("")}
+  </div>`;
+}
+
+function renderCoalitionTerritoryAdminTabs(activeTab, ownerKind = "coalition") {
+  const prefix = territoryAdminOwnerPrefix(ownerKind);
+  const tabs = [
+    ["wizard", "Wizard", "Generate territory plans"],
+    ["editor", "Editor", "Edit units and versions"],
+    ["assignments", "Assignments", "Manage staff access"],
+  ];
+  return `<nav class="shared-coalition-territory-tabs" aria-label="Territory admin tools">
+    ${tabs
+      .map(
+        ([key, label, detail]) =>
+          `<button class="shared-coalition-territory-tab${activeTab === key ? " is-active" : ""}" type="button" data-action="${escapeHtml(prefix)}-territory-admin-tab" data-tab="${escapeHtml(key)}">
+            <strong>${escapeHtml(label)}</strong>
+            <span>${escapeHtml(detail)}</span>
+          </button>`,
+      )
+      .join("")}
+  </nav>`;
+}
+
+function renderCoalitionTerritoryAdminStatus(admin) {
+  return `${admin.error ? `<div class="shared-page__error">${escapeHtml(admin.error)}</div>` : ""}
+    ${admin.notice ? `<div class="shared-page__hint">${escapeHtml(admin.notice)}</div>` : ""}`;
+}
+
+function renderCoalitionTerritoryUnitSetOptions(admin) {
+  if (!admin.unitSets.length) {
+    return '<option value="">No unit sets loaded</option>';
+  }
+  return admin.unitSets
+    .map(
+      (unitSet) =>
+        `<option value="${escapeHtml(unitSet.unitSetId)}"${selectedAttr(unitSet.unitSetId === admin.selectedUnitSetId)}>${escapeHtml(`${unitSet.unitSetId} (${unitSet.sourceType})`)}</option>`,
+    )
+    .join("");
+}
+
+function renderCoalitionTerritoryUnitSets(admin) {
+  if (admin.unitSetsLoading && !admin.unitSetsLoaded) {
+    return '<div class="shared-page__loading">Loading unit sets...</div>';
+  }
+  if (admin.unitSetsError) {
+    return `<div class="shared-page__error">${escapeHtml(admin.unitSetsError)}</div>`;
+  }
+  if (!admin.unitSets.length) {
+    return '<div class="shared-page__empty">Load or build a district unit set before generating territories.</div>';
+  }
+  return `<div class="shared-coalition-territory-unitsets">
+    ${admin.unitSets
+      .map(
+        (unitSet) => `<article class="shared-coalition-territory-unitset${unitSet.unitSetId === admin.selectedUnitSetId ? " is-selected" : ""}">
+          <div>
+            <strong>${escapeHtml(unitSet.unitSetId)}</strong>
+            <span>${escapeHtml(humanizeLabel(unitSet.sourceType))}${unitSet.hexResolution ? ` - H3 ${escapeHtml(String(unitSet.hexResolution))}` : ""}</span>
+          </div>
+          <div class="shared-coalition-territory-unitset__meta">
+            <span>${escapeHtml(humanizeLabel(unitSet.status))}</span>
+            <span>${escapeHtml(formatCount(unitSet.unitCount))} units</span>
+            ${unitSet.datasetVersion ? `<span>${escapeHtml(unitSet.datasetVersion)}</span>` : ""}
+          </div>
+        </article>`,
+      )
+      .join("")}
+  </div>`;
+}
+
+function renderCoalitionTerritoryGenerationJob(admin, ownerKind = "coalition") {
+  const job = admin.generationJob;
+  if (!job?.jobId) {
+    return "";
+  }
+  const prefix = territoryAdminOwnerPrefix(ownerKind);
+  const progress = Math.max(0, Math.min(100, Number(job.progressPct) || 0));
+  const status = normalizeString(job.status).toLowerCase();
+  const canAccept = status === "completed";
+  const canCancel = status === "queued" || status === "processing";
+  const pending = admin.actionPendingKey;
+  return `<article class="shared-coalition-panel shared-coalition-territory-job">
+    <div class="shared-coalition-panel__header">
+      <div>
+        <h2>Generation job</h2>
+        <p>Track the current preview and accept it when the generated plan is ready.</p>
+      </div>
+      <button class="shared-feed-chip" type="button" data-action="${escapeHtml(prefix)}-territory-generation-refresh"${disabledAttr(Boolean(pending))}>${pending === "generation:refresh" ? "Refreshing..." : "Refresh job"}</button>
+    </div>
+    <div class="shared-coalition-territory-progress">
+      <div>
+        <strong>${escapeHtml(job.jobId)}</strong>
+        <span>${escapeHtml(humanizeLabel(job.status))}${job.phase ? ` - ${escapeHtml(humanizeLabel(job.phase))}` : ""}</span>
+      </div>
+      <div class="shared-coalition-territory-progress__bar"><span style="width:${escapeHtml(String(progress))}%"></span></div>
+      <small>${escapeHtml(formatCount(progress))}% complete</small>
+    </div>
+    ${
+      job.errorCode || job.errorMessage
+        ? `<div class="shared-page__error">${escapeHtml(`${job.errorCode} ${job.errorMessage}`.trim())}</div>`
+        : ""
+    }
+    ${
+      job.previewTerritoryIds.length
+        ? `<div class="shared-coalition-territory-preview-list">
+            ${job.previewTerritoryIds.map((id) => `<span>${escapeHtml(id)}</span>`).join("")}
+          </div>`
+        : ""
+    }
+    <div class="shared-card__actions">
+      <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="${escapeHtml(prefix)}-territory-generation-complete" data-generation-action="accept"${disabledAttr(Boolean(pending) || !canAccept)}>${pending === "generation:accept" ? "Accepting..." : "Accept preview"}</button>
+      <button class="shared-feed-chip" type="button" data-action="${escapeHtml(prefix)}-territory-generation-complete" data-generation-action="cancel"${disabledAttr(Boolean(pending) || !canCancel)}>${pending === "generation:cancel" ? "Canceling..." : "Cancel job"}</button>
+    </div>
+  </article>`;
+}
+
+function renderCoalitionTerritoryWizard(admin, ownerKind = "coalition") {
+  const prefix = territoryAdminOwnerPrefix(ownerKind);
+  const districtValue = admin.generationDistrictId || "";
+  const pending = admin.actionPendingKey;
+  return `<div class="shared-coalition-territory-wizard">
+    <article class="shared-coalition-panel">
+      <div class="shared-coalition-panel__header">
+        <div>
+          <h2>District setup</h2>
+          <p>Prepare district unit sets from precinct or hex sources before generation.</p>
+        </div>
+      </div>
+      <div class="shared-coalition-territory-admin__forms">
+        <form class="shared-coalition-territory-form" data-route-form="${escapeHtml(prefix)}-territory-unitsets-load">
+          <label><span>District ID</span><input name="districtId" value="${escapeHtml(districtValue)}" placeholder="MT-02" autocomplete="off" required${disabledAttr(admin.unitSetsLoading)} /></label>
+          <button class="shared-feed-chip" type="submit"${disabledAttr(admin.unitSetsLoading)}>${admin.unitSetsLoading ? "Loading..." : "Refresh unit sets"}</button>
+        </form>
+        <form class="shared-coalition-territory-form" data-route-form="${escapeHtml(prefix)}-territory-unitset-create">
+          <label><span>District ID</span><input name="districtId" value="${escapeHtml(districtValue)}" placeholder="MT-02" autocomplete="off" required${disabledAttr(Boolean(pending))} /></label>
+          <label><span>District name optional</span><input name="districtName" placeholder="Montana Congressional District 2"${disabledAttr(Boolean(pending))} /></label>
+          <label><span>Unit source</span><select name="sourceType"${disabledAttr(Boolean(pending))}><option value="precinct">Precinct</option><option value="hex">Hex</option></select></label>
+          <label><span>Hex resolution</span><input name="hexResolution" type="number" min="1" max="15" value="9"${disabledAttr(Boolean(pending))} /></label>
+          <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(Boolean(pending))}>${pending === "unit-set:create" ? "Building..." : "Build unit set"}</button>
+        </form>
+      </div>
+      ${renderCoalitionTerritoryUnitSets(admin)}
+    </article>
+    <article class="shared-coalition-panel">
+      <div class="shared-coalition-panel__header">
+        <div>
+          <h2>Generation settings</h2>
+          <p>Balance territory plans by workload, compactness, and field geography constraints.</p>
+        </div>
+      </div>
+      <form class="shared-coalition-territory-form shared-coalition-territory-form--dense" data-route-form="${escapeHtml(prefix)}-territory-generation-start">
+        <label><span>District ID</span><input name="districtId" value="${escapeHtml(districtValue)}" placeholder="MT-02" required${disabledAttr(Boolean(pending))} /></label>
+        <label><span>Unit set</span><select name="unitSetId"${disabledAttr(Boolean(pending))}>${renderCoalitionTerritoryUnitSetOptions(admin)}</select></label>
+        <label><span>Mode</span><select name="mode"${disabledAttr(Boolean(pending))}><option value="target_count">Generate N territories</option><option value="target_workload">Target workload per territory</option></select></label>
+        <label><span>Metric</span><select name="metric"${disabledAttr(Boolean(pending))}><option value="addressCount">Address count</option><option value="voterCount">Voter count</option><option value="priorityCount">Priority count</option><option value="estimatedMinutes">Estimated minutes</option></select></label>
+        <label><span>Target territory count</span><input name="targetCount" type="number" min="1" value="12"${disabledAttr(Boolean(pending))} /></label>
+        <label><span>Target workload</span><input name="targetWorkload" type="number" min="1" value="250"${disabledAttr(Boolean(pending))} /></label>
+        <label><span>Compactness weight</span><input name="compactnessWeight" type="number" min="0" max="1" step="0.05" value="0.25"${disabledAttr(Boolean(pending))} /></label>
+        <label><span>Deterministic seed optional</span><input name="seed" inputmode="numeric" autocomplete="off"${disabledAttr(Boolean(pending))} /></label>
+        <label class="shared-coalition-territory-form__wide"><span>Keep subareas intact optional</span><input name="keepSubareasIntact" placeholder="county:001, ward:9"${disabledAttr(Boolean(pending))} /></label>
+        <label class="shared-coalition-territory-check"><input type="checkbox" name="avoidIslands" checked${disabledAttr(Boolean(pending))} /><span>Avoid islands</span></label>
+        <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(Boolean(pending) || !admin.unitSets.length)}>${pending === "generation:start" ? "Generating..." : "Generate territories"}</button>
+      </form>
+    </article>
+    ${renderCoalitionTerritoryGenerationJob(admin, ownerKind)}
+  </div>`;
+}
+
+function renderCoalitionTerritoryEditor(
+  access,
+  admin,
+  ownerKind = "coalition",
+) {
+  const prefix = territoryAdminOwnerPrefix(ownerKind);
+  const selectedTerritoryId = coalitionTerritoryOptionId(access);
+  const selectedTerritory = (access?.territories || []).find(
+    (territory) => territory.territoryId === selectedTerritoryId,
+  );
+  const baseVersion = String(selectedTerritory?.version || 1);
+  const pending = admin.actionPendingKey;
+  return `<div class="shared-coalition-territory-editor">
+    <article class="shared-coalition-panel">
+      <div class="shared-coalition-panel__header">
+        <div>
+          <h2>Unit operations</h2>
+          <p>Move, add, or remove unit IDs while preserving version safety.</p>
+        </div>
+      </div>
+      <form class="shared-coalition-territory-form shared-coalition-territory-form--dense" data-route-form="${escapeHtml(prefix)}-territory-editor-edit">
+        <label><span>Territory</span><select name="territoryId"${disabledAttr(Boolean(pending))}>${renderCoalitionTerritoryOptions(access, selectedTerritoryId)}</select></label>
+        <label><span>Base version</span><input name="baseVersion" type="number" min="1" value="${escapeHtml(baseVersion)}"${disabledAttr(Boolean(pending))} required /></label>
+        <label><span>Operation</span><select name="operation"${disabledAttr(Boolean(pending))}><option value="move_units">Move units</option><option value="add_units">Add units</option><option value="remove_units">Remove units</option></select></label>
+        <label><span>Destination territory ID</span><input name="toTerritoryId" placeholder="Required for move_units"${disabledAttr(Boolean(pending))} /></label>
+        <label class="shared-coalition-territory-form__wide"><span>Unit IDs</span><textarea name="unitIds" rows="3" placeholder="u_1042, u_1043, u_1044"${disabledAttr(Boolean(pending))} required></textarea></label>
+        <label class="shared-coalition-territory-form__wide"><span>Reason optional</span><input name="reason" placeholder="manual_rebalance_after_week1"${disabledAttr(Boolean(pending))} /></label>
+        <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(Boolean(pending))}>${pending === "editor:edit" ? "Applying..." : "Apply edits"}</button>
+      </form>
+    </article>
+    <article class="shared-coalition-panel">
+      <div class="shared-coalition-panel__header">
+        <div>
+          <h2>Split / merge / publish</h2>
+          <p>Restructure territory versions and publish reviewed changes from one command area.</p>
+        </div>
+      </div>
+      <form class="shared-coalition-territory-form shared-coalition-territory-form--compact" data-route-form="${escapeHtml(prefix)}-territory-editor-quick">
+        <label><span>Territory</span><select name="territoryId"${disabledAttr(Boolean(pending))}>${renderCoalitionTerritoryOptions(access, selectedTerritoryId)}</select></label>
+        <label><span>Base version</span><input name="baseVersion" type="number" min="1" value="${escapeHtml(baseVersion)}"${disabledAttr(Boolean(pending))} /></label>
+        <div class="shared-card__actions">
+          <button class="shared-feed-chip" type="submit" name="editorAction" value="rebalance"${disabledAttr(Boolean(pending))}>${pending === "editor:rebalance" ? "Rebalancing..." : "Rebalance"}</button>
+          <button class="shared-feed-chip" type="submit" name="editorAction" value="publish"${disabledAttr(Boolean(pending))}>${pending === "editor:publish" ? "Publishing..." : "Publish"}</button>
+        </div>
+      </form>
+      <form class="shared-coalition-territory-form shared-coalition-territory-form--compact" data-route-form="${escapeHtml(prefix)}-territory-editor-split">
+        <label><span>Territory</span><select name="territoryId"${disabledAttr(Boolean(pending))}>${renderCoalitionTerritoryOptions(access, selectedTerritoryId)}</select></label>
+        <label><span>Base version</span><input name="baseVersion" type="number" min="1" value="${escapeHtml(baseVersion)}"${disabledAttr(Boolean(pending))} required /></label>
+        <label class="shared-coalition-territory-form__wide"><span>Split unit IDs</span><textarea name="splitUnitIds" rows="3" placeholder="u_2001, u_2002"${disabledAttr(Boolean(pending))} required></textarea></label>
+        <label><span>New territory name optional</span><input name="newTerritoryName" placeholder="Downtown East"${disabledAttr(Boolean(pending))} /></label>
+        <label class="shared-coalition-territory-check"><input type="checkbox" name="publish"${disabledAttr(Boolean(pending))} /><span>Publish split result</span></label>
+        <button class="shared-feed-chip" type="submit"${disabledAttr(Boolean(pending))}>${pending === "editor:split" ? "Splitting..." : "Split territory"}</button>
+      </form>
+      <form class="shared-coalition-territory-form shared-coalition-territory-form--compact" data-route-form="${escapeHtml(prefix)}-territory-editor-merge">
+        <label class="shared-coalition-territory-form__wide"><span>Territory IDs to merge</span><textarea name="territoryIds" rows="3" placeholder="t_03, t_07"${disabledAttr(Boolean(pending))} required></textarea></label>
+        <label><span>Merged name optional</span><input name="name" placeholder="North Rural Combined"${disabledAttr(Boolean(pending))} /></label>
+        <label class="shared-coalition-territory-check"><input type="checkbox" name="publish"${disabledAttr(Boolean(pending))} /><span>Publish merged result</span></label>
+        <button class="shared-feed-chip" type="submit"${disabledAttr(Boolean(pending))}>${pending === "editor:merge" ? "Merging..." : "Merge territories"}</button>
+      </form>
+    </article>
+    ${
+      admin.editorResult
+        ? `<article class="shared-coalition-panel shared-coalition-territory-result">
+            <div class="shared-coalition-panel__header"><div><h2>Last result</h2><p>Backend response from the latest territory editor action.</p></div></div>
+            <pre>${escapeHtml(JSON.stringify(admin.editorResult, null, 2))}</pre>
+          </article>`
+        : ""
+    }
+  </div>`;
+}
+
+function renderCoalitionTerritoryAssignmentAdmin(
+  access,
+  assignments,
+  ownerKind = "coalition",
+) {
+  const prefix = territoryAdminOwnerPrefix(ownerKind);
+  const selectedTerritoryId =
+    ownerKind === "candidate"
+      ? selectedCandidateAssignmentTerritoryId(access)
+      : selectedCoalitionAssignmentTerritoryId(access);
+  const pending = assignments.actionPendingKey;
+  return `<div class="shared-coalition-territory-admin">
+    <article class="shared-coalition-panel shared-coalition-territory-admin__queue">
+      <div class="shared-coalition-panel__header">
+        <div>
+          <h2>Territory assignments</h2>
+          <p>Load staff access for a territory, revoke stale records, or move assignment access to another user.</p>
+        </div>
+      </div>
+      <form class="shared-coalition-territory-select" data-route-form="${escapeHtml(prefix)}-territory-assignments-load">
+        <label>
+          <span>Territory</span>
+          <select name="territoryId"${disabledAttr(assignments.loading)}>
+            ${renderCoalitionTerritoryOptions(access, selectedTerritoryId)}
+          </select>
+        </label>
+        <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(assignments.loading || !selectedTerritoryId)}>${assignments.loading ? "Loading..." : assignments.loaded ? "Refresh assignments" : "Load assignments"}</button>
+      </form>
+      ${assignments.error ? `<div class="shared-page__error">${escapeHtml(assignments.error)}</div>` : ""}
+      ${assignments.notice ? `<div class="shared-page__hint">${escapeHtml(assignments.notice)}</div>` : ""}
+      ${renderCoalitionTerritoryAssignmentList(assignments, selectedTerritoryId, ownerKind)}
+    </article>
+    <div class="shared-coalition-territory-admin__forms">
+      <article class="shared-coalition-panel shared-coalition-territory-form-card">
+        <div class="shared-coalition-panel__header">
+          <div>
+            <h2>Assign user</h2>
+            <p>Grant a user access to the selected territory with optional time bounds.</p>
+          </div>
+        </div>
+        <form class="shared-coalition-territory-form" data-route-form="${escapeHtml(prefix)}-territory-assignment-create">
+          <label><span>Territory</span><select name="territoryId"${disabledAttr(Boolean(pending))}>${renderCoalitionTerritoryOptions(access, selectedTerritoryId)}</select></label>
+          <label><span>User ID</span><input name="userId" autocomplete="off"${disabledAttr(Boolean(pending))} required /></label>
+          <label><span>Starts at optional</span><input name="startsAt" autocomplete="off" placeholder="2026-03-01T00:00:00.000Z"${disabledAttr(Boolean(pending))} /></label>
+          <label><span>Ends at optional</span><input name="endsAt" autocomplete="off" placeholder="2026-03-31T23:59:59.000Z"${disabledAttr(Boolean(pending))} /></label>
+          <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(Boolean(pending) || !selectedTerritoryId)}>${pending === "assignment:create" ? "Assigning..." : "Assign user"}</button>
+        </form>
+      </article>
+      <article class="shared-coalition-panel shared-coalition-territory-form-card">
+        <div class="shared-coalition-panel__header">
+          <div>
+            <h2>Reassign territory</h2>
+            <p>Revoke one user's territory access and grant the same territory to a replacement.</p>
+          </div>
+        </div>
+        <form class="shared-coalition-territory-form" data-route-form="${escapeHtml(prefix)}-territory-assignment-reassign">
+          <label><span>Territory</span><select name="territoryId"${disabledAttr(Boolean(pending))}>${renderCoalitionTerritoryOptions(access, selectedTerritoryId)}</select></label>
+          <label><span>From user ID</span><input name="fromUserId" autocomplete="off"${disabledAttr(Boolean(pending))} required /></label>
+          <label><span>To user ID</span><input name="toUserId" autocomplete="off"${disabledAttr(Boolean(pending))} required /></label>
+          <button class="shared-feed-chip" type="submit"${disabledAttr(Boolean(pending) || !selectedTerritoryId)}>${pending === "assignment:reassign" ? "Reassigning..." : "Reassign"}</button>
+        </form>
+      </article>
+    </div>
+  </div>`;
+}
+
+function renderCoalitionVoterMapTerritoryAdminPanel(
+  coalition,
+  membership,
+  access,
+  workspace,
+) {
+  const assignments =
+    workspace?.assignments || createCoalitionTerritoryAssignmentsState();
+  const admin = workspace?.territoryAdmin || createCoalitionTerritoryAdminState();
+  const activeTab = normalizeString(admin.activeTab) || "wizard";
+  const territories = access?.territories || [];
+  const assignmentCount = territories.reduce(
+    (total, territory) => total + (Number(territory.assignmentCount) || 0),
+    0,
+  );
+  const canManage = access.canManageTerritories === true || membership?.isAdmin;
+  let activeBody = "";
+  if (activeTab === "editor") {
+    activeBody = renderCoalitionTerritoryEditor(access, admin);
+  } else if (activeTab === "assignments") {
+    activeBody = renderCoalitionTerritoryAssignmentAdmin(access, assignments);
+  } else {
+    activeBody = renderCoalitionTerritoryWizard(admin);
+  }
+  return `<div class="shared-coalition-territory-admin-page">
+    <article class="shared-coalition-panel shared-coalition-territory-admin-hero">
+      <div class="shared-coalition-panel__header">
+        <div>
+          <h2>Territory Admin</h2>
+          <p>Generate territory plans, edit unit membership, publish versions, and manage staff access from the browser.</p>
+        </div>
+        <button class="shared-feed-chip" type="button" data-action="coalition-voter-map-refresh"${disabledAttr(workspace.loading)}>Refresh access</button>
+      </div>
+      <div class="shared-coalition-territory-admin-metrics">
+        ${renderCoalitionMetric("Territories", formatCount(territories.length), "cyan")}
+        ${renderCoalitionMetric("Assignments", formatCount(assignmentCount))}
+        ${renderCoalitionMetric("Access token", formatCount(access.assignmentTokenVersion || 0))}
+        ${renderCoalitionMetric("Scope", humanizeLabel(access.scope || "coalition"))}
+      </div>
+    </article>
+    ${
+      !canManage
+        ? `<article class="shared-coalition-panel">
+            <div class="shared-page__empty">This coalition role can review territory coverage but cannot manage territory generation, editing, or assignments.</div>
+          </article>`
+        : `${renderCoalitionTerritoryAdminTabs(activeTab)}
+          ${renderCoalitionTerritoryAdminStatus(admin)}
+          ${activeBody}`
+    }
+    ${renderCoalitionVoterMapTerritoryPanel(workspace, access)}
+  </div>`;
 }
 
 function coalitionVoterMapColor(value, fallback = "#0f766e") {
@@ -56449,7 +63995,12 @@ function renderCoalitionVoterMapBody(
     );
   }
   if (activeSection === "territories/admin") {
-    return renderCoalitionVoterMapTerritoryPanel(workspace, access);
+    return renderCoalitionVoterMapTerritoryAdminPanel(
+      coalition,
+      membership,
+      access,
+      workspace,
+    );
   }
   if (activeSection === "scripts") {
     return renderVoterMapOutreachTemplatesWorkspace({
@@ -58324,20 +65875,72 @@ function renderMissionJobGuidance(job) {
   </div>`;
 }
 
-function renderMissionJobActionControls(job, mission) {
+function missionJobControlFlags(mission, job) {
   const detail = state.pages.missions.detail;
+  const currentUserId = normalizeString(state.auth?.user?.userId);
   const isAdmin = missionDetailViewerCanManage(detail);
   const isMine = missionJobIsMine(job);
   const isUnclaimedRoleClaim =
     job.targetMode === "role_claim" && !job.assigneeUserId;
-  const canAdminActivate = isAdmin && job.isQueued && !job.isClosed;
+  const sourceConversationId = normalizeString(mission?.source?.conversationId);
+  const leadUserId = normalizeString(mission?.leadUserId);
   const canWorkJob =
     !job.isQueued && !isUnclaimedRoleClaim && !job.isClosed && (isMine || isAdmin);
-  const canAdminIntervene = isAdmin && !job.isClosed && !job.isQueued;
+  return {
+    currentUserId,
+    isAdmin,
+    isMine,
+    isUnclaimedRoleClaim,
+    canAdminActivate: isAdmin && job.isQueued && !job.isClosed,
+    canWorkJob,
+    canAdminIntervene: isAdmin && !job.isClosed && !job.isQueued,
+    canPostUpdate: canWorkJob,
+    canAddFollowUp: !job.isClosed && !job.isQueued && (isMine || isAdmin),
+    canMessageLead: Boolean(leadUserId && (!currentUserId || leadUserId !== currentUserId)),
+    sourceConversationId,
+    leadUserId,
+  };
+}
+
+function renderMissionJobSupportMenu(mission, job, flags) {
+  if (!flags.isMine || job.isClosed) {
+    return "";
+  }
+  return `<details class="shared-mission-admin-actions shared-mission-admin-actions--support">
+    <summary>Need help</summary>
+    <div>
+      ${
+        !job.isBlocked
+          ? renderMissionJobActionButton({
+              mission,
+              job,
+              action: "block",
+              noteRequired: true,
+            })
+          : ""
+      }
+      ${renderMissionJobActionButton({
+        mission,
+        job,
+        action: "request_reassign",
+        noteRequired: true,
+      })}
+      ${renderMissionJobActionButton({
+        mission,
+        job,
+        action: "cant_do",
+        noteRequired: true,
+      })}
+    </div>
+  </details>`;
+}
+
+function renderMissionJobActionControls(job, mission) {
+  const flags = missionJobControlFlags(mission, job);
   const completionBlocker = missionJobCompletionBlocker(job);
   const actions = [];
 
-  if (canAdminActivate) {
+  if (flags.canAdminActivate) {
     actions.push(
       renderMissionJobActionButton({
         mission,
@@ -58349,7 +65952,7 @@ function renderMissionJobActionControls(job, mission) {
     );
   }
 
-  if (canWorkJob && job.status !== "submitted") {
+  if (flags.canWorkJob && job.status !== "submitted") {
     if (["active", "needs_changes", "late"].includes(job.status)) {
       actions.push(
         renderMissionJobActionButton({
@@ -58373,7 +65976,18 @@ function renderMissionJobActionControls(job, mission) {
     );
   }
 
-  if (job.status === "submitted" && isAdmin) {
+  if (flags.canPostUpdate) {
+    actions.push(
+      renderMissionJobActionButton({
+        mission,
+        job,
+        action: "post_update",
+        noteRequired: true,
+      }),
+    );
+  }
+
+  if (job.status === "submitted" && flags.isAdmin) {
     actions.push(
       renderMissionJobActionButton({
         mission,
@@ -58393,7 +66007,7 @@ function renderMissionJobActionControls(job, mission) {
     );
   }
 
-  if (job.isBlocked && isAdmin) {
+  if (job.isBlocked && flags.isAdmin) {
     actions.push(
       renderMissionJobActionButton({
         mission,
@@ -58402,7 +66016,7 @@ function renderMissionJobActionControls(job, mission) {
         direct: true,
       }),
     );
-  } else if (canAdminIntervene && job.status !== "submitted") {
+  } else if (flags.canAdminIntervene && job.status !== "submitted") {
     actions.push(
       renderMissionJobActionButton({
         mission,
@@ -58413,7 +66027,7 @@ function renderMissionJobActionControls(job, mission) {
     );
   }
 
-  if (isMine && !job.isClosed) {
+  if (flags.isMine && !job.isClosed) {
     actions.push(
       renderMissionJobActionButton({
         mission,
@@ -58424,8 +66038,18 @@ function renderMissionJobActionControls(job, mission) {
     );
   }
 
+  if (flags.canMessageLead) {
+    actions.push(
+      `<button class="shared-feed-chip" type="button" data-action="mission-message-lead" data-lead-user-id="${escapeHtml(flags.leadUserId)}">Message lead</button>`,
+    );
+  } else if (flags.sourceConversationId) {
+    actions.push(
+      `<button class="shared-feed-chip" type="button" data-action="navigate" data-route="/messages/conversations/${escapeHtml(encodeURIComponent(flags.sourceConversationId))}">Open source chat</button>`,
+    );
+  }
+
   const adminMore =
-    canAdminIntervene && !["submitted", "blocked"].includes(job.status)
+    flags.canAdminIntervene && !["submitted", "blocked"].includes(job.status)
       ? `<details class="shared-mission-admin-actions">
           <summary>More actions</summary>
           <div>
@@ -58444,18 +66068,155 @@ function renderMissionJobActionControls(job, mission) {
           </div>
         </details>`
       : "";
+  const supportMore = renderMissionJobSupportMenu(mission, job, flags);
 
-  if (!actions.length && !adminMore) {
+  if (!actions.length && !adminMore && !supportMore) {
     return "";
   }
 
   return `<div class="shared-mission-job-controls">
-    <div class="shared-mission-job-controls__actions">${actions.join("")}${adminMore}</div>
+    <div class="shared-mission-job-controls__actions">${actions.join("")}${supportMore}${adminMore}</div>
     ${completionBlocker ? `<span>${escapeHtml(completionBlocker)}</span>` : ""}
   </div>`;
 }
 
+function renderMissionArtifactControls(mission, job, flags) {
+  const detail = state.pages.missions.detail;
+  const uploadPending =
+    detail.artifactPendingKey === `${mission.missionId}:${job.jobId}:artifact-upload`;
+  const canUpload = flags.canWorkJob;
+  const artifacts = job.artifacts || [];
+  const artifactButtons = artifacts
+    .slice(0, Math.max(artifacts.length, 3))
+    .map((artifact) => {
+      const pending =
+        detail.artifactPendingKey ===
+        `${mission.missionId}:${artifact.artifactId}:artifact-open`;
+      return `<button class="shared-mission-artifact-button" type="button" data-action="mission-artifact-open" data-mission-id="${escapeHtml(mission.missionId)}" data-artifact-id="${escapeHtml(artifact.artifactId)}"${disabledAttr(pending)}>
+        ${renderIcon("download")}
+        <span>${escapeHtml(pending ? "Opening..." : artifact.fileName)}</span>
+      </button>`;
+    })
+    .join("");
+  const uploadForm = canUpload
+    ? `<form class="shared-mission-upload-form" data-route-form="mission-artifact-upload" enctype="multipart/form-data">
+        <input type="hidden" name="missionId" value="${escapeHtml(mission.missionId)}" />
+        <input type="hidden" name="jobId" value="${escapeHtml(job.jobId)}" />
+        <label>
+          <span>${escapeHtml(missionJobMissingRequiredUpload(job) ? "Required file" : "Add file")}</span>
+          <input type="file" name="artifactFile"${disabledAttr(uploadPending)} required />
+        </label>
+        <button class="shared-feed-chip${missionJobMissingRequiredUpload(job) ? " shared-feed-chip--primary" : ""}" type="submit"${disabledAttr(uploadPending)}>${escapeHtml(uploadPending ? "Uploading..." : missionJobMissingRequiredUpload(job) ? "Upload required file" : "Upload")}</button>
+      </form>`
+    : "";
+  if (!artifactButtons && !uploadForm) {
+    return "";
+  }
+  return `<div class="shared-mission-artifacts">
+    ${job.artifactCount ? `<strong>${escapeHtml(formatCount(job.artifactCount))} file${job.artifactCount === 1 ? "" : "s"}</strong>` : ""}
+    ${artifactButtons}
+    ${uploadForm}
+  </div>`;
+}
+
+function renderMissionFollowUpForm(mission, job, flags) {
+  if (!flags.canAddFollowUp) {
+    return "";
+  }
+  const detail = state.pages.missions.detail;
+  const pendingKey = `${mission.missionId}:${job.jobId}:follow-up`;
+  const pending = detail.followUpPendingKey === pendingKey;
+  const defaultTitle = `${job.title} follow-up`;
+  return `<details class="shared-mission-follow-up">
+    <summary>${renderIcon("create")} <span>Add follow-up</span></summary>
+    <form class="shared-mission-follow-up-form" data-route-form="mission-follow-up-create">
+      <input type="hidden" name="missionId" value="${escapeHtml(mission.missionId)}" />
+      <input type="hidden" name="parentJobId" value="${escapeHtml(job.jobId)}" />
+      <label class="is-wide">
+        <span>Title</span>
+        <input name="title" value="${escapeHtml(defaultTitle)}" maxlength="140"${disabledAttr(pending)} required />
+      </label>
+      <label>
+        <span>Owner mode</span>
+        <select name="targetMode"${disabledAttr(pending)}>
+          <option value="user">User</option>
+          <option value="role_claim">Claim</option>
+          <option value="role_fanout">Fan-out</option>
+        </select>
+      </label>
+      <label>
+        <span>Owner</span>
+        <input name="assignee" placeholder="@username or role key"${disabledAttr(pending)} required />
+      </label>
+      <label>
+        <span>Priority</span>
+        <select name="priority"${disabledAttr(pending)}>
+          <option value="normal"${selectedAttr(job.priority === "normal")}>Normal</option>
+          <option value="high"${selectedAttr(job.priority === "high")}>High</option>
+          <option value="urgent"${selectedAttr(job.priority === "urgent")}>Urgent</option>
+          <option value="low"${selectedAttr(job.priority === "low")}>Low</option>
+        </select>
+      </label>
+      <label>
+        <span>Starts when</span>
+        <select name="startWhen"${disabledAttr(pending)}>
+          <option value="parent_completed">Parent completed</option>
+          <option value="parent_approved">Parent approved</option>
+          <option value="artifact_uploaded">Parent file uploaded</option>
+          <option value="time_reached">Scheduled time</option>
+        </select>
+      </label>
+      <label>
+        <span>Start delay hours</span>
+        <input name="startDelayHours" type="number" min="1" step="1" value="6"${disabledAttr(pending)} />
+      </label>
+      <label>
+        <span>Done when</span>
+        <select name="presetKey"${disabledAttr(pending)}>
+          ${MISSION_PRESETS.map(
+            (preset) =>
+              `<option value="${escapeHtml(preset.key)}"${selectedAttr(preset.key === "general")}>${escapeHtml(preset.label)}</option>`,
+          ).join("")}
+        </select>
+      </label>
+      <label>
+        <span>Deadline</span>
+        <select name="deadlineMode"${disabledAttr(pending)}>
+          <option value="indefinite">No deadline</option>
+          <option value="duration_after_activation">After activation</option>
+          <option value="due_at">Fixed from now</option>
+        </select>
+      </label>
+      <label>
+        <span>Hours</span>
+        <input name="dueHours" type="number" min="0" step="1" placeholder="48"${disabledAttr(pending)} />
+      </label>
+      <label>
+        <span>Timeout</span>
+        <select name="timeoutPolicy"${disabledAttr(pending)}>
+          <option value="escalate">Escalate</option>
+          <option value="auto_unassign">Auto-unassign</option>
+          <option value="auto_fail">Auto-fail</option>
+          <option value="none">None</option>
+        </select>
+      </label>
+      <label>
+        <span>Grace hours</span>
+        <input name="timeoutHours" type="number" min="0" step="1" placeholder="24"${disabledAttr(pending)} />
+      </label>
+      <label class="is-full">
+        <span>Description</span>
+        <textarea name="description" rows="3"${disabledAttr(pending)}></textarea>
+      </label>
+      <div class="shared-mission-follow-up-form__actions">
+        <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(pending)}>${escapeHtml(pending ? "Adding..." : "Add follow-up task")}</button>
+      </div>
+    </form>
+  </details>`;
+}
+
 function renderMissionJobPanel(job, mission, jobsById) {
+  const flags = missionJobControlFlags(mission, job);
   const parent = job.parentJobId ? jobsById.get(job.parentJobId) : null;
   const meta = [
     humanizeLabel(job.priority),
@@ -58480,14 +66241,8 @@ function renderMissionJobPanel(job, mission, jobsById) {
     ${renderMissionJobGuidance(job)}
     ${renderMissionJobActionControls(job, mission)}
     ${renderMissionJobActionDraft(job, mission)}
-    ${
-      job.artifactCount
-        ? `<div class="shared-mission-artifacts"><strong>${escapeHtml(formatCount(job.artifactCount))} artifact${job.artifactCount === 1 ? "" : "s"}</strong>${job.artifacts
-            .slice(0, 3)
-            .map((artifact) => `<span>${escapeHtml(artifact.fileName)}</span>`)
-            .join("")}</div>`
-        : ""
-    }
+    ${renderMissionArtifactControls(mission, job, flags)}
+    ${renderMissionFollowUpForm(mission, job, flags)}
   </article>`;
 }
 
@@ -58594,7 +66349,7 @@ function renderMissionDetailPage() {
             <div class="shared-mission-source">
               <span>${escapeHtml(humanizeLabel(mission.scopeType) || "Workspace")}</span>
               <strong>${escapeHtml(missionScopeDisplayName(mission))}</strong>
-              ${mission.source?.conversationId ? `<button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(buildMessagingServerRoute(mission.scopeType === "candidate" ? "candidate" : mission.scopeType, mission.scopeId))}">Open room</button>` : ""}
+              ${mission.source?.conversationId ? `<button class="shared-feed-chip" data-action="navigate" data-route="/messages/conversations/${escapeHtml(encodeURIComponent(normalizeString(mission.source.conversationId)))}">Open source chat</button>` : `<button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(buildMessagingServerRoute(mission.scopeType === "candidate" ? "candidate" : mission.scopeType, mission.scopeId))}">Open workspace rooms</button>`}
             </div>
           </section>
         </aside>
@@ -59516,48 +67271,229 @@ function renderEventsListPage() {
   </section>`;
 }
 
+function normalizeManageEventsStatus(value) {
+  const normalized = normalizeString(value).toLowerCase();
+  return normalized === "previous" || normalized === "archived"
+    ? "previous"
+    : "active";
+}
+
+function manageEventsStatusLabel(value) {
+  return normalizeManageEventsStatus(value) === "previous"
+    ? "Previous"
+    : "Active";
+}
+
+function manageEventsStatusRoute(value) {
+  const status = normalizeManageEventsStatus(value);
+  return status === "previous"
+    ? "/manage-events?status=previous"
+    : "/manage-events";
+}
+
+function manageEventSummary(items = []) {
+  return items.reduce(
+    (summary, event) => {
+      summary.total += 1;
+      summary.attending += Number(event.attendeeCount) || 0;
+      summary.interested += Number(event.interestedCount) || 0;
+      if (event.imageUrl) summary.withCovers += 1;
+      if (Number.isFinite(Number(event.lat)) && Number.isFinite(Number(event.lng))) {
+        summary.mapReady += 1;
+      }
+      if (eventRequiresPayment(event)) summary.paid += 1;
+      if (event.transportEnabled) summary.transport += 1;
+      if (eventIsSoon(event)) summary.soon += 1;
+      return summary;
+    },
+    {
+      total: 0,
+      attending: 0,
+      interested: 0,
+      withCovers: 0,
+      mapReady: 0,
+      paid: 0,
+      transport: 0,
+      soon: 0,
+    },
+  );
+}
+
+function renderManageEventsMetric(label, value, detail = "") {
+  return `<div>
+    <span>${escapeHtml(label)}</span>
+    <strong>${escapeHtml(value)}</strong>
+    ${detail ? `<small>${escapeHtml(detail)}</small>` : ""}
+  </div>`;
+}
+
+function manageEventTimeRange(event = {}) {
+  const start = eventStartTimestamp(event);
+  const end = eventEndTimestamp(event);
+  if (!start) {
+    return "Date pending";
+  }
+  const startLabel = eventDateLabel(event);
+  if (!end || end === start) {
+    return startLabel;
+  }
+  return `${startLabel} - ${new Date(end).toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  })}`;
+}
+
+function manageEventContactLabel(event = {}) {
+  return normalizeString(
+    event.raw?.socials?.email ||
+      event.raw?.email ||
+      event.raw?.contactEmail ||
+      event.raw?.contact_email,
+  );
+}
+
+function manageEventReadiness(event = {}) {
+  const mapReady =
+    Number.isFinite(Number(event.lat)) && Number.isFinite(Number(event.lng));
+  const contact = manageEventContactLabel(event);
+  return [
+    ["Cover", event.imageUrl ? "Ready" : "Missing", Boolean(event.imageUrl)],
+    ["Map", mapReady ? "Ready" : "Needs coordinates", mapReady],
+    ["Contact", contact ? contact : "Missing", Boolean(contact)],
+    ["Signup", eventRequiresPayment(event) ? "Paid checkout" : "Free RSVP", true],
+  ];
+}
+
+function renderManageEventReadiness(event = {}) {
+  return `<div class="shared-manage-event-card__readiness">
+    ${manageEventReadiness(event)
+      .map(
+        ([label, value, ready]) => `<span class="${ready ? "is-ready" : "is-missing"}">
+          <strong>${escapeHtml(label)}</strong>
+          <em>${escapeHtml(value)}</em>
+        </span>`,
+      )
+      .join("")}
+  </div>`;
+}
+
+function renderManageEventCard(event) {
+  const tags = event.tags.slice(0, 5);
+  const isPrevious = eventIsPast(event);
+  const statusLabel = isPrevious ? "Previous" : eventIsSoon(event) ? "Soon" : "Active";
+  return `<article class="shared-manage-event-card">
+    <div class="shared-manage-event-card__media">
+      ${
+        event.imageUrl
+          ? `<img src="${escapeHtml(event.imageUrl)}" alt="${escapeHtml(event.title)}" />`
+          : `<div>${renderIcon("calendar")}<span>Cover needed</span></div>`
+      }
+    </div>
+    <div class="shared-manage-event-card__body">
+      <div class="shared-card__meta">
+        <span>${escapeHtml(statusLabel)}</span>
+        <span>${escapeHtml(manageEventTimeRange(event))}</span>
+        <span>${escapeHtml(eventCostLabel(event))}</span>
+      </div>
+      <h3>${escapeHtml(event.title)}</h3>
+      <p>${escapeHtml(event.description || event.address || "Event details are being finalized.")}</p>
+      <div class="shared-manage-event-card__facts">
+        <span>${renderIcon("map")} ${escapeHtml(eventLocationLabel(event))}</span>
+        <span>${renderIcon("candidate")} ${escapeHtml(event.hostDisplayName || "Host pending")}</span>
+        <span>${renderIcon("calendar")} ${escapeHtml(event.transportEnabled ? eventTransportLabel(event) : "No transport")}</span>
+      </div>
+      <div class="shared-manage-event-card__stats">
+        <span><strong>${escapeHtml(formatCount(event.attendeeCount))}</strong><small>going</small></span>
+        <span><strong>${escapeHtml(formatCount(event.interestedCount))}</strong><small>interested</small></span>
+        <span><strong>${escapeHtml(eventCostLabel(event))}</strong><small>cost</small></span>
+      </div>
+      ${renderManageEventReadiness(event)}
+      ${
+        tags.length
+          ? `<div class="shared-event-feed-card__tags">${tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")}</div>`
+          : ""
+      }
+      <div class="shared-manage-event-card__actions">
+        <button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="${escapeHtml(eventDetailRoute(event))}">Open</button>
+        <button class="shared-feed-chip" data-action="navigate" data-route="/manage-events/${escapeHtml(encodeURIComponent(event.eventId))}/edit">Edit</button>
+        <button class="shared-feed-chip" data-action="delete-event" data-event-id="${escapeHtml(event.eventId)}">Delete</button>
+      </div>
+    </div>
+  </article>`;
+}
+
+function renderManageEventsEmpty(status) {
+  const previous = normalizeManageEventsStatus(status) === "previous";
+  return `<article class="shared-manage-events-empty">
+    <div>${renderIcon("calendar")}</div>
+    <h2>${escapeHtml(previous ? "No previous events yet" : "No active events yet")}</h2>
+    <p>${escapeHtml(
+      previous
+        ? "Events move here after they end. Keep the active tab focused on what still needs attendance, edits, and map details."
+        : "Create the first event to publish a detail page, RSVP path, map location, contact details, and attendee tracking.",
+    )}</p>
+    <div class="shared-card__actions">
+      <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="/manage-events/new">Create event</button>
+      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/events">Public events</button>
+    </div>
+  </article>`;
+}
+
 function renderManageEventsPage() {
   const manage = state.pages.events.manage;
+  const status = normalizeManageEventsStatus(manage.status);
+  const statusLabel = manageEventsStatusLabel(status);
+  const summary = manageEventSummary(manage.items);
   return `<section class="shared-page">
     ${renderTopChrome()}
     <div class="shared-page__content">
       <div class="shared-page__header">
         <div>
           <p class="shared-page__eyebrow">Manage events</p>
-          <h1>Your events</h1>
-          <p>Review active and archived events, then open an edit flow or create a new event.</p>
+          <h1>Event workspace</h1>
+          <p>Publish and maintain the browser version of event discovery, detail pages, signup paths, map context, attendee counts, and paid-event handoff.</p>
         </div>
         <div class="shared-card__actions">
           <button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="/manage-events/new">Create event</button>
-          <button class="shared-feed-chip" data-action="manage-events-status" data-status="active">Active</button>
-          <button class="shared-feed-chip" data-action="manage-events-status" data-status="archived">Archived</button>
+          <button class="shared-feed-chip" data-action="navigate" data-route="/events">Public events</button>
         </div>
       </div>
+      <section class="shared-manage-events-command">
+        <div class="shared-manage-events-command__main">
+          <div class="shared-card__meta">
+            <span>${escapeHtml(statusLabel)} events</span>
+            <span>${escapeHtml(manage.loading ? "Syncing" : manage.loaded ? "Loaded" : "Ready")}</span>
+          </div>
+          <h2>${escapeHtml(status === "previous" ? "Review past turnout and clean up event history." : "Keep upcoming events ready for RSVPs and promotion.")}</h2>
+          <p>${escapeHtml(status === "previous" ? "Previous events keep attendee, interest, cost, host, and map context available for follow-up work." : "Active events need clear public details, complete signup paths, contact information, and enough readiness signals to avoid a rough handoff from the app.")}</p>
+          <div class="shared-manage-events-tabs" role="group" aria-label="Event status">
+            <button class="shared-feed-chip${status === "active" ? " shared-feed-chip--primary" : ""}" data-action="manage-events-status" data-status="active">Active</button>
+            <button class="shared-feed-chip${status === "previous" ? " shared-feed-chip--primary" : ""}" data-action="manage-events-status" data-status="previous">Previous</button>
+          </div>
+        </div>
+        <div class="shared-manage-events-command__metrics">
+          ${renderManageEventsMetric("Events", formatCount(summary.total), statusLabel)}
+          ${renderManageEventsMetric("Going", formatCount(summary.attending), "attendees")}
+          ${renderManageEventsMetric("Interested", formatCount(summary.interested), "signals")}
+          ${renderManageEventsMetric("Map ready", `${formatCount(summary.mapReady)}/${formatCount(summary.total)}`, "locations")}
+          ${renderManageEventsMetric("Covers", `${formatCount(summary.withCovers)}/${formatCount(summary.total)}`, "visuals")}
+          ${renderManageEventsMetric("Paid", formatCount(summary.paid), "checkout")}
+        </div>
+      </section>
       ${
         manage.loading
-          ? '<div class="shared-page__loading">Loading your events…</div>'
+          ? `<div class="shared-page__loading">Loading ${escapeHtml(statusLabel.toLowerCase())} events...</div>`
           : ""
       }
       ${manage.error ? `<div class="shared-page__error">${escapeHtml(manage.error)}</div>` : ""}
-      <div class="shared-card-grid">
-        ${manage.items
-          .map(
-            (event) => `<article class="shared-card">
-              <div class="shared-card__body">
-                <div class="shared-card__meta">
-                  <span>${escapeHtml(formatAbsoluteDateTime(event.startAt))}</span>
-                </div>
-                <h3>${escapeHtml(event.title)}</h3>
-                <p>${escapeHtml(event.address || event.description || "Event details")}</p>
-                <div class="shared-card__actions">
-                  <button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="/events/${escapeHtml(event.eventId)}">Open</button>
-                  <button class="shared-feed-chip" data-action="navigate" data-route="/manage-events/${escapeHtml(event.eventId)}/edit">Edit</button>
-                  <button class="shared-feed-chip" data-action="delete-event" data-event-id="${escapeHtml(event.eventId)}">Delete</button>
-                </div>
-              </div>
-            </article>`,
-          )
-          .join("")}
+      <div class="shared-manage-events-list">
+        ${
+          manage.items.length
+            ? manage.items.map(renderManageEventCard).join("")
+            : !manage.loading
+              ? renderManageEventsEmpty(status)
+              : ""
+        }
       </div>
     </div>
   </section>`;
@@ -60411,7 +68347,7 @@ function renderMessagingConversationPanel({
   const conversationComposerMarkup = !conversation
     ? ""
     : conversation.isEncrypted
-      ? renderMessagingSecureHandoff({ stacked: true })
+      ? renderMessagingSecureHandoff({ stacked: true, conversation })
       : `<form class="shared-form shared-form--inline" data-route-form="messaging-send">
           <input type="hidden" name="conversationId" value="${escapeHtml(conversation.conversationId)}" />
           <input type="text" name="text" placeholder="Write a message" />
@@ -60425,7 +68361,7 @@ function renderMessagingConversationPanel({
         <div>
           <p class="shared-page__eyebrow">${escapeHtml(conversation.kind)}</p>
           <h1>${escapeHtml(conversation.title)}</h1>
-          <p>${escapeHtml(conversation.isEncrypted ? "Encrypted conversation. Use a trusted device or the mobile app to reply securely." : conversation.subtitle || "Conversation")}</p>
+          <p>${escapeHtml(conversation.isEncrypted ? "Encrypted conversation. Use the secure browser options below to manage reply access." : conversation.subtitle || "Conversation")}</p>
         </div>
       </div>
       <div class="shared-message-list">
@@ -60474,16 +68410,7 @@ function renderMessagingPageLegacy() {
   const serverRoles = messaging.serverRoles;
   const serverMembers = messaging.serverMembers;
   const serverBans = messaging.serverBans;
-  const serverModeration = messaging.serverModeration;
-  const serverAutomod = messaging.serverAutomod;
-  const serverWorkflows = messaging.serverWorkflows;
-  const serverAudit = messaging.serverAudit;
-  const serverAssets = messaging.serverAssets;
-  const serverInvites = messaging.serverInvites;
-  const serverSecurityPolicy = messaging.serverSecurityPolicy;
   const roomMembers = messaging.roomMembers;
-  const roomInviteLinks = messaging.roomInviteLinks;
-  const roomPins = messaging.roomPins;
   const permissionBundle = messaging.permissionTarget.bundle || {};
   const permissionTarget =
     permissionBundle.target && typeof permissionBundle.target === "object"
@@ -60677,14 +68604,14 @@ function renderMessagingPageLegacy() {
         <div>
           <p class="shared-page__eyebrow">${escapeHtml(currentServer?.scopeBadge || "Workspace")}</p>
           <h1>${escapeHtml(currentServer?.title || "Workspace")}</h1>
-          <p>${escapeHtml(currentServer?.canManage ? "Manage rooms, access groups, members, and safety review from the browser." : "Browse this workspace’s rooms from the browser.")}</p>
+          <p>${escapeHtml(currentServer?.canManage ? "Manage rooms, access groups, people, and safety review from the browser." : "Browse this workspace's rooms from the browser.")}</p>
         </div>
       </div>
       <div class="shared-card__actions">
-        <button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="${escapeHtml(buildMessagingServerRoute(subroute.scopeType, subroute.scopeId, "/settings"))}">Settings</button>
-        <button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(buildMessagingServerRoute(subroute.scopeType, subroute.scopeId, "/roles"))}">Roles</button>
-        <button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(buildMessagingServerRoute(subroute.scopeType, subroute.scopeId, "/members"))}">Members</button>
-        <button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(buildMessagingServerRoute(subroute.scopeType, subroute.scopeId, "/bans"))}">Restrictions</button>
+        <button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="${escapeHtml(buildMessagingServerRoute(subroute.scopeType, subroute.scopeId, "/settings"))}">Workspace setup</button>
+        <button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(buildMessagingServerRoute(subroute.scopeType, subroute.scopeId, "/roles"))}">Access groups</button>
+        <button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(buildMessagingServerRoute(subroute.scopeType, subroute.scopeId, "/members"))}">People</button>
+        <button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(buildMessagingServerRoute(subroute.scopeType, subroute.scopeId, "/bans"))}">Blocked access</button>
       </div>
       ${
         categories.length
@@ -60784,9 +68711,9 @@ function renderMessagingPageLegacy() {
     bodyMarkup = `<div class="shared-stack">
       <div class="shared-page__header">
         <div>
-          <p class="shared-page__eyebrow">Role detail</p>
-          <h1>${escapeHtml(selectedRole?.name || "Role")}</h1>
-          <p>${escapeHtml(selectedRole?.mentionable ? "Mentionable role" : "Role detail")}</p>
+          <p class="shared-page__eyebrow">Access group detail</p>
+          <h1>${escapeHtml(selectedRole?.name || "Access group")}</h1>
+          <p>${escapeHtml(selectedRole?.mentionable ? "Can be mentioned in room messages" : "Access group details")}</p>
         </div>
       </div>
       ${renderMessagingRoleDetailPanel(subroute, serverRoles)}
@@ -60797,7 +68724,7 @@ function renderMessagingPageLegacy() {
         <div>
           <p class="shared-page__eyebrow">Members</p>
           <h1>${escapeHtml(currentServer?.title || "Members")}</h1>
-          <p>${escapeHtml("Review roles, nicknames, and moderation targets from the browser.")}</p>
+          <p>${escapeHtml("Review access groups, names, and safety context from the browser.")}</p>
         </div>
       </div>
       <form class="shared-form shared-form--inline" data-route-form="messaging-server-members-filter">
@@ -60829,9 +68756,9 @@ function renderMessagingPageLegacy() {
     bodyMarkup = `<div class="shared-stack">
       <div class="shared-page__header">
         <div>
-          <p class="shared-page__eyebrow">Moderation</p>
-          <h1>${escapeHtml(currentServer?.title || "Member restrictions")}</h1>
-          <p>${escapeHtml("Review or remove active restrictions with clear audit context.")}</p>
+          <p class="shared-page__eyebrow">Safety review</p>
+          <h1>${escapeHtml(currentServer?.title || "Blocked access")}</h1>
+          <p>${escapeHtml("Review restricted members and restore access with clear context.")}</p>
         </div>
       </div>
       ${renderMessagingBansPanel(subroute, serverBans)}
@@ -60842,7 +68769,7 @@ function renderMessagingPageLegacy() {
     subroute.view === "room-settings-section"
   ) {
     bodyMarkup = `<div class="shared-stack">
-      <article class="shared-card"><div class="shared-card__body"><div class="shared-card__meta"><span>${escapeHtml(humanizeLabel(subroute.view.replace(/^room-/, "")) || "Room settings")}</span></div><h3>${escapeHtml(conversation.item?.title || "Room")}</h3><p>${escapeHtml(conversation.item?.subtitle || "Manage members and room settings from the browser.")}</p><div class="shared-card__actions"><button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(buildMessagingRoomRoute(subroute.scopeType, subroute.scopeId, subroute.conversationId, "/settings/permissions"))}">Access</button></div></div></article>
+      <article class="shared-card"><div class="shared-card__body"><div class="shared-card__meta"><span>${escapeHtml(humanizeLabel(subroute.view.replace(/^room-/, "")) || "Room settings")}</span></div><h3>${escapeHtml(conversation.item?.title || "Room")}</h3><p>${escapeHtml(conversation.item?.subtitle || "Manage members and room settings from the browser.")}</p><div class="shared-card__actions"><button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(buildMessagingRoomRoute(subroute.scopeType, subroute.scopeId, subroute.conversationId, "/settings/permissions"))}">Room access</button></div></div></article>
       <form class="shared-form shared-form--inline" data-route-form="messaging-room-member-add">
         <input type="hidden" name="conversationId" value="${escapeHtml(subroute.conversationId)}" />
         <label><span>User ID</span><input name="userId" placeholder="User id" /></label>
@@ -60881,7 +68808,7 @@ function renderMessagingPageLegacy() {
       }
     </div>`;
   } else if (subroute.view === "unsupported") {
-    bodyMarkup = `<div class="shared-page__empty">This messaging route is not recognized by the browser shell yet.</div>`;
+    bodyMarkup = `<div class="shared-page__empty">This messaging route does not match a known workspace. Open the inbox, requests, compose, privacy, or workspace routes.</div>`;
   } else {
     bodyMarkup = `<div class="shared-page__split">
       <div class="shared-page__sidebar">
@@ -60897,12 +68824,12 @@ function renderMessagingPageLegacy() {
           <div>
             <p class="shared-page__eyebrow">Inbox</p>
             <h1>Messages</h1>
-            <p>${escapeHtml(messaging.socket.connectionState === "connected" ? "Realtime connected." : "Connecting to messaging gateway…")}</p>
+            <p>${escapeHtml(messaging.socket.connectionState === "connected" ? "Realtime connected." : "Connecting to messaging gateway...")}</p>
           </div>
         </div>
         <div class="shared-stack">${inboxButtons || '<div class="shared-page__empty">No conversations yet.</div>'}</div>
         <h2>Workspaces</h2>
-        <div class="shared-card-grid">${serverCards || '<div class="shared-page__empty">No servers available.</div>'}</div>
+        <div class="shared-card-grid">${serverCards || '<div class="shared-page__empty">No workspaces available.</div>'}</div>
       </div>
     </div>`;
   }
@@ -61188,11 +69115,11 @@ function renderMessagingWorkspaceRail(subroute) {
       </button>`;
     })
     .join("");
-  return `<aside class="shared-messaging-rail" aria-label="Messaging servers">
+  return `<aside class="shared-messaging-rail" aria-label="Messaging workspaces">
     <button class="shared-messaging-rail-button${activeScopeType ? "" : " is-active"}" title="Inbox" data-action="navigate" data-route="/messages">
       ${renderMessagingWorkspaceAvatar({ label: "Inbox", icon: "messages" })}
     </button>
-    <div class="shared-messaging-rail__servers">${serverButtons || '<div class="shared-messaging-rail__empty">No servers</div>'}</div>
+    <div class="shared-messaging-rail__servers">${serverButtons || '<div class="shared-messaging-rail__empty">No workspaces</div>'}</div>
     <button class="shared-messaging-rail-button" title="Compose" data-action="navigate" data-route="/messages/compose">
       ${renderMessagingWorkspaceAvatar({ label: "Compose", icon: "create" })}
     </button>
@@ -61238,9 +69165,9 @@ function renderMessagingWorkspaceRows(
         : emptyOptions.actions;
     return renderMessagingEmptyState({
       title: emptyOptions.title || emptyLabel,
-      body:
-        emptyOptions.body ||
-        "Start a direct message, accept a request, or open a campaign room when one becomes available.",
+    body:
+      emptyOptions.body ||
+      "Start a direct message, accept a request, or open a workspace room when one becomes available.",
       icon: emptyOptions.icon || "messages",
       actions,
       className:
@@ -61304,37 +69231,6 @@ function renderMessagingWorkspaceRows(
     .join("")}</div>`;
 }
 
-function renderMessagingWorkspaceServerCards(servers = []) {
-  if (!servers.length) {
-    return renderMessagingEmptyState({
-      title: "No servers available",
-      body: "Campaign and coalition rooms appear here after your account joins a workspace with messaging enabled.",
-      icon: "team",
-      actions:
-        '<button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="/coalitions">Find coalitions</button><button class="shared-feed-chip" type="button" data-action="navigate" data-route="/candidate-dashboard">Candidate dashboard</button>',
-      className: "shared-messaging-empty-state--compact",
-    });
-  }
-  return `<div class="shared-messaging-server-grid">${servers
-    .map(
-      (server) =>
-        `<article class="shared-messaging-server-card">
-          ${renderMessagingWorkspaceAvatar({
-            label: server.title,
-            imageUrl: server.avatarUrl,
-            className: "shared-messaging-avatar--server-card",
-          })}
-          <div>
-            <p>${escapeHtml(server.scopeBadge || "Workspace")}</p>
-            <h3>${escapeHtml(server.title || "Workspace")}</h3>
-            <span>${escapeHtml(formatCount(server.memberCount || 0))} members</span>
-          </div>
-          <button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="${escapeHtml(buildMessagingServerRoute(server.scopeType, server.scopeId))}">Open</button>
-        </article>`,
-    )
-    .join("")}</div>`;
-}
-
 function messagingServerSettingsSidebarKey(sectionId = "") {
   const normalized = messagingServerSettingsKnownSection(sectionId);
   if (!normalized) {
@@ -61370,17 +69266,17 @@ function messagingServerSettingsSidebarKey(sectionId = "") {
 function renderMessagingWorkspaceServerTools(subroute, activeView = "server") {
   const items = [
     ["server", "Rooms", "Room directory", ""],
-    ["server-settings", "Settings", "Notification defaults", "/settings"],
-    ["server-customization", "Customize", "Brand and profile", "/settings/customization"],
+    ["server-settings", "Workspace setup", "Defaults and member entry", "/settings"],
+    ["server-customization", "Profile", "Brand and presentation", "/settings/customization"],
     ["server-community", "Community", "Onboarding and joins", "/settings/community-settings"],
-    ["server-security", "Security", "Trusted devices and E2EE", "/settings/security"],
-    ["server-invites", "Invites", "Access handoffs", "/settings/invites"],
+    ["server-security", "Safety policy", "Trusted devices and encryption", "/settings/security"],
+    ["server-invites", "Invite links", "Access handoffs", "/settings/invites"],
     ["server-assets", "Assets", "Emoji and stickers", "/settings/emoji"],
-    ["server-roles", "Access", "People and room access", "/roles"],
-    ["server-members", "Members", "Roster and moderation", "/members"],
-    ["server-moderation", "Review", "Reports and held messages", "/moderation"],
-    ["server-workflows", "Automations", "Triggers and handoffs", "/workflows"],
-    ["server-bans", "Restrictions", "Blocked member access", "/bans"],
+    ["server-roles", "Access groups", "Staff and room access", "/roles"],
+    ["server-members", "People", "Members and access", "/members"],
+    ["server-moderation", "Safety review", "Reports and held messages", "/moderation"],
+    ["server-workflows", "Automations", "Routing and handoffs", "/workflows"],
+    ["server-bans", "Blocked access", "Restrictions and restores", "/bans"],
   ];
   return `<div class="shared-messaging-list shared-messaging-server-tools">${items
     .map(([key, title, subtitle, suffix]) => {
@@ -61592,7 +69488,7 @@ function renderMessagingRoleDetailPanel(subroute, rolesState) {
   }
   if (!role?.roleId) {
     return `${rolesState.error ? `<div class="shared-page__error">${escapeHtml(rolesState.error)}</div>` : ""}
-      <div class="shared-messaging-empty">Role detail is unavailable.</div>`;
+      <div class="shared-messaging-empty">Access group details are unavailable.</div>`;
   }
   const locked = messagingRoleLocked(role);
   const updatePending = rolesState.actionPendingKey === `${role.roleId}:update`;
@@ -61818,7 +69714,7 @@ function renderMessagingServerMembersPanel(subroute, membersState) {
     <div class="shared-messaging-members-panel__header">
       <div>
         <h3>Member roster</h3>
-        <p>Find members, review role context, and open moderation detail without leaving the server workspace.</p>
+        <p>Find members, review access groups, and open safety context without leaving the workspace.</p>
       </div>
       <button class="shared-feed-chip" type="button" data-action="refresh-current-route"${disabledAttr(membersState.loading)}>Refresh</button>
     </div>
@@ -61827,7 +69723,7 @@ function renderMessagingServerMembersPanel(subroute, membersState) {
     ${membersState.error ? `<div class="shared-page__error">${escapeHtml(membersState.error)}</div>` : ""}
     ${
       loading
-        ? '<div class="shared-page__loading">Loading server members...</div>'
+        ? '<div class="shared-page__loading">Loading workspace members...</div>'
         : `<div class="shared-messaging-member-grid">${
             members.length
               ? members
@@ -61898,27 +69794,27 @@ function renderMessagingServerMemberPanel(subroute, memberState) {
     <section class="shared-messaging-member-section">
       <div>
         <h3>Access source</h3>
-        <p>Where this member entered the campaign or coalition server.</p>
+        <p>Where this member entered the campaign or coalition workspace.</p>
       </div>
       <div class="shared-messaging-member-chip-cloud">${renderMessagingMemberSourceChips(member.sourceTags)}</div>
     </section>
     <section class="shared-messaging-member-section shared-messaging-member-section--danger">
       <div>
         <h3>Moderation action</h3>
-        <p>Ban keeps the action auditable and moves the user into server restrictions.</p>
+        <p>Restriction keeps the action reviewable and moves the person into workspace restrictions.</p>
       </div>
       <form class="shared-messaging-member-ban-form" data-route-form="messaging-member-ban">
         <input type="hidden" name="scopeType" value="${escapeHtml(subroute.scopeType)}" />
         <input type="hidden" name="scopeId" value="${escapeHtml(subroute.scopeId)}" />
         <input type="hidden" name="userId" value="${escapeHtml(member.userId)}" />
         <label>
-          <span>Ban reason</span>
+          <span>Restriction reason</span>
           <textarea name="reason" rows="3" placeholder="Add a concise moderation note"${disabledAttr(banPending)}></textarea>
         </label>
         <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(banPending)}>${banPending ? "Restricting..." : "Restrict member"}</button>
       </form>
       <div class="shared-messaging-member-danger-actions">
-        <button class="shared-feed-chip shared-messaging-member-danger-button" type="button" data-action="messaging-member-remove" data-scope-type="${escapeHtml(subroute.scopeType)}" data-scope-id="${escapeHtml(subroute.scopeId)}" data-user-id="${escapeHtml(member.userId)}"${disabledAttr(removePending)}>${removePending ? "Removing..." : "Remove from server"}</button>
+        <button class="shared-feed-chip shared-messaging-member-danger-button" type="button" data-action="messaging-member-remove" data-scope-type="${escapeHtml(subroute.scopeType)}" data-scope-id="${escapeHtml(subroute.scopeId)}" data-user-id="${escapeHtml(member.userId)}"${disabledAttr(removePending)}>${removePending ? "Removing..." : "Remove from workspace"}</button>
         <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(buildMessagingServerRoute(subroute.scopeType, subroute.scopeId, "/members"))}">Back to members</button>
       </div>
     </section>
@@ -61939,7 +69835,7 @@ function messagingBanRisk(ban = {}) {
     return ["reported", "Report linked", "Member escalation"];
   }
   if (/(spam|scam|bot|automod|keyword|block)/u.test(`${reason} ${source}`)) {
-    return ["automod", "Automod", "Rule or keyword action"];
+    return ["automod", "Guardrail", "Rule or keyword action"];
   }
   return ["standard", "Restricted", "Manual restriction"];
 }
@@ -62020,7 +69916,7 @@ function renderMessagingBanCard(ban, subroute, pendingKey = "") {
       <div>
         <small>Source</small>
         <strong>${escapeHtml(messagingBanSourceLabel(ban))}</strong>
-        <span>${escapeHtml(ban.bannedAt ? formatAbsoluteDateTime(ban.bannedAt) : "Audit time unavailable")}</span>
+        <span>${escapeHtml(ban.bannedAt ? formatAbsoluteDateTime(ban.bannedAt) : "Recorded time unavailable")}</span>
       </div>
     </div>
     ${meta.length ? `<div class="shared-messaging-ban-card__meta">${meta.map((entry) => `<small>${escapeHtml(entry)}</small>`).join("")}</div>` : ""}
@@ -62034,7 +69930,7 @@ function renderMessagingBanCard(ban, subroute, pendingKey = "") {
 function renderMessagingBansPanel(subroute, bansState) {
   const bans = Array.isArray(bansState.items) ? bansState.items : [];
   if (bansState.loading && !bansState.loaded) {
-    return '<div class="shared-page__loading">Loading member restrictions...</div>';
+    return '<div class="shared-page__loading">Loading blocked access...</div>';
   }
   const highRiskCount = bans.filter(
     (ban) => messagingBanRisk(ban)[0] === "high",
@@ -62044,9 +69940,9 @@ function renderMessagingBansPanel(subroute, bansState) {
   return `<section class="shared-messaging-ban-panel">
     <div class="shared-messaging-ban-hero">
       <div>
-        <span>Restriction center</span>
+        <span>Blocked access</span>
         <h3>Restricted members</h3>
-        <p>Review who is blocked from this server, why the restriction exists, and whether access can be restored.</p>
+        <p>Review who is blocked from this workspace, why the restriction exists, and whether access can be restored.</p>
       </div>
       <div class="shared-messaging-ban-hero__signals">
         <div><strong>${escapeHtml(formatCount(bans.length))}</strong><span>active</span></div>
@@ -62055,7 +69951,7 @@ function renderMessagingBansPanel(subroute, bansState) {
       </div>
     </div>
     <div class="shared-messaging-ban-summary">
-      <div><strong>${escapeHtml(formatCount(bans.length))}</strong><span>Restrictions</span><small>Currently blocked</small></div>
+      <div><strong>${escapeHtml(formatCount(bans.length))}</strong><span>Blocked access</span><small>Currently blocked</small></div>
       <div><strong>${escapeHtml(formatCount(reportedCount))}</strong><span>Reports</span><small>Linked escalations</small></div>
       <div><strong>${escapeHtml(formatCount(reviewCount))}</strong><span>Review path</span><small>Timed or scheduled</small></div>
       <div><strong>${escapeHtml(formatCount(Math.max(0, bans.length - highRiskCount)))}</strong><span>Standard</span><small>Manual restores</small></div>
@@ -62135,15 +70031,15 @@ function renderMessagingAutomodRuleCard(rule, subroute, pendingKey = "") {
     <div class="shared-messaging-automod-rule__top">
       <span class="shared-messaging-automod-rule__action is-${escapeHtml(action)}">${escapeHtml(actionLabel)}</span>
       <div>
-        <strong>${escapeHtml(rule.name || "Automod rule")}</strong>
+        <strong>${escapeHtml(rule.name || "Keyword guardrail")}</strong>
         <small>${escapeHtml(enabled ? actionDescription : "Disabled rule")}</small>
       </div>
     </div>
-    <div class="shared-messaging-automod-rule__keywords" aria-label="Automod keywords">${keywordMarkup}</div>
+    <div class="shared-messaging-automod-rule__keywords" aria-label="Keyword guardrail terms">${keywordMarkup}</div>
     ${meta.length ? `<div class="shared-messaging-automod-rule__meta">${meta.map((entry) => `<span>${escapeHtml(entry)}</span>`).join("")}</div>` : ""}
     <div class="shared-messaging-automod-rule__actions">
       <button class="shared-feed-chip" type="button" data-action="messaging-automod-rule-toggle" data-scope-type="${escapeHtml(subroute.scopeType)}" data-scope-id="${escapeHtml(subroute.scopeId)}" data-rule-id="${escapeHtml(ruleId)}" data-enabled="${enabled ? "false" : "true"}"${disabledAttr(pending)}>${pendingToggle ? "Saving..." : enabled ? "Disable" : "Enable"}</button>
-      <button class="shared-feed-chip shared-messaging-automod-rule__delete" type="button" data-action="messaging-automod-rule-delete" data-scope-type="${escapeHtml(subroute.scopeType)}" data-scope-id="${escapeHtml(subroute.scopeId)}" data-rule-id="${escapeHtml(ruleId)}"${disabledAttr(pending)}>${pendingDelete ? "Deleting..." : "Delete"}</button>
+      <button class="shared-feed-chip shared-messaging-automod-rule__delete" type="button" data-action="messaging-automod-rule-delete" data-scope-type="${escapeHtml(subroute.scopeType)}" data-scope-id="${escapeHtml(subroute.scopeId)}" data-rule-id="${escapeHtml(ruleId)}"${disabledAttr(pending)}>${pendingDelete ? "Removing..." : "Remove"}</button>
     </div>
   </article>`;
 }
@@ -62193,7 +70089,7 @@ function renderMessagingAutomodRulesPanel(subroute, automodState) {
   ).length;
   const loading = automodState.loading && !automodState.loaded;
   const ruleList = loading
-    ? '<div class="shared-page__loading">Loading automod rules...</div>'
+    ? '<div class="shared-page__loading">Loading keyword guardrails...</div>'
     : rules.length
       ? `<div class="shared-messaging-automod-list">${rules
           .map((rule) =>
@@ -62204,12 +70100,12 @@ function renderMessagingAutomodRulesPanel(subroute, automodState) {
             ),
           )
           .join("")}</div>`
-      : '<div class="shared-messaging-empty">No automod rules configured.</div>';
+      : '<div class="shared-messaging-empty">No keyword guardrails configured.</div>';
   return `<section class="shared-messaging-automod-panel">
     <div class="shared-messaging-automod-panel__header">
       <div>
         <span>Guardrails</span>
-        <h3>Automod rules</h3>
+        <h3>Keyword guardrails</h3>
         <p>Catch high-risk keywords before they turn into unresolved reports.</p>
       </div>
       <span>${escapeHtml(formatCount(enabledCount))} active</span>
@@ -62423,8 +70319,8 @@ function renderMessagingWorkflowCreateForm(subroute, workflowState) {
       </select>
     </label>
     <label data-messaging-workflow-action-field="webhook" hidden>
-      <span>Webhook URL</span>
-      <input name="webhookUrl" type="url" placeholder="https://example.com/hook"${disabledAttr(creating)} />
+      <span>Connected URL</span>
+      <input name="webhookUrl" type="url" placeholder="https://example.com/notify"${disabledAttr(creating)} />
     </label>
     <label data-messaging-workflow-action-field="message" hidden>
       <span>Room message</span>
@@ -62465,13 +70361,13 @@ function renderMessagingWorkflowsPanel(subroute, workflowState) {
             ),
           )
           .join("")}</div>`
-      : '<div class="shared-messaging-empty">No automations are configured yet. Create one to route reports, keyword alerts, welcome messages, scheduled room updates, or webhooks.</div>';
+      : '<div class="shared-messaging-empty">No automations are configured yet. Create one to route reports, keyword alerts, welcome messages, scheduled room updates, or external handoffs.</div>';
   return `<section class="shared-messaging-workflow-panel">
     <div class="shared-messaging-workflow-hero">
       <div>
         <span>Automation center</span>
         <h3>Room automations</h3>
-        <p>Keep room operations moving by routing keyword matches, reports, joins, schedules, and webhooks without leaving the web app.</p>
+        <p>Keep room operations moving by routing keyword matches, reports, joins, schedules, and external handoffs without leaving the web app.</p>
       </div>
       <div class="shared-messaging-workflow-metrics">
         <div><strong>${escapeHtml(formatCount(activeCount))}</strong><span>live</span></div>
@@ -62568,7 +70464,7 @@ function messagingModerationTaskPriority(task) {
   if (task.ruleId || /(auto|keyword|hold|block)/u.test(source)) {
     return {
       key: "held",
-      label: "Held by automod",
+      label: "Held by guardrail",
       detail: "Keyword guardrail match",
     };
   }
@@ -62603,7 +70499,7 @@ function renderMessagingModerationSummary(tasks, activeStatus, automodState = {}
       formatCount(tasks.filter((task) => task.reportId).length),
       "Member escalations",
     ],
-    ["Guardrails", formatCount(activeRules), "Active automod"],
+    ["Guardrails", formatCount(activeRules), "Active guardrails"],
   ];
   return `<div class="shared-messaging-moderation-summary">${metrics
     .map(
@@ -62627,7 +70523,7 @@ function renderMessagingModerationHero(tasks, activeStatus, automodState) {
     <div>
       <span>Moderation center</span>
       <h3>Review queue</h3>
-      <p>Resolve held messages, member reports, and automod catches without leaving the server workspace.</p>
+      <p>Resolve held messages, member reports, and keyword guardrail catches without leaving the workspace.</p>
     </div>
     <div class="shared-messaging-moderation-hero__signals">
       <div><strong>${escapeHtml(formatCount(openCount))}</strong><span>open</span></div>
@@ -62776,17 +70672,17 @@ function renderMessagingModerationPanel(subroute, moderationState, automodState)
 
 function renderMessagingWorkspaceSettingsNav(activeView = "settings") {
   const items = [
-    ["settings", "Privacy", "/messages/settings"],
-    ["devices", "Devices", "/messages/devices"],
-    ["device-link", "Device link", "/messages/devices/link"],
-    ["recovery", "Recovery", "/messages/recovery"],
-    ["security", "Security activity", "/messages/security-activity"],
+    ["settings", "Privacy", "Message privacy and availability", "/messages/settings"],
+    ["devices", "Devices", "Trusted browsers and phones", "/messages/devices"],
+    ["device-link", "Device link", "Connect another device", "/messages/devices/link"],
+    ["recovery", "Recovery", "Backup access keys", "/messages/recovery"],
+    ["security", "Security activity", "Recent sign-ins and changes", "/messages/security-activity"],
   ];
   return `<div class="shared-messaging-list">${items
     .map(
-      ([key, label, route]) =>
+      ([key, label, subtitle, route]) =>
         `<button class="shared-messaging-row${key === activeView ? " is-active" : ""}" data-action="navigate" data-route="${escapeHtml(route)}">
-          <span class="shared-messaging-row__body"><strong>${escapeHtml(label)}</strong><span>${escapeHtml(route.replace(/^\/messages\/?/, "") || "inbox")}</span></span>
+          <span class="shared-messaging-row__body"><strong>${escapeHtml(label)}</strong><span>${escapeHtml(subtitle)}</span></span>
         </button>`,
     )
     .join("")}</div>`;
@@ -63049,7 +70945,7 @@ function renderMessagingWorkspaceChannelRows(directory, subroute, activeConversa
         subroute.scopeId,
         channel.conversationId,
       ),
-    "No rooms are available for this server yet.",
+    "No rooms are available for this workspace yet.",
     {
       body: "Rooms will appear here when this workspace publishes channels you can access.",
       actions: "",
@@ -63103,12 +70999,12 @@ const MESSAGING_DIRECTORY_ROOM_TYPE_OPTIONS = [
   {
     value: "public_within_scope",
     label: "Public room",
-    description: "Visible to members who can access this server.",
+    description: "Visible to members who can access this workspace.",
   },
   {
     value: "announcement_only",
     label: "Announcement room",
-    description: "Only server managers can post new messages.",
+    description: "Only workspace managers can post new messages.",
   },
 ];
 
@@ -63706,7 +71602,7 @@ function renderMessagingRoomNotificationForm(subroute, notificationLevel) {
     [
       "inherit",
       "Inherit server default",
-      "Use the notification level configured for this server.",
+      "Use the notification level configured for this workspace.",
     ],
     ["all", "All activity", "Receive notifications for every message."],
     ["mentions", "Mentions only", "Notify only when you are mentioned."],
@@ -64254,7 +72150,7 @@ function messagingServerSettingsGroups(serverSettings) {
     {
       key: "userManagement",
       title: "People and safety",
-      subtitle: "Access groups, members, reports, restrictions, and review tools.",
+      subtitle: "Access groups, people, reports, blocked access, and review tools.",
     },
   ];
   return groups
@@ -64319,7 +72215,7 @@ function messagingServerSettingsItemPresentation(item = {}) {
     },
     integrations: {
       title: "Connected automations",
-      description: "External handoffs, webhooks, and automation links.",
+      description: "External handoffs, connected destinations, and automation links.",
     },
     emoji: {
       title: "Custom emoji",
@@ -65136,8 +73032,8 @@ function renderMessagingServerSecurityPolicyForm({
           saving
             ? "Saving security policy..."
             : canManage
-              ? "Trusted-device and E2EE changes apply to protected server actions."
-              : "You need server management access to change security policy.",
+              ? "Trusted-device and E2EE changes apply to protected workspace actions."
+              : "You need workspace management access to change security policy.",
         )}</span>
         <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(disabled)}>${saving ? "Saving..." : "Save policy"}</button>
       </div>
@@ -65224,14 +73120,14 @@ function renderMessagingServerCustomizationForm({
           ${renderMessagingServerSettingsToggle({
             name: "discoverable",
             label: "List in discovery",
-            description: "Allow public standalone servers to appear in discovery surfaces.",
+            description: "Allow public standalone workspaces to appear in discovery surfaces.",
             checked: discoverable,
             disabled,
           })}`
         : ""
     }
     <div class="shared-messaging-server-settings-editor__footer">
-      <span>${escapeHtml(!canManage ? "Manager access is required to edit this server." : busy ? "Saving server presentation..." : "Updates sync to the app server profile.")}</span>
+    <span>${escapeHtml(!canManage ? "Manager access is required to edit this workspace." : busy ? "Saving workspace profile..." : "Updates sync to the app workspace profile.")}</span>
       <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(disabled)}>${pendingKey === "settings:customization" ? "Saving..." : "Save profile"}</button>
     </div>
   </form>`;
@@ -65274,14 +73170,14 @@ function renderMessagingServerCommunityForm({
     ${renderMessagingServerSettingsToggle({
       name: "communityEnabled",
       label: "Enable community access",
-      description: "Expose the managed welcome and rules experience for this server.",
+      description: "Expose the managed welcome and rules experience for this workspace.",
       checked: communityEnabled,
       disabled,
     })}
     ${renderMessagingServerSettingsToggle({
       name: "communityInvitesEnabled",
       label: "Allow manager invites",
-      description: "Permit server managers to invite Polis users into the community.",
+      description: "Permit workspace managers to invite Polis users into the community.",
       checked: communityInvitesEnabled,
       disabled,
     })}
@@ -65386,7 +73282,7 @@ function renderMessagingServerInviteForm({
       <input name="inviteeUserId" autocomplete="off" placeholder="user_..."${disabledAttr(disabled)} />
     </label>
     <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(disabled)}>${pendingKey === "invite:create" ? "Sending..." : "Send invite"}</button>
-    <span>${escapeHtml(blockedReason || (busy ? "Sending invite..." : "Invite a Polis user directly into this server community."))}</span>
+    <span>${escapeHtml(blockedReason || (busy ? "Sending invite..." : "Invite a Polis user directly into this workspace community."))}</span>
   </form>`;
 }
 
@@ -65676,7 +73572,6 @@ function renderMessagingServerSettingsChannels(
   const categories = Array.isArray(directory?.categories)
     ? directory.categories.filter((category) => messagingDirectoryCategoryId(category))
     : [];
-  const channels = Array.isArray(directory?.channels) ? directory.channels : [];
   const canManage =
     directory?.canManage === true ||
     state.pages.messaging.serverSettings.item?.server?.canManage === true;
@@ -65991,16 +73886,16 @@ function renderMessagingServerSettingsKnownSection({
       badge: "Review tools",
       actions: renderMessagingServerSettingsActionRow([
         { label: "Open moderation", route: buildMessagingServerRoute(subroute.scopeType, subroute.scopeId, "/moderation") },
-        { label: "Restrictions", route: buildMessagingServerRoute(subroute.scopeType, subroute.scopeId, "/bans") },
+        { label: "Blocked access", route: buildMessagingServerRoute(subroute.scopeType, subroute.scopeId, "/bans") },
         { label: "Overview", route: overviewRoute },
       ]),
       body: `${renderMessagingServerSettingsFieldGrid([
         { label: "Reports", value: readMessagingServerSettingsValue(sources, ["reportCount", "reportsCount", "pendingReports"]) || "0" },
         { label: "Held messages", value: readMessagingServerSettingsValue(sources, ["heldCount", "queueCount", "pendingCount"]) || "0" },
-        { label: "Automod", value: messagingServerSettingsFlag(readMessagingServerSettingsValue(sources, ["automodEnabled", "autoModEnabled"]), "Not configured") },
+        { label: "Keyword guardrails", value: messagingServerSettingsFlag(readMessagingServerSettingsValue(sources, ["automodEnabled", "autoModEnabled"]), "Not configured") },
         { label: "Default action", value: readMessagingServerSettingsValue(sources, ["defaultAction", "action"]) },
       ])}
-      ${renderMessagingLooseCardList(moderationRows, "No moderation rows were returned from server settings.", "Moderation rule")}`,
+      ${renderMessagingLooseCardList(moderationRows, "No safety review rows were returned from workspace settings.", "Review rule")}`,
     });
   }
   if (sectionId === "audit-log") {
@@ -66288,7 +74183,7 @@ function renderMessagingServerSettingsBody({
   const loading = settingsState?.loading && !settingsState?.loaded;
   const selectedSection = normalizeString(subroute.sectionId);
   return `<div class="shared-messaging-server-settings-stack">
-    ${loading ? '<div class="shared-page__loading">Loading server settings...</div>' : ""}
+    ${loading ? '<div class="shared-page__loading">Loading workspace settings...</div>' : ""}
     ${error ? `<div class="shared-page__error">${escapeHtml(error)}</div>` : ""}
     ${renderMessagingServerSettingsHero({
       subroute,
@@ -66409,7 +74304,7 @@ function renderMessagingRoomSettingsBody(
       ${renderMessagingRoomSection({
         title: "Room handoffs",
         subtitle:
-          "Automations and webhook destinations that act inside this room.",
+          "Automations and external handoffs that act inside this room.",
         badge: `${formatCount(integrationCount)} connected`,
         actions: `<button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="${escapeHtml(buildMessagingServerRoute(subroute.scopeType, subroute.scopeId, "/workflows"))}">Manage automations</button>`,
         body: `
@@ -66758,7 +74653,6 @@ function renderMessagingPermissionEditorGroup(group, permissions, disabled) {
 function renderMessagingPermissionRoleDetail({
   selectedOverride,
   missingRoleId = "",
-  subroute,
   targetType,
   targetId,
   canManage,
@@ -67091,35 +74985,6 @@ function renderMessagingWorkspaceRequests(items = []) {
     .join("")}</div>`;
 }
 
-function messagingServiceRealtimeState(messaging) {
-  const connectionState = normalizeString(
-    messaging?.socket?.connectionState,
-  ).toLowerCase();
-  const hasRealtimeUrl = Boolean(
-    normalizeString(messaging?.bootstrap?.wsUrl) ||
-      normalizeString(runtimeConfig.messaging?.wsUrl),
-  );
-  if (!hasRealtimeUrl && messaging?.initialized) {
-    return {
-      label: "Browser mode",
-      copy: "Live refresh is unavailable in this browser session.",
-      tone: "muted",
-    };
-  }
-  if (connectionState === "connected") {
-    return {
-      label: "Live",
-      copy: "Realtime message updates are connected.",
-      tone: "ready",
-    };
-  }
-  return {
-    label: "Connecting",
-    copy: "Messages still load; live updates are reconnecting.",
-    tone: "attention",
-  };
-}
-
 function messagingServiceRecoveryLabel(messaging) {
   const recovery = messaging?.recovery || {};
   const status = recovery.status || {};
@@ -67133,159 +74998,391 @@ function messagingServiceRecoveryLabel(messaging) {
   return "Not enrolled";
 }
 
-function renderMessagingInboxCommandCenter({
+function renderMessagingInboxStat({ icon, label, value, route, tone = "" }) {
+  return `<button class="shared-messaging-inbox-stat${tone ? ` is-${escapeHtml(tone)}` : ""}" type="button" data-action="navigate" data-route="${escapeHtml(route)}">
+    <span>${renderIcon(icon)}</span>
+    <strong>${escapeHtml(formatCount(value))}</strong>
+    <small>${escapeHtml(label)}</small>
+  </button>`;
+}
+
+function renderMessagingInboxThreadPreview(conversation) {
+  if (!conversation) {
+    return `<section class="shared-messaging-inbox-thread is-empty" aria-label="Conversation preview">
+      <div class="shared-messaging-inbox-thread__empty">
+        <span>${renderIcon("messages")}</span>
+        <div>
+          <h3>No conversations yet</h3>
+          <p>Start a direct message, build a group chat, or open campaign and coalition rooms when your workspaces are ready.</p>
+        </div>
+        <div class="shared-card__actions">
+          <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="/messages/compose">${renderIcon("create")} New message</button>
+          <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/messages/requests">${renderIcon("bell")} Requests</button>
+        </div>
+      </div>
+    </section>`;
+  }
+  const currentUserId = normalizeString(state.auth.user?.userId);
+  const title = messagingConversationDisplayTitle(conversation, currentUserId);
+  const subtitle = messagingConversationDisplaySubtitle(
+    conversation,
+    currentUserId,
+  );
+  const avatarUrl = messagingConversationDisplayAvatar(
+    conversation,
+    currentUserId,
+  );
+  const kindLabel = messagingConversationKindLabel(conversation);
+  const participantCount = Number(conversation.participantCount) || 0;
+  const unreadCount = Number(conversation.unreadCount) || 0;
+  const timestampLabel = messagingConversationTimeLabel(conversation.updatedAt);
+  const absoluteTimestamp = conversation.updatedAt
+    ? formatAbsoluteDateTime(conversation.updatedAt)
+    : "";
+  const raw = conversation.raw || {};
+  const sender =
+    raw.lastMessageSender && typeof raw.lastMessageSender === "object"
+      ? raw.lastMessageSender
+      : {};
+  const previewSender =
+    normalizeString(
+      raw.lastMessageSenderDisplayName ||
+        raw.lastMessageSenderName ||
+        sender.displayName ||
+        sender.username,
+    ) || title;
+  const previewText =
+    normalizeString(
+      conversation.lastMessagePreview ||
+        raw.lastMessagePreview ||
+        raw.previewText ||
+        subtitle,
+    ) || "No recent messages.";
+  const conversationRoute = `/messages/conversations/${encodeURIComponent(
+    conversation.conversationId,
+  )}`;
+  const metaItems = [
+    kindLabel,
+    participantCount > 1 ? `${formatCount(participantCount)} people` : "",
+    unreadCount ? `${formatCount(unreadCount)} unread` : "",
+    conversation.isEncrypted ? "Encrypted" : "",
+  ].filter(Boolean);
+  return `<section class="shared-messaging-inbox-thread" aria-label="Conversation preview">
+    <header class="shared-messaging-inbox-thread__header">
+      <div class="shared-messaging-inbox-thread__identity">
+        ${renderMessagingWorkspaceAvatar({ label: title, imageUrl: avatarUrl })}
+        <div>
+          <span>${escapeHtml(kindLabel)}</span>
+          <h3>${escapeHtml(title)}</h3>
+          <p>${escapeHtml(subtitle || "Open the thread for full history.")}</p>
+        </div>
+      </div>
+      <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="${escapeHtml(conversationRoute)}">${renderIcon("send")} Open thread</button>
+    </header>
+    <div class="shared-messaging-inbox-thread__meta">
+      ${metaItems
+        .map(
+          (item) =>
+            `<span${item === "Encrypted" ? ' class="is-secure"' : ""}>${item === "Encrypted" ? renderIcon("lock") : ""}${escapeHtml(item)}</span>`,
+        )
+        .join("")}
+    </div>
+    <div class="shared-messaging-inbox-thread__timeline">
+      <div class="shared-messaging-inbox-thread__day"><span>Latest activity</span></div>
+      <article class="shared-messaging-preview-message">
+        ${renderMessagingWorkspaceAvatar({
+          label: previewSender,
+          imageUrl: normalizeUrl(sender.avatarUrl || raw.lastMessageSenderAvatarUrl),
+          className: "shared-messaging-avatar--message",
+        })}
+        <div>
+          <div class="shared-messaging-preview-message__meta">
+            <strong>${escapeHtml(previewSender)}</strong>
+            ${timestampLabel ? `<time title="${escapeHtml(absoluteTimestamp)}">${escapeHtml(timestampLabel)}</time>` : ""}
+          </div>
+          <p>${escapeHtml(previewText)}</p>
+        </div>
+      </article>
+    </div>
+    <footer class="shared-messaging-inbox-thread__composer">
+      <span>${renderIcon("messages")} Reply, share files, and use room tools from the full thread.</span>
+      <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="${escapeHtml(conversationRoute)}">Reply</button>
+    </footer>
+  </section>`;
+}
+
+function renderMessagingInboxRequestQueue(requestItems = []) {
+  const visibleItems = requestItems.slice(0, 3);
+  if (!visibleItems.length) {
+    return renderMessagingEmptyState({
+      title: "No requests waiting",
+      body: "Message requests and workspace invites will appear here.",
+      icon: "bell",
+      actions:
+        '<button class="shared-feed-chip" type="button" data-action="navigate" data-route="/messages/requests">Open requests</button>',
+      className: "shared-messaging-empty-state--compact",
+    });
+  }
+  return `<div class="shared-messaging-inbox-queue-list">
+    ${visibleItems
+      .map(
+        (item) => `<article class="shared-messaging-inbox-queue-item">
+          ${renderMessagingWorkspaceAvatar({ label: item.title, icon: "bell" })}
+          <div>
+            <strong>${escapeHtml(item.title || "Request")}</strong>
+            <span>${escapeHtml(item.subtitle || "Review this request.")}</span>
+          </div>
+          ${item.requestId ? `<button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="messaging-request-accept" data-request-id="${escapeHtml(item.requestId)}">Accept</button>` : `<button class="shared-feed-chip" type="button" data-action="navigate" data-route="/messages/requests">Review</button>`}
+        </article>`,
+      )
+      .join("")}
+  </div>`;
+}
+
+function renderMessagingInboxWorkspaceQueue(serverItems = []) {
+  const visibleServers = serverItems.slice(0, 4);
+  if (!visibleServers.length) {
+    return renderMessagingEmptyState({
+      title: "No campaign or coalition rooms yet",
+      body: "Rooms appear after you join a campaign, coalition, or managed civic workspace with messaging enabled.",
+      icon: "team",
+      actions:
+        '<button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="/coalitions">Find coalitions</button><button class="shared-feed-chip" type="button" data-action="navigate" data-route="/candidate-dashboard">Candidate dashboard</button>',
+      className: "shared-messaging-empty-state--compact",
+    });
+  }
+  return `<div class="shared-messaging-inbox-workspace-list">
+    ${visibleServers
+      .map(
+        (server) => `<button class="shared-messaging-inbox-workspace" type="button" data-action="navigate" data-route="${escapeHtml(buildMessagingServerRoute(server.scopeType, server.scopeId))}">
+          ${renderMessagingWorkspaceAvatar({
+            label: server.title,
+            imageUrl: server.avatarUrl,
+            className: "shared-messaging-avatar--server-card",
+          })}
+          <span>
+            <strong>${escapeHtml(server.title || "Workspace")}</strong>
+            <small>${escapeHtml(server.scopeBadge || "Workspace")} - ${escapeHtml(formatCount(server.memberCount || 0))} members</small>
+          </span>
+          <em>Open</em>
+        </button>`,
+      )
+      .join("")}
+  </div>`;
+}
+
+function renderMessagingInboxToolTray({ messaging = {}, serverItems = [] }) {
+  const settings = normalizeMessagingAccountSettings(messaging.settings || {});
+  const recoveryLabel = messagingServiceRecoveryLabel(messaging);
+  const deviceCount = (messaging.devices?.items || []).length;
+  const firstServer = serverItems[0];
+  const tools = [
+    {
+      icon: "create",
+      title: "New message",
+      copy: "Start a DM or group chat.",
+      route: "/messages/compose",
+      action: "Compose",
+    },
+    {
+      icon: "team",
+      title: "Room workspaces",
+      copy: firstServer
+        ? `${firstServer.scopeBadge || "Workspace"} rooms are available.`
+        : "Open campaign and coalition rooms.",
+      route: firstServer
+        ? buildMessagingServerRoute(firstServer.scopeType, firstServer.scopeId)
+        : "/coalitions",
+      action: firstServer ? "Open rooms" : "Find rooms",
+    },
+    {
+      icon: "dashboard",
+      title: "Devices",
+      copy: deviceCount
+        ? `${formatCount(deviceCount)} trusted device${deviceCount === 1 ? "" : "s"}.`
+        : "Review trusted devices.",
+      route: "/messages/devices",
+      action: "Manage",
+    },
+    {
+      icon: "lock",
+      title: "Privacy",
+      copy: `DMs: ${messagingChoiceLabel(MESSAGING_DM_PRIVACY_OPTIONS, settings.dmPrivacy, "Default")}. Recovery: ${recoveryLabel}.`,
+      route: "/messages/settings",
+      action: "Settings",
+    },
+  ];
+  return `<div class="shared-messaging-inbox-tools">
+    ${tools
+      .map(
+        (tool) => `<button class="shared-messaging-inbox-tool" type="button" data-action="navigate" data-route="${escapeHtml(tool.route)}">
+          <span>${renderIcon(tool.icon)}</span>
+          <strong>${escapeHtml(tool.title)}</strong>
+          <small>${escapeHtml(tool.copy)}</small>
+          <em>${escapeHtml(tool.action)}</em>
+        </button>`,
+      )
+      .join("")}
+  </div>`;
+}
+
+function messagingInboxFirstServerByScope(serverItems = [], scopeType = "") {
+  const normalizedScopeType = normalizeString(scopeType).toLowerCase();
+  return (
+    serverItems.find(
+      (server) =>
+        normalizeString(server.scopeType).toLowerCase() === normalizedScopeType,
+    ) || null
+  );
+}
+
+function renderMessagingInboxServiceCenter({
   conversations = [],
   requestItems = [],
   serverItems = [],
   messaging = {},
 }) {
   const unreadCount = messagingWorkspaceUnreadCount(conversations);
-  const realtime = messagingServiceRealtimeState(messaging);
   const settings = normalizeMessagingAccountSettings(messaging.settings || {});
-  const recoveryLabel = messagingServiceRecoveryLabel(messaging);
-  const currentDeviceId = normalizeString(messaging.device?.currentDeviceId);
+  const dmPrivacyLabel = messagingChoiceLabel(
+    MESSAGING_DM_PRIVACY_OPTIONS,
+    settings.dmPrivacy,
+    "Default",
+  );
   const deviceCount = (messaging.devices?.items || []).length;
-  const latestConversation = conversations[0];
-  const firstServer = serverItems[0];
-  const firstServerRoute = firstServer
-    ? buildMessagingServerRoute(firstServer.scopeType, firstServer.scopeId)
-    : "/coalitions";
+  const recoveryLabel = messagingServiceRecoveryLabel(messaging);
+  const campaignServer = messagingInboxFirstServerByScope(
+    serverItems,
+    "campaign",
+  );
+  const coalitionServer = messagingInboxFirstServerByScope(
+    serverItems,
+    "coalition",
+  );
   const readinessItems = [
     {
-      label: "Realtime",
-      value: realtime.label,
-      copy: realtime.copy,
-      tone: realtime.tone,
-    },
-    {
-      label: "Inbox",
-      value: unreadCount ? `${formatCount(unreadCount)} unread` : "Clear",
-      copy: conversations.length
-        ? `${formatCount(conversations.length)} active chat${conversations.length === 1 ? "" : "s"}`
-        : "No active chats yet",
+      label: "Chats",
+      value: formatCount(conversations.length),
+      copy: unreadCount
+        ? `${formatCount(unreadCount)} unread`
+        : "Direct and group inbox",
       tone: unreadCount ? "attention" : "ready",
     },
     {
       label: "Requests",
       value: formatCount(requestItems.length),
       copy: requestItems.length
-        ? "Review new DMs and workspace invites"
-        : "No requests waiting",
+        ? "Review invites and DMs"
+        : "No queue waiting",
       tone: requestItems.length ? "attention" : "ready",
     },
     {
-      label: "Workspaces",
+      label: "Rooms",
       value: formatCount(serverItems.length),
-      copy: serverItems.length
-        ? "Campaign and coalition room servers"
-        : "Join a campaign or coalition for rooms",
+      copy: "Campaign and coalition workspaces",
       tone: serverItems.length ? "ready" : "muted",
+    },
+    {
+      label: "Recovery",
+      value: recoveryLabel,
+      copy: `${dmPrivacyLabel} DM privacy`,
+      tone: recoveryLabel === "Configured" ? "ready" : "attention",
     },
   ];
   const commandCards = [
     {
       icon: "messages",
-      title: "Inbox",
-      detail: unreadCount ? `${formatCount(unreadCount)} unread` : "All caught up",
-      copy: latestConversation
-        ? "Open the latest direct or group conversation."
-        : "Direct and group chats appear here after you start one.",
-      route: latestConversation?.conversationId
-        ? `/messages/conversations/${encodeURIComponent(latestConversation.conversationId)}`
-        : "/messages",
-      action: latestConversation ? "Open latest" : "Open inbox",
-      status: `${formatCount(conversations.length)} chats`,
-      tone: unreadCount ? "attention" : "ready",
-    },
-    {
-      icon: "create",
-      title: "New message",
-      detail: "Direct or group",
-      copy: "Search people, start a private DM, or build a group conversation.",
+      title: "Direct messages",
+      detail: "Inbox",
+      copy: conversations.length
+        ? `${formatCount(conversations.length)} private or group thread${conversations.length === 1 ? "" : "s"} available.`
+        : "Start a direct message or group chat from the web app.",
       route: "/messages/compose",
-      action: "Compose",
-      status: "People search",
-      tone: "ready",
+      action: conversations.length ? "Compose" : "Start",
+      status: unreadCount ? `${formatCount(unreadCount)} unread` : "Ready",
+      tone: unreadCount ? "attention" : "",
     },
     {
       icon: "bell",
       title: "Requests",
-      detail: requestItems.length
-        ? `${formatCount(requestItems.length)} waiting`
-        : "No queue",
-      copy: "Accept workspace invites and decide which message requests land in chat.",
+      detail: "Review",
+      copy: requestItems.length
+        ? "Accept or refuse pending DMs and workspace invitations."
+        : "Message requests and workspace invitations are clear.",
       route: "/messages/requests",
-      action: "Review",
-      status: requestItems.length ? "Attention" : "Clear",
-      tone: requestItems.length ? "attention" : "ready",
+      action: requestItems.length ? "Review" : "Open",
+      status: requestItems.length ? `${formatCount(requestItems.length)} waiting` : "Clear",
+      tone: requestItems.length ? "attention" : "",
+    },
+    {
+      icon: "candidate",
+      title: "Candidate rooms",
+      detail: "Campaign",
+      copy: campaignServer
+        ? `${campaignServer.title || "Campaign"} is ready for room messaging.`
+        : "Open the candidate dashboard to reach campaign workspaces.",
+      route: campaignServer
+        ? buildMessagingServerRoute(
+            campaignServer.scopeType,
+            campaignServer.scopeId,
+          )
+        : "/candidate-dashboard",
+      action: campaignServer ? "Open rooms" : "Dashboard",
+      status: campaignServer
+        ? `${formatCount(campaignServer.memberCount || 0)} members`
+        : "Not joined",
+      tone: campaignServer ? "" : "muted",
     },
     {
       icon: "team",
-      title: "Room workspaces",
-      detail: serverItems.length
-        ? `${formatCount(serverItems.length)} available`
-        : "Find one",
-      copy: "Open campaign and coalition room servers with categories and access controls.",
-      route: firstServerRoute,
-      action: serverItems.length ? "Open rooms" : "Find coalitions",
-      status: firstServer?.scopeBadge || "Campaigns + coalitions",
-      tone: serverItems.length ? "ready" : "muted",
-    },
-    {
-      icon: "shield",
-      title: "Privacy",
-      detail: messagingChoiceLabel(
-        MESSAGING_DM_PRIVACY_OPTIONS,
-        settings.dmPrivacy,
-        "Default",
-      ),
-      copy: "Tune who can DM you, receipts, typing indicators, presence, and quiet hours.",
-      route: "/messages/settings",
-      action: "Tune defaults",
-      status: settings.readReceiptsEnabled ? "Receipts on" : "Receipts off",
-      tone: "ready",
+      title: "Coalition rooms",
+      detail: "Coalition",
+      copy: coalitionServer
+        ? `${coalitionServer.title || "Coalition"} is ready for room messaging.`
+        : "Find or open coalitions to use shared rooms from the web.",
+      route: coalitionServer
+        ? buildMessagingServerRoute(
+            coalitionServer.scopeType,
+            coalitionServer.scopeId,
+          )
+        : "/coalitions",
+      action: coalitionServer ? "Open rooms" : "Find",
+      status: coalitionServer
+        ? `${formatCount(coalitionServer.memberCount || 0)} members`
+        : "Available",
+      tone: coalitionServer ? "" : "muted",
     },
     {
       icon: "dashboard",
       title: "Trusted devices",
-      detail: currentDeviceId ? "This browser linked" : "Browser pending",
-      copy: "Review active devices, revoke stale sessions, or approve another device.",
+      detail: "Security",
+      copy: deviceCount
+        ? `${formatCount(deviceCount)} browser or app device${deviceCount === 1 ? "" : "s"} can access secure messaging.`
+        : "Register and review devices before using encrypted conversations.",
       route: "/messages/devices",
       action: "Manage",
-      status: deviceCount ? `${formatCount(deviceCount)} devices` : "Device center",
-      tone: currentDeviceId ? "ready" : "attention",
+      status: deviceCount ? `${formatCount(deviceCount)} devices` : "Needs setup",
+      tone: deviceCount ? "" : "attention",
     },
     {
       icon: "lock",
-      title: "Recovery",
-      detail: recoveryLabel,
-      copy: "Protect conversation keys and keep encrypted history recoverable.",
-      route: "/messages/recovery",
-      action: recoveryLabel === "Configured" ? "Verify" : "Enroll",
-      status: recoveryLabel === "Configured" ? "Protected" : "Needs setup",
-      tone: recoveryLabel === "Configured" ? "ready" : "attention",
-    },
-    {
-      icon: "settings",
-      title: "Security activity",
-      detail: messaging.security?.loaded ? "Recent events" : "Activity log",
-      copy: "Review device, recovery, and messaging security events from the web.",
-      route: "/messages/security",
-      action: "Review",
-      status: messaging.security?.items?.length
-        ? `${formatCount(messaging.security.items.length)} events`
-        : "No alerts",
-      tone: "ready",
+      title: "Privacy and recovery",
+      detail: "Account",
+      copy: `DMs use ${dmPrivacyLabel.toLowerCase()} privacy. Recovery is ${recoveryLabel.toLowerCase()}.`,
+      route: "/messages/settings",
+      action: "Open",
+      status: recoveryLabel,
+      tone: recoveryLabel === "Configured" ? "" : "attention",
     },
   ];
-  return `<section class="shared-messaging-service-center" aria-label="Messaging service command center">
+  return `<section class="shared-messaging-service-center" aria-label="Messaging service center">
     <div class="shared-messaging-service-center__header">
       <div>
-        <span>Service center</span>
-        <h3>Messaging is ready to work like a real inbox.</h3>
-        <p>Jump between chats, requests, campaign and coalition rooms, privacy, devices, recovery, and security without leaving the web app.</p>
+        <span>Messaging workspace</span>
+        <h3>One inbox for people, campaigns, and coalitions.</h3>
+        <p>Use the web app to move between private chats, requests, campaign rooms, coalition rooms, device trust, and recovery without falling back to the mobile app.</p>
       </div>
-      <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="/messages/compose">${renderIcon("create")} New message</button>
+      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/messages/settings">${renderIcon("settings")}<span>Settings</span></button>
     </div>
     <div class="shared-messaging-readiness-strip">
       ${readinessItems.map(renderMessagingServerReadinessItem).join("")}
@@ -67301,108 +75398,84 @@ function renderMessagingInboxHomePanel({ inbox, requests, servers, messaging }) 
   const requestItems = requests.items || [];
   const serverItems = servers.items || [];
   const unreadCount = messagingWorkspaceUnreadCount(conversations);
-  const latestConversations = conversations.slice(0, 3);
-  const topQueue = [
-    unreadCount
-      ? {
-          label: "Unread messages",
-          value: unreadCount,
-          route: "/messages",
-          icon: "messages",
-        }
-      : null,
-    requestItems.length
-      ? {
-          label: "Requests waiting",
-          value: requestItems.length,
-          route: "/messages/requests",
-          icon: "bell",
-        }
-      : null,
-    serverItems.length
-      ? {
-          label: "Room workspaces",
-          value: serverItems.length,
-          route: serverItems[0]
-            ? buildMessagingServerRoute(
-                serverItems[0].scopeType,
-                serverItems[0].scopeId,
-              )
-            : "/messages",
-          icon: "team",
-        }
-      : null,
-  ].filter(Boolean);
-  const recentMarkup = latestConversations.length
-    ? renderMessagingWorkspaceRows(latestConversations, "")
-    : renderMessagingEmptyState({
-        title: "No recent conversations",
-        body: "Start with a direct message, or accept a request when one arrives.",
-        icon: "messages",
-        actions:
-          '<button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="/messages/compose">New message</button><button class="shared-feed-chip" type="button" data-action="navigate" data-route="/messages/requests">Requests</button>',
-      });
-  const serverMarkup = serverItems.length
-    ? renderMessagingWorkspaceServerCards(serverItems)
-    : renderMessagingEmptyState({
-        title: "No campaign or coalition rooms yet",
-        body: "Rooms appear after you join a campaign, coalition, or managed civic workspace with messaging enabled.",
-        icon: "team",
-        actions:
-          '<button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="/coalitions">Find coalitions</button><button class="shared-feed-chip" type="button" data-action="navigate" data-route="/candidate-dashboard">Candidate dashboard</button>',
-      });
+  const latestConversation =
+    conversations.find((conversation) => Number(conversation.unreadCount) > 0) ||
+    conversations[0] ||
+    null;
   return renderMessagingWorkspacePanel({
-    title: "Message center",
+    title: "Messages",
     subtitle: "Direct chats, requests, and campaign or coalition rooms.",
     actions:
       '<button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="/messages/compose">New message</button><button class="shared-feed-chip" data-action="navigate" data-route="/messages/requests">Requests</button>',
-    body: `<section class="shared-messaging-hub">
-        <div class="shared-messaging-hub__intro">
-          <span class="shared-card__meta"><span>Inbox</span><span>${escapeHtml(unreadCount ? `${formatCount(unreadCount)} unread` : "All caught up")}</span></span>
-          <h3>Pick up every conversation from one place.</h3>
-          <p>Use the browser inbox for direct messages, group chats, requests, and campaign or coalition room work without hunting through settings screens.</p>
-          <div class="shared-card__actions">
-            <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="/messages/compose">${renderIcon("create")} New message</button>
-            <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/messages/requests">${renderIcon("bell")} Requests</button>
-          </div>
+    className: "shared-messaging-panel--inbox-home",
+    body: `<div class="shared-messaging-inbox-home">
+      <section class="shared-messaging-inbox-overview" aria-label="Inbox overview">
+        <div class="shared-messaging-inbox-overview__copy">
+          <span>${escapeHtml(unreadCount ? `${formatCount(unreadCount)} unread` : "All caught up")}</span>
+          <h3>Open the next conversation without leaving the web app.</h3>
+          <p>Direct messages, group chats, campaign rooms, coalition rooms, requests, privacy, devices, and recovery now share the same messaging workspace.</p>
         </div>
-        <div class="shared-messaging-hub__metrics">
-          <div><strong>${escapeHtml(formatCount(conversations.length))}</strong><span>conversations</span></div>
-          <div><strong>${escapeHtml(formatCount(unreadCount))}</strong><span>unread</span></div>
-          <div><strong>${escapeHtml(formatCount(requestItems.length))}</strong><span>requests</span></div>
-          <div><strong>${escapeHtml(formatCount(serverItems.length))}</strong><span>servers</span></div>
+        <div class="shared-messaging-inbox-overview__stats">
+          ${renderMessagingInboxStat({
+            icon: "messages",
+            label: "Conversations",
+            value: conversations.length,
+            route: "/messages",
+            tone: unreadCount ? "attention" : "ready",
+          })}
+          ${renderMessagingInboxStat({
+            icon: "bell",
+            label: "Requests",
+            value: requestItems.length,
+            route: "/messages/requests",
+            tone: requestItems.length ? "attention" : "ready",
+          })}
+          ${renderMessagingInboxStat({
+            icon: "team",
+            label: "Workspaces",
+            value: serverItems.length,
+            route: serverItems[0]
+              ? buildMessagingServerRoute(serverItems[0].scopeType, serverItems[0].scopeId)
+              : "/coalitions",
+            tone: serverItems.length ? "ready" : "muted",
+          })}
         </div>
-        ${
-          topQueue.length
-            ? `<div class="shared-messaging-hub__queue">
-                ${topQueue
-                  .map(
-                    (item) =>
-                      `<button type="button" data-action="navigate" data-route="${escapeHtml(item.route)}">
-                        <span>${renderIcon(item.icon)}</span>
-                        <strong>${escapeHtml(formatCount(item.value))}</strong>
-                        <em>${escapeHtml(item.label)}</em>
-                      </button>`,
-                  )
-                  .join("")}
-              </div>`
-            : ""
-        }
       </section>
-      ${renderMessagingInboxCommandCenter({
+      ${renderMessagingInboxServiceCenter({
         conversations,
         requestItems,
         serverItems,
         messaging,
       })}
-      <section class="shared-messaging-room-group">
-        <h3>Recent</h3>
-        ${recentMarkup}
-      </section>
-      <section class="shared-messaging-room-group">
-        <h3>Workspaces</h3>
-        ${serverMarkup}
-      </section>`,
+      <div class="shared-messaging-inbox-layout">
+        <div class="shared-messaging-inbox-layout__main">
+          ${renderMessagingInboxThreadPreview(latestConversation)}
+        </div>
+        <aside class="shared-messaging-inbox-layout__side" aria-label="Messaging queues">
+          <section class="shared-messaging-inbox-section">
+            <div class="shared-messaging-inbox-section__header">
+              <div>
+                <h3>Requests</h3>
+                <p>${escapeHtml(requestItems.length ? "Accept DMs and workspace invites." : "Nothing waiting right now.")}</p>
+              </div>
+              <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/messages/requests">Open</button>
+            </div>
+            ${renderMessagingInboxRequestQueue(requestItems)}
+          </section>
+          <section class="shared-messaging-inbox-section">
+            <div class="shared-messaging-inbox-section__header">
+              <div>
+                <h3>Rooms</h3>
+                <p>Campaign and coalition spaces.</p>
+              </div>
+              <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/coalitions">Browse</button>
+            </div>
+            ${renderMessagingInboxWorkspaceQueue(serverItems)}
+          </section>
+          ${renderMessagingInboxToolTray({ messaging, serverItems })}
+        </aside>
+      </div>
+    </div>`,
   });
 }
 
@@ -68415,18 +76488,153 @@ function renderMessagingMessageReportModal(conversationState) {
   </div>`;
 }
 
-function renderMessagingSecureHandoff({ stacked = false } = {}) {
+function shortMessagingDeviceId(deviceId) {
+  const normalized = normalizeString(deviceId);
+  if (normalized.length <= 14) {
+    return normalized;
+  }
+  return `${normalized.slice(0, 8)}...${normalized.slice(-4)}`;
+}
+
+function messagingTrustedDeviceItems() {
+  const devices = state.pages.messaging.devices;
+  return (Array.isArray(devices.items) ? devices.items : []).filter((device) => {
+    const revokedAt = normalizeString(
+      device?.revokedAt || device?.raw?.revokedAt || device?.raw?.revoked_at,
+    );
+    return !revokedAt;
+  });
+}
+
+function messagingRecoveryBackupLabel(recovery = state.pages.messaging.recovery) {
+  const status = recovery.status && typeof recovery.status === "object"
+    ? recovery.status
+    : {};
+  const rawStatus = normalizeString(
+    status.status || status.state || status.health || status.phase,
+  );
+  if (rawStatus) {
+    return rawStatus
+      .split(/[_-]+/g)
+      .filter(Boolean)
+      .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
+      .join(" ");
+  }
+  if (Number(status.backupVersion) > 0 || recovery.bundle) {
+    return "Backup available";
+  }
+  if (recovery.loaded) {
+    return "Not enrolled";
+  }
+  return "Not checked";
+}
+
+function messagingRecoveryBackupDetail(recovery = state.pages.messaging.recovery) {
+  const status = recovery.status && typeof recovery.status === "object"
+    ? recovery.status
+    : {};
+  const updatedAt =
+    Number(
+      status.backupUpdatedAt ||
+        status.updatedAt ||
+        status.verifiedAt ||
+        status.createdAt,
+    ) || null;
+  if (updatedAt) {
+    return `Updated ${formatAbsoluteDateTime(updatedAt)}`;
+  }
+  if (recovery.error) {
+    return recovery.error;
+  }
+  if (recovery.localCode) {
+    return "Local recovery key is saved in this browser.";
+  }
+  return recovery.loaded
+    ? "Use recovery to prepare encrypted history on this browser."
+    : "Open recovery to check encrypted history backup.";
+}
+
+function renderMessagingSecureStatusItem({
+  icon = "shield",
+  label,
+  value,
+  detail,
+} = {}) {
+  return `<div class="shared-messaging-secure-handoff__status-item" role="listitem">
+    <span class="shared-messaging-secure-handoff__status-icon">${renderIcon(icon)}</span>
+    <span>
+      <small>${escapeHtml(label)}</small>
+      <strong>${escapeHtml(value)}</strong>
+      <em>${escapeHtml(detail)}</em>
+    </span>
+  </div>`;
+}
+
+function renderMessagingSecureHandoff({ stacked = false, conversation = null } = {}) {
+  const messaging = state.pages.messaging;
+  const recovery = messaging.recovery;
+  const currentDeviceId = normalizeString(messaging.device.currentDeviceId);
+  const trustedDevices = messagingTrustedDeviceItems();
+  const currentDeviceListed = Boolean(
+    currentDeviceId &&
+      trustedDevices.some(
+        (device) => normalizeString(device.deviceId) === currentDeviceId,
+      ),
+  );
+  const trustedDeviceCount = trustedDevices.length;
+  const trustedDeviceValue = messaging.devices.loaded
+    ? `${formatCount(trustedDeviceCount)} trusted ${trustedDeviceCount === 1 ? "device" : "devices"}`
+    : "Check trusted devices";
+  const trustedDeviceDetail = messaging.devices.error
+    ? messaging.devices.error
+    : messaging.devices.loaded
+      ? currentDeviceListed
+        ? "This browser is listed as a trusted device."
+        : "Link this browser from another trusted device."
+      : "Open trusted devices to verify this browser.";
+  const recoveryValue = recovery.localCode
+    ? "Local key saved"
+    : messagingRecoveryBackupLabel(recovery);
+  const deviceValue = currentDeviceId ? "Browser device ready" : "Device not ready";
+  const deviceDetail = currentDeviceId
+    ? `Current device ${shortMessagingDeviceId(currentDeviceId)}`
+    : "Open trusted devices to register this browser.";
+  const conversationLabel = normalizeString(conversation?.title)
+    ? ` in ${conversation.title}`
+    : "";
   const className = `shared-messaging-secure-handoff${stacked ? " shared-messaging-secure-handoff--stacked" : ""}`;
   return `<section class="${className}" aria-label="Encrypted conversation options">
     <div class="shared-messaging-secure-handoff__icon">${renderIcon("lock")}</div>
-    <div>
-      <strong>Encrypted replies need a trusted message key</strong>
-      <p>This browser can read the thread metadata, but sending to this encrypted conversation requires a trusted device or the mobile app.</p>
-    </div>
-    <div class="shared-messaging-secure-handoff__actions">
-      <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="open-app-shell">Open app</button>
-      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/messages/devices/link">Link device</button>
-      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/messages/recovery">Recovery</button>
+    <div class="shared-messaging-secure-handoff__body">
+      <div class="shared-messaging-secure-handoff__copy">
+        <strong>Trust this browser to reply${escapeHtml(conversationLabel)}</strong>
+        <p>Encrypted sending stays locked until this web session has a trusted message key. Restore encrypted history or approve this browser from another trusted device.</p>
+      </div>
+      <div class="shared-messaging-secure-handoff__status" role="list">
+        ${renderMessagingSecureStatusItem({
+          icon: "dashboard",
+          label: "This browser",
+          value: deviceValue,
+          detail: deviceDetail,
+        })}
+        ${renderMessagingSecureStatusItem({
+          icon: "shield",
+          label: "Trusted devices",
+          value: trustedDeviceValue,
+          detail: trustedDeviceDetail,
+        })}
+        ${renderMessagingSecureStatusItem({
+          icon: "lock",
+          label: "Recovery",
+          value: recoveryValue,
+          detail: messagingRecoveryBackupDetail(recovery),
+        })}
+      </div>
+      <div class="shared-messaging-secure-handoff__actions">
+        <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="/messages/recovery/restore">Restore key</button>
+        <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/messages/devices/link">Link browser</button>
+        <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/messages/devices">Trusted devices</button>
+      </div>
     </div>
   </section>`;
 }
@@ -68487,9 +76695,9 @@ function renderMessagingRoomContextPanel({
       <div><strong>${escapeHtml(activityLabel)}</strong><span>activity</span></div>
     </section>
     <section class="shared-messaging-room-context__actions">
-      <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="${escapeHtml(buildMessagingRoomRoute(subroute.scopeType, subroute.scopeId, subroute.conversationId, "/settings"))}">Room settings</button>
-      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(buildMessagingRoomRoute(subroute.scopeType, subroute.scopeId, subroute.conversationId, "/settings/permissions"))}">Access</button>
-      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(buildMessagingServerRoute(subroute.scopeType, subroute.scopeId, "/members"))}">Members</button>
+      <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="${escapeHtml(buildMessagingRoomRoute(subroute.scopeType, subroute.scopeId, subroute.conversationId, "/settings"))}">${renderIcon("settings")}<span>Details</span></button>
+      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(buildMessagingRoomRoute(subroute.scopeType, subroute.scopeId, subroute.conversationId, "/settings/permissions"))}">${renderIcon("team")}<span>Room access</span></button>
+      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(buildMessagingServerRoute(subroute.scopeType, subroute.scopeId, "/members"))}">${renderIcon("candidate")}<span>Members</span></button>
       <button class="shared-feed-chip" type="button" data-action="refresh-current-route">Refresh</button>
     </section>
     <section class="shared-messaging-room-context__members">
@@ -69963,14 +78171,14 @@ function renderMessagingWorkspaceThread({
     : "";
   const roomActionMarkup =
     roomActions && subroute?.scopeType && subroute?.scopeId && subroute?.conversationId
-      ? `<button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(buildMessagingRoomRoute(subroute.scopeType, subroute.scopeId, subroute.conversationId, "/settings"))}">Room settings</button>
-         <button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(buildMessagingRoomRoute(subroute.scopeType, subroute.scopeId, subroute.conversationId, "/settings/permissions"))}">Access</button>`
+      ? `<button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(buildMessagingRoomRoute(subroute.scopeType, subroute.scopeId, subroute.conversationId, "/settings"))}">${renderIcon("settings")}<span>Details</span></button>
+         <button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(buildMessagingRoomRoute(subroute.scopeType, subroute.scopeId, subroute.conversationId, "/settings/permissions"))}">${renderIcon("team")}<span>Room access</span></button>`
       : "";
   const groupActionMarkup =
     !roomActions &&
     messagingConversationIsGroup(conversation) &&
     conversation.conversationId
-      ? `<button class="shared-feed-chip" data-action="navigate" data-route="/messages/conversations/${escapeHtml(encodeURIComponent(conversation.conversationId))}/people">People</button>`
+      ? `<button class="shared-feed-chip" data-action="navigate" data-route="/messages/conversations/${escapeHtml(encodeURIComponent(conversation.conversationId))}/people">${renderIcon("team")}<span>People</span></button>`
       : "";
   const headerActionMarkup = [roomActionMarkup, groupActionMarkup]
     .filter(Boolean)
@@ -70007,13 +78215,13 @@ function renderMessagingWorkspaceThread({
     ? "Editing message"
     : pendingReply
       ? "Replying to message"
-      : "Standard thread";
+      : "Ready to send";
   const composerModeIcon = editingMessageId
     ? "edit"
     : pendingReply
       ? "reply"
-      : "shield";
-  const composerTools = `<button type="button" class="shared-messaging-composer__tool${showAttachmentEditor ? " is-active" : ""}" data-action="messaging-attachment-toggle" aria-label="Attach media" aria-pressed="${showAttachmentEditor ? "true" : "false"}" title="Attach media by URL"${disabledAttr(composerDisabled || Boolean(editingMessageId))}>${renderIcon("file")}</button>
+      : "check";
+  const composerTools = `<button type="button" class="shared-messaging-composer__tool${showAttachmentEditor ? " is-active" : ""}" data-action="messaging-attachment-toggle" aria-label="Attach media" aria-pressed="${showAttachmentEditor ? "true" : "false"}" title="Attach media"${disabledAttr(composerDisabled || Boolean(editingMessageId))}>${renderIcon("file")}</button>
        <span class="shared-messaging-composer__tool is-status" role="img" aria-label="${escapeHtml(composerModeLabel)}" title="${escapeHtml(composerModeLabel)}">${renderIcon(composerModeIcon)}</span>`;
   const attachmentEditorMarkup = showAttachmentEditor
     ? renderMessagingComposerAttachmentEditor(
@@ -70057,7 +78265,7 @@ function renderMessagingWorkspaceThread({
     ? "Edit message"
     : pendingReply
       ? "Reply in thread"
-      : "Write a message";
+      : `Message ${displayTitle}`;
   const sendButtonLabel = conversationState.uploadingAttachment
     ? "Uploading"
     : conversationState.sending
@@ -70070,7 +78278,7 @@ function renderMessagingWorkspaceThread({
           ? "Reply"
           : "Send";
   const composerMarkup = conversation.isEncrypted
-    ? renderMessagingSecureHandoff()
+    ? renderMessagingSecureHandoff({ conversation })
     : `<form class="shared-messaging-composer" data-route-form="messaging-send">
       <input type="hidden" name="conversationId" value="${escapeHtml(conversation.conversationId)}" />
       ${replyBannerMarkup}
@@ -70162,6 +78370,10 @@ function renderMessagingWorkspaceShell({
   }${
     normalizedMainBody.includes("shared-messaging-permissions")
       ? " shared-messaging-workspace--room-access-focus"
+      : ""
+  }${
+    normalizedMainBody.includes("shared-messaging-inbox-home")
+      ? " shared-messaging-workspace--inbox-home"
       : ""
   }`;
   return `<div class="shared-messaging-workspace${workspaceClassName}">
@@ -70515,7 +78727,7 @@ function renderMessagingPage() {
       mainBody: renderMessagingWorkspacePanel({
         title: currentServer?.title || "Rooms",
         subtitle: canManageDirectory
-          ? `Manage ${scopeLabel.toLowerCase()} rooms, categories, roles, members, and moderation from the browser.`
+          ? `Manage ${scopeLabel.toLowerCase()} rooms, categories, access groups, people, and safety review from the browser.`
           : `Open ${scopeLabel.toLowerCase()} rooms available to your role.`,
         actions: canManageDirectory
           ? `<button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="${escapeHtml(buildMessagingServerRoute(subroute.scopeType, subroute.scopeId, "/settings/channels"))}">Manage directory</button>`
@@ -70581,16 +78793,16 @@ function renderMessagingPage() {
   } else if (subroute.view === "server-members") {
     workspaceMarkup = renderMessagingWorkspaceShell({
       subroute,
-      sidebarTitle: currentServer?.title || "Members",
-      sidebarSubtitle: "Roster and moderation",
+      sidebarTitle: currentServer?.title || "People",
+      sidebarSubtitle: "Members and access",
       sidebarActions: renderMessagingWorkspaceServerTools(
         subroute,
         "server-members",
       ),
       sidebarBody: channelRows,
       mainBody: renderMessagingWorkspacePanel({
-        title: "Members",
-        subtitle: "Review roles, nicknames, and moderation targets.",
+        title: "People",
+        subtitle: "Review access groups, names, and safety context.",
         body: renderMessagingServerMembersPanel(subroute, serverMembers),
       }),
     });
@@ -70650,8 +78862,8 @@ function renderMessagingPage() {
       mainBody: renderMessagingWorkspacePanel({
         title: selectedRole?.name || "Access group",
         subtitle: selectedRole?.mentionable
-          ? "Mentionable access group"
-          : "Access group detail",
+          ? "Can be mentioned in room messages"
+          : "Access group details",
         body: renderMessagingRoleDetailPanel(subroute, serverRoles),
       }),
     });
@@ -70678,16 +78890,16 @@ function renderMessagingPage() {
   } else if (subroute.view === "server-bans") {
     workspaceMarkup = renderMessagingWorkspaceShell({
       subroute,
-      sidebarTitle: currentServer?.title || "Restrictions",
-      sidebarSubtitle: "Blocked member access",
+      sidebarTitle: currentServer?.title || "Blocked access",
+      sidebarSubtitle: "Restrictions and restores",
       sidebarActions: renderMessagingWorkspaceServerTools(
         subroute,
         "server-bans",
       ),
       sidebarBody: channelRows,
       mainBody: renderMessagingWorkspacePanel({
-        title: "Member restrictions",
-        subtitle: "Review or remove active restrictions with clear audit context.",
+        title: "Blocked access",
+        subtitle: "Review restricted members and restore access with clear context.",
         actions: `<button class="shared-feed-chip" type="button" data-action="refresh-current-route">Refresh</button>`,
         body: renderMessagingBansPanel(subroute, serverBans),
       }),
@@ -70717,7 +78929,7 @@ function renderMessagingPage() {
             ? activeRoomConversation?.subtitle || roomSettingsConfig.subtitle
             : `${activeRoomConversation?.title || "Room"} | ${roomSettingsConfig.subtitle}`,
         actions: `<button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(buildMessagingRoomRoute(subroute.scopeType, subroute.scopeId, subroute.conversationId))}">Open room</button>
-          <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(buildMessagingRoomRoute(subroute.scopeType, subroute.scopeId, subroute.conversationId, "/settings/permissions"))}">Access</button>`,
+          <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(buildMessagingRoomRoute(subroute.scopeType, subroute.scopeId, subroute.conversationId, "/settings/permissions"))}">Room access</button>`,
         body: renderMessagingRoomSettingsBody(
           subroute,
           activeRoomConversation,
@@ -70763,10 +78975,10 @@ function renderMessagingPage() {
       sidebarActions: miniNav,
       sidebarBody: inboxRows,
       mainBody: renderMessagingWorkspacePanel({
-        title: "Unsupported route",
+        title: "Choose a messaging workspace",
         subtitle:
-          "This messaging route is not recognized by the browser shell yet.",
-        body: '<div class="shared-messaging-empty">Use the inbox, requests, compose, settings, or server routes.</div>',
+          "This route does not match a known messaging workspace.",
+        body: '<div class="shared-messaging-empty">Use the inbox, requests, compose, privacy, or workspace routes.</div>',
       }),
     });
   } else {
@@ -71285,12 +79497,227 @@ function renderSettingsReturnBanner() {
   </div>`;
 }
 
+function getSettingsSocialProviderLanes() {
+  return [
+    {
+      key: "meta-family",
+      label: "Meta surfaces",
+      description: "Facebook pages, Instagram, and Threads publishing.",
+      providers: ["meta", "instagram", "threads"],
+    },
+    {
+      key: "video",
+      label: "Video channels",
+      description: "YouTube and Shorts publishing targets.",
+      providers: ["youtube"],
+    },
+    {
+      key: "public-conversation",
+      label: "Public conversation",
+      description: "Short-form and decentralized profile publishing.",
+      providers: ["x", "bluesky"],
+    },
+  ];
+}
+
+function settingsConnectionNeedsAttention(connection) {
+  if (!connection) {
+    return false;
+  }
+  const status = normalizeString(connection.status).toLowerCase();
+  return Boolean(
+    connection.lastError ||
+      connection.crosspostMentionConsentPending ||
+      !connection.targets.length ||
+      (status && !["active", "connected", "ok", "ready"].includes(status)),
+  );
+}
+
+function settingsConnectionReadiness(provider, connection) {
+  if (!connection) {
+    return {
+      label: "Not connected",
+      detail: `${provider.label} is available when this channel is needed.`,
+      tone: "muted",
+    };
+  }
+  const status = normalizeString(connection.status).toLowerCase();
+  if (connection.lastError) {
+    return {
+      label: "Needs attention",
+      detail: connection.lastError,
+      tone: "bad",
+    };
+  }
+  if (
+    status &&
+    !["active", "connected", "ok", "ready"].includes(status)
+  ) {
+    return {
+      label: humanizeLabel(status) || "Review",
+      detail: "The connection status is not ready for publishing.",
+      tone: "pending",
+    };
+  }
+  if (connection.crosspostMentionConsentPending) {
+    return {
+      label: "Review tagging",
+      detail: "People cross-post tagging needs a yes or no decision.",
+      tone: "pending",
+    };
+  }
+  if (!connection.targets.length) {
+    return {
+      label: "Sync targets",
+      detail: "Refresh targets to discover pages, channels, and profiles.",
+      tone: "pending",
+    };
+  }
+  const targetCount = connection.targets.length;
+  return {
+    label: "Ready",
+    detail: `${formatCount(targetCount)} publishing target${targetCount === 1 ? "" : "s"} synced.`,
+    tone: "ready",
+  };
+}
+
+function getSettingsConnectedAccountStats(social = state.pages.settings.social) {
+  const providers = getSettingsSocialProviders();
+  const connections = social.connections || [];
+  const knownProviderKeys = new Set(providers.map((provider) => provider.key));
+  const knownConnections = connections.filter((connection) =>
+    knownProviderKeys.has(connection.provider),
+  );
+  const connectedProviderCount = providers.filter((provider) =>
+    knownConnections.some((connection) => connection.provider === provider.key),
+  ).length;
+  const targetCount = knownConnections.reduce(
+    (total, connection) => total + connection.targets.length,
+    0,
+  );
+  const pendingConsentCount = knownConnections.filter(
+    (connection) => connection.crosspostMentionConsentPending,
+  ).length;
+  const attentionCount = knownConnections.filter(settingsConnectionNeedsAttention).length;
+  const missingProviderCount = Math.max(0, providers.length - connectedProviderCount);
+  return {
+    providerCount: providers.length,
+    connectedProviderCount,
+    targetCount,
+    pendingConsentCount,
+    attentionCount,
+    missingProviderCount,
+  };
+}
+
+function renderSettingsConnectedMetric(label, value, detail, tone = "") {
+  return `<div class="shared-settings-connected-metric${tone ? ` is-${escapeHtml(tone)}` : ""}">
+    <span>${escapeHtml(label)}</span>
+    <strong>${escapeHtml(value)}</strong>
+    <small>${escapeHtml(detail)}</small>
+  </div>`;
+}
+
+function renderSettingsConnectedProviderLanes() {
+  const providers = getSettingsSocialProviders();
+  const providerByKey = new Map(providers.map((provider) => [provider.key, provider]));
+  return `<div class="shared-settings-connected-lanes">
+    ${getSettingsSocialProviderLanes()
+      .map((lane) => {
+        const laneProviders = lane.providers
+          .map((providerKey) => providerByKey.get(providerKey))
+          .filter(Boolean);
+        const readyCount = laneProviders.filter((provider) => {
+          const connection = findSettingsConnection(provider.key);
+          return (
+            connection &&
+            settingsConnectionReadiness(provider, connection).tone === "ready"
+          );
+        }).length;
+        return `<article class="shared-settings-connected-lane">
+          <div class="shared-settings-connected-lane__header">
+            <span>
+              <strong>${escapeHtml(lane.label)}</strong>
+              <small>${escapeHtml(lane.description)}</small>
+            </span>
+            <em>${escapeHtml(`${formatCount(readyCount)}/${formatCount(laneProviders.length)} ready`)}</em>
+          </div>
+          <div class="shared-settings-connected-lane__providers">
+            ${laneProviders
+              .map((provider) => {
+                const connection = findSettingsConnection(provider.key);
+                const readiness = settingsConnectionReadiness(provider, connection);
+                return `<span class="shared-settings-connected-provider-pill is-${escapeHtml(readiness.tone)}">
+                  <strong>${escapeHtml(provider.label)}</strong>
+                  <small>${escapeHtml(readiness.label)}</small>
+                </span>`;
+              })
+              .join("")}
+          </div>
+        </article>`;
+      })
+      .join("")}
+  </div>`;
+}
+
+function renderSettingsConnectedAccountsOverview(social) {
+  const stats = getSettingsConnectedAccountStats(social);
+  const statusCopy = social.loading
+    ? "Refreshing connected account status."
+    : stats.attentionCount
+      ? `${formatCount(stats.attentionCount)} connected account${stats.attentionCount === 1 ? "" : "s"} need review before publishing.`
+      : stats.connectedProviderCount
+        ? "Connected publishing channels are ready for the web composer."
+        : "No publishing channels are connected yet.";
+  return `<div class="shared-settings-connected-command">
+    <div class="shared-settings-connected-command__header">
+      <div>
+        <span class="shared-settings-eyebrow">Publishing readiness</span>
+        <h3>${escapeHtml(`${formatCount(stats.connectedProviderCount)} of ${formatCount(stats.providerCount)} providers connected`)}</h3>
+        <p>${escapeHtml(statusCopy)}</p>
+      </div>
+      <div class="shared-settings-connected-command__actions">
+        <button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="/create">New post</button>
+        <button class="shared-feed-chip" data-action="navigate" data-route="/settings/publishing-social">Publishing defaults</button>
+        <button class="shared-feed-chip" data-action="settings-refresh">Refresh</button>
+      </div>
+    </div>
+    <div class="shared-settings-connected-metrics">
+      ${renderSettingsConnectedMetric(
+        "Connected",
+        `${formatCount(stats.connectedProviderCount)}/${formatCount(stats.providerCount)}`,
+        "Providers authorized for Polis",
+        stats.connectedProviderCount ? "ready" : "muted",
+      )}
+      ${renderSettingsConnectedMetric(
+        "Targets",
+        formatCount(stats.targetCount),
+        "Pages, channels, and profiles synced",
+        stats.targetCount ? "ready" : "pending",
+      )}
+      ${renderSettingsConnectedMetric(
+        "Review",
+        formatCount(stats.pendingConsentCount),
+        "Tagging consent decisions pending",
+        stats.pendingConsentCount ? "pending" : "ready",
+      )}
+      ${renderSettingsConnectedMetric(
+        "Attention",
+        formatCount(stats.attentionCount),
+        stats.attentionCount ? "Connections needing review" : "No account issues found",
+        stats.attentionCount ? "bad" : "ready",
+      )}
+    </div>
+    ${renderSettingsConnectedProviderLanes()}
+  </div>`;
+}
+
 function renderSettingsNav(activeSection) {
   const activeNavKey = getSettingsNavSectionKey(activeSection);
   return `<aside class="shared-settings-nav">
     <div class="shared-settings-nav__header">
       <strong>Settings</strong>
-      <span>Web-ready sections and app routes</span>
+      <span>Account, privacy, and workspace controls</span>
     </div>
     <div class="shared-settings-nav__list">
       ${getSettingsSections()
@@ -71346,6 +79773,61 @@ function renderSettingsSummaryCard({ title, value, copy, route, actionLabel }) {
   </article>`;
 }
 
+function renderSettingsOverviewStat({ label, value, copy }) {
+  return `<span class="shared-settings-overview-stat">
+    <strong>${escapeHtml(value)}</strong>
+    <small>${escapeHtml(label)}</small>
+    <em>${escapeHtml(copy)}</em>
+  </span>`;
+}
+
+function renderSettingsOverviewCommand({
+  icon,
+  title,
+  copy,
+  route = "",
+  href = "",
+  action = "navigate",
+  meta = "Open",
+  primary = false,
+  danger = false,
+}) {
+  const className = [
+    "shared-settings-command",
+    primary ? "is-primary" : "",
+    danger ? "is-danger" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const inner = `<span class="shared-settings-command__icon">${renderIcon(
+    icon || "settings",
+  )}</span>
+    <span class="shared-settings-command__body">
+      <strong>${escapeHtml(title)}</strong>
+      <small>${escapeHtml(copy)}</small>
+    </span>
+    <em>${escapeHtml(meta)}</em>`;
+  if (href) {
+    return `<a class="${className}" href="${escapeHtml(href)}">${inner}</a>`;
+  }
+  return `<button class="${className}" type="button" data-action="${escapeHtml(action)}"${route ? ` data-route="${escapeHtml(route)}"` : ""}>${inner}</button>`;
+}
+
+function renderSettingsOverviewGroup({ eyebrow, title, copy, commands }) {
+  return `<section class="shared-settings-panel shared-settings-command-group">
+    <div class="shared-settings-panel__header">
+      <div>
+        <span class="shared-settings-eyebrow">${escapeHtml(eyebrow)}</span>
+        <h2>${escapeHtml(title)}</h2>
+        <p>${escapeHtml(copy)}</p>
+      </div>
+    </div>
+    <div class="shared-settings-command-list">
+      ${commands.map(renderSettingsOverviewCommand).join("")}
+    </div>
+  </section>`;
+}
+
 function renderSettingsOverview() {
   const settings = state.pages.settings;
   const connections = settings.social.connections;
@@ -71370,8 +79852,47 @@ function renderSettingsOverview() {
   const audienceMemberCount = new Set(
     settings.audienceGroups.items.flatMap((group) => group.memberUserIds),
   ).size;
+  const campaignItems = state.pages.candidateDashboard.campaigns.items || [];
+  const coalitionItems = state.pages.coalitions.list.items || [];
+  const connectedCopy = `${formatCount(connections.length)} connected account${connections.length === 1 ? "" : "s"}`;
+  const targetCopy = `${formatCount(targetCount)} publishing target${targetCount === 1 ? "" : "s"}`;
+  const campaignMeta = campaignItems.length
+    ? `${formatCount(campaignItems.length)} workspace${campaignItems.length === 1 ? "" : "s"}`
+    : "Dashboard";
+  const coalitionMeta = coalitionItems.length
+    ? `${formatCount(coalitionItems.length)} coalition${coalitionItems.length === 1 ? "" : "s"}`
+    : "Coalitions";
   return `<div class="shared-settings-main">
-    <div class="shared-settings-grid">
+    <section class="shared-settings-overview-hero">
+      <div>
+        <span class="shared-settings-eyebrow">Command center</span>
+        <h2>Settings for your Polis account and workspaces.</h2>
+        <p>Manage profile details, app preferences, privacy, publishing, campaign tools, coalition access, messages, payments, and support from one browser-ready hub.</p>
+      </div>
+      <div class="shared-settings-overview-hero__actions">
+        <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="/profile/edit">Edit profile</button>
+        <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/messages">Messages</button>
+        <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/candidate-dashboard">Candidate dashboard</button>
+      </div>
+      <div class="shared-settings-overview-stats">
+        ${renderSettingsOverviewStat({
+          label: "Account",
+          value: accountUsername ? `@${accountUsername}` : "Handle needed",
+          copy: accountUsername ? "Username ready" : "Claim a public handle",
+        })}
+        ${renderSettingsOverviewStat({
+          label: "Publishing",
+          value: targetCopy,
+          copy: connectedCopy,
+        })}
+        ${renderSettingsOverviewStat({
+          label: "Alerts",
+          value: `${formatCount(enabledCategories)} on`,
+          copy: notifications.quietHours.enabled ? "Quiet hours enabled" : "Quiet hours off",
+        })}
+      </div>
+    </section>
+    <div class="shared-settings-grid shared-settings-overview-summary">
       ${renderSettingsSummaryCard({
         title: "Connected accounts",
         value: `${formatCount(connections.length)} account${connections.length === 1 ? "" : "s"}`,
@@ -71415,25 +79936,218 @@ function renderSettingsOverview() {
         actionLabel: "Tune alerts",
       })}
     </div>
-    <section class="shared-settings-panel">
-      <div class="shared-settings-panel__header">
-        <div>
-          <h2>Available web settings</h2>
-          <p>These sections are backed by the same APIs used by the app.</p>
-        </div>
-      </div>
-      <div class="shared-settings-row-list">
-        ${getSettingsSections()
-          .filter((section) => section.status === "Web" && section.key !== "overview")
-          .map(
-            (section) => `<button class="shared-settings-row" data-action="navigate" data-route="${escapeHtml(section.route)}">
-              <span><strong>${escapeHtml(section.label)}</strong><small>${escapeHtml(section.description)}</small></span>
-              <em>Open</em>
-            </button>`,
-          )
-          .join("")}
-      </div>
-    </section>
+    <div class="shared-settings-overview-groups">
+      ${renderSettingsOverviewGroup({
+        eyebrow: "Account",
+        title: "Profile, identity, and sign-in",
+        copy: "Keep the public account, username, security, and connected publishing identities in sync.",
+        commands: [
+          {
+            icon: "profile",
+            title: "Edit profile",
+            copy: "Update name, bio, avatar, and public profile details.",
+            route: "/profile/edit",
+            meta: "Profile",
+            primary: true,
+          },
+          {
+            icon: "tag",
+            title: "Username",
+            copy: "Claim or change the handle used across Polis.",
+            route: "/settings/account-username",
+            meta: accountUsername ? `@${accountUsername}` : "Set up",
+          },
+          {
+            icon: "shield",
+            title: "Account security",
+            copy: "Reset password, add authenticator MFA, and open security activity.",
+            route: "/settings/account-security",
+            meta: "Protect",
+          },
+          {
+            icon: "settings",
+            title: "Connected accounts",
+            copy: "Manage Meta, Instagram, Threads, YouTube, X, and Bluesky publishing.",
+            route: "/settings/connected-accounts",
+            meta: `${formatCount(connections.length)} linked`,
+          },
+        ],
+      })}
+      ${renderSettingsOverviewGroup({
+        eyebrow: "Preferences",
+        title: "Voter context and app behavior",
+        copy: "Tune the signals that shape discovery, ballot guidance, accessibility, and district context.",
+        commands: [
+          {
+            icon: "settings",
+            title: "Appearance & accessibility",
+            copy: "Theme and display-size controls for this browser.",
+            route: "/settings/appearance",
+            meta: "Display",
+          },
+          {
+            icon: "map",
+            title: "Voter preferences",
+            copy: "Profile, home location, topics, districts, and political matrix readiness.",
+            route: "/settings/preferences",
+            meta: "Context",
+            primary: true,
+          },
+          {
+            icon: "chart",
+            title: "Policy questions",
+            copy: "Answer reviewed issue questions that improve voter intelligence.",
+            route: "/questions",
+            meta: "Questions",
+          },
+          {
+            icon: "search",
+            title: "Topics",
+            copy: "Choose the issue areas Polis watches for your feed and discovery.",
+            route: "/topics",
+            meta: "Topics",
+          },
+        ],
+      })}
+      ${renderSettingsOverviewGroup({
+        eyebrow: "Privacy",
+        title: "Safety, data, and sharing controls",
+        copy: "Review audience boundaries, permissions, location, storage, activity, and campaign data sharing.",
+        commands: [
+          {
+            icon: "lock",
+            title: "Privacy & safety",
+            copy: "Blocked users, muted users, campaign data sharing, and safety routes.",
+            route: "/settings/privacy-safety",
+            meta: "Safety",
+            primary: true,
+          },
+          {
+            icon: "file",
+            title: "Data & storage",
+            copy: "Clear browser storage, search history, activity, and feed personalization.",
+            route: "/settings/data-storage",
+            meta: "Storage",
+          },
+          {
+            icon: "bell",
+            title: "Permissions",
+            copy: "Notification, location, camera, microphone, and file access checks.",
+            route: "/settings/permissions",
+            meta: "Browser",
+          },
+          {
+            icon: "chart",
+            title: "Activity history",
+            copy: "Saved, liked, watched, comment, search, and feed reset activity.",
+            route: "/settings/activity-history",
+            meta: "History",
+          },
+        ],
+      })}
+      ${renderSettingsOverviewGroup({
+        eyebrow: "Publishing",
+        title: "Social publishing and notifications",
+        copy: "Set default visibility, custom audiences, crosspost targets, and notification categories.",
+        commands: [
+          {
+            icon: "send",
+            title: "Publishing & social",
+            copy: "Post visibility, review defaults, reuse controls, and crossposting.",
+            route: "/settings/publishing-social",
+            meta: humanizeLabel(publishing.defaultPostVisibility) || "Defaults",
+            primary: true,
+          },
+          {
+            icon: "team",
+            title: "Audience groups",
+            copy: "Private custom-visibility lists for posts and campaigns.",
+            route: "/settings/audience-groups",
+            meta: `${formatCount(audienceGroupCount)} group${audienceGroupCount === 1 ? "" : "s"}`,
+          },
+          {
+            icon: "bell",
+            title: "Notifications",
+            copy: "Categories, mentions, messages, account activity, and quiet hours.",
+            route: "/settings/notifications",
+            meta: `${formatCount(enabledCategories)} on`,
+          },
+        ],
+      })}
+      ${renderSettingsOverviewGroup({
+        eyebrow: "Workspaces",
+        title: "Campaigns, coalitions, and messages",
+        copy: "Open the operational areas that have continued to grow inside the Polis app.",
+        commands: [
+          {
+            icon: "dashboard",
+            title: "Candidate dashboard",
+            copy: "Campaign reporting, events, calendar, engagement, voter tools, donations, staff, missions, and messaging.",
+            route: "/candidate-dashboard",
+            meta: campaignMeta,
+            primary: true,
+          },
+          {
+            icon: "team",
+            title: "Coalitions",
+            copy: "Coalition profile, rooms, missions, voter map, governance, calendar, members, and promotion work.",
+            route: "/coalitions",
+            meta: coalitionMeta,
+          },
+          {
+            icon: "candidate",
+            title: "Apply for candidate access",
+            copy: "Submit legal name, office, and filing details for dashboard review.",
+            route: "/settings/candidate-access/name",
+            meta: "Apply",
+          },
+          {
+            icon: "messages",
+            title: "Messages",
+            copy: "Direct messages, rooms, requests, security, and campaign or coalition conversations.",
+            route: "/messages",
+            meta: "Inbox",
+          },
+        ],
+      })}
+      ${renderSettingsOverviewGroup({
+        eyebrow: "Support",
+        title: "Payments, help, and account actions",
+        copy: "Review donation records, open support resources, or manage account-level actions.",
+        commands: [
+          {
+            icon: "payments",
+            title: "Payments",
+            copy: "Donation history, finance records, and receipt details.",
+            route: "/settings/payments",
+            meta: "Finance",
+            primary: true,
+          },
+          {
+            icon: "file",
+            title: "Help & about",
+            copy: "Version details, support, legal, licenses, and product information.",
+            route: "/settings/help-about",
+            meta: "Help",
+          },
+          {
+            icon: "lock",
+            title: "Sign out",
+            copy: "End this browser session for the current Polis account.",
+            action: "logout",
+            meta: "Session",
+          },
+          {
+            icon: "trash",
+            title: "Delete account",
+            copy: "Open the account deletion request and data removal page.",
+            href: "/delete-account.html",
+            meta: "Danger",
+            danger: true,
+          },
+        ],
+      })}
+    </div>
     ${renderSettingsResourceStatus(settings.social, "connected accounts")}
     ${renderSettingsResourceStatus(settings.publishing, "publishing defaults")}
     ${renderSettingsResourceStatus(settings.audienceGroups, "audience groups")}
@@ -71600,6 +80314,7 @@ function renderSettingsConnectedAccounts() {
         <button class="shared-feed-chip" data-action="settings-refresh">Refresh</button>
       </div>
       ${renderSettingsResourceStatus(social, "connected accounts")}
+      ${renderSettingsConnectedAccountsOverview(social)}
       <div class="shared-settings-provider-grid">
         ${getSettingsSocialProviders().map(renderSettingsProviderCard).join("")}
       </div>
@@ -73094,7 +81809,13 @@ function renderVoterIntelGuide() {
               </article>`,
             )
             .join("")}</div>`
-        : `<div class="shared-settings-empty">No ballot guide yet. Rank candidates in an election race from the app, then refresh this guide.</div>`
+        : `<div class="shared-settings-empty">
+            <p>No ballot guide yet. Rank candidates in one of your district races from the web elections workspace, then build the guide again.</p>
+            <div class="shared-settings-form-actions">
+              <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="${escapeHtml(voterIntelTabRoute("elections", true))}">Rank a race</button>
+              <button class="shared-feed-chip" type="button" data-action="voter-intel-guide-load"${disabledAttr(guideState.loading)}>Build guide</button>
+            </div>
+          </div>`
     }
   </section>`;
 }
@@ -75394,14 +84115,47 @@ function renderSettingsCandidateAccess() {
   return renderSettingsCandidateAccessName();
 }
 
+function renderSettingsFallbackCard({ title, copy, route, actionLabel = "Open" }) {
+  return `<button class="shared-settings-resource-card" type="button" data-action="navigate" data-route="${escapeHtml(route)}">
+    <div>
+      <h3>${escapeHtml(title)}</h3>
+      <p>${escapeHtml(copy)}</p>
+    </div>
+    <span>${escapeHtml(actionLabel)}</span>
+  </button>`;
+}
+
 function renderSettingsPlaceholder(activeSection) {
   const config =
     getSettingsSections().find((section) => section.key === activeSection) || {
       label: humanizeLabel(activeSection) || "Settings",
-      description: "This settings route exists in the app but is not wired on the website yet.",
+      description: "Choose the closest browser-ready settings area.",
       route: `/settings/${encodeURIComponent(activeSection)}`,
-      status: "App",
+      status: "Route",
     };
+  const requestedPath = getSettingsRoutePath() || activeSection;
+  const fallbackCards = [
+    {
+      title: "Settings overview",
+      copy: "Account, privacy, publishing, campaign, payment, and support controls.",
+      route: "/settings",
+    },
+    {
+      title: "Privacy & Safety",
+      copy: "Blocked users, muted users, location, permissions, and activity sharing.",
+      route: "/settings/privacy-safety",
+    },
+    {
+      title: "Campaigns",
+      copy: "Candidate access, campaign dashboards, staff workspaces, and donation tools.",
+      route: "/settings/candidate-access",
+    },
+    {
+      title: "Messages",
+      copy: "Direct messages, requests, rooms, devices, recovery, and security settings.",
+      route: "/messages",
+    },
+  ];
   return `<div class="shared-settings-main">
     <section class="shared-settings-panel shared-settings-panel--placeholder">
       <div class="shared-settings-panel__header">
@@ -75409,13 +84163,17 @@ function renderSettingsPlaceholder(activeSection) {
           <h2>${escapeHtml(config.label)}</h2>
           <p>${escapeHtml(config.description)}</p>
         </div>
+        ${renderSettingsStatusPill("Route helper", "pending")}
       </div>
       <div class="shared-settings-empty">
-        This section is mapped in the web shell so links resolve, but the browser UI is not complete yet. Use the app for the full ${escapeHtml(config.label)} workflow while this website parity work continues.
+        ${escapeHtml(requestedPath)} is not a dedicated settings panel in this web build. Use one of the browser-ready destinations below to continue without losing context.
+      </div>
+      <div class="shared-settings-resource-grid">
+        ${fallbackCards.map(renderSettingsFallbackCard).join("")}
       </div>
       <div class="shared-settings-form-actions">
-        <button class="shared-feed-chip shared-feed-chip--primary" data-action="open-app-shell">Open in app</button>
-        <button class="shared-feed-chip" data-action="navigate" data-route="/settings">Back to settings</button>
+        <button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="/settings">Back to settings</button>
+        <button class="shared-feed-chip" data-action="navigate" data-route="/discover">Discover</button>
       </div>
     </section>
   </div>`;
@@ -76686,8 +85444,8 @@ function renderAdminActions(sectionKey, item, slice) {
   if (!actions.length) {
     return `<section class="shared-admin-actions-panel">
       <span class="shared-settings-eyebrow">Actions</span>
-      <h3>Review only</h3>
-      <p>This web surface can display the current backend detail for this area. Editing controls for this section still need a parity pass.</p>
+      <h3>Review state</h3>
+      <p>This record type is read-only in the browser. Use the section workspace, filters, export tools, or dedicated editor controls above for the actions available to this queue.</p>
     </section>`;
   }
   return `<section class="shared-admin-actions-panel">
@@ -77366,7 +86124,6 @@ function renderAdminDetail(sectionKey, slice) {
 }
 
 function renderAdminOverview() {
-  const admin = state.pages.admin;
   const sections = ADMIN_SECTIONS.filter((section) => section.key !== "overview");
   const totalOpen = sections.reduce(
     (sum, section) => sum + (adminSliceForSection(section.key)?.items.length || 0),
@@ -77451,6 +86208,80 @@ function renderAdminPage() {
       <div class="shared-admin-layout">
         ${renderAdminNav(activeSection)}
         ${activeSection === "overview" ? renderAdminOverview() : renderAdminSection()}
+      </div>
+    </div>
+  </section>`;
+}
+
+function routeFallbackCard({ title, copy, route, actionLabel = "Open" }) {
+  return `<button class="shared-settings-resource-card" type="button" data-action="navigate" data-route="${escapeHtml(route)}">
+    <div>
+      <h3>${escapeHtml(title)}</h3>
+      <p>${escapeHtml(copy)}</p>
+    </div>
+    <span>${escapeHtml(actionLabel)}</span>
+  </button>`;
+}
+
+function currentRouteFallbackPath() {
+  if (typeof window === "undefined") {
+    return normalizeString(state.route?.routePath) || "/";
+  }
+  const pathname = normalizePathname(window.location.pathname) || "/";
+  const search = normalizeString(window.location.search);
+  return `${pathname}${search}`;
+}
+
+function renderRouteFallbackPage() {
+  const requestedPath = currentRouteFallbackPath();
+  const routes = [
+    {
+      title: "Feed",
+      copy: "Open the post and event feed with comments, saves, shares, and media playback.",
+      route: "/feed",
+    },
+    {
+      title: "Discover",
+      copy: "Find candidates, officials, coalitions, events, missions, policy questions, and voter tools.",
+      route: "/discover",
+    },
+    {
+      title: "Candidate dashboards",
+      copy: "Manage campaign analytics, events, calendar, engagement, voters, donations, staff, missions, and messaging.",
+      route: "/candidate-dashboard",
+    },
+    {
+      title: "Coalitions",
+      copy: "Open coalition members, rooms, missions, voter map, calendar, governance, and amplify workspaces.",
+      route: "/coalitions",
+    },
+    {
+      title: "Messages",
+      copy: "Use DMs, requests, group chats, campaign rooms, coalition rooms, devices, recovery, and safety tools.",
+      route: "/messages",
+    },
+    {
+      title: "Settings",
+      copy: "Review account, privacy, voter profile, publishing, candidate access, payments, and support controls.",
+      route: "/settings",
+    },
+  ];
+  return `<section class="shared-page shared-route-fallback">
+    ${renderTopChrome()}
+    <div class="shared-page__content">
+      <div class="shared-page__header">
+        <div>
+          <p class="shared-page__eyebrow">Route helper</p>
+          <h1>Choose where to continue in Polis web.</h1>
+          <p>The requested path, ${escapeHtml(requestedPath)}, does not map to a dedicated browser view. The main app workspaces below are available here.</p>
+        </div>
+        <div class="shared-card__actions">
+          <button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="/discover">Open Discover</button>
+          <button class="shared-feed-chip" data-action="navigate" data-route="/settings">Settings</button>
+        </div>
+      </div>
+      <div class="shared-settings-resource-grid">
+        ${routes.map(routeFallbackCard).join("")}
       </div>
     </div>
   </section>`;
@@ -77749,7 +86580,7 @@ function renderRouteStage() {
   ) {
     return renderAdminPage();
   }
-  return `<section class="shared-page">${renderTopChrome()}<div class="shared-page__content"><div class="shared-page__empty">This route is not available yet.</div></div></section>`;
+  return renderRouteFallbackPage();
 }
 
 function renderCommentsPanel() {
@@ -77990,9 +86821,14 @@ function renderAuthModal() {
   return `<div class="shared-auth-modal${modal ? " is-open" : ""}">
     <button class="shared-auth-modal__backdrop" data-action="close-auth-modal" aria-label="Close sign-in modal"></button>
     <section class="shared-auth-modal__dialog" aria-hidden="${modal ? "false" : "true"}">
-      <p class="shared-auth-modal__eyebrow">Polis account</p>
-      <h2>${escapeHtml(modal?.title || "Join Polis")}</h2>
-      <p>${escapeHtml(modal?.message || "Sign in to unlock the full feed.")}</p>
+      <div class="shared-auth-modal__header">
+        <div class="shared-auth-modal__heading">
+          <p class="shared-auth-modal__eyebrow">Polis account</p>
+          <h2>${escapeHtml(modal?.title || "Join Polis")}</h2>
+          <p>${escapeHtml(modal?.message || "Sign in to unlock the full feed.")}</p>
+        </div>
+        <button class="shared-comments__close shared-auth-modal__close" type="button" data-action="close-auth-modal" aria-label="Close sign-in modal">${renderIcon("close")}</button>
+      </div>
       ${renderAuthModalModeControls(modal)}
       ${renderAuthModalStatus(modal)}
       ${bodyMarkup}
@@ -78787,14 +87623,6 @@ function setRouteAuthError(message) {
   });
 }
 
-function setRouteAuthNotice(message) {
-  patchRouteAuth({
-    pending: false,
-    error: "",
-    notice: normalizeString(message),
-  });
-}
-
 async function startHostedRouteAuth(mode) {
   if (!hasHostedSignInConfig(state.auth.config)) {
     setRouteAuthError("Hosted sign-in is not configured for this environment.");
@@ -79024,6 +87852,12 @@ function handleRootClick(event) {
     if (state.pages.create.camera?.active) {
       stopPostComposerCamera({ schedule: false });
     }
+    navigateWithAuthGate(target.getAttribute("data-route"));
+    return;
+  }
+
+  if (action === "discover-calendar-open") {
+    markDiscoverCalendarOpened();
     navigateWithAuthGate(target.getAttribute("data-route"));
     return;
   }
@@ -79351,6 +88185,21 @@ function handleRootClick(event) {
     return;
   }
 
+  if (action === "mission-artifact-open") {
+    openMissionArtifact(
+      target.getAttribute("data-mission-id"),
+      target.getAttribute("data-artifact-id"),
+    ).catch(() => {});
+    return;
+  }
+
+  if (action === "mission-message-lead") {
+    openMissionLeadMessage(target.getAttribute("data-lead-user-id")).catch(
+      () => {},
+    );
+    return;
+  }
+
   if (action === "messaging-mission-job-action-run") {
     runMessagingMissionJobAction({
       missionId: target.getAttribute("data-mission-id"),
@@ -79567,6 +88416,32 @@ function handleRootClick(event) {
     const map = coalitionVoterMapMapWorkspace();
     map.selectedMemberId = memberId;
     scheduleRender();
+    return;
+  }
+
+  if (action === "coalition-territory-admin-tab") {
+    setCoalitionTerritoryAdminTab(target.getAttribute("data-tab"));
+    return;
+  }
+
+  if (action === "coalition-territory-generation-refresh") {
+    loadCoalitionTerritoryGenerationJob({ refresh: true }).catch(() => {});
+    return;
+  }
+
+  if (action === "coalition-territory-generation-complete") {
+    completeCoalitionTerritoryGenerationJob(
+      target.getAttribute("data-generation-action"),
+    ).catch(() => {});
+    return;
+  }
+
+  if (action === "coalition-territory-assignment-revoke") {
+    revokeCoalitionTerritoryAssignment({
+      territoryId: target.getAttribute("data-territory-id"),
+      assignmentId: target.getAttribute("data-assignment-id"),
+      userId: target.getAttribute("data-user-id"),
+    }).catch(() => {});
     return;
   }
 
@@ -80067,55 +88942,20 @@ function handleRootClick(event) {
   }
 
   if (action === "calendar-composer-focus") {
-    const composer = document.querySelector("#candidate-calendar-composer");
-    const input = composer?.querySelector('input[name="title"]');
-    if (composer) {
-      composer.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
-    if (input && typeof input.focus === "function") {
-      setTimeout(() => input.focus(), 220);
-    }
+    focusCalendarComposer("#candidate-calendar-composer");
     return;
   }
 
-  if (action === "candidate-calendar-preset") {
-    const form = target.closest("form");
-    if (!form) {
-      return;
-    }
-    const setValue = (name, value, { onlyIfEmpty = false } = {}) => {
-      const field = form.elements.namedItem(name);
-      if (!field || typeof field.value === "undefined") {
-        return;
-      }
-      if (onlyIfEmpty && normalizeString(field.value)) {
-        return;
-      }
-      field.value = value;
-      field.dispatchEvent(new Event("change", { bubbles: true }));
-    };
-    setValue("itemType", normalizeString(target.getAttribute("data-item-type")));
-    setValue("privacy", normalizeString(target.getAttribute("data-privacy")));
-    setValue("title", normalizeString(target.getAttribute("data-title")), {
-      onlyIfEmpty: true,
-    });
-    setValue("labels", normalizeString(target.getAttribute("data-labels")));
-    setValue(
-      "locationName",
-      normalizeString(target.getAttribute("data-location-name")),
-      { onlyIfEmpty: true },
-    );
-    const description = form.elements.namedItem("description");
-    const descriptionText = normalizeString(
-      target.getAttribute("data-description"),
-    );
-    if (description && descriptionText) {
-      description.setAttribute("placeholder", descriptionText);
-    }
-    form
-      .querySelectorAll(".shared-campaign-calendar-preset")
-      .forEach((button) => button.classList.remove("is-selected"));
-    target.classList.add("is-selected");
+  if (action === "coalition-calendar-composer-focus") {
+    focusCalendarComposer("#coalition-calendar-composer");
+    return;
+  }
+
+  if (
+    action === "candidate-calendar-preset" ||
+    action === "coalition-calendar-preset"
+  ) {
+    applyCalendarPresetButton(target);
     return;
   }
 
@@ -80236,6 +89076,32 @@ function handleRootClick(event) {
     return;
   }
 
+  if (action === "candidate-territory-admin-tab") {
+    setCandidateTerritoryAdminTab(target.getAttribute("data-tab"));
+    return;
+  }
+
+  if (action === "candidate-territory-generation-refresh") {
+    loadCandidateTerritoryGenerationJob({ refresh: true }).catch(() => {});
+    return;
+  }
+
+  if (action === "candidate-territory-generation-complete") {
+    completeCandidateTerritoryGenerationJob(
+      target.getAttribute("data-generation-action"),
+    ).catch(() => {});
+    return;
+  }
+
+  if (action === "candidate-territory-assignment-revoke") {
+    revokeCandidateTerritoryAssignment({
+      territoryId: target.getAttribute("data-territory-id"),
+      assignmentId: target.getAttribute("data-assignment-id"),
+      userId: target.getAttribute("data-user-id"),
+    }).catch(() => {});
+    return;
+  }
+
   if (action === "candidate-voter-map-scripts-refresh") {
     const candidateId = currentCandidateDashboardId();
     if (candidateId) {
@@ -80274,6 +89140,31 @@ function handleRootClick(event) {
     return;
   }
 
+  if (action === "candidate-quest-category") {
+    setCampaignQuestCategoryFilter(target.getAttribute("data-category"));
+    return;
+  }
+
+  if (action === "candidate-quest-target-select") {
+    selectCampaignQuestTarget(target.getAttribute("data-record-id"));
+    return;
+  }
+
+  if (action === "candidate-quest-shift-start") {
+    requestCampaignQuestLocation({ startShift: true });
+    return;
+  }
+
+  if (action === "candidate-quest-follow-location") {
+    requestCampaignQuestLocation();
+    return;
+  }
+
+  if (action === "candidate-quest-shift-stop") {
+    stopCampaignQuestShift();
+    return;
+  }
+
   if (action === "candidate-quest-refresh") {
     const candidateId = currentCandidateDashboardId();
     if (candidateId) {
@@ -80296,7 +89187,8 @@ function handleRootClick(event) {
         row?.getAttribute("data-quest-target-row"),
     );
     const outreachType = normalizeString(
-      row?.querySelector("[data-quest-outreach]")?.value,
+      row?.querySelector("[data-quest-outreach]:checked")?.value ||
+        row?.querySelector("[data-quest-outreach]")?.value,
     );
     if (action === "candidate-quest-target-start") {
       startCampaignQuestTarget(recordId, outreachType).catch(() => {});
@@ -80304,7 +89196,9 @@ function handleRootClick(event) {
       completeCampaignQuestTarget({
         recordId,
         outreachType,
-        outcomeType: row?.querySelector("[data-quest-outcome]")?.value,
+        outcomeType:
+          row?.querySelector("[data-quest-outcome]:checked")?.value ||
+          row?.querySelector("[data-quest-outcome]")?.value,
         note: row?.querySelector("[data-quest-note]")?.value,
       }).catch(() => {});
     }
@@ -80340,8 +89234,21 @@ function handleRootClick(event) {
     return;
   }
 
+  if (action === "candidate-donation-payout-resume") {
+    resumeCandidateDonationPayoutCollection().catch(() => {});
+    return;
+  }
+
   if (action === "candidate-donation-payout-attach") {
     attachCandidateDonationPayoutSession().catch(() => {});
+    return;
+  }
+
+  if (action === "candidate-donation-payout-clear") {
+    const donations = state.pages.candidateDashboard.detail.donations;
+    donations.pendingPayoutSession = null;
+    donations.error = "";
+    scheduleRender();
     return;
   }
 
@@ -80741,6 +89648,59 @@ function handleRootClick(event) {
       return;
     }
     loadInitialFeed({ refresh: true }).catch(() => {});
+    return;
+  }
+
+  if (action === "feed-candidate-prompt-set-all") {
+    const choice = normalizeVoterPreferenceChoice(target.getAttribute("data-choice"));
+    const form = target.closest('[data-route-form="feed-candidate-opt-in"]');
+    if (!form || choice === "unset") {
+      return;
+    }
+    form
+      .querySelectorAll(`input[type="radio"][name^="contact:"][value="${choice}"]`)
+      .forEach((input) => {
+        input.checked = true;
+      });
+    return;
+  }
+
+  if (action === "feed-candidate-prompt-dismiss") {
+    const promptKey = normalizeString(target.getAttribute("data-prompt-key"));
+    if (promptKey) {
+      const prompts = currentFeedPromptState();
+      prompts.dismissedKeys[promptKey] = true;
+      delete prompts.savedKeys[promptKey];
+      delete prompts.savedMessages[promptKey];
+      clearFeedPromptFeedback(promptKey);
+      scheduleRender();
+    }
+    return;
+  }
+
+  if (action === "feed-candidate-community-join") {
+    joinFeedCandidateCommunity(
+      target.getAttribute("data-candidate-id"),
+      target.getAttribute("data-prompt-key"),
+    ).catch(() => {});
+    return;
+  }
+
+  if (action === "feed-civic-prompt-answer") {
+    answerFeedCivicPrompt(
+      target.getAttribute("data-prompt-key"),
+      target.getAttribute("data-choice-value"),
+    ).catch(() => {});
+    return;
+  }
+
+  if (action === "feed-civic-prompt-open") {
+    openFeedCivicPrompt(target.getAttribute("data-prompt-key")).catch(() => {});
+    return;
+  }
+
+  if (action === "feed-civic-prompt-dismiss") {
+    dismissFeedCivicPrompt(target.getAttribute("data-prompt-key")).catch(() => {});
     return;
   }
 
@@ -81690,13 +90650,13 @@ function handleRootClick(event) {
       target.getAttribute("data-rule-id"),
       target.getAttribute("data-enabled") === "true",
     ).catch(() => {
-      showToast("Automod rule update failed.");
+      showToast("Keyword guardrail update failed.");
     });
     return;
   }
 
   if (action === "messaging-automod-rule-delete") {
-    if (!window.confirm("Delete this automod rule?")) {
+    if (!window.confirm("Remove this keyword guardrail?")) {
       return;
     }
     deleteMessagingAutomodRule(
@@ -81704,7 +90664,7 @@ function handleRootClick(event) {
       target.getAttribute("data-scope-id"),
       target.getAttribute("data-rule-id"),
     ).catch(() => {
-      showToast("Automod rule delete failed.");
+      showToast("Keyword guardrail remove failed.");
     });
     return;
   }
@@ -81751,7 +90711,7 @@ function handleRootClick(event) {
   }
 
   if (action === "messaging-role-delete") {
-    if (!window.confirm("Delete this role and remove its assignments?")) {
+    if (!window.confirm("Remove this access group and its assignments?")) {
       return;
     }
     deleteMessagingServerRole(
@@ -81759,7 +90719,7 @@ function handleRootClick(event) {
       target.getAttribute("data-scope-id"),
       target.getAttribute("data-role-id"),
     ).catch(() => {
-      showToast("Role delete failed.");
+      showToast("Access group remove failed.");
     });
     return;
   }
@@ -81783,9 +90743,9 @@ function handleRootClick(event) {
     if (!scopeType || !scopeId || !userId) {
       return;
     }
-    const reason = normalizeString(window.prompt("Ban reason", ""));
+    const reason = normalizeString(window.prompt("Restriction reason", ""));
     banMessagingServerMember(scopeType, scopeId, userId, reason).catch(() => {
-      showToast("Member ban failed.");
+      showToast("Member restriction failed.");
     });
     return;
   }
@@ -81796,7 +90756,7 @@ function handleRootClick(event) {
       target.getAttribute("data-scope-id"),
       target.getAttribute("data-user-id"),
     ).catch(() => {
-      showToast("Member unban failed.");
+      showToast("Member restore failed.");
     });
     return;
   }
@@ -82590,7 +91550,45 @@ function handleRootInput(event) {
   updateScrubber(postId, video);
 }
 
+function syncCampaignQuestOutcomeChoices(row, outreachType) {
+  if (!row) {
+    return;
+  }
+  const normalizedOutreach = normalizeString(outreachType);
+  const choices = Array.from(row.querySelectorAll("[data-quest-outcome-choice]"));
+  let firstVisibleInput = null;
+  let checkedVisible = false;
+  choices.forEach((choice) => {
+    const types = normalizeString(choice.getAttribute("data-outreach-types"))
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+    const visible = !types.length || types.includes(normalizedOutreach);
+    choice.hidden = !visible;
+    choice.classList.toggle("is-hidden", !visible);
+    const input = choice.querySelector("[data-quest-outcome]");
+    if (visible && !firstVisibleInput) {
+      firstVisibleInput = input;
+    }
+    if (visible && input?.checked) {
+      checkedVisible = true;
+    }
+  });
+  if (!checkedVisible && firstVisibleInput) {
+    firstVisibleInput.checked = true;
+  }
+}
+
 function handleRootChange(event) {
+  const questOutreachField = event.target.closest("[data-quest-outreach]");
+  if (questOutreachField) {
+    syncCampaignQuestOutcomeChoices(
+      questOutreachField.closest("[data-quest-target-row]"),
+      questOutreachField.value,
+    );
+    return;
+  }
+
   const missionDraftField = event.target.closest(
     "[data-messaging-mission-field]",
   );
@@ -82802,7 +91800,10 @@ function handleRootChange(event) {
       type === "checkbox" ? createField.checked : createField.value,
       "change",
     );
-    if (fieldName.startsWith("teleprompter.")) {
+    if (
+      fieldName.startsWith("teleprompter.") ||
+      ["visibility", "audienceGroupIds"].includes(fieldName)
+    ) {
       scheduleRender();
     }
     return;
@@ -82965,6 +91966,9 @@ function handleCommentSubmit(event) {
   if (routeForm) {
     event.preventDefault();
     const formData = new FormData(routeForm);
+    if (event.submitter?.name) {
+      formData.set(event.submitter.name, event.submitter.value || "");
+    }
     const formKind = normalizeString(routeForm.getAttribute("data-route-form"));
     if (formKind === "auth-login") {
       submitAuthLoginForm(formData).catch(() => {});
@@ -83006,6 +92010,10 @@ function handleCommentSubmit(event) {
       submitPostComposer(formData).catch(() => {});
       return;
     }
+    if (formKind === "feed-candidate-opt-in") {
+      submitFeedCandidateOptIn(formData).catch(() => {});
+      return;
+    }
     if (formKind === "topics-filter") {
       state.pages.topics.query = normalizeString(formData.get("query"));
       scheduleRender();
@@ -83018,12 +92026,16 @@ function handleCommentSubmit(event) {
     }
     if (formKind === "candidates-filter") {
       const query = new URLSearchParams();
+      query.set("feed", normalizeCandidateDirectoryFeed(formData.get("feed")));
       ["q", "level", "district", "tags"].forEach((key) => {
         const value = normalizeString(formData.get(key));
         if (value) {
           query.set(key, value);
         }
       });
+      if (formData.get("hideAutoGenerated")) {
+        query.set("hideAutoGenerated", "true");
+      }
       navigateTo(
         `/candidates${query.toString() ? `?${query.toString()}` : ""}`,
       );
@@ -83075,6 +92087,22 @@ function handleCommentSubmit(event) {
       submitMissionJobAction(formData)
         .then((saved) => {
           if (saved) routeForm.reset();
+        })
+        .catch(() => {});
+      return;
+    }
+    if (formKind === "mission-artifact-upload") {
+      uploadMissionArtifact(formData)
+        .then((uploaded) => {
+          if (uploaded) routeForm.reset();
+        })
+        .catch(() => {});
+      return;
+    }
+    if (formKind === "mission-follow-up-create") {
+      createMissionFollowUpJob(formData)
+        .then((created) => {
+          if (created) routeForm.reset();
         })
         .catch(() => {});
       return;
@@ -83303,6 +92331,57 @@ function handleCommentSubmit(event) {
       saveCoalitionVoterMapOutreachTemplates(formData).catch(() => {});
       return;
     }
+    if (formKind === "coalition-territory-unitsets-load") {
+      loadCoalitionTerritoryUnitSets(formData, { refresh: true }).catch(() => {});
+      return;
+    }
+    if (formKind === "coalition-territory-unitset-create") {
+      createCoalitionTerritoryUnitSet(formData).catch(() => {});
+      return;
+    }
+    if (formKind === "coalition-territory-generation-start") {
+      startCoalitionTerritoryGeneration(formData).catch(() => {});
+      return;
+    }
+    if (formKind === "coalition-territory-editor-edit") {
+      submitCoalitionTerritoryEdit(formData).catch(() => {});
+      return;
+    }
+    if (formKind === "coalition-territory-editor-quick") {
+      submitCoalitionTerritoryQuickAction(formData).catch(() => {});
+      return;
+    }
+    if (formKind === "coalition-territory-editor-split") {
+      submitCoalitionTerritorySplit(formData).catch(() => {});
+      return;
+    }
+    if (formKind === "coalition-territory-editor-merge") {
+      submitCoalitionTerritoryMerge(formData).catch(() => {});
+      return;
+    }
+    if (formKind === "coalition-territory-assignments-load") {
+      loadCoalitionTerritoryAssignments(currentCoalitionDetailId(), {
+        territoryId: normalizeString(formData.get("territoryId")),
+        refresh: true,
+      }).catch(() => {});
+      return;
+    }
+    if (formKind === "coalition-territory-assignment-create") {
+      createCoalitionTerritoryAssignment(formData)
+        .then((saved) => {
+          if (saved) routeForm.reset();
+        })
+        .catch(() => {});
+      return;
+    }
+    if (formKind === "coalition-territory-assignment-reassign") {
+      reassignCoalitionTerritoryAssignment(formData)
+        .then((saved) => {
+          if (saved) routeForm.reset();
+        })
+        .catch(() => {});
+      return;
+    }
     if (formKind === "voter-map-note-create") {
       createVoterMapNote(formData)
         .then((saved) => {
@@ -83435,6 +92514,57 @@ function handleCommentSubmit(event) {
     }
     if (formKind === "candidate-voter-map-settings") {
       saveCandidateVoterMapSettings(formData);
+      return;
+    }
+    if (formKind === "candidate-territory-unitsets-load") {
+      loadCandidateTerritoryUnitSets(formData, { refresh: true }).catch(() => {});
+      return;
+    }
+    if (formKind === "candidate-territory-unitset-create") {
+      createCandidateTerritoryUnitSet(formData).catch(() => {});
+      return;
+    }
+    if (formKind === "candidate-territory-generation-start") {
+      startCandidateTerritoryGeneration(formData).catch(() => {});
+      return;
+    }
+    if (formKind === "candidate-territory-editor-edit") {
+      submitCandidateTerritoryEdit(formData).catch(() => {});
+      return;
+    }
+    if (formKind === "candidate-territory-editor-quick") {
+      submitCandidateTerritoryQuickAction(formData).catch(() => {});
+      return;
+    }
+    if (formKind === "candidate-territory-editor-split") {
+      submitCandidateTerritorySplit(formData).catch(() => {});
+      return;
+    }
+    if (formKind === "candidate-territory-editor-merge") {
+      submitCandidateTerritoryMerge(formData).catch(() => {});
+      return;
+    }
+    if (formKind === "candidate-territory-assignments-load") {
+      loadCandidateTerritoryAssignments(currentCandidateDashboardId(), {
+        territoryId: normalizeString(formData.get("territoryId")),
+        refresh: true,
+      }).catch(() => {});
+      return;
+    }
+    if (formKind === "candidate-territory-assignment-create") {
+      createCandidateTerritoryAssignment(formData)
+        .then((saved) => {
+          if (saved) routeForm.reset();
+        })
+        .catch(() => {});
+      return;
+    }
+    if (formKind === "candidate-territory-assignment-reassign") {
+      reassignCandidateTerritoryAssignment(formData)
+        .then((saved) => {
+          if (saved) routeForm.reset();
+        })
+        .catch(() => {});
       return;
     }
     if (formKind === "candidate-voter-map-outreach-templates") {
@@ -83786,7 +92916,7 @@ function handleCommentSubmit(event) {
           routeForm.reset();
         })
         .catch(() => {
-          showToast("Member ban failed.");
+          showToast("Member restriction failed.");
         });
       return;
     }
