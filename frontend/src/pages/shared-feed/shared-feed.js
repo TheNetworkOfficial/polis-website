@@ -44,11 +44,35 @@ const POST_COMPOSER_MAX_VIDEO_MS = POST_COMPOSER_MAX_VIDEO_SECONDS * 1000;
 const POST_COMPOSER_IMAGE_ACCEPT = "image/*";
 const POST_COMPOSER_VIDEO_ACCEPT = "video/*";
 const POST_COMPOSER_MEDIA_ACCEPT = `${POST_COMPOSER_IMAGE_ACCEPT},${POST_COMPOSER_VIDEO_ACCEPT}`;
+const POST_COMPOSER_CAPTURE_MODES = [
+  { key: "sixMinutes", label: "6m", title: "Six minutes", maxMs: 6 * 60 * 1000 },
+  { key: "threeMinutes", label: "3m", title: "Three minutes", maxMs: 3 * 60 * 1000 },
+  { key: "sixtySeconds", label: "60s", title: "Sixty seconds", maxMs: 60 * 1000 },
+  { key: "photo", label: "Photo", title: "Photo", maxMs: 0 },
+];
 const MESSAGING_ATTACHMENT_ACCEPT = POST_COMPOSER_MEDIA_ACCEPT;
 const MESSAGING_ATTACHMENT_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
 const MESSAGING_ATTACHMENT_VIDEO_MAX_BYTES = 100 * 1024 * 1024;
 const MESSAGING_QUICK_REACTIONS = ["👍", "❤️", "😂", "👏", "🔥"];
 const MESSAGING_MESSAGE_EDIT_WINDOW_MS = 5 * 60 * 1000;
+const MESSAGING_MENTION_USERNAME_PATTERN = /^[A-Za-z0-9_.]{1,64}$/;
+const MESSAGING_MENTION_SCAN_PATTERN = /(^|[^A-Za-z0-9_.])@([A-Za-z0-9_.]{1,64})/g;
+const MESSAGING_MISSION_COMMANDS = [
+  {
+    command: "/assign",
+    title: "/assign",
+    subtitle: "Create and assign a mission from this chat.",
+  },
+  {
+    command: "/mission",
+    title: "/mission",
+    subtitle: "Open a mission draft linked to this chat.",
+  },
+];
+const MESSAGING_MISSION_PRIORITY_PATTERN =
+  /(?:^|\s)--priority=(urgent|high|normal|low)(?:\s|$)/i;
+const MESSAGING_MISSION_PLAIN_MENTION_PATTERN =
+  /(^|\s)@([A-Za-z0-9][A-Za-z0-9_.-]{0,63})(?=\s|$)/g;
 const MESSAGING_REPORT_REASON_OPTIONS = [
   [
     "user_report",
@@ -78,11 +102,11 @@ const MESSAGING_AUTOMOD_ACTION_OPTIONS = [
   ["block", "Block", "Stop the message before it reaches the room."],
 ];
 const MESSAGING_WORKFLOW_TRIGGER_OPTIONS = [
-  ["message_keyword", "Message keyword", "Run when a room message includes a keyword."],
-  ["member_join", "Member joins", "Run when a new member joins the server."],
-  ["report_opened", "Report opened", "Run when a moderation report is opened."],
+  ["message_keyword", "Keyword match", "Start when a room message includes a phrase."],
+  ["member_join", "New member", "Start when someone joins this space."],
+  ["report_opened", "Member report", "Start when a safety report opens."],
   ["invite_accepted", "Invite accepted", "Run when an invite is accepted."],
-  ["schedule", "Schedule", "Run on a recurring schedule."],
+  ["schedule", "Scheduled time", "Run on a recurring schedule."],
 ];
 const MESSAGING_WORKFLOW_SCHEDULE_OPTIONS = [
   ["hourly", "Hourly"],
@@ -90,10 +114,10 @@ const MESSAGING_WORKFLOW_SCHEDULE_OPTIONS = [
   ["weekly", "Weekly"],
 ];
 const MESSAGING_WORKFLOW_ACTION_OPTIONS = [
-  ["notify_moderators", "Notify moderators", "Create an audit event for moderators."],
-  ["call_webhook", "Call webhook", "Send the workflow event to an external URL."],
-  ["send_message", "Send message", "Post a prepared message into a room."],
-  ["create_moderation_task", "Create moderation task", "Open a queue item for review."],
+  ["notify_moderators", "Notify safety team", "Send a clear review alert."],
+  ["call_webhook", "Notify external tool", "Send the event to a webhook URL."],
+  ["send_message", "Post room message", "Share a prepared message in a room."],
+  ["create_moderation_task", "Open safety review", "Create a review item for the team."],
 ];
 const MESSAGING_DM_PRIVACY_OPTIONS = [
   [
@@ -118,7 +142,7 @@ const MESSAGING_READ_RECEIPT_SCOPE_OPTIONS = [
   [
     "direct_and_groups",
     "DMs and groups",
-    "Send receipts in private conversations, not server rooms.",
+    "Send receipts in private conversations, not workspace rooms.",
   ],
   ["direct", "Direct only", "Send receipts only in one-to-one direct messages."],
   ["groups", "Groups only", "Send receipts only in group direct messages."],
@@ -626,6 +650,8 @@ const ADMIN_SECTIONS = [
     description: "For You feed ranking config and rollback history.",
   },
 ];
+const ADMIN_POLICY_QUESTION_GENERATION_MAX_TOPICS = 3;
+const ADMIN_POLICY_QUESTION_GENERATION_MAX_DRAFTS = 6;
 
 const ADMIN_LIST_SECTION_KEYS = new Set([
   "applications",
@@ -1803,8 +1829,58 @@ function normalizeRouteParams(value) {
   }, {});
 }
 
-function parseRouteFromLocation(pathname = window.location.pathname) {
+function connectedAccountReturnPathStatus(pathname = window.location.pathname) {
   const normalizedPath = normalizePathname(pathname);
+  if (
+    normalizedPath === "/social-return" ||
+    normalizedPath === "/oauth/complete" ||
+    normalizedPath === "/settings/connected-accounts/social-return"
+  ) {
+    return "success";
+  }
+  if (normalizedPath.startsWith("/api/social/")) {
+    return "error";
+  }
+  return "";
+}
+
+function calendarReturnPathStatus(pathname = window.location.pathname) {
+  const normalizedPath = normalizePathname(pathname);
+  if (normalizedPath === "/calendar-return") {
+    return "success";
+  }
+  if (normalizedPath.startsWith("/api/calendar/")) {
+    return "error";
+  }
+  return "";
+}
+
+function calendarReturnTargetPathFromLocation(pathname = window.location.pathname) {
+  if (!calendarReturnPathStatus(pathname)) {
+    return "";
+  }
+  const params = readCurrentSearchParams();
+  const explicitTarget = normalizeString(params.get("targetPath"));
+  if (explicitTarget.startsWith("/")) {
+    return normalizePathname(explicitTarget.split("?")[0]);
+  }
+  const candidateId = normalizeString(params.get("candidateId"));
+  if (candidateId) {
+    return `/candidate-dashboard/${encodeURIComponent(candidateId)}/calendar`;
+  }
+  return "/settings/connected-accounts";
+}
+
+function parseRouteFromLocation(pathname = window.location.pathname) {
+  const calendarTargetPath = calendarReturnTargetPathFromLocation(pathname);
+  const normalizedPath = calendarTargetPath || normalizePathname(pathname);
+  if (connectedAccountReturnPathStatus(pathname)) {
+    return {
+      routeKey: ROUTE_KEY_SETTINGS_SECTION,
+      routePath: "/settings/connected-accounts",
+      routeParams: { settingsPath: "connected-accounts" },
+    };
+  }
   if (/^\/cta-invite(?:\/index\.html)?\/?$/u.test(normalizedPath)) {
     const params = readCurrentSearchParams();
     const token = normalizeString(params.get("token"));
@@ -1835,6 +1911,7 @@ function parseRouteFromLocation(pathname = window.location.pathname) {
     };
   }
   const routePatterns = [
+    [ROUTE_KEY_BOOTSTRAP, /^\/(?:index\.html)?$/u, []],
     [ROUTE_KEY_BOOTSTRAP, /^\/bootstrap$/u, []],
     [ROUTE_KEY_AUTH, /^\/auth$/u, []],
     [ROUTE_KEY_AUTH, /^\/auth\/signup\/email$/u, []],
@@ -2066,6 +2143,44 @@ function createMessagingAttachmentDraft() {
   };
 }
 
+function createMessagingComposerMentionState() {
+  return {
+    active: null,
+    suggestions: [],
+    selectedIndex: 0,
+    appliedMentions: [],
+  };
+}
+
+function createMessagingMissionCommandState() {
+  return {
+    active: null,
+    suggestions: [],
+    selectedIndex: 0,
+  };
+}
+
+function createMessagingMissionDraftState(extra = {}) {
+  return {
+    open: false,
+    command: "",
+    title: "",
+    description: "",
+    priority: "normal",
+    assignee: "",
+    targetMode: "user",
+    presetKey: "general",
+    deadlineMode: "indefinite",
+    dueHours: "",
+    timeoutPolicy: "escalate",
+    timeoutHours: "",
+    sourceExcerpt: "",
+    pending: false,
+    error: "",
+    ...extra,
+  };
+}
+
 function createMessagingConversationState() {
   return {
     item: null,
@@ -2087,8 +2202,12 @@ function createMessagingConversationState() {
     deletePending: false,
     messageActionPendingKey: "",
     reactionPendingKey: "",
+    missionActionPendingKey: "",
     reportingMessageId: "",
     typingParticipants: [],
+    mention: createMessagingComposerMentionState(),
+    missionCommand: createMessagingMissionCommandState(),
+    missionDraft: createMessagingMissionDraftState(),
   };
 }
 
@@ -2115,6 +2234,18 @@ function createMessagingComposeState() {
     selected: [],
     error: "",
     pending: false,
+    searchToken: 0,
+  };
+}
+
+function createMessagingGroupPeopleState() {
+  return {
+    query: "",
+    lastSearchQuery: "",
+    friends: createPagedState(),
+    search: createPagedState(),
+    error: "",
+    actionPendingKey: "",
     searchToken: 0,
   };
 }
@@ -2394,6 +2525,12 @@ function createCandidateDashboardCalendarState() {
     error: "",
     loaded: false,
     actionPendingKey: "",
+    focusedItemId: "",
+    focusedDate: "",
+    focusRefreshToken: "",
+    focusQueryKey: "",
+    handledFocusRefreshToken: "",
+    focusedItemScrollKey: "",
   };
 }
 
@@ -2598,6 +2735,7 @@ function createSettingsVoterProfileState() {
       item: null,
       loading: false,
       error: "",
+      notice: "",
       loaded: false,
       saving: false,
     },
@@ -2718,6 +2856,7 @@ function createAdminSliceState() {
     historyLoaded: false,
     actionPendingKey: "",
     draft: "",
+    draftKey: "",
     validationMessage: "",
     validationError: "",
     selectedHistorySk: "",
@@ -2751,6 +2890,18 @@ function createPostComposerPageState() {
     source: "",
     durationMs: null,
     durationKnown: false,
+    captureMode: "sixMinutes",
+    clips: [],
+    teleprompter: {
+      enabled: false,
+      expanded: false,
+      script: "",
+      speed: 34,
+      fontSize: 28,
+      opacity: 0.58,
+      height: 25,
+      delaySeconds: 3,
+    },
     camera: {
       stream: null,
       recorder: null,
@@ -3074,6 +3225,15 @@ const state = {
         error: "",
         saving: false,
         signupSaving: false,
+        editorDraft: null,
+        addressLookup: {
+          query: "",
+          items: [],
+          loading: false,
+          error: "",
+          selected: null,
+          requestId: 0,
+        },
       },
       manage: {
         ...createPagedState(),
@@ -3164,6 +3324,14 @@ const state = {
           loaded: false,
           nextCursor: null,
           actionPendingKey: "",
+        },
+        rankings: {
+          selectedContestId: "",
+          loadingContestId: "",
+          savingContestId: "",
+          errorByContestId: {},
+          aggregateByContestId: {},
+          preferencesByContestId: {},
         },
       },
       privacySafety: createSettingsPrivacySafetyState(),
@@ -3294,6 +3462,7 @@ const state = {
       },
       security: createPagedState(),
       compose: createMessagingComposeState(),
+      groupPeople: createMessagingGroupPeopleState(),
     },
   },
   feeds: {
@@ -3346,8 +3515,10 @@ let candidateCollapsedPartyGroups = new Set();
 let candidateCollapsedPartyGroupsLoaded = false;
 let settingsExpandedDistrictSeats = new Set();
 let messagingComposeSearchTimer = null;
+let messagingGroupPeopleSearchTimer = null;
 let candidateStaffInviteSearchTimer = null;
 let coalitionInviteSearchTimer = null;
+let eventAddressLookupTimer = null;
 let messagingTypingStopTimer = null;
 let messagingSessionRetained = false;
 
@@ -3385,6 +3556,18 @@ function normalizeString(value) {
 function normalizeUrl(value) {
   const normalized = normalizeString(value);
   return normalized || "";
+}
+
+function resolveSharedAssetUrl(value) {
+  const normalized = normalizeUrl(value);
+  if (!normalized || typeof window === "undefined") {
+    return normalized;
+  }
+  try {
+    return new URL(normalized, window.location.origin).toString();
+  } catch {
+    return normalized;
+  }
 }
 
 function parseBoolean(value, fallback = false) {
@@ -3535,10 +3718,14 @@ function getRouteSection(route = state.route) {
     return "admin";
   }
   if (
+    routeKey === ROUTE_KEY_TOPICS ||
+    routeKey === ROUTE_KEY_ONBOARDING_TOPICS
+  ) {
+    return "topics";
+  }
+  if (
     routeKey === ROUTE_KEY_SETTINGS ||
     routeKey === ROUTE_KEY_SETTINGS_SECTION ||
-    routeKey === ROUTE_KEY_TOPICS ||
-    routeKey === ROUTE_KEY_ONBOARDING_TOPICS ||
     routeKey === ROUTE_KEY_ONBOARDING_PROFILE ||
     routeKey === ROUTE_KEY_ONBOARDING_PHOTO ||
     routeKey === ROUTE_KEY_ONBOARDING_LOCATION ||
@@ -3562,6 +3749,65 @@ function getPathnameFromRouteTarget(value) {
     return new URL(normalized, window.location.origin).pathname;
   } catch {
     return normalized.split("?")[0] || "/";
+  }
+}
+
+function getRouteDocumentTitle(route = state.route) {
+  const routeKey = normalizeString(route?.routeKey);
+  const exactTitles = {
+    [ROUTE_KEY_AUTH]: "Account",
+    [ROUTE_KEY_FEED]: "Feed",
+    [ROUTE_KEY_SHARE_POST]: "Post",
+    [ROUTE_KEY_POST_ANALYTICS]: "Post Analytics",
+    [ROUTE_KEY_CREATE]: "Create",
+    [ROUTE_KEY_ACHIEVEMENTS]: "Achievements",
+    [ROUTE_KEY_SEARCH]: "Search",
+    [ROUTE_KEY_SEARCH_RESULTS]: "Search",
+    [ROUTE_KEY_CONGRESSIONAL_REPORT_CARD]: "Congressional Report Card",
+    [ROUTE_KEY_OFFICIAL_DETAIL]: "Officials",
+    [ROUTE_KEY_OFFICIAL_REPORT_CARD]: "Officials",
+    [ROUTE_KEY_AUTO_CANDIDATE_DETAIL]: "Auto Candidate",
+    [ROUTE_KEY_CANDIDATE_VOTER_MAP]: "Candidate Voter Map",
+    [ROUTE_KEY_CANDIDATE_VOTER_MAP_SECTION]: "Candidate Voter Map",
+    [ROUTE_KEY_MANAGE_EVENTS]: "Manage Events",
+    [ROUTE_KEY_MANAGE_EVENTS_NEW]: "Manage Events",
+    [ROUTE_KEY_MANAGE_EVENTS_EDIT]: "Manage Events",
+    [ROUTE_KEY_TOPICS]: "Topics",
+    [ROUTE_KEY_ONBOARDING_TOPICS]: "Topics",
+    [ROUTE_KEY_ONBOARDING_PROFILE]: "Onboarding",
+    [ROUTE_KEY_ONBOARDING_PHOTO]: "Onboarding",
+    [ROUTE_KEY_ONBOARDING_LOCATION]: "Onboarding",
+    [ROUTE_KEY_ONBOARDING_ADDRESS]: "Onboarding",
+    [ROUTE_KEY_POLICY_QUESTIONS]: "Policy Questions",
+    [ROUTE_KEY_POLICY_QUESTION_DETAIL]: "Policy Questions",
+    [ROUTE_KEY_ADMIN]: "Admin",
+    [ROUTE_KEY_ADMIN_SECTION]: "Admin",
+    [ROUTE_KEY_ACCOUNT_DELETION_REQUESTED]: "Account Deletion Requested",
+  };
+  if (exactTitles[routeKey]) {
+    return `${exactTitles[routeKey]} | Polis`;
+  }
+  const section = getRouteSection(route);
+  const titles = {
+    campaigns: "Candidate Dashboard",
+    candidates: "Candidates",
+    coalitions: "Coalitions",
+    discover: "Discover",
+    elections: "Election Day",
+    events: "Events",
+    messages: "Messages",
+    missions: "Missions",
+    profile: "Profile",
+    settings: "Settings",
+    topics: "Topics",
+  };
+  return `${titles[section] || "Polis"} | Polis`;
+}
+
+function syncDocumentTitle() {
+  const nextTitle = getRouteDocumentTitle();
+  if (document.title !== nextTitle) {
+    document.title = nextTitle;
   }
 }
 
@@ -4078,7 +4324,18 @@ function buildProtectedRouteContext(path) {
   };
 }
 
+function routeUsesInlineProtectedGate(route = state.route) {
+  const section = getRouteSection(route);
+  return section === "campaigns" || section === "coalitions";
+}
+
 function promptForProtectedRoute(path) {
+  const route = parseRouteFromLocation(getPathnameFromRouteTarget(path));
+  if (routeUsesInlineProtectedGate(route)) {
+    state.ui.authModal = null;
+    scheduleRender();
+    return;
+  }
   openAuthModal("route-protected", buildProtectedRouteContext(path));
 }
 
@@ -4087,10 +4344,15 @@ function navigateWithAuthGate(path, options = {}) {
   if (!normalizedPath) {
     return;
   }
+  const targetRoute = parseRouteFromLocation(getPathnameFromRouteTarget(path));
   if (
     !state.auth.session &&
-    isProtectedRoute(parseRouteFromLocation(getPathnameFromRouteTarget(path)))
+    isProtectedRoute(targetRoute)
   ) {
+    if (routeUsesInlineProtectedGate(targetRoute)) {
+      navigateTo(normalizedPath, options);
+      return;
+    }
     promptForProtectedRoute(normalizedPath);
     return;
   }
@@ -10518,38 +10780,133 @@ async function saveMissionTemplate(resource, formData, refreshTemplates) {
 
 async function claimCandidateDashboardMissionJob(missionId, jobId) {
   const candidateId = currentCandidateDashboardId();
+  return runCandidateDashboardMissionJobAction(missionId, jobId, "claim", {
+    candidateId,
+  });
+}
+
+function updateMissionWorkspaceJobSnapshot(resource, missionId, updatedJobPayload = {}) {
+  const normalizedMissionId = normalizeString(missionId);
+  const updatedJob = normalizeMissionJob({
+    ...updatedJobPayload,
+    missionId: normalizedMissionId,
+  });
+  const normalizedJobId = normalizeString(updatedJob.jobId);
+  if (!resource || !normalizedMissionId || !normalizedJobId) {
+    return false;
+  }
+  let changed = false;
+  resource.items = (resource.items || []).map((mission) => {
+    if (normalizeString(mission.missionId) !== normalizedMissionId) {
+      return mission;
+    }
+    let matched = false;
+    const jobs = (mission.jobs || []).map((job) => {
+      if (normalizeString(job.jobId) !== normalizedJobId) {
+        return job;
+      }
+      matched = true;
+      return normalizeMissionJob({
+        ...job.raw,
+        ...job,
+        ...updatedJobPayload,
+        missionId: normalizedMissionId,
+      });
+    });
+    if (!matched) {
+      jobs.push(updatedJob);
+    }
+    const nextMission = normalizeMission({
+      ...mission.raw,
+      ...mission,
+      status: missionStatusFromJobs(jobs, mission.status),
+      jobs,
+    });
+    changed = true;
+    return nextMission;
+  });
+  return changed;
+}
+
+async function runMissionWorkspaceJobAction({
+  missionId,
+  jobId,
+  action,
+  resource,
+  refresh,
+  missingMessage = "Mission task unavailable.",
+}) {
   const normalizedMissionId = normalizeString(missionId);
   const normalizedJobId = normalizeString(jobId);
-  const resource = state.pages.candidateDashboard.detail.missionsWorkspace;
-  if (!candidateId || !normalizedMissionId || !normalizedJobId) {
-    showToast("Mission task unavailable.");
-    return;
+  const normalizedAction = normalizeString(action).toLowerCase();
+  if (!normalizedMissionId || !normalizedJobId || !normalizedAction) {
+    showToast(missingMessage);
+    return false;
   }
-  const pendingKey = `${normalizedMissionId}:${normalizedJobId}:claim`;
-  if (resource.actionPendingKey) {
-    return;
+  if (!resource || resource.actionPendingKey) {
+    return false;
   }
+  const pendingKey = missionJobActionPendingKey(
+    normalizedMissionId,
+    normalizedJobId,
+    normalizedAction,
+  );
   resource.actionPendingKey = pendingKey;
+  resource.error = "";
   scheduleRender();
   try {
-    await fetchJson(
+    const payload = await fetchJson(
       `/api/missions/${encodeURIComponent(normalizedMissionId)}/jobs/${encodeURIComponent(normalizedJobId)}/actions`,
       {
         auth: true,
         method: "POST",
-        body: { action: "claim" },
+        body: { action: normalizedAction },
       },
     );
-    showToast("Mission task claimed.");
-    await loadCandidateDashboardMissions(candidateId, { refresh: true });
+    const updatedJob = payload.job || payload;
+    updateMissionWorkspaceJobSnapshot(resource, normalizedMissionId, updatedJob);
+    const config = missionJobActionConfig(normalizedAction, updatedJob);
+    showToast(config.toast || "Mission task updated.");
+    if (typeof refresh === "function") {
+      await refresh();
+    }
+    return true;
   } catch (error) {
     resource.error =
-      normalizeString(error?.message) || "Could not claim task.";
+      normalizeString(error?.message) || "Mission task update failed.";
     showToast(resource.error);
+    return false;
   } finally {
-    resource.actionPendingKey = "";
+    if (resource.actionPendingKey === pendingKey) {
+      resource.actionPendingKey = "";
+    }
     scheduleRender();
   }
+}
+
+async function runCandidateDashboardMissionJobAction(
+  missionId,
+  jobId,
+  action,
+  { candidateId = currentCandidateDashboardId() } = {},
+) {
+  const normalizedCandidateId = normalizeString(candidateId);
+  const resource = state.pages.candidateDashboard.detail.missionsWorkspace;
+  if (!normalizedCandidateId) {
+    showToast("Mission task unavailable.");
+    return false;
+  }
+  return runMissionWorkspaceJobAction({
+    missionId,
+    jobId,
+    action,
+    resource,
+    missingMessage: "Mission task unavailable.",
+    refresh: () =>
+      loadCandidateDashboardMissions(normalizedCandidateId, {
+        refresh: true,
+      }),
+  });
 }
 
 async function loadCoalitionMissions(coalitionId, { refresh = false } = {}) {
@@ -10698,38 +11055,36 @@ async function createCoalitionMission(formData) {
 
 async function claimCoalitionMissionJob(missionId, jobId) {
   const coalitionId = currentCoalitionDetailId();
+  return runCoalitionMissionJobAction(missionId, jobId, "claim", {
+    coalitionId,
+  });
+}
+
+async function runCoalitionMissionJobAction(
+  missionId,
+  jobId,
+  action,
+  { coalitionId = currentCoalitionDetailId() } = {},
+) {
+  const normalizedCoalitionId = normalizeString(coalitionId);
   const normalizedMissionId = normalizeString(missionId);
   const normalizedJobId = normalizeString(jobId);
   const resource = state.pages.coalitions.detail.missionsWorkspace;
-  if (!coalitionId || !normalizedMissionId || !normalizedJobId) {
+  if (!normalizedCoalitionId || !normalizedMissionId || !normalizedJobId) {
     showToast("Mission task unavailable.");
-    return;
+    return false;
   }
-  const pendingKey = `${normalizedMissionId}:${normalizedJobId}:claim`;
-  if (resource.actionPendingKey) {
-    return;
-  }
-  resource.actionPendingKey = pendingKey;
-  scheduleRender();
-  try {
-    await fetchJson(
-      `/api/missions/${encodeURIComponent(normalizedMissionId)}/jobs/${encodeURIComponent(normalizedJobId)}/actions`,
-      {
-        auth: true,
-        method: "POST",
-        body: { action: "claim" },
-      },
-    );
-    showToast("Mission task claimed.");
-    await loadCoalitionMissions(coalitionId, { refresh: true });
-  } catch (error) {
-    resource.error =
-      normalizeString(error?.message) || "Could not claim task.";
-    showToast(resource.error);
-  } finally {
-    resource.actionPendingKey = "";
-    scheduleRender();
-  }
+  return runMissionWorkspaceJobAction({
+    missionId: normalizedMissionId,
+    jobId: normalizedJobId,
+    action,
+    resource,
+    missingMessage: "Mission task unavailable.",
+    refresh: () =>
+      loadCoalitionMissions(normalizedCoalitionId, {
+        refresh: true,
+      }),
+  });
 }
 
 function coalitionCalendarWorkspace() {
@@ -11292,6 +11647,13 @@ function normalizeMissionJob(raw = {}) {
     createdAt: parseMissionTimestamp(raw.createdAt, raw.createdAtIso),
     updatedAt: parseMissionTimestamp(raw.updatedAt, raw.updatedAtIso),
     claimedAt: parseMissionTimestamp(raw.claimedAt, raw.claimedAtIso),
+    lastStartedAt: parseMissionTimestamp(
+      raw.lastStartedAt,
+      raw.lastStartedAtIso,
+      raw.startedAt,
+    ),
+    submittedAt: parseMissionTimestamp(raw.submittedAt, raw.submittedAtIso),
+    completedAt: parseMissionTimestamp(raw.completedAt, raw.completedAtIso),
     isQueued,
     isActive,
     isSubmitted,
@@ -11657,6 +12019,9 @@ async function claimMissionJob(missionId, jobId) {
     showToast(normalizeString(error?.message) || "Could not claim task.");
   } finally {
     detail.actionPendingKey = "";
+    if (list.actionPendingKey === pendingKey) {
+      list.actionPendingKey = "";
+    }
     scheduleRender();
   }
 }
@@ -11751,6 +12116,14 @@ function missionJobActionConfig(action, job = {}) {
   const normalized = normalizeString(action).toLowerCase();
   const submitLabel = missionJobRequiresApproval(job) ? "Submit" : "Complete";
   const configs = {
+    claim: {
+      label: "Claim",
+      title: "Claim task",
+      noteLabel: "Note",
+      helper: "Take ownership of this role-based mission task.",
+      toast: "Mission task claimed.",
+      direct: true,
+    },
     activate: {
       label: "Activate",
       title: "Activate queued task",
@@ -11912,6 +12285,7 @@ async function runMissionJobAction({
     return false;
   }
   const detail = state.pages.missions.detail;
+  const list = state.pages.missions.list;
   const pendingKey = missionJobActionPendingKey(
     normalizedMissionId,
     normalizedJobId,
@@ -12190,8 +12564,26 @@ function normalizeMessagingConversation(raw = {}) {
         ),
         username: normalizeString(participant.username || participant.handle),
         avatarUrl: normalizeUrl(participant.avatarUrl || participant.imageUrl),
+        role: normalizeString(
+          participant.role || participant.memberRole || participant.groupRole,
+        ),
+        isFriend: participant.isFriend === true || participant.friend === true,
+        raw: participant,
       }))
     : [];
+  const rawRoomPermissions =
+    raw.roomPermissions &&
+    typeof raw.roomPermissions === "object" &&
+    !Array.isArray(raw.roomPermissions)
+      ? raw.roomPermissions
+      : {};
+  const roomPermissions = Object.entries(rawRoomPermissions).reduce(
+    (permissions, [key, value]) => ({
+      ...permissions,
+      [normalizeString(key)]: value !== false,
+    }),
+    {},
+  );
   return {
     conversationId: normalizeString(raw.conversationId || raw.id),
     title:
@@ -12213,6 +12605,12 @@ function normalizeMessagingConversation(raw = {}) {
     scopeType: normalizeString(raw.scopeType),
     scopeId: normalizeString(raw.scopeId),
     canManage: raw.canManage === true,
+    canManageMembers:
+      raw.canManageMembers === true ||
+      raw.canManageGroup === true ||
+      raw.canManage === true,
+    isReadOnly: raw.isReadOnly === true || raw.readOnly === true,
+    roomPermissions,
     participants,
     members: Array.isArray(raw.members) ? raw.members : participants,
     raw,
@@ -12247,6 +12645,34 @@ function normalizeMessagingReaction(raw = {}) {
       source.me === true ||
       (currentUserId &&
         users.some((user) => normalizeString(user?.userId || user) === currentUserId)),
+  };
+}
+
+function normalizeMessagingSeenByEntry(raw = {}) {
+  const source =
+    raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  const userId = normalizeString(source.userId || source.id || source.viewerId);
+  const username = normalizeString(source.username || source.handle).replace(
+    /^@/u,
+    "",
+  );
+  const displayName =
+    normalizeString(source.displayName || source.name || source.title) ||
+    username ||
+    userId;
+  const seenAt =
+    Number(source.seenAt || source.timestamp || source.createdAt) ||
+    Date.parse(normalizeString(source.seenAtIso || source.createdAtIso)) ||
+    null;
+  return {
+    userId,
+    username,
+    displayName,
+    avatarUrl: normalizeUrl(
+      source.avatarUrl || source.avatar || source.imageUrl || source.photoUrl,
+    ),
+    seenAt: Number.isFinite(seenAt) && seenAt > 0 ? seenAt : null,
+    raw: source,
   };
 }
 
@@ -12326,11 +12752,58 @@ function normalizeMessagingMessage(raw = {}) {
           attachment.contentType || attachment.mimeType || attachment.mime,
         ),
         url: normalizeUrl(attachment.url || attachment.downloadUrl),
+        thumbnailUrl: normalizeUrl(attachment.thumbnailUrl),
+        width: Number(attachment.width) || null,
+        height: Number(attachment.height) || null,
+        durationMs: Number(attachment.durationMs) || null,
+        size: Number(attachment.size) || null,
       }))
     : [];
   const reactions = Array.isArray(raw.reactions)
     ? raw.reactions.map(normalizeMessagingReaction).filter((reaction) => reaction.emoji)
     : [];
+  const snapshot =
+    raw.snapshot && typeof raw.snapshot === "object" && !Array.isArray(raw.snapshot)
+      ? raw.snapshot
+      : null;
+  const mentions = readArrayPayload(raw, [
+    "mentions",
+    "textMentions",
+    "text_mentions",
+  ]).map((mention) => {
+    const start = Math.max(0, Number(mention.start) || 0);
+    const length =
+      Math.max(0, Number(mention.length) || 0) ||
+      Math.max(0, (Number(mention.end) || 0) - start);
+    const username = normalizeString(mention.username || mention.handle);
+    const end =
+      Number(mention.end) ||
+      (length ? start + length : username ? start + username.length + 1 : start);
+    return {
+      type: normalizeString(mention.type || mention.mentionType || "user").toLowerCase(),
+      userId: normalizeString(mention.userId || mention.id),
+      roleId: normalizeString(mention.roleId),
+      username,
+      displayName:
+        normalizeString(mention.displayName || mention.name || mention.label) ||
+        username,
+      start,
+      length: Math.max(0, Number(length) || Math.max(0, end - start)),
+      end,
+      raw: mention,
+    };
+  });
+  const seenBy = readArrayPayload(raw, [
+    "seenBy",
+    "seen_by",
+    "readBy",
+    "read_by",
+    "readReceipts",
+    "receipts",
+    "viewers",
+  ])
+    .map(normalizeMessagingSeenByEntry)
+    .filter((entry) => entry.userId || entry.displayName);
   return {
     messageId: normalizeString(raw.messageId || raw.id),
     conversationId: normalizeString(raw.conversationId),
@@ -12353,6 +12826,10 @@ function normalizeMessagingMessage(raw = {}) {
       normalizeString(raw.text || raw.body || raw.caption || raw.previewText) ||
       (raw.isEncrypted === true ? "Encrypted message" : ""),
     type: normalizeString(raw.type || raw.contentKind || "text"),
+    postId:
+      normalizeString(raw.postId) ||
+      normalizeString(raw.missionId ? `mission:${raw.missionId}` : ""),
+    snapshot,
     createdAt,
     updatedAt: Number(raw.updatedAt || raw.editedAt) || null,
     status: normalizeString(raw.status || raw.deliveryStatus),
@@ -12367,6 +12844,8 @@ function normalizeMessagingMessage(raw = {}) {
     replyTo: normalizeMessagingReplyPreview(raw.replyTo || raw.reply_to),
     attachments,
     reactions,
+    mentions,
+    seenBy,
     raw,
   };
 }
@@ -12422,17 +12901,21 @@ function normalizeMessagingRequest(raw = {}) {
 }
 
 function normalizeMessagingServer(raw = {}) {
+  const rawScopeBadge = normalizeString(raw.scopeBadge);
   return {
     serverKey:
       normalizeString(raw.serverKey) ||
       `${normalizeString(raw.scopeType)}:${normalizeString(raw.scopeId)}`,
     scopeType: normalizeString(raw.scopeType).toLowerCase(),
     scopeId: normalizeString(raw.scopeId),
-    title: normalizeString(raw.title) || "Server",
+    title: normalizeString(raw.title) || "Workspace",
     avatarUrl: normalizeUrl(raw.avatarUrl || raw.avatar || raw.imageUrl),
     canManage: raw.canManage === true,
     memberCount: Number(raw.memberCount) || 0,
-    scopeBadge: normalizeString(raw.scopeBadge) || "Server",
+    scopeBadge:
+      rawScopeBadge.toLowerCase() === "server"
+        ? "Workspace"
+        : rawScopeBadge || "Workspace",
     capabilities:
       raw.capabilities && typeof raw.capabilities === "object"
         ? raw.capabilities
@@ -12658,7 +13141,7 @@ function normalizeMessagingWorkflowAction(raw = {}) {
 function normalizeMessagingWorkflow(raw = {}) {
   return {
     workflowId: normalizeString(raw.workflowId || raw.id),
-    name: normalizeString(raw.name) || "Workflow",
+    name: normalizeString(raw.name) || "Automation",
     enabled: raw.enabled !== false,
     trigger: normalizeMessagingWorkflowTrigger(raw.trigger),
     keyword: normalizeString(raw.keyword),
@@ -13444,56 +13927,7 @@ async function applyCandidateDashboardEventMapFilters(formData) {
 }
 
 function candidateDashboardEventPayloadFromForm(formData) {
-  const title = normalizeString(formData.get("title"));
-  const imageUrl = normalizeString(formData.get("imageUrl"));
-  const startAtMs = Date.parse(normalizeString(formData.get("startAt")));
-  const endAtMs = Date.parse(normalizeString(formData.get("endAt")));
-  const locationLat = Number(formData.get("locationLat"));
-  const locationLng = Number(formData.get("locationLng"));
-  const isFree = formData.get("isFree") === "on";
-  const costAmount = Number(formData.get("costAmount"));
-  if (!title) {
-    throw new Error("Event title is required.");
-  }
-  if (!imageUrl) {
-    throw new Error("A cover image URL is required.");
-  }
-  if (!Number.isFinite(startAtMs) || !Number.isFinite(endAtMs)) {
-    throw new Error("Choose valid start and end times.");
-  }
-  if (endAtMs <= startAtMs) {
-    throw new Error("End time must be after the start time.");
-  }
-  if (!Number.isFinite(locationLat) || !Number.isFinite(locationLng)) {
-    throw new Error("Latitude and longitude are required for the event map.");
-  }
-  if (!isFree && !Number.isFinite(costAmount)) {
-    throw new Error("Enter a valid event price.");
-  }
-  return {
-    title,
-    imageUrl,
-    startAt: new Date(startAtMs).toISOString(),
-    endAt: new Date(endAtMs).toISOString(),
-    description: normalizeString(formData.get("description")),
-    locationTown: normalizeString(formData.get("locationTown")),
-    locationName: normalizeString(formData.get("locationName")),
-    address: normalizeString(formData.get("address")),
-    locationPlaceId: normalizeString(formData.get("locationPlaceId")),
-    locationLat,
-    locationLng,
-    isFree,
-    ...(isFree ? {} : { costAmount }),
-    tags: normalizeString(formData.get("tags"))
-      .split(",")
-      .map((entry) => entry.trim())
-      .filter(Boolean),
-    socials: {
-      email: normalizeString(formData.get("email")),
-      website: normalizeString(formData.get("website")),
-      link: normalizeString(formData.get("link")),
-    },
-  };
+  return buildEventPayloadFromForm(formData);
 }
 
 async function saveCandidateDashboardEvent(formData) {
@@ -13775,6 +14209,117 @@ function candidateCalendarDefaultRange() {
   return { from: from.getTime(), to: to.getTime() };
 }
 
+function candidateCalendarDateInputFromQuery(value) {
+  const normalized = normalizeString(value);
+  if (!normalized) {
+    return "";
+  }
+  const dateOnly = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/u);
+  if (dateOnly) {
+    return normalized;
+  }
+  const date = new Date(normalized);
+  if (!Number.isFinite(date.getTime())) {
+    return "";
+  }
+  return formatDateInputValue(date.getTime());
+}
+
+function candidateCalendarRefreshTokenFromQuery(params) {
+  const explicitToken = normalizeString(
+    params.get("calendarRefreshToken") || params.get("calendarRefresh"),
+  );
+  if (explicitToken) {
+    return explicitToken;
+  }
+  const status = normalizeString(
+    params.get("calendar_status") ||
+      params.get("status") ||
+      calendarReturnPathStatus(),
+  ).toLowerCase();
+  if (status !== "success") {
+    return "";
+  }
+  return [
+    status,
+    normalizeString(params.get("provider")),
+    normalizeString(params.get("connectionId")),
+  ].join("|");
+}
+
+function readCandidateDashboardCalendarFocus() {
+  const params = readCurrentSearchParams();
+  return {
+    itemId: normalizeString(params.get("calendarItemId")),
+    date: candidateCalendarDateInputFromQuery(params.get("calendarDate")),
+    refreshToken: candidateCalendarRefreshTokenFromQuery(params),
+  };
+}
+
+function syncCandidateDashboardCalendarFocus(resource) {
+  if (!resource) {
+    return false;
+  }
+  const focus = readCandidateDashboardCalendarFocus();
+  const queryKey = [
+    focus.itemId,
+    focus.date,
+    focus.refreshToken,
+  ].join("|");
+  if (resource.focusQueryKey === queryKey) {
+    return false;
+  }
+  const shouldRefreshForToken =
+    Boolean(focus.refreshToken) &&
+    focus.refreshToken !== resource.handledFocusRefreshToken;
+  resource.focusedItemId = focus.itemId;
+  resource.focusedDate = focus.date;
+  resource.focusRefreshToken = focus.refreshToken;
+  resource.focusQueryKey = queryKey;
+  if (focus.date) {
+    resource.filters = {
+      ...resource.filters,
+      from: focus.date,
+      to: focus.date,
+    };
+  }
+  if (focus.itemId) {
+    resource.filters = {
+      ...resource.filters,
+      status: "",
+      itemType: "",
+    };
+  }
+  if (shouldRefreshForToken) {
+    resource.handledFocusRefreshToken = focus.refreshToken;
+  }
+  return Boolean(focus.itemId || focus.date || shouldRefreshForToken);
+}
+
+function scrollCandidateDashboardFocusedCalendarItemSoon(resource) {
+  const focusedItemId = normalizeString(resource?.focusedItemId);
+  const scrollKey = normalizeString(resource?.focusQueryKey) || focusedItemId;
+  if (!focusedItemId || !scrollKey || resource.focusedItemScrollKey === scrollKey) {
+    return;
+  }
+  resource.focusedItemScrollKey = scrollKey;
+  window.requestAnimationFrame(() => {
+    try {
+      const target = root?.querySelector("#candidate-calendar-focused-item");
+      if (!target) {
+        return;
+      }
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+      target.classList.add("is-focus-pulse");
+      window.setTimeout(() => {
+        target.classList.remove("is-focus-pulse");
+      }, 1600);
+    } catch {
+      // Focus scrolling is best effort after render.
+    }
+  });
+}
+
 function candidateCalendarDateFilterTimestamp(value, endOfDay = false) {
   const normalized = normalizeString(value);
   if (!normalized) {
@@ -13815,13 +14360,14 @@ async function loadCandidateDashboardCalendar(
   }
   const detail = state.pages.candidateDashboard.detail;
   const resource = detail.calendarWorkspace;
+  const focusChanged = syncCandidateDashboardCalendarFocus(resource);
   if (resource.loading) {
     return;
   }
-  if (resource.loaded && !refresh) {
+  if (resource.loaded && !refresh && !focusChanged) {
     return;
   }
-  if (refresh) {
+  if (refresh || focusChanged) {
     resource.items = [];
     resource.connections = [];
     resource.providers = [];
@@ -13882,6 +14428,9 @@ async function loadCandidateDashboardCalendar(
   resource.loaded = itemsResult.status === "fulfilled";
   resource.loading = false;
   scheduleRender();
+  if (resource.loaded) {
+    scrollCandidateDashboardFocusedCalendarItemSoon(resource);
+  }
 }
 
 async function refreshCandidateDashboardCalendar() {
@@ -20882,6 +21431,30 @@ async function loadCandidateDashboardPage({ refresh = false } = {}) {
   }
   if (candidateId) {
     await loadCandidateDashboardDetail(candidateId, { refresh });
+    const overviewAccess =
+      state.pages.candidateDashboard.detail.access ||
+      findCandidateDashboardAccess(candidateId);
+    if (activeSection === "overview") {
+      const overviewLoads = [];
+      if (candidateDashboardCanOpenSectionKey("engagement", overviewAccess)) {
+        overviewLoads.push(loadCandidateDashboardEngagement(candidateId, { refresh }));
+      }
+      if (candidateDashboardCanOpenSectionKey("voter-contact-prompt", overviewAccess)) {
+        overviewLoads.push(loadCandidateDashboardContactPrompt(candidateId, { refresh }));
+      }
+      if (candidateDashboardCanOpenSectionKey("voter-registry", overviewAccess)) {
+        overviewLoads.push(loadCandidateDashboardVoterRegistry(candidateId, { refresh }));
+      }
+      if (candidateDashboardCanOpenSectionKey("messaging", overviewAccess)) {
+        overviewLoads.push(loadCandidateDashboardMessaging(candidateId, { refresh }));
+      }
+      if (candidateDashboardCanOpenSectionKey("campaign-quest", overviewAccess)) {
+        overviewLoads.push(loadCandidateDashboardVoterMapAccess(candidateId, { refresh }));
+      }
+      if (overviewLoads.length) {
+        await Promise.allSettled(overviewLoads);
+      }
+    }
     if (activeSection === "analytics") {
       await loadCandidateDashboardAnalytics(candidateId, { refresh });
     }
@@ -24313,20 +24886,350 @@ async function loadManageEvents({ refresh = false } = {}) {
   }
 }
 
-function buildEventPayloadFromForm(formData) {
+function defaultEventEditorTimes(event = {}) {
+  const fallbackStart = Date.now() + 24 * 60 * 60 * 1000;
+  const startAt = event.startAt || fallbackStart;
+  const endAt = event.endAt || startAt + 2 * 60 * 60 * 1000;
+  return { startAt, endAt };
+}
+
+function eventEditorKey(event = {}, mode = "create") {
+  return `${normalizeString(mode) || "create"}:${normalizeString(event.eventId)}`;
+}
+
+function createEventEditorDraft(event = {}, mode = "create") {
+  const times = defaultEventEditorTimes(event);
+  const socials = event.raw?.socials || {};
+  const lat = Number.isFinite(Number(event.lat))
+    ? String(Number(event.lat))
+    : "";
+  const lng = Number.isFinite(Number(event.lng))
+    ? String(Number(event.lng))
+    : "";
   return {
-    title: normalizeString(formData.get("title")),
-    description: normalizeString(formData.get("description")),
-    locationTown: normalizeString(formData.get("locationTown")),
-    address: normalizeString(formData.get("address")),
+    key: eventEditorKey(event, mode),
+    mode,
+    eventId: normalizeString(event.eventId),
+    title: normalizeString(event.title),
+    imageUrl: normalizeString(event.imageUrl),
+    description: normalizeString(event.description),
+    startAt: formatDateTimeInputValue(times.startAt),
+    endAt: formatDateTimeInputValue(times.endAt),
+    address: normalizeString(event.address),
+    locationTown: normalizeString(event.locationTown),
+    locationName: normalizeString(event.locationName),
+    locationPlaceId: normalizeString(event.locationPlaceId),
+    locationState: normalizeString(event.raw?.locationStateId || event.raw?.stateId),
+    postalCode: normalizeString(event.raw?.postalCode),
+    lat,
+    lng,
+    tags: Array.isArray(event.tags) ? event.tags.join(", ") : "",
+    email: normalizeString(socials.email),
+    website: normalizeString(socials.website),
+    link: normalizeString(socials.link || socials.other),
+    isFree: event.isFree !== false,
+    costAmount:
+      event.costAmount === null || event.costAmount === undefined
+        ? ""
+        : String(event.costAmount),
+  };
+}
+
+function eventEditorDraft(event = {}, mode = "create") {
+  const detail = state.pages.events.detail;
+  const key = eventEditorKey(event, mode);
+  if (!detail.editorDraft || detail.editorDraft.key !== key) {
+    detail.editorDraft = createEventEditorDraft(event, mode);
+    detail.addressLookup.query = normalizeString(detail.editorDraft.address);
+    detail.addressLookup.items = [];
+    detail.addressLookup.error = "";
+    detail.addressLookup.selected = null;
+  }
+  return detail.editorDraft;
+}
+
+function updateEventEditorDraftField(name, value) {
+  const detail = state.pages.events.detail;
+  const routeKey = getCurrentRoute().routeKey;
+  const mode = routeKey === ROUTE_KEY_MANAGE_EVENTS_EDIT ? "edit" : "create";
+  const draft = eventEditorDraft(detail.item || {}, mode);
+  const field = normalizeString(name);
+  if (!field) {
+    return draft;
+  }
+  draft[field] = value;
+  if (field === "address") {
+    detail.addressLookup.query = normalizeString(value);
+    detail.addressLookup.selected = null;
+  }
+  detail.error = "";
+  return draft;
+}
+
+function normalizeEventAddressSuggestion(raw = {}) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  const primaryText = normalizeString(
+    source.primaryText ||
+      source.primary_text ||
+      source.mainText ||
+      source.main_text ||
+      source.text ||
+      source.description,
+  );
+  if (!primaryText) {
+    return null;
+  }
+  return {
+    placeId: normalizeString(source.placeId || source.place_id || source.id) || primaryText,
+    primaryText,
+    secondaryText: normalizeString(
+      source.secondaryText || source.secondary_text || source.secondary,
+    ),
+  };
+}
+
+function eventAddressSuggestionLabel(suggestion = {}) {
+  return [suggestion.primaryText, suggestion.secondaryText]
+    .map(normalizeString)
+    .filter(Boolean)
+    .join(", ");
+}
+
+function normalizeEventAddressDetails(raw = {}) {
+  const source = readObjectPayload(raw.details || raw.address || raw.item || raw);
+  const geometry = readObjectPayload(source.geometry || source.Geometry);
+  const point = Array.isArray(source.Point)
+    ? source.Point
+    : Array.isArray(source.point)
+      ? source.point
+      : Array.isArray(geometry.Point)
+        ? geometry.Point
+        : Array.isArray(geometry.point)
+          ? geometry.point
+          : null;
+  const directLat = Number(
+    source.lat ?? source.latitude ?? geometry.lat ?? geometry.latitude,
+  );
+  const directLng = Number(
+    source.lng ?? source.longitude ?? geometry.lng ?? geometry.longitude,
+  );
+  const pointLat = Array.isArray(point) ? Number(point[1]) : NaN;
+  const pointLng = Array.isArray(point) ? Number(point[0]) : NaN;
+  const lat = Number.isFinite(directLat) ? directLat : pointLat;
+  const lng = Number.isFinite(directLng) ? directLng : pointLng;
+  return {
+    placeId: normalizeString(source.placeId || source.place_id),
+    addressLine1: normalizeString(
+      source.addressLine1 ||
+        source.address_line1 ||
+        source.line1 ||
+        source.label,
+    ),
+    city: normalizeString(
+      source.city ||
+        source.municipality ||
+        source.Municipality ||
+        source.town ||
+        source.Town,
+    ),
+    state: normalizeString(
+      source.stateId ||
+        source.state_id ||
+        source.state ||
+        source.region ||
+        source.Region,
+    ).toUpperCase(),
+    postalCode: normalizeString(
+      source.postalCode || source.postal_code || source.PostalCode || source.zip,
+    ),
+    lat: Number.isFinite(lat) ? lat : null,
+    lng: Number.isFinite(lng) ? lng : null,
+  };
+}
+
+function applyEventAddressDetails(details = {}, suggestion = null) {
+  const draft = eventEditorDraft(
+    state.pages.events.detail.item || {},
+    getCurrentRoute().routeKey === ROUTE_KEY_MANAGE_EVENTS_EDIT
+      ? "edit"
+      : "create",
+  );
+  const label =
+    normalizeString(details.addressLine1) ||
+    (suggestion ? eventAddressSuggestionLabel(suggestion) : "");
+  draft.address = label;
+  draft.locationTown = normalizeString(details.city) || draft.locationTown;
+  draft.locationState = normalizeString(details.state) || draft.locationState;
+  draft.postalCode = normalizeString(details.postalCode) || draft.postalCode;
+  draft.locationPlaceId =
+    normalizeString(details.placeId) ||
+    normalizeString(suggestion?.placeId) ||
+    draft.locationPlaceId;
+  if (Number.isFinite(details.lat)) {
+    draft.lat = String(details.lat);
+  }
+  if (Number.isFinite(details.lng)) {
+    draft.lng = String(details.lng);
+  }
+  state.pages.events.detail.addressLookup.selected = {
+    suggestion,
+    details,
+  };
+  state.pages.events.detail.addressLookup.query = label;
+}
+
+function queueEventAddressLookup() {
+  window.clearTimeout(eventAddressLookupTimer);
+  eventAddressLookupTimer = window.setTimeout(() => {
+    loadEventAddressSuggestions().catch(() => {});
+  }, 280);
+}
+
+async function loadEventAddressSuggestions() {
+  const lookup = state.pages.events.detail.addressLookup;
+  const query = normalizeString(lookup.query);
+  lookup.items = [];
+  lookup.error = "";
+  if (!query || query.length < 3) {
+    lookup.loading = false;
+    scheduleRender();
+    return;
+  }
+  const requestId = lookup.requestId + 1;
+  lookup.requestId = requestId;
+  lookup.loading = true;
+  scheduleRender();
+  try {
+    const payload = await fetchJson(
+      `/api/geo/address/autocomplete?q=${encodeURIComponent(query)}`,
+      { auth: true },
+    );
+    if (lookup.requestId !== requestId) {
+      return;
+    }
+    if (payload.available === false) {
+      lookup.items = [];
+      lookup.error = "Address suggestions are not configured. Enter the address and coordinates manually.";
+    } else {
+      const items = readArrayPayload(payload, [
+        "items",
+        "results",
+        "suggestions",
+        "predictions",
+      ]);
+      lookup.items = items.map(normalizeEventAddressSuggestion).filter(Boolean);
+    }
+  } catch (error) {
+    if (lookup.requestId === requestId) {
+      lookup.error =
+        normalizeString(error?.message) || "Address suggestions failed.";
+      lookup.items = [];
+    }
+  } finally {
+    if (lookup.requestId === requestId) {
+      lookup.loading = false;
+      scheduleRender();
+    }
+  }
+}
+
+async function selectEventAddressSuggestion(index) {
+  const lookup = state.pages.events.detail.addressLookup;
+  const suggestion = lookup.items[Number(index)];
+  if (!suggestion) {
+    return;
+  }
+  lookup.loading = true;
+  lookup.error = "";
+  scheduleRender();
+  try {
+    const payload = await fetchJson(
+      `/api/geo/address/details?placeId=${encodeURIComponent(suggestion.placeId)}`,
+      { auth: true },
+    );
+    const item = payload.item || payload.details || payload.address || payload;
+    const details = normalizeEventAddressDetails(item);
+    applyEventAddressDetails(details, suggestion);
+    lookup.items = [];
+  } catch (error) {
+    lookup.error =
+      normalizeString(error?.message) || "Address details could not be loaded.";
+  } finally {
+    lookup.loading = false;
+    scheduleRender();
+  }
+}
+
+function buildEventPayloadFromForm(formData) {
+  const title = normalizeString(formData.get("title"));
+  const imageUrl = normalizeString(formData.get("imageUrl"));
+  const description = normalizeString(formData.get("description"));
+  const startAtMs = Date.parse(normalizeString(formData.get("startAt")));
+  const endAtMs = Date.parse(normalizeString(formData.get("endAt")));
+  const locationTown = normalizeString(formData.get("locationTown"));
+  const address = normalizeString(formData.get("address"));
+  const lat = Number(formData.get("lat") || formData.get("locationLat"));
+  const lng = Number(formData.get("lng") || formData.get("locationLng"));
+  const isFree = formData.get("isFree") === "on";
+  const costAmount = Number(formData.get("costAmount"));
+  const email = normalizeString(formData.get("email"));
+  const website = normalizeString(formData.get("website"));
+  const link = normalizeString(formData.get("link"));
+  if (!title) {
+    throw new Error("Event title is required.");
+  }
+  if (!imageUrl) {
+    throw new Error("A cover image URL is required.");
+  }
+  if (!description) {
+    throw new Error("Description is required.");
+  }
+  if (!Number.isFinite(startAtMs) || !Number.isFinite(endAtMs)) {
+    throw new Error("Choose valid start and end times.");
+  }
+  if (endAtMs <= startAtMs) {
+    throw new Error("End time must be after the start time.");
+  }
+  if (!locationTown) {
+    throw new Error("City or town is required.");
+  }
+  if (!address) {
+    throw new Error("Event address is required.");
+  }
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    throw new Error("Select a suggested address or enter latitude and longitude.");
+  }
+  if (!email || !email.includes("@")) {
+    throw new Error("A valid contact email is required.");
+  }
+  if (!isFree && (!Number.isFinite(costAmount) || costAmount <= 0)) {
+    throw new Error("Enter a valid event price.");
+  }
+  return {
+    title,
+    imageUrl,
+    startAt: new Date(startAtMs).toISOString(),
+    endAt: new Date(endAtMs).toISOString(),
+    description,
+    locationTown,
     locationName: normalizeString(formData.get("locationName")),
-    imageUrl: normalizeString(formData.get("imageUrl")),
-    startAt: new Date(normalizeString(formData.get("startAt"))).getTime(),
-    endAt: new Date(normalizeString(formData.get("endAt"))).getTime(),
+    address,
+    locationPlaceId: normalizeString(formData.get("locationPlaceId")),
+    lat,
+    lng,
+    locationLat: lat,
+    locationLng: lng,
+    isFree,
+    ...(isFree ? {} : { costAmount }),
     tags: normalizeString(formData.get("tags"))
       .split(",")
       .map((entry) => entry.trim())
       .filter(Boolean),
+    socials: {
+      email,
+      ...(website ? { website } : {}),
+      ...(link ? { link } : {}),
+    },
   };
 }
 
@@ -24353,6 +25256,15 @@ async function saveEventFromForm(formData, { mode = "create" } = {}) {
           });
     const normalized = normalizeEvent(response.event || response);
     detail.item = normalized;
+    detail.editorDraft = null;
+    detail.addressLookup = {
+      query: "",
+      items: [],
+      loading: false,
+      error: "",
+      selected: null,
+      requestId: detail.addressLookup.requestId,
+    };
     navigateTo(`/events/${encodeURIComponent(normalized.eventId)}`, {
       replace: true,
     });
@@ -24983,6 +25895,13 @@ function parseMessagingSubroute(route = state.route) {
     };
   }
   if (segments[0] === "conversations" && segments[1]) {
+    if (segments[2] === "people") {
+      return {
+        view: "conversation-people",
+        conversationId: decodeRouteSegment(segments[1]),
+        segments,
+      };
+    }
     return {
       view: "conversation",
       conversationId: decodeRouteSegment(segments[1]),
@@ -25160,7 +26079,7 @@ async function loadMessagingServers() {
     servers.items = (payload.servers || []).map(normalizeMessagingServer);
     servers.loaded = true;
   } catch (error) {
-    servers.error = normalizeString(error?.message) || "Servers unavailable.";
+    servers.error = normalizeString(error?.message) || "Workspaces unavailable.";
   } finally {
     servers.loading = false;
     scheduleRender();
@@ -25455,6 +26374,192 @@ function queueMessagingComposeSearch() {
   }, 300);
 }
 
+function messagingGroupPeopleState() {
+  if (!state.pages.messaging.groupPeople) {
+    state.pages.messaging.groupPeople = createMessagingGroupPeopleState();
+  }
+  return state.pages.messaging.groupPeople;
+}
+
+async function loadMessagingGroupPeopleFriends({ refresh = false } = {}) {
+  const peopleState = messagingGroupPeopleState();
+  const friends = peopleState.friends;
+  const currentUserId = currentMessagingUserId();
+  if (!currentUserId) {
+    friends.loaded = true;
+    return;
+  }
+  if (friends.loading || (!refresh && friends.loaded)) {
+    return;
+  }
+  if (refresh) {
+    friends.items = [];
+    friends.loaded = false;
+  }
+  friends.loading = true;
+  friends.error = "";
+  scheduleRender();
+  try {
+    const payload = await fetchJson(
+      `/api/users/${encodeURIComponent(currentUserId)}/friends?limit=40`,
+      { auth: true },
+    );
+    friends.items = readArrayPayload(payload, [
+      "items",
+      "friends",
+      "connections",
+      "users",
+      "data",
+    ])
+      .map((item) => normalizeMessagingComposeCandidate(item, { isFriend: true }))
+      .filter(Boolean);
+    friends.loaded = true;
+  } catch (error) {
+    friends.error =
+      normalizeString(error?.message) || "Friend suggestions could not load.";
+    friends.loaded = true;
+  } finally {
+    friends.loading = false;
+    scheduleRender();
+  }
+}
+
+async function loadMessagingGroupPeopleSearch(query, { refresh = false } = {}) {
+  const peopleState = messagingGroupPeopleState();
+  const search = peopleState.search;
+  const normalizedQuery = normalizeString(query);
+  peopleState.query = normalizedQuery;
+  if (normalizedQuery.length < 3) {
+    peopleState.lastSearchQuery = "";
+    search.items = [];
+    search.error = "";
+    search.loading = false;
+    search.loaded = false;
+    scheduleRender();
+    return;
+  }
+  if (
+    search.loading ||
+    (!refresh && search.loaded && peopleState.lastSearchQuery === normalizedQuery)
+  ) {
+    return;
+  }
+  const token = peopleState.searchToken + 1;
+  peopleState.searchToken = token;
+  peopleState.lastSearchQuery = normalizedQuery;
+  search.loading = true;
+  search.error = "";
+  scheduleRender();
+  try {
+    const payload = await fetchJson(
+      messagingComposeSearchEndpoint(normalizedQuery, 16),
+      { auth: true },
+    );
+    if (peopleState.searchToken !== token) return;
+    const friendsByKey = new Map(
+      (peopleState.friends.items || []).map((candidate) => [
+        messagingComposeCandidateKey(candidate),
+        candidate,
+      ]),
+    );
+    search.items = normalizeSearchResultsPayload(payload, "users").items
+      .map((item) => {
+        const candidate = normalizeMessagingComposeCandidate(item);
+        if (!candidate) return null;
+        const key = messagingComposeCandidateKey(candidate);
+        return friendsByKey.has(key)
+          ? { ...candidate, isFriend: true, deliveryFolder: "inbox" }
+          : candidate;
+      })
+      .filter(Boolean);
+    search.loaded = true;
+  } catch (error) {
+    if (peopleState.searchToken !== token) return;
+    search.error = normalizeString(error?.message) || "People search failed.";
+    search.loaded = true;
+  } finally {
+    if (peopleState.searchToken === token) {
+      search.loading = false;
+      scheduleRender();
+    }
+  }
+}
+
+function queueMessagingGroupPeopleSearch() {
+  window.clearTimeout(messagingGroupPeopleSearchTimer);
+  const query = normalizeString(messagingGroupPeopleState().query);
+  if (query.length < 3) {
+    loadMessagingGroupPeopleSearch(query).catch(() => {});
+    return;
+  }
+  messagingGroupPeopleSearchTimer = window.setTimeout(() => {
+    loadMessagingGroupPeopleSearch(query).catch(() => {});
+  }, 300);
+}
+
+function findMessagingGroupPeopleCandidate(candidateKey) {
+  const key = normalizeString(candidateKey);
+  if (!key) return null;
+  const peopleState = messagingGroupPeopleState();
+  return [
+    ...(peopleState.friends.items || []),
+    ...(peopleState.search.items || []),
+  ].find((candidate) => messagingComposeCandidateKey(candidate) === key) || null;
+}
+
+async function addMessagingGroupPeopleCandidate(conversationId, candidateKey) {
+  const peopleState = messagingGroupPeopleState();
+  const candidate = findMessagingGroupPeopleCandidate(candidateKey);
+  const key = messagingComposeCandidateKey(candidate);
+  const normalizedConversationId = normalizeString(conversationId);
+  if (!normalizedConversationId || !candidate || !key) {
+    peopleState.error = "Choose a person from the list first.";
+    scheduleRender();
+    return false;
+  }
+  if (candidate.blockedByPrivacy) {
+    peopleState.error =
+      candidate.reason || "This person cannot be added right now.";
+    showToast(peopleState.error);
+    scheduleRender();
+    return false;
+  }
+  peopleState.actionPendingKey = `add:${key}`;
+  peopleState.error = "";
+  scheduleRender();
+  try {
+    const formData = new FormData();
+    formData.set("conversationId", normalizedConversationId);
+    if (normalizeString(candidate.userId)) {
+      formData.set("userId", normalizeString(candidate.userId));
+    } else {
+      formData.set(
+        "username",
+        normalizeString(candidate.username).replace(/^@/u, ""),
+      );
+    }
+    const added = await addMessagingConversationMember(formData);
+    if (added) {
+      peopleState.query = "";
+      peopleState.lastSearchQuery = "";
+      peopleState.search.items = [];
+      peopleState.search.loaded = false;
+      await Promise.all([
+        loadMessagingConversation(normalizedConversationId, { refresh: true }).catch(
+          () => {},
+        ),
+        loadMessagingGroupPeopleFriends({ refresh: true }).catch(() => {}),
+      ]);
+    }
+    return added;
+  } finally {
+    if (peopleState.actionPendingKey === `add:${key}`) {
+      peopleState.actionPendingKey = "";
+    }
+    scheduleRender();
+  }
+}
+
 async function loadMessagingConversation(
   conversationId,
   { refresh = false } = {},
@@ -25471,6 +26576,9 @@ async function loadMessagingConversation(
     conversation.editingMessageId = "";
     conversation.editingOriginalText = "";
     conversation.pendingReply = null;
+    conversation.mention = createMessagingComposerMentionState();
+    conversation.missionCommand = createMessagingMissionCommandState();
+    conversation.missionDraft = createMessagingMissionDraftState();
   }
   conversation.loading = true;
   conversation.error = "";
@@ -25793,7 +26901,7 @@ async function loadMessagingServerDirectory(
     directory.loaded = true;
   } catch (error) {
     directory.error =
-      normalizeString(error?.message) || "Server directory unavailable.";
+      normalizeString(error?.message) || "Room directory unavailable.";
   } finally {
     directory.loading = false;
     scheduleRender();
@@ -25857,11 +26965,95 @@ async function loadMessagingServerSettings(
     serverSettings.loaded = true;
   } catch (error) {
     serverSettings.error =
-      normalizeString(error?.message) || "Server settings unavailable.";
+      normalizeString(error?.message) || "Workspace settings unavailable.";
   } finally {
     serverSettings.loading = false;
     scheduleRender();
   }
+}
+
+function messagingReadableActivityType(value) {
+  const rawLabel = normalizeString(value);
+  const normalized = rawLabel
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, "_")
+    .replace(/^_+|_+$/gu, "");
+  const labels = {
+    automod_rule_created: "Guardrail added",
+    automod_rule_deleted: "Guardrail removed",
+    automod_rule_updated: "Guardrail updated",
+    ban_created: "Member restricted",
+    ban_deleted: "Member restored",
+    ban_updated: "Restriction updated",
+    channel_created: "Room created",
+    channel_deleted: "Room removed",
+    channel_permission_updated: "Room access updated",
+    channel_permissions_updated: "Room access updated",
+    channel_updated: "Room updated",
+    invite_created: "Invite link created",
+    invite_deleted: "Invite link removed",
+    invite_revoked: "Invite link revoked",
+    member_banned: "Member restricted",
+    member_joined: "Member joined",
+    member_removed: "Member removed",
+    member_unbanned: "Member restored",
+    message_deleted: "Message removed",
+    moderation_report_created: "Report opened",
+    moderation_report_resolved: "Report resolved",
+    role_created: "Access group created",
+    role_deleted: "Access group removed",
+    role_updated: "Access group updated",
+    security_policy_updated: "Safety policy updated",
+    server_updated: "Workspace updated",
+    settings_updated: "Settings updated",
+    workflow_created: "Automation added",
+    workflow_deleted: "Automation removed",
+    workflow_disabled: "Automation paused",
+    workflow_enabled: "Automation resumed",
+    workflow_updated: "Automation updated",
+  };
+  return labels[normalized] || humanizeLabel(rawLabel) || "Activity update";
+}
+
+function messagingReadableActivityActor(source = {}) {
+  const actor =
+    normalizeString(
+      source.actorName ||
+        source.actorDisplayName ||
+        source.actorUsername ||
+        source.username ||
+        source.adminName,
+    ) || (source.actorId || source.actorUserId ? "an admin" : "");
+  return actor ? `By ${actor}` : "System update";
+}
+
+function messagingReadableActivityTarget(source = {}) {
+  const targetName = normalizeString(
+    source.targetName ||
+      source.targetTitle ||
+      source.channelName ||
+      source.roomName ||
+      source.roleName ||
+      source.memberName,
+  );
+  const targetType = normalizeString(source.targetType);
+  const targetLabels = {
+    ban: "Restriction",
+    channel: "Room",
+    conversation: "Room",
+    member: "Member",
+    message: "Message",
+    role: "Access group",
+    server: "Workspace",
+    user: "Member",
+    workflow: "Automation",
+  };
+  const readableType =
+    targetLabels[targetType.toLowerCase()] || humanizeLabel(targetType);
+  if (targetName && readableType) {
+    return `${readableType}: ${targetName}`;
+  }
+  return targetName || readableType || "";
 }
 
 function normalizeMessagingServerAuditEvent(raw = {}) {
@@ -25869,23 +27061,31 @@ function normalizeMessagingServerAuditEvent(raw = {}) {
     raw && typeof raw === "object" && !Array.isArray(raw)
       ? raw
       : { title: raw };
-  const createdAt = Number(source.createdAt || source.timestamp) || null;
+  const createdAt = normalizeMessagingInviteTimestamp(
+    source.createdAt ||
+      source.createdAtIso ||
+      source.timestamp ||
+      source.timestampIso,
+  );
+  const title = messagingReadableActivityType(
+    source.title || source.type || source.action,
+  );
+  const subtitle =
+    normalizeString(source.description || source.summary || source.message) ||
+    [
+      messagingReadableActivityActor(source),
+      messagingReadableActivityTarget(source),
+    ]
+      .filter(Boolean)
+      .join(" - ") ||
+    "Workspace activity recorded.";
   return {
     eventId: normalizeString(source.eventId || source.auditEventId || source.id),
-    title:
-      normalizeString(source.title || source.type || source.action) ||
-      "Audit event",
-    subtitle:
-      normalizeString(source.description || source.summary || source.message) ||
-      [
-        source.actorId ? `Actor ${source.actorId}` : "",
-        source.targetType ? `${source.targetType}: ${source.targetId || ""}` : "",
-      ]
-        .filter(Boolean)
-        .join(" - "),
+    title,
+    subtitle,
     status: createdAt
-      ? formatAbsoluteDateTime(createdAt)
-      : normalizeString(source.status || source.state),
+      ? `Recorded ${formatAbsoluteDateTime(createdAt)}`
+      : humanizeLabel(source.status || source.state) || "Recorded",
     actorId: normalizeString(source.actorId || source.actorUserId),
     targetType: normalizeString(source.targetType),
     targetId: normalizeString(source.targetId),
@@ -25932,7 +27132,7 @@ async function loadMessagingServerAudit(
     auditState.loaded = true;
   } catch (error) {
     auditState.error =
-      normalizeString(error?.message) || "Server audit log unavailable.";
+      normalizeString(error?.message) || "Activity history unavailable.";
   } finally {
     auditState.loading = false;
     scheduleRender();
@@ -26009,7 +27209,7 @@ async function loadMessagingServerAssets(
     assetState.loaded = true;
   } catch (error) {
     assetState.error =
-      normalizeString(error?.message) || "Server assets unavailable.";
+      normalizeString(error?.message) || "Workspace assets unavailable.";
   } finally {
     assetState.loading = false;
     scheduleRender();
@@ -26089,11 +27289,11 @@ async function createMessagingServerAsset(formData) {
       },
     });
     upsertMessagingServerAsset(payload.asset || payload);
-    showToast("Server asset added.");
+    showToast("Workspace asset added.");
     return true;
   } catch (error) {
     assetState.error =
-      normalizeString(error?.message) || "Server asset could not be added.";
+      normalizeString(error?.message) || "Workspace asset could not be added.";
     showToast(assetState.error);
     return false;
   } finally {
@@ -26143,11 +27343,11 @@ async function updateMessagingServerAsset(formData) {
       },
     );
     upsertMessagingServerAsset(payload.asset || payload);
-    showToast("Server asset updated.");
+    showToast("Workspace asset updated.");
     return true;
   } catch (error) {
     assetState.error =
-      normalizeString(error?.message) || "Server asset could not be updated.";
+      normalizeString(error?.message) || "Workspace asset could not be updated.";
     showToast(assetState.error);
     return false;
   } finally {
@@ -26185,11 +27385,11 @@ async function deleteMessagingServerAsset(scopeType, scopeId, assetId) {
       },
     );
     removeMessagingServerAsset(normalizedAssetId);
-    showToast("Server asset deleted.");
+    showToast("Workspace asset deleted.");
     return true;
   } catch (error) {
     assetState.error =
-      normalizeString(error?.message) || "Server asset could not be deleted.";
+      normalizeString(error?.message) || "Workspace asset could not be deleted.";
     showToast(assetState.error);
     return false;
   } finally {
@@ -26304,7 +27504,7 @@ async function loadMessagingServerSecurityPolicy(
     policyState.loaded = true;
   } catch (error) {
     policyState.error =
-      normalizeString(error?.message) || "Server security policy unavailable.";
+      normalizeString(error?.message) || "Safety policy unavailable.";
   } finally {
     policyState.loading = false;
     scheduleRender();
@@ -26415,7 +27615,7 @@ async function loadMessagingServerRoles(
     rolesState.loaded = true;
   } catch (error) {
     rolesState.error =
-      normalizeString(error?.message) || "Server roles unavailable.";
+      normalizeString(error?.message) || "Access groups unavailable.";
   } finally {
     rolesState.loading = false;
     scheduleRender();
@@ -26717,7 +27917,7 @@ async function loadMessagingServerMembers(
     membersState.loaded = true;
   } catch (error) {
     membersState.error =
-      normalizeString(error?.message) || "Server members unavailable.";
+      normalizeString(error?.message) || "Members unavailable.";
   } finally {
     membersState.loading = false;
     scheduleRender();
@@ -26759,7 +27959,7 @@ async function loadMessagingServerMember(
     };
   } catch (error) {
     membersState.detailError =
-      normalizeString(error?.message) || "Server member detail unavailable.";
+      normalizeString(error?.message) || "Member detail unavailable.";
   } finally {
     membersState.detailLoading = false;
     scheduleRender();
@@ -27076,7 +28276,7 @@ async function loadMessagingServerWorkflows(
     workflowState.loaded = true;
   } catch (error) {
     workflowState.error =
-      normalizeString(error?.message) || "Server workflows unavailable.";
+      normalizeString(error?.message) || "Automations unavailable.";
   } finally {
     workflowState.loading = false;
     scheduleRender();
@@ -27133,19 +28333,19 @@ async function createMessagingWorkflow(formData) {
   const schedule = normalizeMessagingWorkflowSchedule(formData.get("schedule"));
   const name =
     normalizeString(formData.get("name")) ||
-    (trigger === "schedule" ? "Scheduled workflow" : "Keyword workflow");
+    (trigger === "schedule" ? "Scheduled automation" : "Keyword automation");
   const action = messagingWorkflowActionFromForm(formData);
   const workflowState = state.pages.messaging.serverWorkflows;
   if (!scopeType || !scopeId) {
-    showToast("Workflow server unavailable.");
+    showToast("Automation space unavailable.");
     return false;
   }
   if (trigger === "message_keyword" && !keyword) {
-    showToast("Add a keyword for this workflow.");
+    showToast("Add a keyword for this automation.");
     return false;
   }
   if (trigger === "schedule" && !schedule) {
-    showToast("Choose a schedule for this workflow.");
+    showToast("Choose a schedule for this automation.");
     return false;
   }
   if (action.type === "call_webhook" && !normalizeUrl(action.webhookUrl)) {
@@ -27153,7 +28353,7 @@ async function createMessagingWorkflow(formData) {
     return false;
   }
   if (action.type === "send_message" && !action.message) {
-    showToast("Add a message for this workflow.");
+    showToast("Add a message for this automation.");
     return false;
   }
   if (workflowState.creating) {
@@ -27179,11 +28379,11 @@ async function createMessagingWorkflow(formData) {
       },
     });
     upsertMessagingWorkflow(payload.workflow || {});
-    showToast("Workflow created.");
+    showToast("Automation created.");
     return true;
   } catch (error) {
     workflowState.error =
-      normalizeString(error?.message) || "Workflow create failed.";
+      normalizeString(error?.message) || "Automation create failed.";
     showToast(workflowState.error);
     return false;
   } finally {
@@ -27203,7 +28403,7 @@ async function updateMessagingWorkflowEnabled(
   const normalizedWorkflowId = normalizeString(workflowId);
   const workflowState = state.pages.messaging.serverWorkflows;
   if (!normalizedScopeType || !normalizedScopeId || !normalizedWorkflowId) {
-    showToast("Workflow unavailable.");
+    showToast("Automation unavailable.");
     return false;
   }
   const pendingKey = `${normalizedWorkflowId}:toggle`;
@@ -27226,11 +28426,11 @@ async function updateMessagingWorkflowEnabled(
       },
     );
     upsertMessagingWorkflow(payload.workflow || {});
-    showToast(enabled === true ? "Workflow enabled." : "Workflow disabled.");
+    showToast(enabled === true ? "Automation resumed." : "Automation paused.");
     return true;
   } catch (error) {
     workflowState.error =
-      normalizeString(error?.message) || "Workflow update failed.";
+      normalizeString(error?.message) || "Automation update failed.";
     showToast(workflowState.error);
     return false;
   } finally {
@@ -27247,7 +28447,7 @@ async function deleteMessagingWorkflow(scopeType, scopeId, workflowId) {
   const normalizedWorkflowId = normalizeString(workflowId);
   const workflowState = state.pages.messaging.serverWorkflows;
   if (!normalizedScopeType || !normalizedScopeId || !normalizedWorkflowId) {
-    showToast("Workflow unavailable.");
+    showToast("Automation unavailable.");
     return false;
   }
   const pendingKey = `${normalizedWorkflowId}:delete`;
@@ -27271,11 +28471,11 @@ async function deleteMessagingWorkflow(scopeType, scopeId, workflowId) {
     workflowState.items = workflowState.items.filter(
       (item) => item.workflowId !== normalizedWorkflowId,
     );
-    showToast("Workflow deleted.");
+    showToast("Automation removed.");
     return true;
   } catch (error) {
     workflowState.error =
-      normalizeString(error?.message) || "Workflow delete failed.";
+      normalizeString(error?.message) || "Automation remove failed.";
     showToast(workflowState.error);
     return false;
   } finally {
@@ -27689,7 +28889,7 @@ async function loadMessagingPermissionTarget(
     setMessagingPermissionTargetFromPayload(payload);
   } catch (error) {
     permissionTarget.error =
-      normalizeString(error?.message) || "Permission detail unavailable.";
+      normalizeString(error?.message) || "Room access unavailable.";
   } finally {
     permissionTarget.loading = false;
     scheduleRender();
@@ -27993,7 +29193,7 @@ async function updateMessagingServerNotificationLevel(
       },
     );
     await loadMessagingServerSettings(scopeType, scopeId, { refresh: true });
-    showToast("Server preference updated.");
+    showToast("Workspace preference updated.");
   } finally {
     state.pages.messaging.serverSettings.saving = false;
     scheduleRender();
@@ -28261,7 +29461,7 @@ async function loadMessagingServerInvites(
     invitesState.loaded = true;
   } catch (error) {
     invitesState.error =
-      normalizeString(error?.message) || "Server invites unavailable.";
+      normalizeString(error?.message) || "Workspace invites unavailable.";
   } finally {
     invitesState.loading = false;
     scheduleRender();
@@ -28300,7 +29500,7 @@ function upsertMessagingServerInvite(invite) {
       ) || "Pending invite",
     subtitle:
       normalizeString(source.subtitle || source.description || source.message) ||
-      (inviteeUserId ? `Invite sent to ${inviteeUserId}` : "Server invite pending."),
+      (inviteeUserId ? `Invite sent to ${inviteeUserId}` : "Workspace invite pending."),
     status: normalizeString(source.status) || "pending",
   };
   if (!settingsBundle.raw || typeof settingsBundle.raw !== "object") {
@@ -28331,7 +29531,7 @@ async function updateMessagingServerSettings(formData) {
   const settingsState = state.pages.messaging.serverSettings;
   const pendingKey = `settings:${section || "general"}`;
   if (!scopeType || !scopeId) {
-    showToast("Server settings unavailable.");
+    showToast("Workspace settings unavailable.");
     return false;
   }
   if (settingsState.actionPendingKey) {
@@ -28341,7 +29541,7 @@ async function updateMessagingServerSettings(formData) {
   if (section === "customization") {
     const title = normalizeString(formData.get("title"));
     if (!title) {
-      showToast("Add a server display name.");
+      showToast("Add a workspace display name.");
       return false;
     }
     body.title = title;
@@ -28425,11 +29625,11 @@ async function updateMessagingServerSettings(formData) {
         () => {},
       ),
     ]);
-    showToast("Server settings updated.");
+    showToast("Workspace settings updated.");
     return true;
   } catch (error) {
     settingsState.error =
-      normalizeString(error?.message) || "Server settings could not be updated.";
+      normalizeString(error?.message) || "Workspace settings could not be updated.";
     showToast(settingsState.error);
     return false;
   } finally {
@@ -28465,7 +29665,7 @@ async function createMessagingChannelCategory(formData) {
   const settingsState = state.pages.messaging.serverSettings;
   const pendingKey = "category:create";
   if (!scopeType || !scopeId) {
-    showToast("Server directory unavailable.");
+    showToast("Room directory unavailable.");
     return false;
   }
   if (!title) {
@@ -28616,7 +29816,7 @@ async function createMessagingServerChannel(formData) {
   const settingsState = state.pages.messaging.serverSettings;
   const pendingKey = "channel:create";
   if (!scopeType || !scopeId) {
-    showToast("Server directory unavailable.");
+    showToast("Room directory unavailable.");
     return false;
   }
   if (!title) {
@@ -28805,11 +30005,11 @@ async function createMessagingServerInvite(formData) {
     await loadMessagingServerInvites(scopeType, scopeId, { refresh: true }).catch(
       () => {},
     );
-    showToast("Server invite sent.");
+    showToast("Workspace invite sent.");
     return true;
   } catch (error) {
     settingsState.error =
-      normalizeString(error?.message) || "Server invite could not be sent.";
+      normalizeString(error?.message) || "Workspace invite could not be sent.";
     showToast(settingsState.error);
     return false;
   } finally {
@@ -28845,6 +30045,9 @@ async function addMessagingConversationMember(formData) {
       },
     );
     await loadMessagingConversationMembers(conversationId, { refresh: true });
+    await loadMessagingConversation(conversationId, { refresh: true }).catch(
+      () => {},
+    );
     showToast("Member added.");
     return true;
   } catch (error) {
@@ -28882,6 +30085,9 @@ async function removeMessagingConversationMember(conversationId, userId) {
     await loadMessagingConversationMembers(normalizedConversationId, {
       refresh: true,
     });
+    await loadMessagingConversation(normalizedConversationId, {
+      refresh: true,
+    }).catch(() => {});
     showToast("Member removed.");
   } catch (error) {
     roomMembers.error =
@@ -29240,13 +30446,13 @@ async function saveMessagingPermissionTarget({
   overrides,
   syncState,
   pendingKey = "permission-save",
-  successMessage = "Permissions updated.",
+  successMessage = "Access updated.",
 } = {}) {
   const normalizedTargetType = normalizeString(targetType).toLowerCase();
   const normalizedTargetId = normalizeString(targetId);
   const permissionState = state.pages.messaging.permissionTarget;
   if (!normalizedTargetType || !normalizedTargetId) {
-    showToast("Permission target unavailable.");
+    showToast("Access target unavailable.");
     return false;
   }
   permissionState.actionPendingKey = pendingKey;
@@ -29273,7 +30479,7 @@ async function saveMessagingPermissionTarget({
     return true;
   } catch (error) {
     permissionState.error =
-      normalizeString(error?.message) || "Permission update failed.";
+      normalizeString(error?.message) || "Access update failed.";
     showToast(permissionState.error);
     return false;
   } finally {
@@ -29322,7 +30528,7 @@ async function saveMessagingPermissionRoleOverride(formData) {
   const roleId = normalizeString(formData.get("roleId"));
   const role = messagingPermissionRoleFromId(roleId);
   if (!role) {
-    showToast("Role unavailable.");
+    showToast("Access group unavailable.");
     return false;
   }
   const permissions = readMessagingPermissionFormValues(formData);
@@ -29340,7 +30546,7 @@ async function saveMessagingPermissionRoleOverride(formData) {
     targetId,
     overrides: nextOverrides,
     pendingKey: `${targetType}:${targetId}:${role.roleId}:save`,
-    successMessage: "Role permissions saved.",
+    successMessage: "Group access saved.",
   });
 }
 
@@ -29349,7 +30555,7 @@ async function addMessagingPermissionRoleOverride(formData) {
   const roleId = normalizeString(formData.get("roleId"));
   const role = messagingPermissionRoleFromId(roleId);
   if (!role) {
-    showToast("Choose a role to add.");
+    showToast("Choose an access group to add.");
     return false;
   }
   const currentOverrides = messagingPermissionOverridesForEdit();
@@ -29378,7 +30584,7 @@ async function addMessagingPermissionRoleOverride(formData) {
       },
     ],
     pendingKey: `${targetType}:${targetId}:${role.roleId}:add`,
-    successMessage: "Role override added.",
+    successMessage: "Access group added.",
   });
   if (saved) {
     if (roleRoute) {
@@ -29396,7 +30602,7 @@ async function removeMessagingPermissionRoleOverride({
 } = {}) {
   const normalizedRoleId = normalizeString(roleId);
   if (!normalizedRoleId) {
-    showToast("Role override unavailable.");
+    showToast("Access group unavailable.");
     return false;
   }
   const nextOverrides = messagingPermissionOverridesForEdit().filter(
@@ -29407,7 +30613,7 @@ async function removeMessagingPermissionRoleOverride({
     targetId,
     overrides: nextOverrides,
     pendingKey: `${targetType}:${targetId}:${normalizedRoleId}:remove`,
-    successMessage: "Role override removed.",
+    successMessage: "Access group removed.",
   });
   if (saved && normalizeString(returnRoute)) {
     navigateTo(returnRoute);
@@ -29423,7 +30629,7 @@ async function toggleMessagingPermissionPrivate({
   const roles = currentMessagingPermissionRoles();
   const everyoneRole = roles.find((role) => role.isEveryone);
   if (!everyoneRole) {
-    showToast("Default role unavailable.");
+    showToast("Default access group unavailable.");
     return false;
   }
   const currentOverrides = messagingPermissionOverridesForEdit();
@@ -29470,7 +30676,7 @@ async function syncMessagingPermissionTargetFromCategory(conversationId) {
       },
     );
     setMessagingPermissionTargetFromPayload(payload);
-    showToast("Channel permissions synced.");
+    showToast("Room access synced.");
   } catch (error) {
     permissionState.error =
       normalizeString(error?.message) || "Permission sync failed.";
@@ -29918,7 +31124,7 @@ async function sendMessagingDraft(
   conversationId,
   text,
   attachments = [],
-  { replyTo = null } = {},
+  { replyTo = null, mentions = [] } = {},
 ) {
   const normalizedConversationId = normalizeString(conversationId);
   const normalizedText = normalizeString(text);
@@ -29926,6 +31132,7 @@ async function sendMessagingDraft(
     ? attachments.filter((attachment) => normalizeString(attachment?.url))
     : [];
   const replyPreview = normalizeMessagingReplyPreview(replyTo);
+  const normalizedMentions = normalizeMessagingMentionPayloadsForSend(mentions);
   const conversation = state.pages.messaging.conversation.item;
   if (!normalizedConversationId || (!normalizedText && !normalizedAttachments.length)) {
     return false;
@@ -29955,6 +31162,7 @@ async function sendMessagingDraft(
           ...(normalizedAttachments.length
             ? { attachments: normalizedAttachments }
             : {}),
+          ...(normalizedMentions.length ? { mentions: normalizedMentions } : {}),
           ...(replyPreview
             ? {
                 replyToMessageId: replyPreview.messageId,
@@ -29974,6 +31182,12 @@ async function sendMessagingDraft(
       createMessagingAttachmentDraft();
     state.pages.messaging.conversation.attachmentEditorOpen = false;
     state.pages.messaging.conversation.pendingReply = null;
+    state.pages.messaging.conversation.mention =
+      createMessagingComposerMentionState();
+    state.pages.messaging.conversation.missionCommand =
+      createMessagingMissionCommandState();
+    state.pages.messaging.conversation.missionDraft =
+      createMessagingMissionDraftState();
     state.pages.messaging.conversation.error = "";
     return true;
   } catch (error) {
@@ -29983,6 +31197,469 @@ async function sendMessagingDraft(
     return false;
   } finally {
     state.pages.messaging.conversation.sending = false;
+    scheduleRender();
+  }
+}
+
+function messagingMissionCardDueAt(mission = {}) {
+  if (mission.dueAt) {
+    return mission.dueAt;
+  }
+  const dueDates = (mission.jobs || []).map((job) => job.dueAt).filter(Boolean);
+  return dueDates.length ? Math.min(...dueDates) : null;
+}
+
+function messagingMissionSnapshotCondition(condition = {}) {
+  const normalized = normalizeMissionCondition(condition);
+  return {
+    type: normalized.type,
+    label: normalized.label,
+    status: normalized.status,
+    target: normalized.target,
+    current: normalized.current,
+    completed: normalized.completed,
+    required: normalized.required,
+    jobId: normalized.jobId,
+    metric: normalized.metric,
+    outreachType: normalized.outreachType,
+    recordIds: normalized.recordIds,
+  };
+}
+
+function messagingMissionSnapshotJob(job = {}, missionId = "") {
+  const normalized = normalizeMissionJob({
+    ...job,
+    missionId: normalizeString(job.missionId || missionId),
+  });
+  return {
+    missionId: normalizeString(normalized.missionId || missionId),
+    jobId: normalized.jobId,
+    title: normalized.title,
+    description: normalized.description,
+    status: normalized.status,
+    priority: normalized.priority,
+    targetType: normalized.targetType,
+    targetMode: normalized.targetMode,
+    targetRoleKey: normalized.targetRoleKey,
+    targetRoleLabel: normalized.targetRoleLabel,
+    assigneeUserId: normalized.assigneeUserId,
+    assigneeDisplayName: normalized.assigneeDisplayName,
+    assigneeUsername: normalized.assigneeUsername,
+    parentJobId: normalized.parentJobId,
+    deadlineMode: normalized.deadlineMode,
+    dueAt: normalized.dueAt,
+    timeoutPolicy: normalized.timeoutPolicy,
+    artifactCount: normalized.artifactCount,
+    startConditions: normalized.startConditions.map(
+      messagingMissionSnapshotCondition,
+    ),
+    successConditions: normalized.successConditions.map(
+      messagingMissionSnapshotCondition,
+    ),
+    createdAt: normalized.createdAt,
+    updatedAt: normalized.updatedAt,
+    claimedAt: normalized.claimedAt,
+    lastStartedAt: normalized.lastStartedAt,
+    submittedAt: normalized.submittedAt,
+    completedAt: normalized.completedAt,
+  };
+}
+
+function messagingMissionFromMessage(message = {}) {
+  const snapshot = messagingMessageSnapshot(message);
+  const missionId = messagingMissionIdFromMessage(message);
+  const snapshotJob =
+    snapshot.job && typeof snapshot.job === "object" && !Array.isArray(snapshot.job)
+      ? [snapshot.job]
+      : [];
+  const jobs = readArrayPayload(snapshot, [
+    "jobs",
+    "visibleJobs",
+    "tasks",
+  ]);
+  return normalizeMission({
+    missionId,
+    title:
+      normalizeString(snapshot.previewTitle || message.raw?.title) ||
+      "Mission assigned",
+    description:
+      normalizeString(
+        snapshot.previewText || message.raw?.previewText || message.text,
+      ) || "",
+    status: normalizeString(snapshot.status || message.raw?.status),
+    priority: normalizeString(snapshot.priority || message.raw?.priority),
+    dueAt: snapshot.dueAt || message.raw?.dueAt,
+    jobs: (jobs.length ? jobs : snapshotJob).map((job) => ({
+      ...job,
+      missionId,
+    })),
+  });
+}
+
+function missionStatusFromJobs(jobs = [], fallback = "") {
+  const normalizedJobs = jobs.map(normalizeMissionJob);
+  if (!normalizedJobs.length) {
+    return normalizeString(fallback);
+  }
+  if (
+    normalizedJobs.every((job) =>
+      ["completed", "approved"].includes(job.status),
+    )
+  ) {
+    return "completed";
+  }
+  if (normalizedJobs.some((job) => job.status === "blocked")) {
+    return "blocked";
+  }
+  if (normalizedJobs.some((job) => job.status === "submitted")) {
+    return "submitted";
+  }
+  if (normalizedJobs.some((job) => job.status === "late" || job.isLate)) {
+    return "late";
+  }
+  if (
+    normalizedJobs.some((job) =>
+      ["active", "needs_changes"].includes(job.status),
+    )
+  ) {
+    return "active";
+  }
+  if (normalizedJobs.some((job) => job.isClaimable)) {
+    return "active";
+  }
+  return normalizeString(fallback) || "active";
+}
+
+function messagingMissionStatusFromJobs(jobs = [], fallback = "") {
+  return missionStatusFromJobs(jobs, fallback);
+}
+
+function updateMessagingMissionCardJobSnapshot(missionId, updatedJobPayload = {}) {
+  const normalizedMissionId = normalizeString(missionId);
+  const updatedJob = messagingMissionSnapshotJob(
+    updatedJobPayload,
+    normalizedMissionId,
+  );
+  const normalizedJobId = normalizeString(updatedJob.jobId);
+  if (!normalizedMissionId || !normalizedJobId) {
+    return false;
+  }
+  let changed = false;
+  const conversation = state.pages.messaging.conversation;
+  conversation.messages = conversation.messages.map((message) => {
+    if (messagingMissionIdFromMessage(message) !== normalizedMissionId) {
+      return message;
+    }
+    const snapshot = messagingMessageSnapshot(message);
+    const nextSnapshot = { ...snapshot };
+    const jobs = readArrayPayload(snapshot, [
+      "jobs",
+      "visibleJobs",
+      "tasks",
+    ]);
+    const snapshotJob =
+      snapshot.job &&
+      typeof snapshot.job === "object" &&
+      !Array.isArray(snapshot.job)
+        ? snapshot.job
+        : null;
+    let matched = false;
+
+    if (jobs.length) {
+      nextSnapshot.jobs = jobs.map((job) => {
+        const jobId = normalizeString(job.jobId || job.id);
+        if (jobId !== normalizedJobId) {
+          return job;
+        }
+        matched = true;
+        return messagingMissionSnapshotJob(
+          {
+            ...job,
+            ...updatedJobPayload,
+          },
+          normalizedMissionId,
+        );
+      });
+      if (!matched) {
+        nextSnapshot.jobs = [...nextSnapshot.jobs, updatedJob];
+      }
+    } else if (snapshotJob) {
+      const snapshotJobId = normalizeString(snapshotJob.jobId || snapshotJob.id);
+      nextSnapshot.job =
+        snapshotJobId === normalizedJobId
+          ? messagingMissionSnapshotJob(
+              {
+                ...snapshotJob,
+                ...updatedJobPayload,
+              },
+              normalizedMissionId,
+            )
+          : snapshotJob;
+      if (snapshotJobId === normalizedJobId) {
+        matched = true;
+      }
+    } else {
+      nextSnapshot.jobs = [updatedJob];
+      matched = true;
+    }
+
+    if (!matched && !nextSnapshot.jobs?.length) {
+      return message;
+    }
+
+    const nextMission = normalizeMission({
+      missionId: normalizedMissionId,
+      title: nextSnapshot.previewTitle,
+      description: nextSnapshot.previewText,
+      status: nextSnapshot.status,
+      priority: nextSnapshot.priority,
+      dueAt: nextSnapshot.dueAt,
+      jobs: readArrayPayload(nextSnapshot, ["jobs"]).length
+        ? nextSnapshot.jobs
+        : nextSnapshot.job
+          ? [nextSnapshot.job]
+          : [],
+    });
+    nextSnapshot.status = messagingMissionStatusFromJobs(
+      nextMission.jobs,
+      nextSnapshot.status,
+    );
+    nextSnapshot.dueAt = messagingMissionCardDueAt(nextMission);
+    nextSnapshot.openCount = nextMission.openCount;
+    nextSnapshot.completedCount = nextMission.completedCount;
+    nextSnapshot.assignedCount = nextMission.assignedCount;
+    changed = true;
+    return {
+      ...message,
+      snapshot: nextSnapshot,
+      raw:
+        message.raw && typeof message.raw === "object"
+          ? {
+              ...message.raw,
+              snapshot: nextSnapshot,
+              dueAt: nextSnapshot.dueAt,
+            }
+          : message.raw,
+    };
+  });
+  return changed;
+}
+
+async function sendMessagingMissionCard(conversationId, mission, { replyTo = null } = {}) {
+  const normalizedConversationId = normalizeString(conversationId);
+  const normalizedMission = normalizeMission(mission);
+  const missionId = normalizeString(normalizedMission.missionId);
+  const title = normalizeString(normalizedMission.title);
+  if (!normalizedConversationId || !missionId || !title) {
+    return false;
+  }
+  const dueAt = messagingMissionCardDueAt(normalizedMission);
+  const nextJob = missionNextJob(normalizedMission);
+  const postId = `mission:${missionId}`;
+  const replyPreview = normalizeMessagingReplyPreview(replyTo);
+  const snapshot = {
+    postId,
+    missionId,
+    brandName: "Mission",
+    authorDisplayName: "Mission",
+    canonicalUrl: `/missions/${encodeURIComponent(missionId)}`,
+    previewTitle: title,
+    previewText: normalizeString(normalizedMission.description) || null,
+    mediaType: "mission",
+    priority: normalizeString(normalizedMission.priority) || null,
+    status: normalizeString(normalizedMission.status) || null,
+    dueAt,
+    jobId: nextJob?.jobId || null,
+    jobs: normalizedMission.jobs.map((job) =>
+      messagingMissionSnapshotJob(job, missionId),
+    ),
+    assignedCount: normalizedMission.assignedCount,
+    openCount: normalizedMission.openCount,
+    completedCount: normalizedMission.completedCount,
+  };
+  const payload = await fetchJson(
+    `/api/messaging/conversations/${encodeURIComponent(normalizedConversationId)}/messages`,
+    {
+      auth: true,
+      method: "POST",
+      body: {
+        clientMessageId: buildMessagingClientMessageId(),
+        type: "mission_card",
+        missionId,
+        postId,
+        title,
+        ...(snapshot.previewText ? { previewText: snapshot.previewText } : {}),
+        ...(snapshot.priority ? { priority: snapshot.priority } : {}),
+        ...(snapshot.status ? { status: snapshot.status } : {}),
+        ...(dueAt ? { dueAt } : {}),
+        snapshot,
+        ...(replyPreview
+          ? {
+              replyToMessageId: replyPreview.messageId,
+              replyTo: replyPreview,
+            }
+          : {}),
+      },
+    },
+  );
+  const message = normalizeMessagingMessage(payload.message || payload);
+  state.pages.messaging.conversation.messages = [
+    ...state.pages.messaging.conversation.messages,
+    message,
+  ];
+  return true;
+}
+
+async function runMessagingMissionJobAction({
+  missionId,
+  jobId,
+  action,
+  note = "",
+  extra = null,
+}) {
+  const normalizedMissionId = normalizeString(missionId);
+  const normalizedJobId = normalizeString(jobId);
+  const normalizedAction = normalizeString(action).toLowerCase();
+  if (!normalizedMissionId || !normalizedJobId || !normalizedAction) {
+    showToast("Mission action unavailable.");
+    return false;
+  }
+  const conversation = state.pages.messaging.conversation;
+  const pendingKey = missionJobActionPendingKey(
+    normalizedMissionId,
+    normalizedJobId,
+    normalizedAction,
+  );
+  if (conversation.missionActionPendingKey) {
+    return false;
+  }
+  conversation.missionActionPendingKey = pendingKey;
+  conversation.error = "";
+  scheduleRender();
+  try {
+    const body = { action: normalizedAction };
+    const normalizedNote = normalizeString(note);
+    if (normalizedNote) {
+      body.note = normalizedNote;
+    }
+    if (extra && typeof extra === "object" && !Array.isArray(extra)) {
+      Object.assign(body, extra);
+    }
+    const payload = await fetchJson(
+      `/api/missions/${encodeURIComponent(normalizedMissionId)}/jobs/${encodeURIComponent(normalizedJobId)}/actions`,
+      {
+        auth: true,
+        method: "POST",
+        body,
+      },
+    );
+    const updatedJob = payload.job || payload;
+    updateMessagingMissionCardJobSnapshot(normalizedMissionId, updatedJob);
+    const config = missionJobActionConfig(normalizedAction, updatedJob);
+    showToast(config.toast || "Mission task updated.");
+    if (state.pages.missions.detail.item?.missionId === normalizedMissionId) {
+      await loadMissionDetail(normalizedMissionId, { refresh: true });
+    }
+    return true;
+  } catch (error) {
+    const message =
+      normalizeString(error?.message) || "Mission action failed.";
+    conversation.error = message;
+    showToast(message);
+    return false;
+  } finally {
+    if (conversation.missionActionPendingKey === pendingKey) {
+      conversation.missionActionPendingKey = "";
+    }
+    scheduleRender();
+  }
+}
+
+function messagingMissionSourceFromComposer(formData, conversationId, replyTo = null) {
+  const replyPreview = normalizeMessagingReplyPreview(replyTo);
+  const excerpt =
+    normalizeString(formData.get("sourceExcerpt")) ||
+    normalizeString(replyPreview?.text) ||
+    normalizeString(formData.get("description")) ||
+    normalizeString(formData.get("title"));
+  return {
+    type: "chat",
+    conversationId: normalizeString(conversationId),
+    ...(replyPreview?.messageId ? { messageId: replyPreview.messageId } : {}),
+    ...(excerpt ? { excerpt } : {}),
+  };
+}
+
+async function createMessagingMissionFromComposer(formData, conversationId) {
+  const conversationState = state.pages.messaging.conversation;
+  const conversation = conversationState.item;
+  const scope = messagingMissionScopeForConversation(conversation);
+  const normalizedConversationId = normalizeString(conversationId);
+  if (!scope || !normalizedConversationId) {
+    conversationState.error =
+      "Mission workspace unavailable for this conversation.";
+    showToast(conversationState.error);
+    scheduleRender();
+    return false;
+  }
+  const payload = missionPayloadFromForm(
+    formData,
+    scope.scopeType,
+    scope.scopeId,
+  );
+  if (!payload) {
+    conversationState.missionDraft.error =
+      "Mission title and lead owner are required.";
+    showToast(conversationState.missionDraft.error);
+    scheduleRender();
+    return false;
+  }
+  conversationState.missionDraft.pending = true;
+  conversationState.missionDraft.error = "";
+  conversationState.error = "";
+  scheduleRender();
+  const replyTo = conversationState.pendingReply;
+  try {
+    const result = await fetchJson("/api/missions", {
+      auth: true,
+      method: "POST",
+      body: {
+        ...payload,
+        source: messagingMissionSourceFromComposer(
+          formData,
+          normalizedConversationId,
+          replyTo,
+        ),
+      },
+    });
+    const mission = normalizeMission(result.mission || result);
+    let cardPosted = false;
+    try {
+      cardPosted = await sendMessagingMissionCard(normalizedConversationId, mission, {
+        replyTo,
+      });
+    } catch (error) {
+      conversationState.error =
+        normalizeString(error?.message) ||
+        "Mission created, but the card could not be posted.";
+    }
+    conversationState.draft = "";
+    conversationState.pendingReply = null;
+    conversationState.mention = createMessagingComposerMentionState();
+    conversationState.missionCommand = createMessagingMissionCommandState();
+    conversationState.missionDraft = createMessagingMissionDraftState();
+    showToast(cardPosted ? "Mission created and posted." : "Mission created.");
+    return true;
+  } catch (error) {
+    const message =
+      normalizeString(error?.message) || "Mission could not be created.";
+    conversationState.missionDraft.error = message;
+    showToast(message);
+    return false;
+  } finally {
+    if (conversationState.missionDraft?.pending) {
+      conversationState.missionDraft.pending = false;
+    }
     scheduleRender();
   }
 }
@@ -30078,6 +31755,11 @@ function startEditingMessagingMessage(messageId) {
   conversation.editingOriginalText = normalizeString(message.text);
   conversation.pendingReply = null;
   conversation.draft = normalizeString(message.text);
+  conversation.mention = createMessagingComposerMentionState();
+  conversation.mention.appliedMentions =
+    messagingAppliedMentionsFromMessage(message);
+  conversation.missionCommand = createMessagingMissionCommandState();
+  conversation.missionDraft = createMessagingMissionDraftState();
   conversation.attachmentDraft = createMessagingAttachmentDraft();
   conversation.attachmentEditorOpen = false;
   conversation.error = "";
@@ -30090,6 +31772,9 @@ function cancelEditingMessagingMessage() {
   conversation.editingMessageId = "";
   conversation.editingOriginalText = "";
   conversation.draft = "";
+  conversation.mention = createMessagingComposerMentionState();
+  conversation.missionCommand = createMessagingMissionCommandState();
+  conversation.missionDraft = createMessagingMissionDraftState();
   conversation.error = "";
   scheduleRender();
 }
@@ -30107,6 +31792,9 @@ function startReplyingToMessagingMessage(messageId) {
   conversation.editingMessageId = "";
   conversation.editingOriginalText = "";
   conversation.pendingReply = messagingReplyPreviewFromMessage(message);
+  conversation.mention = createMessagingComposerMentionState();
+  conversation.missionCommand = createMessagingMissionCommandState();
+  conversation.missionDraft = createMessagingMissionDraftState();
   conversation.error = "";
   scheduleRender();
   focusMessagingComposerSoon();
@@ -30115,6 +31803,9 @@ function startReplyingToMessagingMessage(messageId) {
 function cancelReplyingToMessagingMessage() {
   const conversation = state.pages.messaging.conversation;
   conversation.pendingReply = null;
+  conversation.mention = createMessagingComposerMentionState();
+  conversation.missionCommand = createMessagingMissionCommandState();
+  conversation.missionDraft = createMessagingMissionDraftState();
   conversation.error = "";
   scheduleRender();
 }
@@ -30247,11 +31938,12 @@ async function submitMessagingMessageReport(formData) {
   }
 }
 
-async function editMessagingDraft(conversationId, text) {
+async function editMessagingDraft(conversationId, text, mentions = []) {
   const normalizedConversationId = normalizeString(conversationId);
   const normalizedText = normalizeString(text);
   const conversation = state.pages.messaging.conversation;
   const messageId = normalizeString(conversation.editingMessageId);
+  const normalizedMentions = normalizeMessagingMentionPayloadsForSend(mentions);
   if (!normalizedConversationId || !messageId) {
     return false;
   }
@@ -30281,13 +31973,19 @@ async function editMessagingDraft(conversationId, text) {
       {
         auth: true,
         method: "PUT",
-        body: { text: normalizedText },
+        body: {
+          text: normalizedText,
+          ...(normalizedMentions.length ? { mentions: normalizedMentions } : {}),
+        },
       },
     );
     replaceMessagingMessage(payload.message || payload);
     conversation.editingMessageId = "";
     conversation.editingOriginalText = "";
     conversation.draft = "";
+    conversation.mention = createMessagingComposerMentionState();
+    conversation.missionCommand = createMessagingMissionCommandState();
+    conversation.missionDraft = createMessagingMissionDraftState();
     conversation.error = "";
     showToast("Message updated.");
     return true;
@@ -30342,6 +32040,9 @@ async function deleteMessagingMessage(conversationId, messageId) {
       conversation.editingMessageId = "";
       conversation.editingOriginalText = "";
       conversation.draft = "";
+      conversation.mention = createMessagingComposerMentionState();
+      conversation.missionCommand = createMessagingMissionCommandState();
+      conversation.missionDraft = createMessagingMissionDraftState();
     }
     if (conversation.pendingReply?.messageId === normalizedMessageId) {
       conversation.pendingReply = null;
@@ -30947,6 +32648,13 @@ function getSettingsSections() {
       route: "/settings/connected-accounts",
       status: "Web",
       description: "Manage social accounts and publishing targets.",
+    },
+    {
+      key: "account-username",
+      label: "Username",
+      route: "/settings/account-username",
+      status: "Web",
+      description: "Claim or change the public Polis account handle.",
     },
     {
       key: "publishing-social",
@@ -31679,6 +33387,20 @@ function normalizeMyProfile(raw = {}) {
     displayName: normalizeString(source.displayName || source.name),
     username: normalizeString(
       source.username || source.handle || source.preferredUsername,
+    ),
+    usernameUpdatedAt:
+      normalizeSettingsTimestamp(
+        source.usernameUpdatedAt || source.username_updated_at,
+      ) || null,
+    usernameUpdatedAtIso: normalizeString(
+      source.usernameUpdatedAtIso || source.username_updated_at_iso,
+    ),
+    usernameNextAllowedAt:
+      normalizeSettingsTimestamp(
+        source.usernameNextAllowedAt || source.username_next_allowed_at,
+      ) || null,
+    usernameNextAllowedAtIso: normalizeString(
+      source.usernameNextAllowedAtIso || source.username_next_allowed_at_iso,
     ),
     email: normalizeString(source.email),
     phone: normalizeString(source.phone || source.phoneNumber),
@@ -32686,6 +34408,9 @@ async function loadSettingsPage({ refresh = false } = {}) {
   if (["overview", "notifications"].includes(section)) {
     tasks.push(loadNotificationPreferences({ refresh }));
   }
+  if (["overview", "account-username"].includes(section)) {
+    tasks.push(loadSettingsMyProfile({ refresh }));
+  }
   if (section === "preferences") {
     tasks.push(loadSettingsMyProfile({ refresh }));
     tasks.push(loadSettingsMyDistricts({ refresh }));
@@ -32705,6 +34430,8 @@ async function loadSettingsPage({ refresh = false } = {}) {
     tasks.push(loadSettingsMyDistricts({ refresh }));
   }
   if (section === "voter-intelligence") {
+    tasks.push(loadSettingsMyProfile({ refresh }));
+    tasks.push(loadSettingsMyDistricts({ refresh }));
     tasks.push(loadVoterIntelSnapshot({ refresh }));
     tasks.push(loadVoterIntelBallotGuide({ refresh, silent: true }));
     tasks.push(loadVoterIntelPolicyQuestions({ refresh }));
@@ -33706,7 +35433,7 @@ async function loadAdminDetail(sectionKey, id, { refresh = false } = {}) {
   scheduleRender();
   try {
     const payload = await fetchJson(endpoint, { auth: true });
-    const source =
+    let source =
       payload?.item ||
       payload?.application ||
       payload?.report ||
@@ -33716,7 +35443,25 @@ async function loadAdminDetail(sectionKey, id, { refresh = false } = {}) {
       payload?.source ||
       payload?.question ||
       payload;
+    if (
+      source &&
+      typeof source === "object" &&
+      payload &&
+      typeof payload === "object" &&
+      source !== payload
+    ) {
+      source = {
+        ...source,
+        audit: source.audit || payload.audit || payload.actions || payload.moderationActions,
+        regions: source.regions || payload.regions || payload.items,
+        history: source.history || payload.history || payload.entries,
+        rawDetail: payload,
+      };
+    }
     slice.item = normalizeAdminItem(sectionKey, source, 0);
+    if (sectionKey === "policy-questions") {
+      syncAdminPolicyQuestionDraft(slice, slice.item, { reset: true });
+    }
     slice.loaded = true;
   } catch (error) {
     slice.error = settingsErrorMessage(
@@ -33748,6 +35493,9 @@ async function loadAdminPage({ refresh = false } = {}) {
   if (section === "feed-config") {
     await loadAdminFeedConfigHistory({ refresh });
     return;
+  }
+  if (section === "policy-questions") {
+    await loadAdminPolicyQuestionIssueCatalog({ refresh });
   }
   if (detailId) {
     await loadAdminDetail(section, detailId, { refresh });
@@ -34102,6 +35850,801 @@ async function submitAdminActionForm(formData) {
     actionKey: formData.get("actionKey"),
     note: formData.get("note"),
   });
+}
+
+function adminPolicyQuestionSlice() {
+  return adminSliceForSection("policy-questions");
+}
+
+function adminPolicyQuestionSlugId(value, fallback = "category") {
+  const slug = normalizeString(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, "-")
+    .replace(/^-+|-+$/gu, "");
+  return slug || fallback;
+}
+
+function adminPolicyQuestionIssueIds(value) {
+  if (Array.isArray(value)) {
+    return Array.from(
+      new Set(value.map((entry) => normalizeString(entry)).filter(Boolean)),
+    );
+  }
+  return Array.from(
+    new Set(
+      normalizeString(value)
+        .split(/[\n,]+/u)
+        .map((entry) => normalizeString(entry))
+        .filter(Boolean),
+    ),
+  );
+}
+
+function adminPolicyQuestionNumberInput(value, fallback = "") {
+  if (value === undefined || value === null || value === "") {
+    return normalizeString(fallback);
+  }
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? String(numeric) : normalizeString(value);
+}
+
+function adminPolicyQuestionNumberValue(value, fallback = 0) {
+  const normalized = normalizeString(value);
+  if (!normalized) {
+    return fallback;
+  }
+  const numeric = Number(normalized);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function adminPolicyQuestionDefaultOption(index = 0) {
+  return {
+    optionId: `option-${index + 1}`,
+    text: "",
+    stanceLabel: "",
+    opinion: "neutral",
+    isNoneOfAbove: false,
+    matrixX: "0",
+    matrixY: "0",
+    weight: "1",
+  };
+}
+
+function adminPolicyQuestionOptionDraft(raw = {}, index = 0) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  const matrix =
+    source.matrix && typeof source.matrix === "object" && !Array.isArray(source.matrix)
+      ? source.matrix
+      : {};
+  const none =
+    source.isNoneOfAbove === true ||
+    source.noneOfAbove === true ||
+    source.isNone === true;
+  return {
+    optionId:
+      normalizeString(source.optionId || source.id || source.key) ||
+      `option-${index + 1}`,
+    text: normalizeString(source.text || source.label || source.optionText),
+    stanceLabel: normalizeString(
+      source.stanceLabel || source.stance || source.ideology || source.axis,
+    ),
+    opinion: normalizeString(source.opinion || source.opinionLabel) || "neutral",
+    isNoneOfAbove: none,
+    matrixX: adminPolicyQuestionNumberInput(matrix.x ?? source.matrixX ?? source.x, 0),
+    matrixY: adminPolicyQuestionNumberInput(matrix.y ?? source.matrixY ?? source.y, 0),
+    weight: adminPolicyQuestionNumberInput(
+      matrix.weight ?? source.weight,
+      none ? 0 : 1,
+    ),
+  };
+}
+
+function adminPolicyQuestionDefaultChartDatum(index = 0) {
+  return {
+    label: `Value ${index + 1}`,
+    value: "0",
+    color: "",
+  };
+}
+
+function adminPolicyQuestionChartDatumDraft(raw = {}, index = 0) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  return {
+    label:
+      normalizeString(source.label || source.name || source.title) ||
+      `Value ${index + 1}`,
+    value: adminPolicyQuestionNumberInput(source.value ?? source.count, 0),
+    color: normalizeString(source.color || source.fill || source.hex),
+  };
+}
+
+function adminPolicyQuestionCitationDraft(raw = {}, index = 0) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  return {
+    label:
+      normalizeString(source.label || source.title || source.publisher) ||
+      `Citation ${index + 1}`,
+    url: normalizeString(source.url || source.href || source.sourceUrl),
+  };
+}
+
+function adminPolicyQuestionDraftFromItem(item) {
+  const source = adminDetailSource(item);
+  const questionId =
+    normalizeString(source.questionId || source.id || item?.id) ||
+    getAdminDetailId();
+  const chartSpec = adminFirstObject(source, ["chartSpec", "chart", "chartConfig"]);
+  const chartData = Array.isArray(chartSpec.data)
+    ? chartSpec.data
+    : Array.isArray(chartSpec.items)
+      ? chartSpec.items
+      : [];
+  const options = adminFirstArray(source, ["options", "answerOptions"]).map(
+    (option, index) => adminPolicyQuestionOptionDraft(option, index),
+  );
+  const citations = adminFirstArray(source, ["citations", "sources"]).map(
+    (citation, index) => adminPolicyQuestionCitationDraft(citation, index),
+  );
+  return {
+    questionId,
+    status: normalizeString(source.status || item?.status),
+    title: normalizeString(source.title),
+    categoryId: normalizeString(source.categoryId || source.category),
+    categoryLabel: normalizeString(source.categoryLabel || source.category),
+    issueIds: adminPolicyQuestionIssueIds(source.issueIds || source.issues),
+    shortBackground: normalizeString(
+      source.shortBackground || readAdminPath(source, "background.short"),
+    ),
+    longBackground: normalizeString(
+      source.longBackground || readAdminPath(source, "background.long"),
+    ),
+    questionText: normalizeString(source.questionText || source.prompt),
+    options: options.length ? options : [adminPolicyQuestionDefaultOption(0)],
+    chart: {
+      type: normalizeString(chartSpec.type) || "bar",
+      title: normalizeString(chartSpec.title),
+      sourceLabel: normalizeString(chartSpec.sourceLabel || chartSpec.source),
+      sourceUrl: normalizeString(chartSpec.sourceUrl || chartSpec.url),
+      data: chartData.length
+        ? chartData.map((entry, index) =>
+            adminPolicyQuestionChartDatumDraft(entry, index),
+          )
+        : [adminPolicyQuestionDefaultChartDatum(0)],
+    },
+    citations: citations.length ? citations : [adminPolicyQuestionCitationDraft({}, 0)],
+  };
+}
+
+function syncAdminPolicyQuestionDraft(slice, item, { reset = false } = {}) {
+  if (!slice) return null;
+  const key = normalizeString(item?.id || getAdminDetailId());
+  if (
+    reset ||
+    !slice.draft ||
+    typeof slice.draft !== "object" ||
+    Array.isArray(slice.draft) ||
+    slice.draftKey !== key
+  ) {
+    slice.draft = adminPolicyQuestionDraftFromItem(item);
+    slice.draftKey = key;
+    slice.validationMessage = "";
+    slice.validationError = "";
+  }
+  return slice.draft;
+}
+
+function adminPolicyQuestionCurrentForm() {
+  return root?.querySelector('[data-route-form="admin-policy-question-save"]') || null;
+}
+
+function adminPolicyQuestionDraftFromForm(form) {
+  const read = (selector) => normalizeString(form.querySelector(selector)?.value);
+  const optionRows = Array.from(
+    form.querySelectorAll("[data-admin-policy-question-option]"),
+  );
+  const chartRows = Array.from(
+    form.querySelectorAll("[data-admin-policy-question-chart-row]"),
+  );
+  const citationRows = Array.from(
+    form.querySelectorAll("[data-admin-policy-question-citation]"),
+  );
+  return {
+    questionId: read('input[name="questionId"]') || getAdminDetailId(),
+    status: read('input[name="status"]'),
+    title: read('input[name="title"]'),
+    categoryId: read('input[name="categoryId"]'),
+    categoryLabel: read('input[name="categoryLabel"]'),
+    issueIds: adminPolicyQuestionIssueIds(read('textarea[name="issueIds"]')),
+    shortBackground: read('textarea[name="shortBackground"]'),
+    longBackground: read('textarea[name="longBackground"]'),
+    questionText: read('textarea[name="questionText"]'),
+    options: optionRows.map((row, index) => ({
+      optionId:
+        normalizeString(row.querySelector('input[name="optionId"]')?.value) ||
+        `option-${index + 1}`,
+      text: normalizeString(row.querySelector('textarea[name="optionText"]')?.value),
+      stanceLabel: normalizeString(
+        row.querySelector('input[name="stanceLabel"]')?.value,
+      ),
+      opinion:
+        normalizeString(row.querySelector('input[name="opinion"]')?.value) ||
+        "neutral",
+      isNoneOfAbove:
+        row.querySelector('input[name="isNoneOfAbove"]')?.checked === true,
+      matrixX: normalizeString(row.querySelector('input[name="matrixX"]')?.value),
+      matrixY: normalizeString(row.querySelector('input[name="matrixY"]')?.value),
+      weight: normalizeString(row.querySelector('input[name="weight"]')?.value),
+    })),
+    chart: {
+      type: read('select[name="chartType"]') || "bar",
+      title: read('input[name="chartTitle"]'),
+      sourceLabel: read('input[name="chartSourceLabel"]'),
+      sourceUrl: read('input[name="chartSourceUrl"]'),
+      data: chartRows.map((row, index) => ({
+        label:
+          normalizeString(row.querySelector('input[name="chartLabel"]')?.value) ||
+          `Value ${index + 1}`,
+        value: normalizeString(row.querySelector('input[name="chartValue"]')?.value),
+        color: normalizeString(row.querySelector('input[name="chartColor"]')?.value),
+      })),
+    },
+    citations: citationRows.map((row, index) => ({
+      label:
+        normalizeString(row.querySelector('input[name="citationLabel"]')?.value) ||
+        `Citation ${index + 1}`,
+      url: normalizeString(row.querySelector('input[name="citationUrl"]')?.value),
+    })),
+  };
+}
+
+function syncAdminPolicyQuestionDraftFromCurrentForm() {
+  const slice = adminPolicyQuestionSlice();
+  const form = adminPolicyQuestionCurrentForm();
+  if (!slice || !form) return null;
+  const draft = adminPolicyQuestionDraftFromForm(form);
+  slice.draft = draft;
+  slice.draftKey = normalizeString(draft.questionId || getAdminDetailId());
+  slice.validationMessage = "";
+  slice.validationError = "";
+  return draft;
+}
+
+function mutateAdminPolicyQuestionDraft(mutator) {
+  const slice = adminPolicyQuestionSlice();
+  if (!slice) return;
+  const current =
+    syncAdminPolicyQuestionDraftFromCurrentForm() ||
+    syncAdminPolicyQuestionDraft(slice, slice.item);
+  if (!current) return;
+  mutator(current);
+  slice.draft = current;
+  slice.draftKey = normalizeString(current.questionId || getAdminDetailId());
+  scheduleRender();
+}
+
+function adminPolicyQuestionPayloadFromDraft(draft = {}) {
+  const categoryLabel = normalizeString(draft.categoryLabel);
+  const options = (Array.isArray(draft.options) ? draft.options : []).map(
+    (option, index) => {
+      const none = option?.isNoneOfAbove === true;
+      return {
+        optionId:
+          normalizeString(option?.optionId) ||
+          `option-${index + 1}`,
+        text: normalizeString(option?.text),
+        stanceLabel: normalizeString(option?.stanceLabel),
+        opinion: normalizeString(option?.opinion) || "neutral",
+        isNoneOfAbove: none,
+        matrix: {
+          x: none ? 0 : adminPolicyQuestionNumberValue(option?.matrixX, 0),
+          y: none ? 0 : adminPolicyQuestionNumberValue(option?.matrixY, 0),
+          weight: none
+            ? 0
+            : adminPolicyQuestionNumberValue(option?.weight, 1),
+        },
+      };
+    },
+  );
+  const chart = draft.chart && typeof draft.chart === "object" ? draft.chart : {};
+  return {
+    title: normalizeString(draft.title),
+    categoryId: adminPolicyQuestionSlugId(
+      categoryLabel || draft.categoryId,
+      "category",
+    ),
+    categoryLabel,
+    issueIds: adminPolicyQuestionIssueIds(draft.issueIds),
+    shortBackground: normalizeString(draft.shortBackground),
+    longBackground: normalizeString(draft.longBackground),
+    questionText: normalizeString(draft.questionText),
+    options,
+    chartSpec: {
+      type: normalizeString(chart.type) || "bar",
+      title: normalizeString(chart.title),
+      sourceLabel: normalizeString(chart.sourceLabel),
+      sourceUrl: normalizeString(chart.sourceUrl),
+      data: (Array.isArray(chart.data) ? chart.data : []).map((entry, index) => ({
+        label: normalizeString(entry?.label) || `Value ${index + 1}`,
+        value: adminPolicyQuestionNumberValue(entry?.value, 0),
+        color: normalizeString(entry?.color),
+      })),
+    },
+    citations: (Array.isArray(draft.citations) ? draft.citations : [])
+      .map((citation) => ({
+        label: normalizeString(citation?.label),
+        url: normalizeString(citation?.url),
+      }))
+      .filter((citation) => citation.url),
+  };
+}
+
+async function saveAdminPolicyQuestion(form) {
+  const slice = adminPolicyQuestionSlice();
+  if (!slice || !form) return false;
+  const draft = adminPolicyQuestionDraftFromForm(form);
+  const questionId = normalizeString(draft.questionId || getAdminDetailId());
+  if (!questionId) {
+    slice.validationError = "Question ID is missing.";
+    scheduleRender();
+    return false;
+  }
+  const payload = adminPolicyQuestionPayloadFromDraft(draft);
+  const pendingKey = adminPendingKey(questionId, "save");
+  slice.draft = draft;
+  slice.draftKey = questionId;
+  slice.actionPendingKey = pendingKey;
+  slice.error = "";
+  slice.notice = "";
+  slice.validationMessage = "";
+  slice.validationError = "";
+  scheduleRender();
+  try {
+    const response = await fetchJson(
+      `/api/admin/policy-questions/${encodeURIComponent(questionId)}`,
+      {
+        auth: true,
+        method: "PUT",
+        body: { question: payload },
+      },
+    );
+    const source = response?.question || response?.item || {
+      ...payload,
+      questionId,
+      status: draft.status || "draft",
+    };
+    const item = normalizeAdminItem("policy-questions", source, 0);
+    slice.item = item;
+    const existingIndex = slice.items.findIndex((entry) => entry.id === item.id);
+    if (existingIndex >= 0) {
+      slice.items = slice.items.map((entry, index) =>
+        index === existingIndex ? item : entry,
+      );
+    } else {
+      slice.items = [item, ...slice.items];
+    }
+    syncAdminPolicyQuestionDraft(slice, item, { reset: true });
+    slice.notice = "Policy question saved.";
+    slice.validationMessage = "Draft saved with structured options, chart, and citations.";
+    showToast(slice.notice);
+    return true;
+  } catch (error) {
+    slice.error = settingsErrorMessage(
+      error,
+      "Policy question could not be saved.",
+    );
+    showToast(slice.error);
+    return false;
+  } finally {
+    if (slice.actionPendingKey === pendingKey) {
+      slice.actionPendingKey = "";
+    }
+    scheduleRender();
+  }
+}
+
+function createAdminPolicyQuestionGenerationSource() {
+  return {
+    url: "",
+    label: "",
+    notes: "",
+  };
+}
+
+function createAdminPolicyQuestionGenerationTopic(index = 0) {
+  return {
+    title: "",
+    category: "",
+    issueIds: [],
+    issueInput: "",
+    notes: "",
+    sources: [createAdminPolicyQuestionGenerationSource()],
+    clientId: `topic-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`,
+  };
+}
+
+function createAdminPolicyQuestionGenerationDraft() {
+  return {
+    requestedCount: 2,
+    force: false,
+    allowWebSearch: false,
+    notes: "",
+    topics: [createAdminPolicyQuestionGenerationTopic(0)],
+  };
+}
+
+function ensureAdminPolicyQuestionGenerationState(slice = adminPolicyQuestionSlice()) {
+  if (!slice) return null;
+  if (
+    !slice.generationDraft ||
+    typeof slice.generationDraft !== "object" ||
+    Array.isArray(slice.generationDraft)
+  ) {
+    slice.generationDraft = createAdminPolicyQuestionGenerationDraft();
+  }
+  if (!Array.isArray(slice.generationDraft.topics)) {
+    slice.generationDraft.topics = [createAdminPolicyQuestionGenerationTopic(0)];
+  }
+  if (!slice.generationDraft.topics.length) {
+    slice.generationDraft.topics.push(createAdminPolicyQuestionGenerationTopic(0));
+  }
+  slice.generationDraft.topics = slice.generationDraft.topics
+    .slice(0, ADMIN_POLICY_QUESTION_GENERATION_MAX_TOPICS)
+    .map((topic, index) => ({
+      ...createAdminPolicyQuestionGenerationTopic(index),
+      ...(topic && typeof topic === "object" ? topic : {}),
+      issueIds: Array.isArray(topic?.issueIds)
+        ? Array.from(new Set(topic.issueIds.map(normalizeString).filter(Boolean)))
+        : adminPolicyQuestionIssueIds(topic?.issueIds),
+      sources:
+        Array.isArray(topic?.sources) && topic.sources.length
+          ? topic.sources.map((source) => ({
+              ...createAdminPolicyQuestionGenerationSource(),
+              ...(source && typeof source === "object" ? source : {}),
+            }))
+          : [createAdminPolicyQuestionGenerationSource()],
+    }));
+  slice.generationDraft.requestedCount = Math.max(
+    1,
+    Math.min(
+      ADMIN_POLICY_QUESTION_GENERATION_MAX_DRAFTS,
+      Math.floor(Number(slice.generationDraft.requestedCount) || 2),
+    ),
+  );
+  slice.generationDraft.force = slice.generationDraft.force === true;
+  slice.generationDraft.allowWebSearch =
+    slice.generationDraft.allowWebSearch === true;
+  slice.generationDraft.notes = normalizeString(slice.generationDraft.notes);
+  return slice.generationDraft;
+}
+
+function adminPolicyQuestionGenerationForm() {
+  return (
+    root?.querySelector('[data-route-form="admin-policy-question-generate"]') ||
+    null
+  );
+}
+
+function adminPolicyQuestionGenerationDraftFromForm(form) {
+  const read = (selector) => normalizeString(form.querySelector(selector)?.value);
+  const topicRows = Array.from(
+    form.querySelectorAll("[data-admin-policy-generation-topic]"),
+  );
+  return {
+    requestedCount: Math.max(
+      1,
+      Math.min(
+        ADMIN_POLICY_QUESTION_GENERATION_MAX_DRAFTS,
+        Math.floor(Number(read('input[name="requestedCount"]')) || 2),
+      ),
+    ),
+    force: form.querySelector('input[name="force"]')?.checked === true,
+    allowWebSearch:
+      form.querySelector('input[name="allowWebSearch"]')?.checked === true,
+    notes: read('textarea[name="generationNotes"]'),
+    topics: topicRows.map((row, index) => ({
+      title: normalizeString(row.querySelector('input[name="topicTitle"]')?.value),
+      category: normalizeString(
+        row.querySelector('input[name="topicCategory"]')?.value,
+      ),
+      issueIds: adminPolicyQuestionIssueIds(
+        row.querySelector('input[name="topicIssueIds"]')?.value,
+      ),
+      issueInput: normalizeString(
+        row.querySelector('input[name="topicIssueInput"]')?.value,
+      ),
+      notes: normalizeString(row.querySelector('textarea[name="topicNotes"]')?.value),
+      sources: Array.from(
+        row.querySelectorAll("[data-admin-policy-generation-source]"),
+      ).map((sourceRow) => ({
+        url: normalizeString(sourceRow.querySelector('input[name="sourceUrl"]')?.value),
+        label: normalizeString(
+          sourceRow.querySelector('input[name="sourceLabel"]')?.value,
+        ),
+        notes: normalizeString(
+          sourceRow.querySelector('textarea[name="sourceNotes"]')?.value,
+        ),
+      })),
+      clientId: normalizeString(row.getAttribute("data-topic-client-id")) ||
+        `topic-${index + 1}`,
+    })),
+  };
+}
+
+function syncAdminPolicyQuestionGenerationDraftFromCurrentForm() {
+  const slice = adminPolicyQuestionSlice();
+  const form = adminPolicyQuestionGenerationForm();
+  if (!slice || !form) return null;
+  slice.generationDraft = adminPolicyQuestionGenerationDraftFromForm(form);
+  slice.generationValidationError = "";
+  return ensureAdminPolicyQuestionGenerationState(slice);
+}
+
+function mutateAdminPolicyQuestionGenerationDraft(mutator) {
+  const slice = adminPolicyQuestionSlice();
+  if (!slice) return;
+  const draft =
+    syncAdminPolicyQuestionGenerationDraftFromCurrentForm() ||
+    ensureAdminPolicyQuestionGenerationState(slice);
+  if (!draft) return;
+  mutator(draft);
+  slice.generationDraft = draft;
+  ensureAdminPolicyQuestionGenerationState(slice);
+  scheduleRender();
+}
+
+function adminPolicyGenerationLooksLikeUrl(value) {
+  const normalized = normalizeString(value);
+  if (!normalized) return false;
+  try {
+    const url = new URL(normalized);
+    return Boolean(
+      (url.protocol === "https:" || url.protocol === "http:") && url.hostname,
+    );
+  } catch {
+    return false;
+  }
+}
+
+function adminPolicyGenerationResolveIssueId(value, issues = []) {
+  const normalized = normalizeString(value);
+  if (!normalized) return "";
+  const lower = normalized.toLowerCase();
+  const candidates = Array.isArray(issues) ? issues : [];
+  const exact = candidates.find(
+    (issue) =>
+      issue.issueId.toLowerCase() === lower ||
+      issue.label.toLowerCase() === lower ||
+      `${issue.label} ${issue.issueId}`.toLowerCase() === lower,
+  );
+  if (exact) return exact.issueId;
+  const contains = candidates.find((issue) =>
+    [
+      issue.issueId,
+      issue.label,
+      issue.categoryLabel,
+      `${issue.label} ${issue.categoryLabel}`,
+    ]
+      .join(" ")
+      .toLowerCase()
+      .includes(lower),
+  );
+  return contains?.issueId || "";
+}
+
+function adminPolicyGenerationIssueById(issueId, issues = []) {
+  const normalized = normalizeString(issueId).toLowerCase();
+  if (!normalized) return null;
+  return (Array.isArray(issues) ? issues : []).find(
+    (issue) => issue.issueId.toLowerCase() === normalized,
+  ) || null;
+}
+
+function adminPolicyQuestionGenerationPayloadFromDraft(draft = {}) {
+  const errors = [];
+  const allowWebSearch = draft.allowWebSearch === true;
+  const topics = [];
+  const sourceIsBlank = (source) =>
+    !normalizeString(source?.url) &&
+    !normalizeString(source?.label) &&
+    !normalizeString(source?.notes);
+  (Array.isArray(draft.topics) ? draft.topics : [])
+    .slice(0, ADMIN_POLICY_QUESTION_GENERATION_MAX_TOPICS)
+    .forEach((topic, topicIndex) => {
+      const title = normalizeString(topic?.title);
+      const category = normalizeString(topic?.category);
+      const issueIds = adminPolicyQuestionIssueIds(topic?.issueIds);
+      if (!title) errors.push(`Topic ${topicIndex + 1}: title is required.`);
+      if (!category) errors.push(`Topic ${topicIndex + 1}: category is required.`);
+      if (!issueIds.length) {
+        errors.push(`Topic ${topicIndex + 1}: choose at least one issue.`);
+      }
+      const sources = [];
+      (Array.isArray(topic?.sources) ? topic.sources : []).forEach(
+        (source, sourceIndex) => {
+          if (sourceIsBlank(source)) return;
+          const url = normalizeString(source?.url);
+          const label = normalizeString(source?.label);
+          const notes = normalizeString(source?.notes);
+          if (!url) {
+            errors.push(
+              `Topic ${topicIndex + 1}, source ${sourceIndex + 1}: URL is required.`,
+            );
+            return;
+          }
+          if (!adminPolicyGenerationLooksLikeUrl(url)) {
+            errors.push(
+              `Topic ${topicIndex + 1}, source ${sourceIndex + 1}: URL is invalid.`,
+            );
+          }
+          sources.push({
+            url,
+            ...(label ? { label } : {}),
+            ...(notes ? { notes } : {}),
+          });
+        },
+      );
+      if (!sources.length && !allowWebSearch) {
+        errors.push(`Topic ${topicIndex + 1}: add at least one source URL.`);
+      }
+      topics.push({
+        title,
+        category,
+        categoryId: adminPolicyQuestionSlugId(category, "category"),
+        topicId: adminPolicyQuestionSlugId(title, `topic-${topicIndex + 1}`),
+        issueIds,
+        sources,
+        ...(normalizeString(topic?.notes) ? { notes: normalizeString(topic.notes) } : {}),
+      });
+    });
+  if (!topics.length) {
+    errors.push("Add at least one topic.");
+  }
+  if (errors.length) {
+    const error = new Error(errors.join("\n"));
+    error.validationErrors = errors;
+    throw error;
+  }
+  const notes = normalizeString(draft.notes);
+  return {
+    requestedCount: Math.max(
+      1,
+      Math.min(
+        ADMIN_POLICY_QUESTION_GENERATION_MAX_DRAFTS,
+        Math.floor(Number(draft.requestedCount) || 1),
+      ),
+    ),
+    force: draft.force === true,
+    allowWebSearch,
+    ...(notes ? { notes } : {}),
+    topics,
+  };
+}
+
+async function loadAdminPolicyQuestionIssueCatalog({ refresh = false } = {}) {
+  const slice = adminPolicyQuestionSlice();
+  if (!slice) return;
+  if (slice.generationIssuesLoading) return;
+  if (slice.generationIssuesLoaded && !refresh) return;
+  slice.generationIssuesLoading = true;
+  slice.generationIssuesError = "";
+  scheduleRender();
+  try {
+    const payload = await fetchJson("/api/issues", { auth: true });
+    slice.generationIssues = (payload.issues || [])
+      .map(normalizeIssue)
+      .filter(Boolean)
+      .sort((left, right) => left.label.localeCompare(right.label));
+    slice.generationIssuesLoaded = true;
+  } catch (error) {
+    slice.generationIssues = [];
+    slice.generationIssuesLoaded = true;
+    slice.generationIssuesError =
+      normalizeString(error?.message) || "Issue catalog could not be loaded.";
+  } finally {
+    slice.generationIssuesLoading = false;
+    scheduleRender();
+  }
+}
+
+async function submitAdminPolicyQuestionGeneration(form) {
+  const slice = adminPolicyQuestionSlice();
+  if (!slice || !form) return false;
+  const draft = adminPolicyQuestionGenerationDraftFromForm(form);
+  slice.generationDraft = draft;
+  let payload;
+  try {
+    payload = adminPolicyQuestionGenerationPayloadFromDraft(draft);
+  } catch (error) {
+    slice.generationValidationError =
+      normalizeString(error?.message) || "Generation settings are incomplete.";
+    slice.generationNotice = "";
+    showToast("Fix generation settings before starting.");
+    scheduleRender();
+    return false;
+  }
+  const pendingKey = "policy-question-generation";
+  slice.actionPendingKey = pendingKey;
+  slice.generationValidationError = "";
+  slice.generationNotice = "";
+  slice.generationError = "";
+  slice.generationResult = null;
+  scheduleRender();
+  try {
+    const response = await fetchJson("/api/admin/policy-questions/generation-jobs", {
+      auth: true,
+      method: "POST",
+      body: payload,
+    });
+    const job = response?.job && typeof response.job === "object" ? response.job : {};
+    const drafts = Array.isArray(response?.drafts) ? response.drafts : [];
+    slice.generationResult = response;
+    slice.generationNotice =
+      response?.duplicate === true
+        ? "Reused a previous successful generation job."
+        : `Generated ${formatCount(drafts.length || job.draftCount || 0)} draft${(drafts.length || job.draftCount || 0) === 1 ? "" : "s"}.`;
+    showToast(slice.generationNotice);
+    if (drafts.length) {
+      const draftItems = drafts
+        .map((item, index) => normalizeAdminItem("policy-questions", item, index))
+        .filter((item) => item.id);
+      const existingIds = new Set(draftItems.map((item) => item.id));
+      slice.items = [
+        ...draftItems,
+        ...slice.items.filter((item) => !existingIds.has(item.id)),
+      ];
+    }
+    await loadAdminList("policy-questions", { refresh: true });
+    return true;
+  } catch (error) {
+    slice.generationError = settingsErrorMessage(
+      error,
+      "Policy question drafts could not be generated.",
+    );
+    showToast(slice.generationError);
+    return false;
+  } finally {
+    if (slice.actionPendingKey === pendingKey) {
+      slice.actionPendingKey = "";
+    }
+    scheduleRender();
+  }
+}
+
+async function refreshAdminPolicyQuestionGenerationJob(jobId) {
+  const slice = adminPolicyQuestionSlice();
+  const normalizedJobId = normalizeString(jobId);
+  if (!slice || !normalizedJobId) return false;
+  const pendingKey = `policy-question-generation-refresh:${normalizedJobId}`;
+  slice.actionPendingKey = pendingKey;
+  slice.generationError = "";
+  scheduleRender();
+  try {
+    const response = await fetchJson(
+      `/api/admin/policy-questions/generation-jobs/${encodeURIComponent(normalizedJobId)}`,
+      { auth: true },
+    );
+    slice.generationResult = {
+      ...(slice.generationResult && typeof slice.generationResult === "object"
+        ? slice.generationResult
+        : {}),
+      ...response,
+    };
+    slice.generationNotice = "Generation job refreshed.";
+    showToast(slice.generationNotice);
+    return true;
+  } catch (error) {
+    slice.generationError = settingsErrorMessage(
+      error,
+      "Generation job could not be refreshed.",
+    );
+    showToast(slice.generationError);
+    return false;
+  } finally {
+    if (slice.actionPendingKey === pendingKey) {
+      slice.actionPendingKey = "";
+    }
+    scheduleRender();
+  }
 }
 
 function adminFeedConfigSlice() {
@@ -34903,6 +37446,26 @@ function postComposerMediaLabel(mediaType) {
   return mediaType === "video" ? "video" : "image";
 }
 
+function postComposerCaptureModeConfig(key) {
+  const normalized = normalizeString(key);
+  return (
+    POST_COMPOSER_CAPTURE_MODES.find((mode) => mode.key === normalized) ||
+    POST_COMPOSER_CAPTURE_MODES[0]
+  );
+}
+
+function postComposerSelectedMaxMs(composer = state.pages.create) {
+  const config = postComposerCaptureModeConfig(composer.captureMode);
+  return config.maxMs > 0 ? config.maxMs : POST_COMPOSER_MAX_VIDEO_MS;
+}
+
+function postComposerSelectedMaxLabel(composer = state.pages.create) {
+  const config = postComposerCaptureModeConfig(composer.captureMode);
+  return config.key === "photo"
+    ? "Photo capture"
+    : `${formatComposerDuration(config.maxMs)} limit`;
+}
+
 function formatComposerDuration(durationMs) {
   const numeric = Math.max(0, Number(durationMs) || 0);
   if (!numeric) {
@@ -34912,6 +37475,71 @@ function formatComposerDuration(durationMs) {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+function createPostComposerClip(file, composer = state.pages.create) {
+  if (!file) {
+    return null;
+  }
+  const mediaType = postComposerMediaTypeForFile(file) || composer.mediaType;
+  const durationMs =
+    mediaType === "video" && Number(composer.durationMs) > 0
+      ? Number(composer.durationMs)
+      : 0;
+  return {
+    clipId: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    name: normalizeString(file.name) || `Polis ${postComposerMediaLabel(mediaType)}`,
+    mediaType,
+    source: normalizeString(composer.source) || "upload",
+    durationMs,
+  };
+}
+
+function refreshPostComposerClipMetadata(composer = state.pages.create) {
+  if (!composer.file) {
+    composer.clips = [];
+    return;
+  }
+  if (!composer.clips.length) {
+    const clip = createPostComposerClip(composer.file, composer);
+    composer.clips = clip ? [clip] : [];
+    return;
+  }
+  const clip = composer.clips[composer.clips.length - 1];
+  clip.name =
+    normalizeString(composer.file.name) ||
+    clip.name ||
+    `Polis ${postComposerMediaLabel(composer.mediaType)}`;
+  clip.mediaType = composer.mediaType;
+  clip.source = normalizeString(composer.source) || clip.source || "upload";
+  clip.durationMs =
+    composer.mediaType === "video" && Number(composer.durationMs) > 0
+      ? Number(composer.durationMs)
+      : 0;
+}
+
+function postComposerTimelineDurationMs(composer = state.pages.create) {
+  return (composer.clips || []).reduce(
+    (total, clip) => total + Math.max(0, Number(clip.durationMs) || 0),
+    0,
+  );
+}
+
+function normalizePostComposerTeleprompter(composer = state.pages.create) {
+  const teleprompter = composer.teleprompter || {};
+  teleprompter.speed = Math.max(12, Math.min(90, Number(teleprompter.speed) || 34));
+  teleprompter.fontSize = Math.max(18, Math.min(48, Number(teleprompter.fontSize) || 28));
+  teleprompter.opacity = Math.max(0.18, Math.min(0.9, Number(teleprompter.opacity) || 0.58));
+  teleprompter.height = Math.max(12, Math.min(85, Number(teleprompter.height) || 25));
+  teleprompter.delaySeconds = Math.max(
+    0,
+    Math.min(10, Number(teleprompter.delaySeconds) || 0),
+  );
+  teleprompter.script = normalizeString(teleprompter.script).slice(0, 5000);
+  teleprompter.enabled = teleprompter.enabled === true;
+  teleprompter.expanded = teleprompter.expanded === true;
+  composer.teleprompter = teleprompter;
+  return teleprompter;
 }
 
 function postComposerVideoDurationError(composer = state.pages.create) {
@@ -35009,6 +37637,7 @@ async function setPostComposerFile(
   composer.source = "";
   composer.durationMs = null;
   composer.durationKnown = false;
+  composer.clips = [];
   composer.error = "";
   composer.notice = "";
   composer.createdPostId = "";
@@ -35031,6 +37660,7 @@ async function setPostComposerFile(
     composer.durationMs = providedDurationMs;
     composer.durationKnown = true;
   }
+  refreshPostComposerClipMetadata(composer);
   try {
     composer.previewUrl = window.URL?.createObjectURL(file) || "";
   } catch {
@@ -35045,6 +37675,7 @@ async function setPostComposerFile(
       }
       composer.durationMs = durationMs;
       composer.durationKnown = true;
+      refreshPostComposerClipMetadata(composer);
       composer.error = postComposerVideoDurationError(composer);
     } catch {
       if (state.pages.create.file !== file) {
@@ -35052,10 +37683,12 @@ async function setPostComposerFile(
       }
       composer.durationMs = null;
       composer.durationKnown = false;
+      refreshPostComposerClipMetadata(composer);
       composer.error = postComposerVideoDurationError(composer);
     }
     renderApp();
   } else if (mediaType === "video") {
+    refreshPostComposerClipMetadata(composer);
     composer.error = postComposerVideoDurationError(composer);
     renderApp();
   }
@@ -35087,6 +37720,27 @@ function updatePostComposerField(field, value) {
   }
   if (normalizedField === "issueIds") {
     composer.issueIds = normalizeString(value).slice(0, 240);
+    return;
+  }
+  if (normalizedField.startsWith("teleprompter.")) {
+    const teleprompter = normalizePostComposerTeleprompter(composer);
+    const key = normalizedField.slice("teleprompter.".length);
+    if (key === "script") {
+      teleprompter.script = normalizeString(value).slice(0, 5000);
+      teleprompter.enabled = Boolean(teleprompter.script);
+    } else if (key === "enabled" || key === "expanded") {
+      teleprompter[key] = Boolean(value);
+    } else if (key === "speed") {
+      teleprompter.speed = Math.max(12, Math.min(90, Number(value) || 34));
+    } else if (key === "fontSize") {
+      teleprompter.fontSize = Math.max(18, Math.min(48, Number(value) || 28));
+    } else if (key === "opacity") {
+      teleprompter.opacity = Math.max(0.18, Math.min(0.9, Number(value) || 0.58));
+    } else if (key === "height") {
+      teleprompter.height = Math.max(12, Math.min(85, Number(value) || 25));
+    } else if (key === "delaySeconds") {
+      teleprompter.delaySeconds = Math.max(0, Math.min(10, Number(value) || 0));
+    }
   }
 }
 
@@ -35112,11 +37766,12 @@ function startPostComposerCameraTimer() {
     if (!camera?.recording || !camera.startedAt) {
       return;
     }
+    const maxMs = postComposerSelectedMaxMs(state.pages.create);
     camera.elapsedMs = Math.min(
-      POST_COMPOSER_MAX_VIDEO_MS,
+      maxMs,
       Date.now() - camera.startedAt,
     );
-    if (camera.elapsedMs >= POST_COMPOSER_MAX_VIDEO_MS) {
+    if (camera.elapsedMs >= maxMs) {
       stopPostComposerRecording();
       return;
     }
@@ -35216,6 +37871,13 @@ async function capturePostComposerPhoto() {
 function startPostComposerRecording() {
   const composer = state.pages.create;
   const camera = composer.camera;
+  if (postComposerCaptureModeConfig(composer.captureMode).key === "photo") {
+    capturePostComposerPhoto().catch(() => {
+      composer.error = "Photo could not be captured.";
+      scheduleRender();
+    });
+    return;
+  }
   if (!camera?.stream || camera.recording) {
     composer.error = "Open the camera before recording.";
     scheduleRender();
@@ -35846,6 +38508,125 @@ async function loadSettingsMyDistricts({ refresh = false } = {}) {
   }
 }
 
+function normalizeSettingsAccountUsername(value) {
+  return normalizeString(value).replace(/^@+/u, "").toLowerCase();
+}
+
+function settingsAccountUsernameNextAllowedAt(profile = {}, payload = {}) {
+  return (
+    normalizeSettingsTimestamp(
+      payload.usernameNextAllowedAt ||
+        payload.usernameNextAllowedAtIso ||
+        profile.usernameNextAllowedAt ||
+        profile.usernameNextAllowedAtIso,
+    ) || null
+  );
+}
+
+function settingsAccountUsernameCooldownText(profile = {}, payload = {}) {
+  const nextAllowedAt = settingsAccountUsernameNextAllowedAt(profile, payload);
+  if (!nextAllowedAt || nextAllowedAt <= Date.now()) {
+    return "";
+  }
+  return `Available again ${formatSettingsDate(nextAllowedAt)}.`;
+}
+
+function settingsAccountUsernameValidationError(username, currentUsername = "") {
+  if (!username) {
+    return "Enter a username.";
+  }
+  if (username === currentUsername) {
+    return "Enter a different username.";
+  }
+  if (username.length < 3 || username.length > 20 || !/^[a-z0-9_]+$/u.test(username)) {
+    return "Use 3-20 lowercase letters, numbers, or underscores.";
+  }
+  return "";
+}
+
+function settingsAccountUsernameErrorMessage(error, profile = {}) {
+  const code = normalizeString(error?.payload?.error || error?.message).toLowerCase();
+  if (code === "username_conflict" || error?.status === 409) {
+    return "That username is already taken.";
+  }
+  if (code === "username_update_rate_limited" || error?.status === 429) {
+    const cooldownText = settingsAccountUsernameCooldownText(
+      profile,
+      error?.payload || {},
+    );
+    return cooldownText
+      ? `You can change your username once every 90 days. ${cooldownText}`
+      : "You can change your username once every 90 days.";
+  }
+  if (code === "invalid_username" || error?.status === 400) {
+    return "Use 3-20 lowercase letters, numbers, or underscores.";
+  }
+  return settingsErrorMessage(error, "Username could not be saved.");
+}
+
+async function saveSettingsAccountUsername(formData) {
+  const resource = state.pages.settings.voterProfile.profile;
+  const currentProfile = resource.item || {};
+  const currentUsername = normalizeSettingsAccountUsername(currentProfile.username);
+  const username = normalizeSettingsAccountUsername(formData.get("username"));
+  const validationError = settingsAccountUsernameValidationError(
+    username,
+    currentUsername,
+  );
+  if (validationError) {
+    resource.error = validationError;
+    resource.notice = "";
+    showToast(validationError);
+    scheduleRender();
+    return false;
+  }
+  const cooldownText = settingsAccountUsernameCooldownText(currentProfile);
+  if (cooldownText) {
+    resource.error = `You can change your username once every 90 days. ${cooldownText}`;
+    resource.notice = "";
+    showToast(resource.error);
+    scheduleRender();
+    return false;
+  }
+  resource.saving = true;
+  resource.error = "";
+  resource.notice = "";
+  scheduleRender();
+  try {
+    const payload = await fetchJson("/api/profile", {
+      auth: true,
+      method: "POST",
+      body: { username },
+    });
+    const nextProfile = normalizeMyProfile(payload);
+    resource.item = nextProfile;
+    resource.loaded = true;
+    resource.notice = "Username updated.";
+    if (state.pages.profile.me?.userId === nextProfile.userId) {
+      state.pages.profile.me = nextProfile;
+    }
+    if (state.pages.profile.current?.userId === nextProfile.userId) {
+      state.pages.profile.current = nextProfile;
+    }
+    if (state.auth.user && nextProfile.username) {
+      state.auth.user = {
+        ...state.auth.user,
+        username: nextProfile.username,
+      };
+    }
+    showToast(resource.notice);
+    return true;
+  } catch (error) {
+    resource.error = settingsAccountUsernameErrorMessage(error, currentProfile);
+    resource.notice = "";
+    showToast(resource.error);
+    return false;
+  } finally {
+    resource.saving = false;
+    scheduleRender();
+  }
+}
+
 async function saveSettingsVoterProfile(formData) {
   const profile = state.pages.settings.voterProfile.profile;
   profile.saving = true;
@@ -36287,6 +39068,474 @@ async function loadVoterIntelBallotGuide({
     guide.loading = false;
     scheduleRender();
   }
+}
+
+function voterIntelRankingsState() {
+  const voterIntel = state.pages.settings.voterIntel;
+  voterIntel.rankings =
+    voterIntel.rankings || {
+      selectedContestId: "",
+      loadingContestId: "",
+      savingContestId: "",
+      errorByContestId: {},
+      aggregateByContestId: {},
+      preferencesByContestId: {},
+    };
+  voterIntel.rankings.errorByContestId =
+    voterIntel.rankings.errorByContestId || {};
+  voterIntel.rankings.aggregateByContestId =
+    voterIntel.rankings.aggregateByContestId || {};
+  voterIntel.rankings.preferencesByContestId =
+    voterIntel.rankings.preferencesByContestId || {};
+  return voterIntel.rankings;
+}
+
+function normalizeContestRankingAggregate(raw = {}) {
+  const aggregate =
+    raw.aggregate && typeof raw.aggregate === "object" ? raw.aggregate : raw;
+  return {
+    contestId: normalizeString(aggregate.contestId),
+    available: aggregate.available === true,
+    privacySuppressed: aggregate.privacySuppressed === true,
+    totalRankings: Number(aggregate.totalRankings) || 0,
+    minTotalRankings: Number(aggregate.minTotalRankings) || 25,
+    minSegmentCount: Number(aggregate.minSegmentCount) || 10,
+    updatedAtIso: normalizeString(aggregate.updatedAtIso),
+    candidates: readArrayPayload(aggregate, ["candidates"]).map((candidate) => ({
+      candidateId: normalizeString(candidate.candidateId || candidate.id),
+      firstChoiceCount: Number(candidate.firstChoiceCount) || 0,
+      firstChoicePct: Number(candidate.firstChoicePct) || 0,
+      rankedCount: Number(candidate.rankedCount) || 0,
+      avgRank: Number.isFinite(Number(candidate.avgRank))
+        ? Number(candidate.avgRank)
+        : null,
+    })),
+  };
+}
+
+function normalizeContestRankingCandidate(candidate = {}) {
+  return {
+    candidateId: normalizeString(candidate.candidateId || candidate.id),
+    displayName:
+      normalizeString(candidate.displayName || candidate.name) ||
+      normalizeString(candidate.candidateId || candidate.id) ||
+      "Candidate",
+    rank: Number(candidate.rank) || 0,
+  };
+}
+
+function normalizeContestRankingPreferences(raw = []) {
+  const seen = new Set();
+  return (Array.isArray(raw) ? raw : [])
+    .map(normalizeContestRankingCandidate)
+    .sort((left, right) => left.rank - right.rank)
+    .filter((candidate) => {
+      const id = normalizeString(candidate.candidateId);
+      if (!id || seen.has(id)) {
+        return false;
+      }
+      seen.add(id);
+      return true;
+    })
+    .map((candidate, index) => ({ ...candidate, rank: index + 1 }));
+}
+
+function voterIntelSlug(value, fallback = "candidate") {
+  const slug = normalizeString(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, "-")
+    .replace(/^-+|-+$/gu, "");
+  return slug || fallback;
+}
+
+function voterIntelDateKey(value) {
+  const normalized = normalizeString(value);
+  if (!normalized) return "";
+  const dateOnly = normalized.match(/^(\d{4})-(\d{2})-(\d{2})/u);
+  if (dateOnly) {
+    return `${dateOnly[1]}-${dateOnly[2]}-${dateOnly[3]}`;
+  }
+  const timestamp = Date.parse(normalized);
+  return Number.isNaN(timestamp) ? "" : formatDateInputValue(timestamp);
+}
+
+function voterIntelDistrictElectionData(districts = {}) {
+  return districts?.electionData && typeof districts.electionData === "object"
+    ? districts.electionData
+    : {};
+}
+
+function voterIntelDistrictRaceContestId({
+  electionId = "",
+  electionDay = "",
+  office = "",
+  jurisdiction = "",
+} = {}) {
+  const parts = [
+    normalizeString(electionId) || voterIntelDateKey(electionDay),
+    normalizeString(office),
+    normalizeString(jurisdiction),
+  ].filter(Boolean);
+  return voterIntelSlug(parts.join("|"), "contest");
+}
+
+function voterIntelDistrictCandidateId(candidate = {}, index = 0) {
+  const appCandidateId = normalizeString(candidate.appCandidateId);
+  if (appCandidateId) return appCandidateId;
+  const name = settingsDistrictPersonName(candidate);
+  return `${voterIntelSlug(name, "candidate")}-${index}`;
+}
+
+function normalizeVoterIntelDistrictCandidate(candidate = {}, index = 0, group = {}) {
+  const name = normalizeString(
+    candidate.name || candidate.displayName || candidate.fullName,
+  );
+  const candidateId = voterIntelDistrictCandidateId(candidate, index);
+  return {
+    candidateId,
+    id: candidateId,
+    name,
+    displayName: name,
+    partyLabel:
+      normalizeString(candidate.partyLabel || candidate.party || group.partyLabel) ||
+      normalizeString(candidate.partyToken || group.partyToken),
+    partyToken: normalizeElectionPartyToken(
+      candidate.partyToken || candidate.partyCode || group.partyToken,
+    ),
+    avatarUrl: normalizeUrl(candidate.appAvatarUrl || candidate.avatarUrl),
+    initials: settingsDistrictPersonInitials(candidate),
+  };
+}
+
+function voterIntelDistrictCandidateSources(reelection = {}, candidateGroups = []) {
+  const directCandidates = readArrayPayload(reelection, ["candidates"]);
+  if (directCandidates.length) {
+    return directCandidates.map((candidate, index) => ({
+      candidate,
+      group: {},
+      index,
+    }));
+  }
+  let index = 0;
+  return candidateGroups.flatMap((group) =>
+    readArrayPayload(group, ["candidates"]).map((candidate) => ({
+      candidate,
+      group,
+      index: index++,
+    })),
+  );
+}
+
+function voterIntelRankableRaceFromDistrictEntry(districts, entry = {}) {
+  const { office = {}, index = 0 } = entry;
+  const reelection = settingsDistrictOfficeReelection(office);
+  const candidateGroups = settingsDistrictCandidateGroups(reelection);
+  const electionData = voterIntelDistrictElectionData(districts);
+  const title =
+    normalizeString(office.office || office.title || office.officeTitle) ||
+    `Race ${index + 1}`;
+  const jurisdiction = normalizeString(
+    office.jurisdiction || office.district || office.state,
+  );
+  const electionId = normalizeString(
+    reelection.electionId || electionData.electionId,
+  );
+  const electionDay = voterIntelDateKey(
+    reelection.electionDay || electionData.electionDay,
+  );
+  const candidates = voterIntelDistrictCandidateSources(
+    reelection,
+    candidateGroups,
+  )
+    .map(({ candidate, group, index: candidateIndex }) =>
+      normalizeVoterIntelDistrictCandidate(candidate, candidateIndex, group),
+    )
+    .filter((candidate) => candidate.candidateId && candidate.name);
+  return {
+    contestId: voterIntelDistrictRaceContestId({
+      electionId,
+      electionDay,
+      office: title,
+      jurisdiction,
+    }),
+    raceId: voterIntelDistrictRaceContestId({
+      electionId,
+      electionDay,
+      office: title,
+      jurisdiction,
+    }),
+    title,
+    officeTitle: title,
+    level:
+      normalizeString(office.level) ||
+      settingsDistrictOfficeLevelKey(office.level),
+    jurisdiction,
+    districtId: normalizeString(office.districtId || office.district),
+    stateId: normalizeString(office.state || electionData.stateId),
+    electionId,
+    electionName: normalizeString(
+      reelection.electionName || electionData.electionName,
+    ),
+    electionDay,
+    status: normalizeString(reelection.status),
+    candidateGroups,
+    candidates,
+  };
+}
+
+function voterIntelRankableRacesFromDistricts(districts) {
+  const offices = settingsDistrictOffices(districts);
+  const grouped = settingsDistrictGroupedOffices(offices);
+  return SETTINGS_DISTRICT_LEVELS.flatMap((level) => grouped[level.key] || [])
+    .map((entry) => voterIntelRankableRaceFromDistrictEntry(districts, entry))
+    .filter((race) => voterIntelRaceContestId(race));
+}
+
+function findVoterIntelRankableRace(contestId) {
+  const normalizedContestId = normalizeString(contestId);
+  if (!normalizedContestId) return null;
+  const districts = state.pages.settings.voterProfile.districts.item;
+  return (
+    voterIntelRankableRacesFromDistricts(districts).find(
+      (race) => voterIntelRaceContestId(race) === normalizedContestId,
+    ) || null
+  );
+}
+
+function findVoterIntelSavedContest(contestId) {
+  const normalizedContestId = normalizeString(contestId);
+  const guide = state.pages.settings.voterIntel.guide.item || normalizeBallotGuide();
+  return (
+    guide.contests.find(
+      (contest) => normalizeString(contest.contestId) === normalizedContestId,
+    ) || null
+  );
+}
+
+function voterIntelRaceContestId(race = {}) {
+  if (!race || typeof race !== "object") return "";
+  return normalizeString(race.raceId || race.contestId || race.id);
+}
+
+function voterIntelRaceCandidates(race = {}) {
+  if (!race || typeof race !== "object") return [];
+  const seen = new Set();
+  return (race.candidates || [])
+    .map((candidate) => ({
+      candidateId: normalizeString(candidate.id || candidate.candidateId),
+      displayName:
+        normalizeString(candidate.displayName || candidate.name) ||
+        "Candidate",
+      partyLabel: normalizeString(
+        candidate.partyLabel || candidate.party || candidate.partyToken,
+      ),
+      partyToken: normalizeElectionPartyToken(
+        candidate.partyToken || candidate.partyCode || candidate.partyLabel,
+      ),
+      avatarUrl: normalizeUrl(
+        candidate.avatarUrl || candidate.appAvatarUrl || candidate.photoUrl,
+      ),
+      initials: normalizeString(candidate.initials),
+    }))
+    .filter((candidate) => {
+      if (!candidate.candidateId || seen.has(candidate.candidateId)) {
+        return false;
+      }
+      seen.add(candidate.candidateId);
+      return true;
+    });
+}
+
+function voterIntelRaceContext(race = {}) {
+  const source = race && typeof race === "object" ? race : {};
+  return {
+    stateId: normalizeString(source.stateId),
+    districtId: normalizeString(source.districtId),
+    office: normalizeString(source.officeTitle || source.title || source.office),
+    level: normalizeString(source.level),
+    jurisdiction: normalizeString(source.jurisdiction),
+    electionId: normalizeString(source.electionId),
+    electionName: normalizeString(source.electionName),
+    electionDay: normalizeString(source.electionDay || source.date),
+  };
+}
+
+function ensureVoterIntelRaceRanking(race = {}) {
+  const contestId = voterIntelRaceContestId(race);
+  if (!contestId) return;
+  const rankingState = voterIntelRankingsState();
+  if (!rankingState.preferencesByContestId[contestId]) {
+    const saved = findVoterIntelSavedContest(contestId);
+    rankingState.preferencesByContestId[contestId] =
+      normalizeContestRankingPreferences(saved?.ranking || []);
+  }
+  if (
+    !rankingState.aggregateByContestId[contestId] &&
+    rankingState.loadingContestId !== contestId
+  ) {
+    loadVoterIntelContestAggregate(contestId).catch(() => {});
+  }
+}
+
+async function loadVoterIntelContestAggregate(contestId, { refresh = false } = {}) {
+  const normalizedContestId = normalizeString(contestId);
+  if (!normalizedContestId) return;
+  const rankingState = voterIntelRankingsState();
+  if (rankingState.aggregateByContestId[normalizedContestId] && !refresh) {
+    return;
+  }
+  rankingState.loadingContestId = normalizedContestId;
+  rankingState.errorByContestId[normalizedContestId] = "";
+  scheduleRender();
+  try {
+    const payload = await fetchJson(
+      `/api/elections/contests/${encodeURIComponent(normalizedContestId)}/ranking-aggregate`,
+      { auth: true },
+    );
+    rankingState.aggregateByContestId[normalizedContestId] =
+      normalizeContestRankingAggregate(payload);
+    if (payload.myRanking?.ranking) {
+      rankingState.preferencesByContestId[normalizedContestId] =
+        normalizeContestRankingPreferences(payload.myRanking.ranking);
+    }
+  } catch (error) {
+    rankingState.errorByContestId[normalizedContestId] = settingsErrorMessage(
+      error,
+      "Ranking data could not be loaded.",
+    );
+  } finally {
+    if (rankingState.loadingContestId === normalizedContestId) {
+      rankingState.loadingContestId = "";
+    }
+    scheduleRender();
+  }
+}
+
+function setVoterIntelRacePreferences(contestId, preferences) {
+  const normalizedContestId = normalizeString(contestId);
+  if (!normalizedContestId) return;
+  voterIntelRankingsState().preferencesByContestId[normalizedContestId] =
+    normalizeContestRankingPreferences(preferences);
+}
+
+async function saveVoterIntelRaceRanking(race = {}) {
+  const contestId = voterIntelRaceContestId(race);
+  if (!contestId) return;
+  const rankingState = voterIntelRankingsState();
+  const ranking = normalizeContestRankingPreferences(
+    rankingState.preferencesByContestId[contestId] || [],
+  );
+  if (!ranking.length) {
+    rankingState.errorByContestId[contestId] = "Rank at least one candidate.";
+    scheduleRender();
+    return;
+  }
+  rankingState.savingContestId = contestId;
+  rankingState.errorByContestId[contestId] = "";
+  scheduleRender();
+  try {
+    const payload = await fetchJson(
+      `/api/elections/contests/${encodeURIComponent(contestId)}/ranking`,
+      {
+        auth: true,
+        method: "PUT",
+        body: {
+          ...voterIntelRaceContext(race),
+          ranking: ranking.map((candidate, index) => ({
+            candidateId: candidate.candidateId,
+            displayName: candidate.displayName,
+            rank: index + 1,
+          })),
+        },
+      },
+    );
+    rankingState.aggregateByContestId[contestId] =
+      normalizeContestRankingAggregate(payload);
+    await Promise.allSettled([
+      loadVoterIntelSnapshot({ refresh: true }),
+      loadVoterIntelBallotGuide({ refresh: true, silent: true }),
+    ]);
+    showToast("Ranking saved.");
+  } catch (error) {
+    rankingState.errorByContestId[contestId] = settingsErrorMessage(
+      error,
+      "Ranking could not be saved.",
+    );
+    showToast(rankingState.errorByContestId[contestId]);
+  } finally {
+    if (rankingState.savingContestId === contestId) {
+      rankingState.savingContestId = "";
+    }
+    scheduleRender();
+  }
+}
+
+function addVoterIntelRaceRankingCandidate(contestId, candidateId) {
+  const race = findVoterIntelRankableRace(contestId);
+  const normalizedContestId = voterIntelRaceContestId(race);
+  const normalizedCandidateId = normalizeString(candidateId);
+  if (!race || !normalizedContestId || !normalizedCandidateId) {
+    showToast("Candidate ranking is unavailable.");
+    return;
+  }
+  const candidate = voterIntelRaceCandidates(race).find(
+    (item) => item.candidateId === normalizedCandidateId,
+  );
+  if (!candidate) {
+    showToast("Candidate could not be found for this race.");
+    return;
+  }
+  const current = voterIntelRankingPreferencesForContest(normalizedContestId);
+  if (current.some((item) => item.candidateId === normalizedCandidateId)) {
+    return;
+  }
+  setVoterIntelRacePreferences(normalizedContestId, [
+    ...current,
+    {
+      candidateId: candidate.candidateId,
+      displayName: candidate.displayName,
+      rank: current.length + 1,
+    },
+  ]);
+  scheduleRender();
+}
+
+function removeVoterIntelRaceRankingCandidate(contestId, candidateId) {
+  const normalizedContestId = normalizeString(contestId);
+  const normalizedCandidateId = normalizeString(candidateId);
+  if (!normalizedContestId || !normalizedCandidateId) return;
+  setVoterIntelRacePreferences(
+    normalizedContestId,
+    voterIntelRankingPreferencesForContest(normalizedContestId).filter(
+      (candidate) => candidate.candidateId !== normalizedCandidateId,
+    ),
+  );
+  scheduleRender();
+}
+
+function moveVoterIntelRaceRankingCandidate(contestId, candidateId, direction) {
+  const normalizedContestId = normalizeString(contestId);
+  const normalizedCandidateId = normalizeString(candidateId);
+  const numericDirection = Number(direction);
+  if (
+    !normalizedContestId ||
+    !normalizedCandidateId ||
+    !Number.isInteger(numericDirection)
+  ) {
+    return;
+  }
+  const next = voterIntelRankingPreferencesForContest(normalizedContestId);
+  const index = next.findIndex(
+    (candidate) => candidate.candidateId === normalizedCandidateId,
+  );
+  const nextIndex = index + numericDirection;
+  if (index < 0 || nextIndex < 0 || nextIndex >= next.length) {
+    return;
+  }
+  const [candidate] = next.splice(index, 1);
+  next.splice(nextIndex, 0, candidate);
+  setVoterIntelRacePreferences(normalizedContestId, next);
+  scheduleRender();
 }
 
 async function loadVoterIntelPolicyQuestions({ refresh = false } = {}) {
@@ -38190,6 +41439,19 @@ async function loadCurrentRoute({ refresh = false } = {}) {
       ]);
       return;
     }
+    if (subroute.view === "conversation-people") {
+      await Promise.all([
+        loadMessagingInbox({ refresh }),
+        loadMessagingRequests().catch(() => {}),
+        loadMessagingServers(),
+        loadMessagingConversation(subroute.conversationId, { refresh }),
+        loadMessagingConversationMembers(subroute.conversationId, {
+          refresh,
+        }).catch(() => {}),
+        loadMessagingGroupPeopleFriends({ refresh }).catch(() => {}),
+      ]);
+      return;
+    }
     if (subroute.view === "server-room") {
       await Promise.all([
         loadMessagingServers(),
@@ -38473,6 +41735,10 @@ function renderIcon(name) {
     save: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12a2 2 0 0 1 2 2v16l-8-4-8 4V5a2 2 0 0 1 2-2Zm0 2v12.764l6-3 6 3V5H6Z"></path></svg>',
     saveFilled:
       '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12a2 2 0 0 1 2 2v16l-8-4-8 4V5a2 2 0 0 1 2-2Z"></path></svg>',
+    chevronUp:
+      '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 7 7 7-1.41 1.41L12 9.83l-5.59 5.58L5 14l7-7Z"></path></svg>',
+    chevronDown:
+      '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 17-7-7 1.41-1.41L12 14.17l5.59-5.58L19 10l-7 7Z"></path></svg>',
     play: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"></path></svg>',
     pause:
       '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h4v14H7zm6 0h4v14h-4z"></path></svg>',
@@ -38507,7 +41773,7 @@ function renderRail() {
   return `<aside class="shared-feed-rail">
     <div class="shared-feed-rail__brand">
       <span class="shared-feed-rail__brand-mark">
-        <img class="shared-feed-rail__brand-logo" src="${escapeHtml(polisLogoUrl)}" alt="Polis" />
+        <img class="shared-feed-rail__brand-logo" src="${escapeHtml(resolveSharedAssetUrl(polisLogoUrl))}" alt="Polis" />
       </span>
       <div>
         <div class="shared-feed-rail__brand-name">Polis</div>
@@ -38528,6 +41794,46 @@ function renderRail() {
   </aside>`;
 }
 
+function getTopChromeTitle(route = state.route) {
+  const routeKey = normalizeString(route?.routeKey);
+  const exactTitles = {
+    [ROUTE_KEY_AUTH]: "Account",
+    [ROUTE_KEY_CREATE]: "Create",
+    [ROUTE_KEY_ACHIEVEMENTS]: "Achievements",
+    [ROUTE_KEY_SEARCH]: "Search",
+    [ROUTE_KEY_SEARCH_RESULTS]: "Search",
+    [ROUTE_KEY_CANDIDATE_VOTER_MAP]: "Voter Map",
+    [ROUTE_KEY_CANDIDATE_VOTER_MAP_SECTION]: "Voter Map",
+    [ROUTE_KEY_MANAGE_EVENTS]: "Manage Events",
+    [ROUTE_KEY_MANAGE_EVENTS_NEW]: "Manage Events",
+    [ROUTE_KEY_MANAGE_EVENTS_EDIT]: "Manage Events",
+    [ROUTE_KEY_TOPICS]: "Topics",
+    [ROUTE_KEY_ONBOARDING_TOPICS]: "Topics",
+    [ROUTE_KEY_POLICY_QUESTIONS]: "Policy Questions",
+    [ROUTE_KEY_POLICY_QUESTION_DETAIL]: "Policy Questions",
+    [ROUTE_KEY_ADMIN]: "Admin",
+    [ROUTE_KEY_ADMIN_SECTION]: "Admin",
+  };
+  if (exactTitles[routeKey]) {
+    return exactTitles[routeKey];
+  }
+  const section = getRouteSection(route);
+  const sectionTitles = {
+    candidates: "Candidates",
+    campaigns: "Campaigns",
+    coalitions: "Coalitions",
+    discover: "Discover",
+    elections: "Election Day",
+    events: "Events",
+    messages: "Messages",
+    missions: "Missions",
+    profile: "Profile",
+    settings: "Settings",
+    topics: "Topics",
+  };
+  return sectionTitles[section] || "Polis";
+}
+
 function renderTopChrome() {
   const actions = getTopActions()
     .map(
@@ -38541,27 +41847,7 @@ function renderTopChrome() {
   return `<header class="shared-feed-topbar">
     <div class="shared-feed-topbar__spacer">${
       !isFeedRoute()
-        ? `<div class="shared-feed-topbar__title">${escapeHtml(
-            getRouteSection() === "messages"
-              ? "Messages"
-              : getRouteSection() === "profile"
-                ? "Profile"
-                : getRouteSection() === "events"
-                  ? "Events"
-                  : getRouteSection() === "elections"
-                    ? "Election Day"
-                    : getRouteSection() === "campaigns"
-                      ? "Campaigns"
-                      : getRouteSection() === "coalitions"
-                        ? "Coalitions"
-                        : getRouteSection() === "missions"
-                          ? "Missions"
-                          : getRouteSection() === "settings"
-                            ? "Settings"
-                            : getRouteSection() === "candidates"
-                              ? "Candidates"
-                              : "Polis",
-          )}</div>`
+        ? `<div class="shared-feed-topbar__title">${escapeHtml(getTopChromeTitle())}</div>`
         : ""
     }</div>
     <div class="shared-feed-topbar__toggle">${
@@ -38802,15 +42088,23 @@ function renderFeedStage() {
   </section>`;
 }
 
-function renderDiscoverAuthGate() {
-  return `<section class="shared-page shared-discover-page">
+function renderFeatureAuthGate({
+  pageClass = "shared-discover-page",
+  authClass = "",
+  eyebrow,
+  title,
+  copy,
+  tiles = [],
+} = {}) {
+  const classes = ["shared-discover-auth", authClass].filter(Boolean).join(" ");
+  return `<section class="shared-page ${escapeHtml(pageClass)}">
     ${renderTopChrome()}
     <div class="shared-page__content">
-      <section class="shared-discover-auth">
+      <section class="${escapeHtml(classes)}">
         <div>
-          <span class="shared-discover-eyebrow">Discover</span>
-          <h1>Find the next civic action.</h1>
-          <p>Sign in to browse Polis feed trends, people, campaign events, community rooms, friend activity, ballot tools, and volunteer work from the browser.</p>
+          <span class="shared-discover-eyebrow">${escapeHtml(eyebrow)}</span>
+          <h1>${escapeHtml(title)}</h1>
+          <p>${escapeHtml(copy)}</p>
           <div class="shared-auth-modal__actions">
             <button class="shared-feed-chip shared-feed-chip--primary" data-action="auth-login-inline">Sign in</button>
             <button class="shared-feed-chip" data-action="auth-signup-inline">Create account</button>
@@ -38818,14 +42112,7 @@ function renderDiscoverAuthGate() {
           </div>
         </div>
         <div class="shared-discover-auth__grid" aria-hidden="true">
-          ${[
-            "Trending feed",
-            "Candidates",
-            "Events",
-            "Communities",
-            "Ballot tools",
-            "Friend activity",
-          ]
+          ${tiles
             .map(
               (label) =>
                 `<span class="shared-discover-auth__tile">${escapeHtml(label)}</span>`,
@@ -38837,32 +42124,175 @@ function renderDiscoverAuthGate() {
   </section>`;
 }
 
+function renderFeedAuthGate() {
+  return renderFeatureAuthGate({
+    eyebrow: "Feed",
+    title: "Follow the live Polis feed from the browser.",
+    copy: "Sign in to open your For You and Following feeds, view shared posts, join comment threads, and pick up where the mobile app leaves off.",
+    tiles: [
+      "For You",
+      "Following",
+      "Shared posts",
+      "Comments",
+      "Reposts",
+      "Saved activity",
+    ],
+  });
+}
+
+function renderDiscoverAuthGate() {
+  return renderFeatureAuthGate({
+    eyebrow: "Discover",
+    title: "Find the next civic action.",
+    copy: "Sign in to browse Polis feed trends, people, campaign events, community rooms, friend activity, ballot tools, and volunteer work from the browser.",
+    tiles: [
+      "Trending feed",
+      "Candidates",
+      "Events",
+      "Communities",
+      "Ballot tools",
+      "Friend activity",
+    ],
+  });
+}
+
+function renderAchievementsAuthGate() {
+  return renderFeatureAuthGate({
+    eyebrow: "Achievements",
+    title: "Track your civic progress from the browser.",
+    copy: "Sign in to review earned badges, streaks, mission milestones, voter-intelligence progress, and the activity that moves your Polis profile forward.",
+    tiles: [
+      "Badges",
+      "Streaks",
+      "Missions",
+      "Policy progress",
+      "Coalition work",
+      "Profile growth",
+    ],
+  });
+}
+
+function renderCandidatesAuthGate() {
+  return renderFeatureAuthGate({
+    eyebrow: "Candidates",
+    title: "Browse candidates and public officials from the browser.",
+    copy: "Sign in to compare candidate pages, follow campaigns, review official report cards, find related events, and continue candidate research inside Polis.",
+    tiles: [
+      "Candidate profiles",
+      "Followed races",
+      "Report cards",
+      "Donations",
+      "Related events",
+      "Campaign posts",
+    ],
+  });
+}
+
+function renderEventsAuthGate() {
+  return renderFeatureAuthGate({
+    eyebrow: "Events",
+    title: "Find civic events from the browser.",
+    copy: "Sign in to discover campaign events, view event details, RSVP, handle signup flows, and keep event activity connected to your Polis profile.",
+    tiles: [
+      "Event discovery",
+      "RSVPs",
+      "Signup flows",
+      "Ticketing",
+      "Candidate events",
+      "Coalition events",
+    ],
+  });
+}
+
+function renderManageEventsAuthGate() {
+  return renderFeatureAuthGate({
+    eyebrow: "Manage events",
+    title: "Create and manage Polis events from the browser.",
+    copy: "Sign in with event access to draft events, edit details, review attendees, manage publishing state, and coordinate events across campaign and coalition work.",
+    tiles: [
+      "Draft events",
+      "Edit details",
+      "Attendees",
+      "Publishing",
+      "Campaign hosts",
+      "Coalition hosts",
+    ],
+  });
+}
+
+function renderProfileAuthGate() {
+  return renderFeatureAuthGate({
+    eyebrow: "Profile",
+    title: "Open your Polis profile from the browser.",
+    copy: "Sign in to edit your public profile, review followers and following, manage notifications, and keep your civic identity synced across Polis.",
+    tiles: [
+      "Profile basics",
+      "Followers",
+      "Following",
+      "Notifications",
+      "Public activity",
+      "Account links",
+    ],
+  });
+}
+
+function renderMessagesAuthGate() {
+  return renderFeatureAuthGate({
+    eyebrow: "Messages",
+    title: "Open Polis messaging from the browser.",
+    copy: "Sign in to use direct messages, campaign rooms, coalition channels, mentions, attachments, read receipts, and room settings without leaving the web app.",
+    tiles: [
+      "Direct messages",
+      "Campaign rooms",
+      "Coalition channels",
+      "Group threads",
+      "Mentions",
+      "Read receipts",
+    ],
+  });
+}
+
+function renderTopicsAuthGate() {
+  return renderFeatureAuthGate({
+    eyebrow: "Topics",
+    title: "Choose the issues Polis should follow.",
+    copy: "Sign in to set topic preferences, tune policy-question coverage, and shape the recommendations, candidates, and civic actions Polis brings forward.",
+    tiles: [
+      "Topic picks",
+      "Policy areas",
+      "Question filters",
+      "Candidate context",
+      "Feed tuning",
+      "Issue alerts",
+    ],
+  });
+}
+
+function renderPolicyQuestionsAuthGate() {
+  return renderFeatureAuthGate({
+    eyebrow: "Policy questions",
+    title: "Answer the issues that shape your ballot.",
+    copy: "Sign in to answer policy questions, compare your voter-intelligence profile, revisit explanations, and keep your civic preferences synced across Polis.",
+    tiles: [
+      "Issue prompts",
+      "Preference scoring",
+      "Candidate matching",
+      "Answer history",
+      "Topic filters",
+      "Voter profile",
+    ],
+  });
+}
+
 function renderSearchAuthGate() {
-  return `<section class="shared-page shared-search-page">
-    ${renderTopChrome()}
-    <div class="shared-page__content">
-      <section class="shared-discover-auth shared-search-auth">
-        <div>
-          <span class="shared-discover-eyebrow">Search</span>
-          <h1>Find people, posts, and tags.</h1>
-          <p>Sign in to search the live Polis graph from the browser and move straight into profiles, posts, conversations, campaign work, and civic actions.</p>
-          <div class="shared-auth-modal__actions">
-            <button class="shared-feed-chip shared-feed-chip--primary" data-action="auth-login-inline">Sign in</button>
-            <button class="shared-feed-chip" data-action="auth-signup-inline">Create account</button>
-            <button class="shared-feed-chip" data-action="open-app-shell">Open app</button>
-          </div>
-        </div>
-        <div class="shared-discover-auth__grid" aria-hidden="true">
-          ${["Posts", "People", "Tags", "Campaigns", "Coalitions", "Events"]
-            .map(
-              (label) =>
-                `<span class="shared-discover-auth__tile">${escapeHtml(label)}</span>`,
-            )
-            .join("")}
-        </div>
-      </section>
-    </div>
-  </section>`;
+  return renderFeatureAuthGate({
+    pageClass: "shared-search-page",
+    authClass: "shared-search-auth",
+    eyebrow: "Search",
+    title: "Find people, posts, and tags.",
+    copy: "Sign in to search the live Polis graph from the browser and move straight into profiles, posts, conversations, campaign work, and civic actions.",
+    tiles: ["Posts", "People", "Tags", "Campaigns", "Coalitions", "Events"],
+  });
 }
 
 function buildSearchResultsRoute(query) {
@@ -39250,25 +42680,141 @@ function formatComposerFileSize(size) {
   return `${Math.round(bytes)} B`;
 }
 
+function renderPostComposerCaptureModeStrip(composer) {
+  const pending = composer.pending || composer.camera?.recording;
+  const locked = pending || Boolean(composer.file);
+  return `<div class="shared-create-mode-strip" role="group" aria-label="Capture mode">
+    ${POST_COMPOSER_CAPTURE_MODES.map((mode) => {
+      const selected = postComposerCaptureModeConfig(composer.captureMode).key === mode.key;
+      return `<button class="shared-create-mode${selected ? " is-selected" : ""}" type="button" data-action="post-composer-capture-mode" data-mode="${escapeHtml(mode.key)}"${disabledAttr(locked && !selected)}>
+        <strong>${escapeHtml(mode.label)}</strong>
+        <span>${escapeHtml(mode.title)}</span>
+      </button>`;
+    }).join("")}
+  </div>`;
+}
+
+function renderPostComposerTimeline(composer) {
+  const clips = Array.isArray(composer.clips) ? composer.clips : [];
+  const maxMs = postComposerSelectedMaxMs(composer);
+  const durationMs =
+    composer.camera?.recording && Number(composer.camera.elapsedMs) > 0
+      ? Number(composer.camera.elapsedMs)
+      : postComposerTimelineDurationMs(composer);
+  const progress = maxMs > 0 ? Math.max(0, Math.min(100, (durationMs / maxMs) * 100)) : 0;
+  const modeLabel = postComposerSelectedMaxLabel(composer);
+  return `<section class="shared-create-timeline" aria-label="Recording timeline">
+    <div class="shared-create-timeline__header">
+      <div>
+        <span>Timeline</span>
+        <strong>${escapeHtml(durationMs ? formatComposerDuration(durationMs) : "0:00")} / ${escapeHtml(modeLabel)}</strong>
+      </div>
+      ${composer.file ? `<button class="shared-feed-chip" type="button" data-action="post-composer-clear-media"${disabledAttr(composer.pending)}>${renderIcon("trash")} <span>Delete clip</span></button>` : ""}
+    </div>
+    <i class="shared-create-timeline__track"><b style="width:${escapeHtml(progress.toFixed(2))}%"></b></i>
+    ${
+      clips.length
+        ? `<div class="shared-create-timeline__clips">
+            ${clips
+              .map(
+                (clip) => `<span>
+                  ${renderIcon(clip.mediaType === "video" ? "video" : "camera")}
+                  <strong>${escapeHtml(clip.name)}</strong>
+                  <small>${escapeHtml([
+                    humanizeLabel(clip.source),
+                    clip.durationMs ? formatComposerDuration(clip.durationMs) : postComposerMediaLabel(clip.mediaType),
+                  ].filter(Boolean).join(" / "))}</small>
+                </span>`,
+              )
+              .join("")}
+          </div>`
+        : `<p>${escapeHtml(composer.camera?.active ? "Record or capture to add the first clip." : "Open the camera or upload media to start the timeline.")}</p>`
+    }
+  </section>`;
+}
+
+function renderPostComposerTeleprompterOverlay(composer) {
+  const teleprompter = normalizePostComposerTeleprompter(composer);
+  if (!teleprompter.enabled || !teleprompter.script) {
+    return "";
+  }
+  const lineCount = Math.max(1, teleprompter.script.split(/\r?\n/u).length);
+  const words = teleprompter.script.split(/\s+/u).filter(Boolean).length;
+  const scrollDuration = Math.max(
+    8,
+    Math.round((Math.max(words, lineCount * 8) * 18) / teleprompter.speed),
+  );
+  return `<div class="shared-create-teleprompter-overlay${composer.camera?.recording ? " is-scrolling" : ""}" style="--teleprompter-opacity:${escapeHtml(String(teleprompter.opacity))};--teleprompter-height:${escapeHtml(String(teleprompter.height))}%;--teleprompter-font:${escapeHtml(String(teleprompter.fontSize))}px;--teleprompter-delay:${escapeHtml(String(teleprompter.delaySeconds))}s;--teleprompter-duration:${escapeHtml(String(scrollDuration))}s">
+    <div class="shared-create-teleprompter-overlay__script">${escapeHtml(teleprompter.script)}</div>
+  </div>`;
+}
+
+function renderPostComposerTeleprompterPanel(composer, pending) {
+  const teleprompter = normalizePostComposerTeleprompter(composer);
+  const open = teleprompter.expanded || teleprompter.enabled || teleprompter.script;
+  return `<section class="shared-create-teleprompter">
+    <div class="shared-create-teleprompter__header">
+      <div>
+        <span>${renderIcon("file")}</span>
+        <div>
+          <strong>Teleprompter</strong>
+          <small>${escapeHtml(teleprompter.enabled ? "On for camera recording" : "Scripted recording helper")}</small>
+        </div>
+      </div>
+      <div class="shared-create-teleprompter__actions">
+        <label class="shared-create-switch">
+          <input type="checkbox" data-create-field="teleprompter.enabled"${checkedAttr(teleprompter.enabled)}${disabledAttr(pending)} />
+          <span>On</span>
+        </label>
+        <button class="shared-feed-chip" type="button" data-action="post-composer-teleprompter-toggle">${escapeHtml(open ? "Collapse" : "Edit")}</button>
+      </div>
+    </div>
+    ${
+      open
+        ? `<div class="shared-create-teleprompter__body">
+            <label class="is-wide">
+              <span>Script</span>
+              <textarea name="teleprompterScript" rows="5" data-create-field="teleprompter.script" placeholder="Paste or draft the script you want visible while recording"${disabledAttr(pending)}>${escapeHtml(teleprompter.script)}</textarea>
+            </label>
+            <div class="shared-create-teleprompter__sliders">
+              <label><span>Speed <b>${escapeHtml(String(Math.round(teleprompter.speed)))} px/s</b></span><input type="range" min="12" max="90" step="1" value="${escapeHtml(String(teleprompter.speed))}" data-create-field="teleprompter.speed"${disabledAttr(pending)} /></label>
+              <label><span>Text size <b>${escapeHtml(String(Math.round(teleprompter.fontSize)))}</b></span><input type="range" min="18" max="48" step="1" value="${escapeHtml(String(teleprompter.fontSize))}" data-create-field="teleprompter.fontSize"${disabledAttr(pending)} /></label>
+              <label><span>Opacity <b>${escapeHtml(`${Math.round(teleprompter.opacity * 100)}%`)}</b></span><input type="range" min="0.18" max="0.9" step="0.01" value="${escapeHtml(String(teleprompter.opacity))}" data-create-field="teleprompter.opacity"${disabledAttr(pending)} /></label>
+              <label><span>Height <b>${escapeHtml(`${Math.round(teleprompter.height)}%`)}</b></span><input type="range" min="12" max="85" step="1" value="${escapeHtml(String(teleprompter.height))}" data-create-field="teleprompter.height"${disabledAttr(pending)} /></label>
+            </div>
+            <div class="shared-create-teleprompter__footer">
+              <label><span>Start delay</span><input type="number" min="0" max="10" step="1" value="${escapeHtml(String(teleprompter.delaySeconds))}" data-create-field="teleprompter.delaySeconds"${disabledAttr(pending)} /></label>
+              <button class="shared-feed-chip" type="button" data-action="post-composer-teleprompter-reset"${disabledAttr(pending)}>Reset</button>
+            </div>
+          </div>`
+        : ""
+    }
+  </section>`;
+}
+
 function renderPostComposerMediaPreview(composer) {
   const fileName = normalizeString(composer.file?.name);
   const camera = composer.camera;
+  const mode = postComposerCaptureModeConfig(composer.captureMode);
   if (camera?.active) {
     const elapsed = formatComposerDuration(camera.elapsedMs);
     const recordingClass = camera.recording ? " is-recording" : "";
     return `<div class="shared-create-camera${recordingClass}">
       <video data-create-camera-preview autoplay muted playsinline></video>
+      ${renderPostComposerTeleprompterOverlay(composer)}
       <div class="shared-create-camera__hud">
         <span>${renderIcon("camera")} <strong>${escapeHtml(camera.recording ? elapsed || "0:00" : "Camera ready")}</strong></span>
-        <small>${escapeHtml(`${POST_COMPOSER_MAX_VIDEO_SECONDS / 60}:00 max`)}</small>
+        <small>${escapeHtml(postComposerSelectedMaxLabel(composer))}</small>
       </div>
       <div class="shared-create-camera__actions">
         ${
           camera.recording
             ? `<button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="post-composer-record-stop">${renderIcon("pause")} <span>Stop</span></button>`
-            : `<button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="post-composer-record-start">${renderIcon("video")} <span>Record</span></button>`
+            : mode.key === "photo"
+              ? `<button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="post-composer-capture-photo">${renderIcon("camera")} <span>Take photo</span></button>`
+              : `<button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="post-composer-record-start">${renderIcon("video")} <span>Record ${escapeHtml(mode.label)}</span></button>`
         }
-        <button class="shared-feed-chip" type="button" data-action="post-composer-capture-photo"${disabledAttr(camera.recording)}>${renderIcon("camera")} <span>Photo</span></button>
+        ${mode.key === "photo" ? "" : `<button class="shared-feed-chip" type="button" data-action="post-composer-capture-photo"${disabledAttr(camera.recording)}>${renderIcon("camera")} <span>Photo</span></button>`}
         <button class="shared-feed-chip" type="button" data-action="post-composer-camera-stop">${renderIcon("close")} <span>Close</span></button>
       </div>
     </div>`;
@@ -39328,6 +42874,7 @@ function renderPostComposerPage() {
       </section>
       <form class="shared-create-layout" data-route-form="post-create">
         <section class="shared-create-panel shared-create-panel--media">
+          ${renderPostComposerCaptureModeStrip(composer)}
           <div class="shared-create-source-row">
             <label class="shared-feed-chip shared-create-file-chip${pending || camera.active ? " is-disabled" : ""}">
               <input type="file" accept="${escapeHtml(POST_COMPOSER_MEDIA_ACCEPT)}" data-create-file data-create-source="upload"${disabledAttr(pending || camera.active)} />
@@ -39353,10 +42900,12 @@ function renderPostComposerPage() {
                 : ""
             }
           </div>
+          ${renderPostComposerTimeline(composer)}
           <div class="shared-create-upload-note">
             <span>${renderIcon("shield")}</span>
             <p>Media publishes through the same upload and post pipeline as the mobile app.</p>
           </div>
+          ${renderPostComposerTeleprompterPanel(composer, pending)}
         </section>
         <section class="shared-create-panel shared-create-panel--form">
           <label>
@@ -40346,7 +43895,7 @@ function renderDiscoverServerCard(server) {
     ${renderDiscoverImage(server.avatarUrl, server.title)}
     <div class="shared-discover-card__body">
       <div class="shared-card__meta">
-        <span>${escapeHtml(server.scopeBadge || "Server")}</span>
+        <span>${escapeHtml(server.scopeBadge || "Workspace")}</span>
         <span>${escapeHtml(formatCount(server.memberCount))} members</span>
       </div>
       <h3>${escapeHtml(server.title)}</h3>
@@ -40667,7 +44216,6 @@ function renderFeedPromptCards(items = []) {
               <p class="shared-page__eyebrow">Prompt</p>
               <h3>${escapeHtml(item.title || "Continue in Polis")}</h3>
               <p class="shared-card__summary">${escapeHtml(item.description || "Open the app to continue this feed step.")}</p>
-              <div class="shared-card__actions">
                 <button class="shared-feed-chip shared-feed-chip--primary" data-action="open-app-shell">Open app</button>
               </div>
             </div>
@@ -42027,7 +45575,6 @@ function renderCandidateEditForm(candidate, detail, socials = {}) {
       </div>
     </section>
     <div class="shared-candidate-editor__actions">
-      <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${detail.saving ? " disabled" : ""}>${detail.saving ? "Saving..." : "Save changes"}</button>
       <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(resolveCandidateOpenRoute(candidate))}">Cancel</button>
     </div>
   </form>`;
@@ -42546,6 +46093,40 @@ function renderCandidateDashboardAuthGate() {
   </section>`;
 }
 
+function renderCandidateVoterMapAuthGate() {
+  return `<section class="shared-page shared-campaign-dashboard">
+    ${renderTopChrome()}
+    <div class="shared-page__content">
+      <section class="shared-campaign-auth">
+        <div>
+          <h1>Open the campaign voter map from the browser.</h1>
+          <p>Sign in with campaign access to review district geography, voter segments, precinct context, and outreach paths from the Polis web app.</p>
+          <div class="shared-card__actions">
+            <button class="shared-feed-chip shared-feed-chip--primary" data-action="auth-login-inline">Sign in</button>
+            <button class="shared-feed-chip" data-action="auth-signup-inline">Create account</button>
+            <button class="shared-feed-chip" data-action="open-app-shell">Open app</button>
+          </div>
+        </div>
+        <div class="shared-campaign-auth__grid" aria-hidden="true">
+          ${[
+            "District map",
+            "Voter segments",
+            "Precinct context",
+            "Support levels",
+            "Outreach routes",
+            "Turnout targets",
+          ]
+            .map(
+              (label) =>
+                `<span class="shared-campaign-auth__tile">${escapeHtml(label)}</span>`,
+            )
+            .join("")}
+        </div>
+      </section>
+    </div>
+  </section>`;
+}
+
 function candidateDashboardFeatureRank(section) {
   const index = CANDIDATE_DASHBOARD_FEATURE_ORDER.indexOf(section?.key);
   return index >= 0 ? index : CANDIDATE_DASHBOARD_FEATURE_ORDER.length;
@@ -42583,8 +46164,111 @@ function candidateDashboardFeatureStatus(section, access) {
   }
   return {
     label: "Permission required",
-    cta: "Ask for access",
+    cta: "Ask owner for access",
   };
+}
+
+function candidateDashboardCommandItems(candidateId, access) {
+  const sectionByKey = new Map(
+    CANDIDATE_DASHBOARD_SECTION_CONFIG.map((section) => [section.key, section]),
+  );
+  const makeSectionItem = (key, label, copy, tone = "") => {
+    const section = sectionByKey.get(key);
+    if (!canOpenCandidateDashboardSection(section, access)) {
+      return null;
+    }
+    return {
+      key,
+      label,
+      copy,
+      icon: section.icon,
+      route: candidateDashboardSectionPath(candidateId, key),
+      tone,
+    };
+  };
+  const items = [
+    makeSectionItem(
+      "missions",
+      "Missions",
+      "Assign, claim, approve, and track campaign work.",
+      "primary",
+    ),
+    makeSectionItem(
+      "messaging",
+      "Messaging",
+      "Manage campaign rooms and volunteer entitlements.",
+      "primary",
+    ),
+    makeSectionItem(
+      "engagement",
+      "Engagement queue",
+      "Triage comments, likes, replies, and posts.",
+      "primary",
+    ),
+    makeSectionItem(
+      "calendar",
+      "Calendar",
+      "Availability, bookings, shifts, travel, and promotion.",
+    ),
+    makeSectionItem(
+      "voter-contact-prompt",
+      "Contact prompt",
+      "Tune voter-facing outreach choices.",
+    ),
+    makeSectionItem(
+      "voter-registry",
+      "Voter registry",
+      "Search, add, import, and manage voter records.",
+    ),
+    makeSectionItem(
+      "campaign-quest",
+      "Campaign Quest",
+      "Open field map, territories, XP, and sign-drop work.",
+    ),
+    makeSectionItem(
+      "staff",
+      "Campaign staff",
+      "Invite staff and tune dashboard permissions.",
+    ),
+    makeSectionItem(
+      "donations",
+      "Donations",
+      "Review setup, transactions, exports, and payout state.",
+    ),
+    makeSectionItem(
+      "analytics",
+      "Analytics",
+      "Reach, engagement, trends, and event conversion.",
+    ),
+  ].filter(Boolean);
+  if (canManageCandidateMessaging(access)) {
+    items.splice(2, 0, {
+      key: "room-workspace",
+      label: "Room workspace",
+      copy: "Open the full Polis messaging workspace for this campaign.",
+      icon: "messages",
+      route: candidateMessagingServerPath(candidateId),
+    });
+  }
+  return items;
+}
+
+function renderCandidateDashboardCommandStrip(candidateId, access) {
+  const items = candidateDashboardCommandItems(candidateId, access);
+  if (!items.length) {
+    return "";
+  }
+  return `<section class="shared-campaign-command-strip" aria-label="Campaign work areas">
+    ${items
+      .map(
+        (item) => `<button class="shared-campaign-command${item.tone ? ` shared-campaign-command--${escapeHtml(item.tone)}` : ""}" type="button" data-action="navigate" data-route="${escapeHtml(item.route)}">
+          <span>${renderIcon(item.icon)}</span>
+          <strong>${escapeHtml(item.label)}</strong>
+          <small>${escapeHtml(item.copy)}</small>
+        </button>`,
+      )
+      .join("")}
+  </section>`;
 }
 
 function candidateDashboardFeatureHighlights(access, limit = 5) {
@@ -42778,6 +46462,7 @@ function renderCandidateDashboardRoot() {
 }
 
 function renderCandidateDashboardHero(candidate, access) {
+  const candidateId = access?.candidateId || candidate?.candidateId || "";
   const displayName =
     normalizeString(candidate?.displayName || access?.profile?.displayName) ||
     "Campaign";
@@ -42790,6 +46475,33 @@ function renderCandidateDashboardHero(candidate, access) {
     .map(normalizeString)
     .filter(Boolean)
     .join(" - ");
+  const sectionByKey = new Map(
+    CANDIDATE_DASHBOARD_SECTION_CONFIG.map((section) => [section.key, section]),
+  );
+  const heroActions = [
+    canOpenCandidateDashboardSection(sectionByKey.get("messaging"), access)
+      ? {
+          label: "Messaging",
+          icon: "messages",
+          route: candidateDashboardSectionPath(candidateId, "messaging"),
+          primary: true,
+        }
+      : null,
+    canOpenCandidateDashboardSection(sectionByKey.get("missions"), access)
+      ? {
+          label: "Missions",
+          icon: "mission",
+          route: candidateDashboardSectionPath(candidateId, "missions"),
+        }
+      : null,
+    canOpenCandidateDashboardSection(sectionByKey.get("calendar"), access)
+      ? {
+          label: "Calendar",
+          icon: "calendar",
+          route: candidateDashboardSectionPath(candidateId, "calendar"),
+        }
+      : null,
+  ].filter(Boolean);
   return `<section class="shared-campaign-hero">
     <div class="shared-campaign-hero__identity">
       <div class="shared-campaign-hero__avatar">
@@ -42809,8 +46521,12 @@ function renderCandidateDashboardHero(candidate, access) {
       </div>
   </div>
   <div class="shared-campaign-hero__actions">
-      <button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="${escapeHtml(candidateMessagingServerPath(access?.candidateId || candidate?.candidateId || ""))}">${renderIcon("messages")} Rooms</button>
-      <button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(candidateDashboardSectionPath(access?.candidateId || candidate?.candidateId, "missions"))}">${renderIcon("mission")} Missions</button>
+      ${heroActions
+        .map(
+          (action) =>
+            `<button class="shared-feed-chip${action.primary ? " shared-feed-chip--primary" : ""}" data-action="navigate" data-route="${escapeHtml(action.route)}">${renderIcon(action.icon)} ${escapeHtml(action.label)}</button>`,
+        )
+        .join("")}
       <button class="shared-feed-chip" data-action="open-app-shell">Open app</button>
     </div>
   </section>`;
@@ -42821,7 +46537,11 @@ function renderCandidateDashboardTabs(candidateId, activeSection, access) {
     ${CANDIDATE_DASHBOARD_SECTION_CONFIG.map((section) => {
       const active = section.key === activeSection;
       const enabled = canOpenCandidateDashboardSection(section, access);
-      return `<button class="shared-campaign-tab${active ? " is-active" : ""}${enabled ? "" : " is-muted"}" data-action="navigate" data-route="${escapeHtml(candidateDashboardSectionPath(candidateId, section.key))}">
+      const status = candidateDashboardFeatureStatus(section, access);
+      const routeAttr = enabled
+        ? ` data-action="navigate" data-route="${escapeHtml(candidateDashboardSectionPath(candidateId, section.key))}"`
+        : ` disabled aria-disabled="true" title="${escapeHtml(status.cta)}"`;
+      return `<button class="shared-campaign-tab${active ? " is-active" : ""}${enabled ? "" : " is-muted"}" type="button"${routeAttr}>
         <span>${renderIcon(section.icon)}</span>
         <strong>${escapeHtml(section.label)}</strong>
       </button>`;
@@ -42841,6 +46561,169 @@ function renderCandidateDashboardMiniList(items, renderItem, emptyText) {
     return `<div class="shared-page__empty">${escapeHtml(emptyText)}</div>`;
   }
   return `<div class="shared-stack">${items.map(renderItem).join("")}</div>`;
+}
+
+function candidateDashboardSectionConfig(key) {
+  return CANDIDATE_DASHBOARD_SECTION_CONFIG.find((section) => section.key === key);
+}
+
+function candidateDashboardCanOpenSectionKey(key, access) {
+  return canOpenCandidateDashboardSection(
+    candidateDashboardSectionConfig(key),
+    access,
+  );
+}
+
+function candidateDashboardContactOpsCards(detail, candidateId, access) {
+  const engagement = detail.engagement || createCandidateDashboardEngagementState();
+  const engagementItems = Array.isArray(engagement.items) ? engagement.items : [];
+  const needsAttention = engagementItems.filter((item) => !item.handled).length;
+  const contactSettings =
+    detail.contactPrompt?.settings ||
+    normalizeCandidateDashboardContactPromptSettings({}, candidateId);
+  const contactChannels = candidateContactPromptEnabledCount(contactSettings);
+  const registry =
+    detail.voterRegistry || createCandidateDashboardVoterRegistryState();
+  const voterRecords = Array.isArray(registry.items) ? registry.items : [];
+  const preferredCount = voterRecords.filter(
+    (item) => candidateVoterPreferredContactTypes(item).length > 0,
+  ).length;
+  const messaging =
+    detail.messagingWorkspace || createCandidateDashboardMessagingState();
+  const channels = Array.isArray(messaging.item?.channels)
+    ? messaging.item.channels
+    : [];
+  const unreadCount = channels.reduce(
+    (total, channel) => total + (Number(channel.unreadCount) || 0),
+    0,
+  );
+  const canOpen = (key) => candidateDashboardCanOpenSectionKey(key, access);
+  return [
+    {
+      key: "engagement",
+      label: "Engagement queue",
+      metric: needsAttention
+        ? `${formatCount(needsAttention)} needs response`
+        : engagement.loaded
+          ? "Queue clear"
+          : "Load queue",
+      copy: "Reply as candidate or staff, then clear handled activity.",
+      icon: "comment",
+      route: candidateDashboardSectionPath(candidateId, "engagement"),
+      enabled: canOpen("engagement"),
+      urgent: needsAttention > 0,
+    },
+    {
+      key: "voter-contact-prompt",
+      label: "Voter contact prompt",
+      metric: contactSettings.feedPromptEnabled
+        ? `${formatCount(contactChannels)} live channels`
+        : "Hidden from voters",
+      copy: "Choose which voter outreach requests are shown in feeds and profiles.",
+      icon: "candidate",
+      route: candidateDashboardSectionPath(candidateId, "voter-contact-prompt"),
+      enabled: canOpen("voter-contact-prompt"),
+      urgent: !contactSettings.feedPromptEnabled,
+    },
+    {
+      key: "voter-registry",
+      label: "Voter registry",
+      metric: voterRecords.length
+        ? `${formatCount(voterRecords.length)} loaded voters`
+        : "No voters loaded",
+      copy: preferredCount
+        ? `${formatCount(preferredCount)} voters have preferred contact channels.`
+        : "Search, import, and capture contact preferences before outreach.",
+      icon: "registry",
+      route: candidateDashboardSectionPath(candidateId, "voter-registry"),
+      enabled: canOpen("voter-registry"),
+    },
+    {
+      key: "messaging",
+      label: "Campaign rooms",
+      metric: channels.length
+        ? `${formatCount(channels.length)} rooms${unreadCount ? `, ${formatCount(unreadCount)} unread` : ""}`
+        : "Open room workspace",
+      copy: "Coordinate staff, volunteers, announcements, and voter follow-up.",
+      icon: "messages",
+      route: candidateDashboardSectionPath(candidateId, "messaging"),
+      enabled: canOpen("messaging"),
+      urgent: unreadCount > 0,
+    },
+    {
+      key: "campaign-quest",
+      label: "Field map",
+      metric: detail.voterMap?.loaded ? "Map access loaded" : "Check field access",
+      copy: "Move voter records into territories, scripts, quests, and sign-drop work.",
+      icon: "map",
+      route: candidateDashboardSectionPath(candidateId, "campaign-quest"),
+      enabled: canOpen("campaign-quest"),
+    },
+    {
+      key: "staff",
+      label: "Staff permissions",
+      metric: `${formatCount(detail.staff.length)} staff loaded`,
+      copy: "Grant engagement, messaging, voter registry, and map access deliberately.",
+      icon: "team",
+      route: candidateDashboardSectionPath(candidateId, "staff"),
+      enabled: canOpen("staff"),
+    },
+  ];
+}
+
+function renderCandidateDashboardContactOpsCard(item) {
+  const className = [
+    "shared-campaign-contact-ops-card",
+    item.urgent ? "is-urgent" : "",
+    item.enabled ? "" : "is-locked",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const body = `
+    <span class="shared-campaign-contact-ops-card__icon">${renderIcon(item.enabled ? item.icon : "lock")}</span>
+    <span class="shared-campaign-contact-ops-card__body">
+      <small>${escapeHtml(item.metric)}</small>
+      <strong>${escapeHtml(item.label)}</strong>
+      <em>${escapeHtml(item.enabled ? item.copy : "Ask the campaign owner for this permission.")}</em>
+    </span>`;
+  if (!item.enabled) {
+    return `<article class="${className}" aria-disabled="true">${body}</article>`;
+  }
+  return `<button class="${className}" type="button" data-action="navigate" data-route="${escapeHtml(item.route)}">${body}</button>`;
+}
+
+function renderCandidateDashboardContactOps(detail, candidateId, access) {
+  const cards = candidateDashboardContactOpsCards(detail, candidateId, access);
+  const activeCards = cards.filter((item) => item.enabled);
+  const urgentCards = cards.filter((item) => item.enabled && item.urgent);
+  const engagement = detail.engagement || createCandidateDashboardEngagementState();
+  const registry =
+    detail.voterRegistry || createCandidateDashboardVoterRegistryState();
+  const contactSettings =
+    detail.contactPrompt?.settings ||
+    normalizeCandidateDashboardContactPromptSettings({}, candidateId);
+  return `<article class="shared-campaign-panel shared-campaign-panel--wide shared-campaign-contact-ops">
+    <div class="shared-campaign-panel__header">
+      <div>
+        <span class="shared-card__meta"><span>Voter contact operations</span><span>${escapeHtml(`${formatCount(activeCards.length)} available lanes`)}</span></span>
+        <h2>Move from voter signal to campaign response.</h2>
+        <p>Use the same app-backed areas from the browser: prompt settings create consent, engagement handles public activity, the registry stores voter preferences, messaging coordinates follow-up, and staff permissions control who can act.</p>
+      </div>
+      <div class="shared-card__actions">
+        <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="${escapeHtml(candidateDashboardSectionPath(candidateId, "engagement"))}"${disabledAttr(!candidateDashboardCanOpenSectionKey("engagement", access))}>Engagement</button>
+        <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(candidateDashboardSectionPath(candidateId, "voter-registry"))}"${disabledAttr(!candidateDashboardCanOpenSectionKey("voter-registry", access))}>Voter registry</button>
+      </div>
+    </div>
+    <div class="shared-campaign-contact-ops__summary">
+      <span><strong>${escapeHtml(formatCount(urgentCards.length))}</strong><small>attention lanes</small></span>
+      <span><strong>${escapeHtml(contactSettings.feedPromptEnabled ? "Live" : "Hidden")}</strong><small>contact prompt</small></span>
+      <span><strong>${escapeHtml(formatCount(registry.items?.length || 0))}</strong><small>voters loaded</small></span>
+      <span><strong>${escapeHtml(formatCount((engagement.items || []).filter((item) => !item.handled).length))}</strong><small>engagement tasks</small></span>
+    </div>
+    <div class="shared-campaign-contact-ops__grid">
+      ${cards.map(renderCandidateDashboardContactOpsCard).join("")}
+    </div>
+  </article>`;
 }
 
 function renderCandidateDashboardOverview(detail, candidateId, access) {
@@ -42902,6 +46785,7 @@ function renderCandidateDashboardOverview(detail, candidateId, access) {
           "No staff members loaded.",
         )}
       </article>
+      ${renderCandidateDashboardContactOps(detail, candidateId, access)}
       <article class="shared-campaign-panel shared-campaign-panel--wide">
         <div class="shared-campaign-panel__header">
           <div>
@@ -43526,6 +47410,19 @@ function renderCandidateCalendarCommandCenter(resource, access) {
   const counts = candidateCalendarCounts(resource);
   const next = candidateCalendarNextItem(resource);
   const detailsLabel = canViewCandidateCalendarDetails(access) ? "Full details" : "Busy only";
+  const focusedItemId = normalizeString(resource.focusedItemId);
+  const focusedItem = focusedItemId
+    ? resource.items.find(
+        (item) => normalizeString(item.calendarItemId) === focusedItemId,
+      )
+    : null;
+  const focusLabel = focusedItem
+    ? `Focused: ${focusedItem.title}`
+    : resource.focusedDate
+      ? `Focused: ${formatCalendarDate(resource.focusedDate)}`
+      : focusedItemId
+        ? "Focused calendar item"
+        : "";
   return `<section class="shared-campaign-calendar-command">
     <div class="shared-campaign-calendar-command__main">
       <div class="shared-card__meta">
@@ -43542,6 +47439,11 @@ function renderCandidateCalendarCommandCenter(resource, access) {
         <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="calendar-composer-focus">New item</button>
         <button class="shared-feed-chip" type="button" data-action="candidate-calendar-refresh"${disabledAttr(resource.loading)}>Refresh</button>
       </div>
+      ${
+        focusLabel
+          ? `<div class="shared-campaign-calendar-focus">${renderIcon("calendar")}<span>${escapeHtml(focusLabel)}</span></div>`
+          : ""
+      }
     </div>
     <div class="shared-campaign-calendar-command__metrics">
       ${renderCandidateCalendarCommandMetric("Upcoming", formatCount(counts.upcoming), "loaded")}
@@ -43595,6 +47497,8 @@ function renderCandidateCalendarFilters(resource) {
 }
 
 function renderCandidateCalendarItemCard(item, resource, canApprove) {
+  const isFocused =
+    normalizeString(item.calendarItemId) === normalizeString(resource.focusedItemId);
   const pendingApprove =
     resource.actionPendingKey === `approve:${item.calendarItemId}`;
   const pendingReject =
@@ -43605,7 +47509,7 @@ function renderCandidateCalendarItemCard(item, resource, canApprove) {
     : humanizeLabel(item.status);
   const endLabel = item.endAt ? formatAbsoluteDateTime(item.endAt) : "";
   const syncLabel = item.syncState?.lastSyncStatus || item.provider || item.source;
-  return `<article class="shared-campaign-calendar-item">
+  return `<article class="shared-campaign-calendar-item${isFocused ? " is-focused" : ""}"${isFocused ? ` id="candidate-calendar-focused-item"` : ""}>
     <div class="shared-campaign-calendar-item__time">
       <strong>${escapeHtml(item.startAt ? formatCalendarDate(item.startAt) : "Unscheduled")}</strong>
       <span>${escapeHtml(dateLabel)}</span>
@@ -43619,7 +47523,7 @@ function renderCandidateCalendarItemCard(item, resource, canApprove) {
           </span>
           <h3>${escapeHtml(item.title)}</h3>
         </div>
-        <em>${escapeHtml(candidateCalendarPrivacyLabel(item.privacy))}</em>
+        <em>${escapeHtml(isFocused ? "Focused item" : candidateCalendarPrivacyLabel(item.privacy))}</em>
       </div>
       <div class="shared-campaign-calendar-meta">
         ${endLabel ? `<span>${renderIcon("calendar")} Ends ${escapeHtml(endLabel)}</span>` : ""}
@@ -44415,6 +48319,156 @@ function renderMissionWorkspaceClaimButton(
   return `<button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="${escapeHtml(actionName)}" data-mission-id="${escapeHtml(missionId)}" data-job-id="${escapeHtml(job.jobId)}"${disabledAttr(pending)}>${pending ? "Claiming..." : "Claim"}</button>`;
 }
 
+function renderMissionWorkspaceJobActionButton({
+  mission,
+  job,
+  action,
+  actionName,
+  resource,
+  label = "",
+  primary = false,
+  disabled = false,
+}) {
+  const normalizedAction = normalizeString(action).toLowerCase();
+  const config = missionJobActionConfig(normalizedAction, job);
+  const pendingKey = missionJobActionPendingKey(
+    mission.missionId,
+    job.jobId,
+    normalizedAction,
+  );
+  const currentPending = normalizeString(resource?.actionPendingKey);
+  const pending = currentPending === pendingKey;
+  return `<button class="shared-feed-chip${primary ? " shared-feed-chip--primary" : ""}" type="button" data-action="${escapeHtml(actionName)}" data-mission-id="${escapeHtml(mission.missionId)}" data-job-id="${escapeHtml(job.jobId)}" data-job-action="${escapeHtml(normalizedAction)}"${disabledAttr(disabled || Boolean(currentPending && !pending) || pending)}>${escapeHtml(pending ? "Updating..." : label || config.label)}</button>`;
+}
+
+function renderMissionWorkspaceJobPanel(mission, job, options = {}) {
+  const actionName = normalizeString(options.jobAction);
+  if (!job || !actionName) {
+    return "";
+  }
+  const resource =
+    options.resource || state.pages.candidateDashboard.detail.missionsWorkspace;
+  const canManage = options.canManage === true;
+  const isMine = missionJobIsMine(job);
+  const isUnclaimedRoleClaim =
+    job.targetMode === "role_claim" && !job.assigneeUserId;
+  const canWorkJob =
+    !job.isQueued &&
+    !isUnclaimedRoleClaim &&
+    !job.isClosed &&
+    (isMine || canManage);
+  const completionBlocker = missionJobCompletionBlocker(job);
+  const requiresNote = missionJobHasRequiredNote(job);
+  const actions = [];
+  const route = `/missions/${encodeURIComponent(mission.missionId)}?returnTo=${encodeURIComponent(getCurrentPathWithQuery())}`;
+
+  if (job.isClaimable) {
+    actions.push(
+      renderMissionWorkspaceJobActionButton({
+        mission,
+        job,
+        action: "claim",
+        actionName,
+        resource,
+        primary: true,
+      }),
+    );
+  }
+
+  if (canWorkJob && job.status !== "submitted" && !job.isBlocked) {
+    if (
+      ["active", "late", "needs_changes"].includes(job.status) &&
+      !job.lastStartedAt
+    ) {
+      actions.push(
+        renderMissionWorkspaceJobActionButton({
+          mission,
+          job,
+          action: "start",
+          actionName,
+          resource,
+        }),
+      );
+    }
+    const completionAction = missionJobRequiresApproval(job)
+      ? "submit"
+      : "complete";
+    if (!completionBlocker && !requiresNote) {
+      actions.push(
+        renderMissionWorkspaceJobActionButton({
+          mission,
+          job,
+          action: completionAction,
+          actionName,
+          resource,
+          primary: true,
+        }),
+      );
+    }
+  }
+
+  if (job.status === "submitted" && canManage) {
+    actions.push(
+      renderMissionWorkspaceJobActionButton({
+        mission,
+        job,
+        action: "approve",
+        actionName,
+        resource,
+        primary: true,
+      }),
+    );
+  }
+
+  if (job.isBlocked && canManage) {
+    actions.push(
+      renderMissionWorkspaceJobActionButton({
+        mission,
+        job,
+        action: "unblock",
+        actionName,
+        resource,
+      }),
+    );
+  }
+
+  actions.push(
+    `<button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(route)}">Details</button>`,
+  );
+
+  const helper = completionBlocker
+    ? completionBlocker
+    : requiresNote && canWorkJob
+      ? "Open details to submit this task with the required note."
+      : job.status === "submitted"
+        ? "Submitted and waiting for review."
+        : job.isBlocked
+          ? "Blocked. Open details for support actions and notes."
+          : job.isQueued
+            ? "Queued until its start conditions are met."
+            : "";
+  const meta = [
+    missionJobOwnerLabel(job),
+    job.dueAt ? `Due ${formatAbsoluteDateTime(job.dueAt)}` : "",
+    mission.jobs.length
+      ? `${formatCount(mission.completedCount)} of ${formatCount(mission.jobs.length)} tasks`
+      : "",
+  ].filter(Boolean);
+
+  return `<div class="shared-campaign-mission-card__task">
+    <div class="shared-campaign-mission-card__task-top">
+      <div>
+        <span>Next task</span>
+        <strong>${escapeHtml(job.title)}</strong>
+      </div>
+      ${renderMissionBadge(messagingMissionStatusLabel(job.status), missionStatusTone(job.status))}
+    </div>
+    ${meta.length ? `<div class="shared-campaign-mission-card__task-meta">${meta.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>` : ""}
+    ${actions.length ? `<div class="shared-campaign-mission-card__task-actions">${actions.join("")}</div>` : ""}
+    ${helper ? `<p>${escapeHtml(helper)}</p>` : ""}
+  </div>`;
+}
+
 function renderCandidateMissionCard(mission, options = {}) {
   const nextJob = missionNextJob(mission);
   const progress = missionCompletionPercent(mission);
@@ -44422,6 +48476,7 @@ function renderCandidateMissionCard(mission, options = {}) {
   const resource =
     options.resource || state.pages.candidateDashboard.detail.missionsWorkspace;
   const claimAction = options.claimAction || "candidate-mission-job-claim";
+  const jobAction = normalizeString(options.jobAction);
   const returnTo = encodeURIComponent(getCurrentPathWithQuery());
   const route = `/missions/${encodeURIComponent(mission.missionId)}?returnTo=${returnTo}`;
   const meta = [
@@ -44441,14 +48496,23 @@ function renderCandidateMissionCard(mission, options = {}) {
       </button>
       <div class="shared-campaign-mission-card__actions">
         ${renderMissionBadge(humanizeLabel(mission.status), missionStatusTone(mission.status))}
-        ${renderMissionWorkspaceClaimButton(
-          mission.missionId,
-          nextJob,
-          resource,
-          claimAction,
-        )}
+        ${
+          jobAction
+            ? ""
+            : renderMissionWorkspaceClaimButton(
+                mission.missionId,
+                nextJob,
+                resource,
+                claimAction,
+              )
+        }
       </div>
     </div>
+    ${renderMissionWorkspaceJobPanel(mission, nextJob, {
+      ...options,
+      resource,
+      jobAction,
+    })}
     <div class="shared-mission-progress" aria-label="${escapeHtml(`${progress}% complete`)}"><span style="width: ${Math.max(0, Math.min(100, progress))}%"></span></div>
     <div class="shared-campaign-mission-card__metrics">
       <span>${escapeHtml(formatCount(mission.openCount))} open</span>
@@ -45112,12 +49176,17 @@ function renderMissionWorkspaceShell({
     templateToggleAction: `${templateActionPrefix}-toggle`,
     templateEditAction: `${templateActionPrefix}-edit`,
     templateFormKind: `${templateActionPrefix}-save`,
+    jobAction:
+      scopeType === "coalition"
+        ? "coalition-mission-job-action-run"
+        : "candidate-mission-job-action-run",
     formKind,
     toggleAction: createToggleAction,
     viewAction,
     noun,
     scopeType,
     scopeId,
+    canManage,
   };
   return `<div class="shared-campaign-section shared-campaign-missions">
     <section class="shared-campaign-missions-hero">
@@ -45307,11 +49376,11 @@ function renderCandidateMessagingAdminPanel(candidateId, directory, access) {
   const serverRoute = candidateMessagingServerPath(candidateId);
   const canManage = directory?.canManage || canManageCandidateMessaging(access);
   const actions = [
-    ["Settings", "Server defaults", `${serverRoute}/settings`, "settings"],
-    ["Roles", "Messaging roles", `${serverRoute}/roles`, "shield"],
-    ["Access", "People and rooms", `${serverRoute}/members`, "team"],
-    ["Moderation", "Reports and bans", `${serverRoute}/moderation`, "flag"],
-    ["Workflows", "Room automation", `${serverRoute}/workflows`, "dashboard"],
+    ["Settings", "Workspace defaults", `${serverRoute}/settings`, "settings"],
+    ["Groups", "Access groups", `${serverRoute}/roles`, "shield"],
+    ["Members", "People and rooms", `${serverRoute}/members`, "team"],
+    ["Review", "Reports and restrictions", `${serverRoute}/moderation`, "flag"],
+    ["Automations", "Triggers and handoffs", `${serverRoute}/workflows`, "dashboard"],
   ];
   return `<aside class="shared-campaign-room-admin">
     <div>
@@ -48264,6 +52333,7 @@ function renderCandidateDashboardPage() {
         <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/candidate-dashboard">All campaigns</button>
       </div>
       ${renderCandidateDashboardHero(candidate, access)}
+      ${renderCandidateDashboardCommandStrip(candidateId, access)}
       ${detail.error ? `<div class="shared-page__error">${escapeHtml(detail.error)}</div>` : ""}
       ${renderCandidateDashboardTabs(candidateId, activeSection, access)}
       ${renderCandidateDashboardSection(detail, candidateId, access, activeSection)}
@@ -48529,6 +52599,120 @@ function coalitionFeatureStatus(section, coalition, membership) {
     label: "Permission required",
     cta: "Ask for access",
   };
+}
+
+function coalitionMembersCommandPath(coalitionId, membership) {
+  return membership?.isLeader || membership?.isAdmin
+    ? coalitionSectionPath(coalitionId, "admin")
+    : coalitionSectionPath(coalitionId, "members");
+}
+
+function coalitionCommandItems(coalition, membership) {
+  const coalitionId = normalizeString(coalition?.coalitionId);
+  const sectionByKey = new Map(
+    COALITION_SECTION_CONFIG.map((section) => [section.key, section]),
+  );
+  const makeSectionItem = (
+    key,
+    label,
+    copy,
+    tone = "",
+    routeOverride = "",
+  ) => {
+    const section = sectionByKey.get(key);
+    if (!canOpenCoalitionSection(section, coalition, membership)) {
+      return null;
+    }
+    return {
+      key,
+      label,
+      copy,
+      icon: section.icon,
+      route: routeOverride || coalitionSectionPath(coalitionId, key),
+      tone,
+    };
+  };
+  const items = [
+    makeSectionItem(
+      "members",
+      "Members & Access",
+      "Invite, approve, assign roles, and tune permissions.",
+      "primary",
+      coalitionMembersCommandPath(coalitionId, membership),
+    ),
+    makeSectionItem(
+      "rooms",
+      "Rooms",
+      "Open coalition rooms and coordinate workstreams.",
+      "primary",
+    ),
+    makeSectionItem(
+      "missions",
+      "Missions",
+      "Create, claim, approve, and track coalition work.",
+      "primary",
+    ),
+    makeSectionItem(
+      "voter-map",
+      "Voter map",
+      "District search, territories, voter records, CTA, and notes.",
+    ),
+    makeSectionItem(
+      "calendar",
+      "Calendar",
+      "Events, shifts, availability, promotion, and booking work.",
+    ),
+    makeSectionItem(
+      "governance",
+      "Governance",
+      "Constitution, proposals, votes, results, and speaker tools.",
+    ),
+    makeSectionItem(
+      "amplify",
+      "Amplify",
+      "Create requests and collect platform-response links.",
+    ),
+  ].filter(Boolean);
+  if (membership?.isActive) {
+    items.splice(2, 0, {
+      key: "room-workspace",
+      label: "Room workspace",
+      copy: "Open the full Polis messaging workspace for this coalition.",
+      icon: "messages",
+      route: `/messages/servers/coalition/${encodeURIComponent(coalitionId)}`,
+    });
+  }
+  if (
+    canOpenCoalitionSection(sectionByKey.get("governance"), coalition, membership) &&
+    (coalition?.coalitionType === "constitutional" || coalition?.hasConstitution)
+  ) {
+    items.push({
+      key: "voting",
+      label: "Voting",
+      copy: "Open ballots, proposal detail, and result routes.",
+      icon: "election",
+      route: coalitionSectionPath(coalitionId, "voting"),
+    });
+  }
+  return items;
+}
+
+function renderCoalitionCommandStrip(coalition, membership) {
+  const items = coalitionCommandItems(coalition, membership);
+  if (!items.length) {
+    return "";
+  }
+  return `<section class="shared-coalition-command-strip" aria-label="Coalition work areas">
+    ${items
+      .map(
+        (item) => `<button class="shared-coalition-command${item.tone ? ` shared-coalition-command--${escapeHtml(item.tone)}` : ""}" type="button" data-action="navigate" data-route="${escapeHtml(item.route)}">
+          <span>${renderIcon(item.icon)}</span>
+          <strong>${escapeHtml(item.label)}</strong>
+          <small>${escapeHtml(item.copy)}</small>
+        </button>`,
+      )
+      .join("")}
+  </section>`;
 }
 
 function coalitionFeatureHighlights(coalition, membership, limit = 5) {
@@ -48967,6 +53151,9 @@ function renderCoalitionsRootPage() {
 }
 
 function renderCoalitionHero(coalition, membership) {
+  const sectionByKey = new Map(
+    COALITION_SECTION_CONFIG.map((section) => [section.key, section]),
+  );
   const statusLabel = membership.isPending
     ? "Pending approval"
     : membership.isActive
@@ -48990,6 +53177,11 @@ function renderCoalitionHero(coalition, membership) {
   if (canViewCoalitionMissions(membership)) {
     actions.push(
       `<button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, "missions"))}">${renderIcon("mission")} Missions</button>`,
+    );
+  }
+  if (canOpenCoalitionSection(sectionByKey.get("voter-map"), coalition, membership)) {
+    actions.push(
+      `<button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, "voter-map"))}">${renderIcon("map")} Voter map</button>`,
     );
   }
   actions.push(
@@ -49019,10 +53211,11 @@ function renderCoalitionTabs(coalition, membership, activeSection) {
     ${COALITION_SECTION_CONFIG.map((section) => {
       const active = section.key === activeSection;
       const enabled = canOpenCoalitionSection(section, coalition, membership);
+      const status = coalitionFeatureStatus(section, coalition, membership);
       const actionAttrs = enabled
         ? `data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, section.key))}"`
-        : `${disabledAttr(true)} aria-disabled="true"`;
-      return `<button class="shared-coalition-tab${active ? " is-active" : ""}${enabled ? "" : " is-muted"}" ${actionAttrs}>
+        : `${disabledAttr(true)} aria-disabled="true" title="${escapeHtml(status.cta)}"`;
+      return `<button class="shared-coalition-tab${active ? " is-active" : ""}${enabled ? "" : " is-muted"}" type="button" ${actionAttrs}>
         <span>${renderIcon(section.icon)}</span>
         <strong>${escapeHtml(section.label)}</strong>
       </button>`;
@@ -50212,11 +54405,11 @@ function renderCoalitionRoomsAdminPanel(coalition, membership, directory) {
   const serverRoute = buildMessagingServerRoute("coalition", coalition.coalitionId);
   const canManage = directory?.canManage || membership.isLeader;
   const actions = [
-    ["Settings", "Server defaults", `${serverRoute}/settings`, "settings"],
-    ["Roles", "Messaging roles", `${serverRoute}/roles`, "shield"],
+    ["Settings", "Workspace defaults", `${serverRoute}/settings`, "settings"],
+    ["Groups", "Access groups", `${serverRoute}/roles`, "shield"],
     ["Members", "Room access", `${serverRoute}/members`, "team"],
-    ["Moderation", "Reports and bans", `${serverRoute}/moderation`, "flag"],
-    ["Workflows", "Room automation", `${serverRoute}/workflows`, "dashboard"],
+    ["Review", "Reports and restrictions", `${serverRoute}/moderation`, "flag"],
+    ["Automations", "Triggers and handoffs", `${serverRoute}/workflows`, "dashboard"],
   ];
   return `<aside class="shared-coalition-room-admin">
     <div>
@@ -53495,6 +57688,7 @@ function renderCoalitionDetailPage() {
         <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/coalitions">All coalitions</button>
       </div>
       ${renderCoalitionHero(coalition, membership)}
+      ${renderCoalitionCommandStrip(coalition, membership)}
       ${detail.error ? `<div class="shared-page__error">${escapeHtml(detail.error)}</div>` : ""}
       ${renderCoalitionTabs(coalition, membership, activeSection)}
       ${renderCoalitionSection(detail, coalition, membership, activeSection)}
@@ -55369,6 +59563,160 @@ function renderManageEventsPage() {
   </section>`;
 }
 
+function renderEventAddressLookup(draft, pending) {
+  const lookup = state.pages.events.detail.addressLookup;
+  const hasItems = lookup.items.length > 0;
+  return `<div class="shared-event-address-lookup is-wide">
+    <label>
+      <span>Event address</span>
+      <input name="address" value="${escapeHtml(draft.address)}" autocomplete="street-address" required data-event-editor-field="address"${disabledAttr(pending)} />
+    </label>
+    ${
+      lookup.loading
+        ? `<div class="shared-event-address-lookup__status">Searching addresses...</div>`
+        : ""
+    }
+    ${
+      lookup.error
+        ? `<div class="shared-event-address-lookup__error">${escapeHtml(lookup.error)}</div>`
+        : ""
+    }
+    ${
+      hasItems
+        ? `<div class="shared-event-address-lookup__results">
+            ${lookup.items
+              .map(
+                (item, index) => `<button class="shared-event-address-option" type="button" data-action="event-address-select" data-index="${escapeHtml(String(index))}"${disabledAttr(pending)}>
+                  <strong>${escapeHtml(item.primaryText)}</strong>
+                  ${item.secondaryText ? `<span>${escapeHtml(item.secondaryText)}</span>` : ""}
+                </button>`,
+              )
+              .join("")}
+          </div>`
+        : ""
+    }
+  </div>`;
+}
+
+function renderEventEditorReadiness(draft) {
+  const checks = [
+    ["Cover", normalizeString(draft.imageUrl), "Cover image is set"],
+    ["Time", normalizeString(draft.startAt) && normalizeString(draft.endAt), "Start and end are set"],
+    ["Map", normalizeString(draft.lat) && normalizeString(draft.lng), "Map coordinates are set"],
+    ["Contact", normalizeString(draft.email), "Contact email is set"],
+    ["Cost", draft.isFree || normalizeString(draft.costAmount), draft.isFree ? "Free event" : "Ticket price is set"],
+  ];
+  return `<div class="shared-event-editor__checks">
+    ${checks
+      .map(
+        ([label, ready, detail]) => `<span class="${ready ? "is-ready" : "is-missing"}">
+          <strong>${escapeHtml(label)}</strong>
+          <em>${escapeHtml(ready ? detail : "Needs attention")}</em>
+        </span>`,
+      )
+      .join("")}
+  </div>`;
+}
+
+function refreshEventEditorPreviewFromDraft(draft) {
+  const editor = root?.querySelector(".shared-event-editor");
+  if (!editor || !draft) {
+    return;
+  }
+  const cover = editor.querySelector(".shared-event-editor__cover");
+  if (cover) {
+    cover.classList.toggle("has-image", Boolean(normalizeString(draft.imageUrl)));
+    cover.innerHTML = draft.imageUrl
+      ? `<img src="${escapeHtml(draft.imageUrl)}" alt="${escapeHtml(draft.title || "Event cover")}" />`
+      : `<div>${renderIcon("upload")}<strong>Cover preview</strong></div>`;
+  }
+  const summary = editor.querySelector(".shared-event-editor__summary");
+  if (summary) {
+    const eyebrow = summary.querySelector(".shared-page__eyebrow");
+    const title = summary.querySelector("h2");
+    const body = summary.querySelector("p:not(.shared-page__eyebrow)");
+    const meta = summary.querySelector(".shared-card__meta");
+    if (eyebrow) eyebrow.textContent = draft.isFree ? "Free event" : "Paid event";
+    if (title) title.textContent = draft.title || "Untitled event";
+    if (body) {
+      body.textContent =
+        draft.description || "Add the public event description.";
+    }
+    if (meta) {
+      meta.innerHTML = `<span>${escapeHtml(draft.locationTown || "Location pending")}</span><span>${escapeHtml(draft.tags || "No tags")}</span>`;
+    }
+  }
+  const checks = editor.querySelector(".shared-event-editor__checks");
+  if (checks) {
+    checks.outerHTML = renderEventEditorReadiness(draft);
+  }
+}
+
+function renderEventEditorWorkspace(event = {}, mode = "create", detail) {
+  const draft = eventEditorDraft(event, mode);
+  const pending = detail.saving === true;
+  const isEdit = mode === "edit";
+  const cancelRoute =
+    isEdit && draft.eventId
+      ? `/events/${encodeURIComponent(draft.eventId)}`
+      : "/manage-events";
+  return `<div class="shared-event-editor">
+    <form class="shared-form shared-event-editor__form" data-route-form="event-edit">
+      <input type="hidden" name="eventId" value="${escapeHtml(draft.eventId)}" />
+      <input type="hidden" name="mode" value="${escapeHtml(mode)}" />
+      <div class="shared-event-editor__section is-wide">
+        <span>${renderIcon("calendar")}</span>
+        <div>
+          <h2>${escapeHtml(isEdit ? "Event details" : "Create event")}</h2>
+          <p>${escapeHtml(isEdit ? "Keep the public event page, map, and signup path in sync." : "Publish a map-ready event with signup and contact details.")}</p>
+        </div>
+      </div>
+      <label><span>Title</span><input name="title" value="${escapeHtml(draft.title)}" required data-event-editor-field="title"${disabledAttr(pending)} /></label>
+      <label><span>Cover image URL</span><input name="imageUrl" type="url" inputmode="url" value="${escapeHtml(draft.imageUrl)}" required data-event-editor-field="imageUrl"${disabledAttr(pending)} /></label>
+      <label class="is-wide"><span>Description</span><textarea name="description" rows="5" required data-event-editor-field="description"${disabledAttr(pending)}>${escapeHtml(draft.description)}</textarea></label>
+      <label><span>Start</span><input type="datetime-local" name="startAt" value="${escapeHtml(draft.startAt)}" required data-event-editor-field="startAt"${disabledAttr(pending)} /></label>
+      <label><span>End</span><input type="datetime-local" name="endAt" value="${escapeHtml(draft.endAt)}" required data-event-editor-field="endAt"${disabledAttr(pending)} /></label>
+      ${renderEventAddressLookup(draft, pending)}
+      <label><span>City or town</span><input name="locationTown" value="${escapeHtml(draft.locationTown)}" autocomplete="address-level2" required data-event-editor-field="locationTown"${disabledAttr(pending)} /></label>
+      <label><span>State</span><input name="locationState" value="${escapeHtml(draft.locationState)}" autocomplete="address-level1" maxlength="2" data-event-editor-field="locationState"${disabledAttr(pending)} /></label>
+      <label><span>ZIP</span><input name="postalCode" value="${escapeHtml(draft.postalCode)}" autocomplete="postal-code" data-event-editor-field="postalCode"${disabledAttr(pending)} /></label>
+      <label><span>Place ID</span><input name="locationPlaceId" value="${escapeHtml(draft.locationPlaceId)}" data-event-editor-field="locationPlaceId"${disabledAttr(pending)} /></label>
+      <label><span>Latitude</span><input name="lat" inputmode="decimal" value="${escapeHtml(draft.lat)}" required data-event-editor-field="lat"${disabledAttr(pending)} /></label>
+      <label><span>Longitude</span><input name="lng" inputmode="decimal" value="${escapeHtml(draft.lng)}" required data-event-editor-field="lng"${disabledAttr(pending)} /></label>
+      <label><span>Location name</span><input name="locationName" value="${escapeHtml(draft.locationName)}" placeholder="Field office, campus, venue" data-event-editor-field="locationName"${disabledAttr(pending)} /></label>
+      <label><span>Tags</span><input name="tags" value="${escapeHtml(draft.tags)}" placeholder="town hall, canvass" data-event-editor-field="tags"${disabledAttr(pending)} /></label>
+      <label><span>Email</span><input name="email" type="email" autocomplete="email" value="${escapeHtml(draft.email)}" required data-event-editor-field="email"${disabledAttr(pending)} /></label>
+      <label><span>Website</span><input name="website" type="url" inputmode="url" value="${escapeHtml(draft.website)}" data-event-editor-field="website"${disabledAttr(pending)} /></label>
+      <label><span>Other link</span><input name="link" type="url" inputmode="url" value="${escapeHtml(draft.link)}" data-event-editor-field="link"${disabledAttr(pending)} /></label>
+      <label class="shared-form__checkbox"><input type="checkbox" name="isFree" data-event-editor-field="isFree"${checkedAttr(draft.isFree)}${disabledAttr(pending)} /> Free event</label>
+      <label><span>Ticket price</span><input name="costAmount" inputmode="decimal" value="${escapeHtml(draft.costAmount)}" data-event-editor-field="costAmount"${disabledAttr(pending || draft.isFree)} /></label>
+      <div class="shared-card__actions is-wide">
+        <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(pending)}>${pending ? "Saving..." : isEdit ? "Save event" : "Create event"}</button>
+        <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(cancelRoute)}"${disabledAttr(pending)}>Cancel</button>
+      </div>
+    </form>
+    <aside class="shared-event-editor__aside">
+      <div class="shared-event-editor__cover${draft.imageUrl ? " has-image" : ""}">
+        ${
+          draft.imageUrl
+            ? `<img src="${escapeHtml(draft.imageUrl)}" alt="${escapeHtml(draft.title || "Event cover")}" />`
+            : `<div>${renderIcon("upload")}<strong>Cover preview</strong></div>`
+        }
+      </div>
+      <div class="shared-event-editor__summary">
+        <p class="shared-page__eyebrow">${escapeHtml(draft.isFree ? "Free event" : "Paid event")}</p>
+        <h2>${escapeHtml(draft.title || "Untitled event")}</h2>
+        <p>${escapeHtml(draft.description || "Add the public event description.")}</p>
+        <div class="shared-card__meta">
+          <span>${escapeHtml(draft.locationTown || "Location pending")}</span>
+          <span>${escapeHtml(draft.tags || "No tags")}</span>
+        </div>
+      </div>
+      ${renderEventEditorReadiness(draft)}
+    </aside>
+  </div>`;
+}
+
 function renderEventDetailsCard(event) {
   return `<article class="shared-card shared-event-detail-card">
     ${
@@ -55553,7 +59901,7 @@ function renderEventDetailPage() {
   const isEditRoute = routeKey === ROUTE_KEY_MANAGE_EVENTS_EDIT;
   const isSignupRoute = routeKey === ROUTE_KEY_EVENT_SIGNUP;
   const isPaymentRoute = routeKey === ROUTE_KEY_EVENT_PAYMENT;
-  const formEvent = event || {};
+  const formEvent = isCreateRoute ? {} : event || {};
   const backRoute =
     isCreateRoute
       ? "/manage-events"
@@ -55571,6 +59919,7 @@ function renderEventDetailPage() {
   if (!isCreateRoute && !event) {
     return `<section class="shared-page">${renderTopChrome()}<div class="shared-page__content"><div class="shared-page__error">${escapeHtml(detail.error || "Event unavailable.")}</div></div></section>`;
   }
+  const editorOpen = isCreateRoute || isEditRoute;
   return `<section class="shared-page">
     ${renderTopChrome()}
     <div class="shared-page__content">
@@ -55584,7 +59933,7 @@ function renderEventDetailPage() {
           <p>${escapeHtml(formEvent.description || "Manage event details, attendance, and the web detail page here.")}</p>
         </div>
         ${
-          !isCreateRoute
+          !isCreateRoute && !isEditRoute
             ? `<div class="shared-card__actions">
                 <button class="shared-feed-chip shared-feed-chip--primary" data-action="event-attend" data-event-id="${escapeHtml(formEvent.eventId)}">${formEvent.isAttending ? "Going" : "RSVP"}</button>
                 <button class="shared-feed-chip" data-action="event-interest" data-event-id="${escapeHtml(formEvent.eventId)}">${formEvent.isInterested ? "Interested" : "Interested?"}</button>
@@ -55599,24 +59948,12 @@ function renderEventDetailPage() {
       </div>
       ${detail.error ? `<div class="shared-page__error">${escapeHtml(detail.error)}</div>` : ""}
       ${
-        isCreateRoute || isEditRoute
-          ? `<form class="shared-form" data-route-form="event-edit">
-              <input type="hidden" name="eventId" value="${escapeHtml(formEvent.eventId || "")}" />
-              <input type="hidden" name="mode" value="${escapeHtml(isEditRoute ? "edit" : "create")}" />
-              <label><span>Title</span><input name="title" value="${escapeHtml(formEvent.title || "")}" required /></label>
-              <label><span>Description</span><textarea name="description" rows="5">${escapeHtml(formEvent.description || "")}</textarea></label>
-              <label><span>Town</span><input name="locationTown" value="${escapeHtml(formEvent.locationTown || "")}" required /></label>
-              <label><span>Location name</span><input name="locationName" value="${escapeHtml(formEvent.locationName || "")}" /></label>
-              <label><span>Address</span><input name="address" value="${escapeHtml(formEvent.address || "")}" required /></label>
-              <label><span>Image URL</span><input name="imageUrl" value="${escapeHtml(formEvent.imageUrl || "")}" /></label>
-              <label><span>Tags</span><input name="tags" value="${escapeHtml((formEvent.tags || []).join(", "))}" /></label>
-              <label><span>Start</span><input type="datetime-local" name="startAt" value="${escapeHtml(formatDateTimeInputValue(formEvent.startAt))}" required /></label>
-              <label><span>End</span><input type="datetime-local" name="endAt" value="${escapeHtml(formatDateTimeInputValue(formEvent.endAt))}" required /></label>
-              <div class="shared-card__actions">
-                <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${detail.saving ? " disabled" : ""}>${detail.saving ? "Saving…" : isEditRoute ? "Save event" : "Create event"}</button>
-                <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${isEditRoute ? `/events/${escapeHtml(formEvent.eventId)}` : "/manage-events"}">Cancel</button>
-              </div>
-            </form>`
+        editorOpen
+          ? renderEventEditorWorkspace(
+              formEvent,
+              isEditRoute ? "edit" : "create",
+              detail,
+            )
           : `<div class="shared-card-grid shared-card-grid--detail shared-event-detail-grid">
               ${renderEventDetailsCard(formEvent)}
               ${renderEventDetailAside(formEvent, routeKey)}
@@ -55856,9 +60193,9 @@ const MESSAGING_PERMISSION_GROUPS = Object.freeze([
     permissions: [
       {
         key: "viewChannel",
-        title: "View channel",
+        title: "View room",
         description:
-          "Controls whether members can see this channel or category.",
+          "Controls whether members can see this room or category.",
       },
     ],
   },
@@ -55924,8 +60261,8 @@ const MESSAGING_PERMISSION_GROUPS = Object.freeze([
       },
       {
         key: "manageChannel",
-        title: "Manage channel",
-        description: "Update this channel or category access and metadata.",
+        title: "Manage room",
+        description: "Update this room or category access and metadata.",
       },
     ],
   },
@@ -56051,10 +60388,10 @@ function renderMessagingServerCards(servers = []) {
       (server) => `<article class="shared-card">
         <div class="shared-card__body">
           <div class="shared-card__meta">
-            <span>${escapeHtml(server.scopeBadge || "Server")}</span>
+            <span>${escapeHtml(server.scopeBadge || "Workspace")}</span>
             <span>${escapeHtml(formatCount(server.memberCount || 0))} members</span>
           </div>
-          <h3>${escapeHtml(server.title || "Server")}</h3>
+          <h3>${escapeHtml(server.title || "Workspace")}</h3>
           <p>${escapeHtml(server.scopeType || "Scope server")}</p>
           <div class="shared-card__actions">
             <button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="${escapeHtml(buildMessagingServerRoute(server.scopeType, server.scopeId))}">Open</button>
@@ -56224,12 +60561,12 @@ function renderMessagingPageLegacy() {
       conversation: conversation.item,
       messages: conversation.messages,
       sideButtons: channelButtons,
-      asideTitle: currentServer?.title || "Server rooms",
+      asideTitle: currentServer?.title || "Rooms",
     })}
     <div class="shared-stack">
       <div class="shared-card__actions">
         <button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(buildMessagingRoomRoute(subroute.scopeType, subroute.scopeId, subroute.conversationId, "/settings"))}">Room settings</button>
-        <button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(buildMessagingRoomRoute(subroute.scopeType, subroute.scopeId, subroute.conversationId, "/settings/permissions"))}">Permissions</button>
+        <button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(buildMessagingRoomRoute(subroute.scopeType, subroute.scopeId, subroute.conversationId, "/settings/permissions"))}">Access</button>
       </div>
     </div>`;
   } else if (subroute.view === "settings") {
@@ -56338,9 +60675,9 @@ function renderMessagingPageLegacy() {
     bodyMarkup = `<div class="shared-stack">
       <div class="shared-page__header">
         <div>
-          <p class="shared-page__eyebrow">${escapeHtml(currentServer?.scopeBadge || "Server")}</p>
-          <h1>${escapeHtml(currentServer?.title || "Server")}</h1>
-          <p>${escapeHtml(currentServer?.canManage ? "Manage channels, roles, members, and moderation from the browser." : "Browse this server’s channels and rooms from the browser.")}</p>
+          <p class="shared-page__eyebrow">${escapeHtml(currentServer?.scopeBadge || "Workspace")}</p>
+          <h1>${escapeHtml(currentServer?.title || "Workspace")}</h1>
+          <p>${escapeHtml(currentServer?.canManage ? "Manage rooms, access groups, members, and safety review from the browser." : "Browse this workspace’s rooms from the browser.")}</p>
         </div>
       </div>
       <div class="shared-card__actions">
@@ -56388,15 +60725,18 @@ function renderMessagingPageLegacy() {
   ) {
     const sections = serverSettings?.sections || {};
     const selectedSection = normalizeString(subroute.sectionId);
+    const selectedSectionDisplay = messagingServerSettingsItemPresentation({
+      id: selectedSection,
+    });
     bodyMarkup = `<div class="shared-stack">
       <article class="shared-card">
         <div class="shared-card__body">
           <div class="shared-card__meta">
-            <span>${escapeHtml(serverSettings?.server?.scopeBadge || "Server")}</span>
+            <span>${escapeHtml(serverSettings?.server?.scopeBadge || "Workspace")}</span>
             <span>${escapeHtml(formatCount(serverSettings?.server?.memberCount || 0))} members</span>
           </div>
-          <h3>${escapeHtml(serverSettings?.server?.title || currentServer?.title || "Server settings")}</h3>
-          <p>${escapeHtml(selectedSection ? `${humanizeLabel(selectedSection)} section` : "Overview and server preferences.")}</p>
+          <h3>${escapeHtml(serverSettings?.server?.title || currentServer?.title || "Workspace settings")}</h3>
+          <p>${escapeHtml(selectedSection ? `${selectedSectionDisplay.title} area` : "Overview and workspace preferences.")}</p>
         </div>
       </article>
       <form class="shared-form shared-form--inline" data-route-form="messaging-server-settings-preferences">
@@ -56413,11 +60753,17 @@ function renderMessagingPageLegacy() {
           if (!items.length) {
             return "";
           }
-          return `<article class="shared-card"><div class="shared-card__body"><h3>${escapeHtml(humanizeLabel(groupKey))}</h3><div class="shared-stack">${items
-            .map(
-              (item) =>
-                `<button class="shared-list-item${selectedSection === normalizeString(item.id) ? " is-active" : ""}" data-action="navigate" data-route="${escapeHtml(buildMessagingServerRoute(subroute.scopeType, subroute.scopeId, `/settings/${encodeURIComponent(normalizeString(item.id))}`))}"><strong>${escapeHtml(item.title || humanizeLabel(item.id) || "Section")}</strong><span>${item.available === false ? "Not available for this server." : "Open this settings section."}</span></button>`,
-            )
+          const groupDisplay =
+            groupKey === "settings"
+              ? "Workspace defaults"
+              : groupKey === "community"
+                ? "Member entry"
+                : "People and safety";
+          return `<article class="shared-card"><div class="shared-card__body"><h3>${escapeHtml(groupDisplay)}</h3><div class="shared-stack">${items
+            .map((item) => {
+              const display = messagingServerSettingsItemPresentation(item);
+              return `<button class="shared-list-item${selectedSection === normalizeString(item.id) ? " is-active" : ""}" data-action="navigate" data-route="${escapeHtml(buildMessagingServerRoute(subroute.scopeType, subroute.scopeId, `/settings/${encodeURIComponent(normalizeString(item.id))}`))}"><strong>${escapeHtml(display.title)}</strong><span>${item.available === false ? "Not available for this workspace." : display.description || "Open this workspace area."}</span></button>`;
+            })
             .join("")}</div></div></article>`;
         })
         .join("")}
@@ -56426,9 +60772,9 @@ function renderMessagingPageLegacy() {
     bodyMarkup = `<div class="shared-stack">
       <div class="shared-page__header">
         <div>
-          <p class="shared-page__eyebrow">Roles</p>
-          <h1>${escapeHtml(currentServer?.title || "Server roles")}</h1>
-          <p>${escapeHtml("Create roles, review permission baselines, and manage assignments.")}</p>
+          <p class="shared-page__eyebrow">Access groups</p>
+          <h1>${escapeHtml(currentServer?.title || "Access groups")}</h1>
+          <p>${escapeHtml("Create access groups, review room defaults, and manage assignments.")}</p>
         </div>
       </div>
       ${renderMessagingRolesPanel(subroute, serverRoles)}
@@ -56450,7 +60796,7 @@ function renderMessagingPageLegacy() {
       <div class="shared-page__header">
         <div>
           <p class="shared-page__eyebrow">Members</p>
-          <h1>${escapeHtml(currentServer?.title || "Server members")}</h1>
+          <h1>${escapeHtml(currentServer?.title || "Members")}</h1>
           <p>${escapeHtml("Review roles, nicknames, and moderation targets from the browser.")}</p>
         </div>
       </div>
@@ -56496,7 +60842,7 @@ function renderMessagingPageLegacy() {
     subroute.view === "room-settings-section"
   ) {
     bodyMarkup = `<div class="shared-stack">
-      <article class="shared-card"><div class="shared-card__body"><div class="shared-card__meta"><span>${escapeHtml(humanizeLabel(subroute.view.replace(/^room-/, "")) || "Room settings")}</span></div><h3>${escapeHtml(conversation.item?.title || "Room")}</h3><p>${escapeHtml(conversation.item?.subtitle || "Manage members and room settings from the browser.")}</p><div class="shared-card__actions"><button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(buildMessagingRoomRoute(subroute.scopeType, subroute.scopeId, subroute.conversationId, "/settings/permissions"))}">Permissions</button></div></div></article>
+      <article class="shared-card"><div class="shared-card__body"><div class="shared-card__meta"><span>${escapeHtml(humanizeLabel(subroute.view.replace(/^room-/, "")) || "Room settings")}</span></div><h3>${escapeHtml(conversation.item?.title || "Room")}</h3><p>${escapeHtml(conversation.item?.subtitle || "Manage members and room settings from the browser.")}</p><div class="shared-card__actions"><button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(buildMessagingRoomRoute(subroute.scopeType, subroute.scopeId, subroute.conversationId, "/settings/permissions"))}">Access</button></div></div></article>
       <form class="shared-form shared-form--inline" data-route-form="messaging-room-member-add">
         <input type="hidden" name="conversationId" value="${escapeHtml(subroute.conversationId)}" />
         <label><span>User ID</span><input name="userId" placeholder="User id" /></label>
@@ -56514,11 +60860,11 @@ function renderMessagingPageLegacy() {
         normalizeString(entry.subjectId) === normalizeString(subroute.roleId),
     );
     bodyMarkup = `<div class="shared-stack">
-      <article class="shared-card"><div class="shared-card__body"><div class="shared-card__meta"><span>${escapeHtml(permissionTarget.syncState || "standalone")}</span>${permissionTarget.inheritedFromCategoryId ? `<span>${escapeHtml(`Inherited from ${permissionTarget.inheritedFromCategoryId}`)}</span>` : ""}</div><h3>${escapeHtml(conversation.item?.title || "Channel permissions")}</h3><p>${escapeHtml(selectedOverride ? `Showing override for ${selectedOverride.roleName || selectedOverride.subjectId}.` : "Inspect the active permission overrides for this room.")}</p><div class="shared-card__actions">${permissionTarget.canManage ? `<button class="shared-feed-chip shared-feed-chip--primary" data-action="messaging-permission-sync" data-conversation-id="${escapeHtml(subroute.conversationId)}">Sync from category</button>` : ""}</div></div></article>
-      <article class="shared-card"><div class="shared-card__body"><h3>Overrides</h3><div class="shared-stack">${(permissionTarget.overrides || []).length ? permissionTarget.overrides.map((entry) => `<button class="shared-list-item${normalizeString(entry.subjectId) === normalizeString(subroute.roleId) ? " is-active" : ""}" data-action="navigate" data-route="${escapeHtml(buildMessagingRoomRoute(subroute.scopeType, subroute.scopeId, subroute.conversationId, `/settings/permissions/roles/${encodeURIComponent(normalizeString(entry.subjectId))}`))}"><strong>${escapeHtml(entry.roleName || entry.subjectId || "Override")}</strong><span>${escapeHtml(entry.roleColor || "")}</span></button>`).join("") : '<div class="shared-page__empty">No explicit overrides.</div>'}</div></div></article>
+      <article class="shared-card"><div class="shared-card__body"><div class="shared-card__meta"><span>${escapeHtml(permissionTarget.syncState || "standalone")}</span>${permissionTarget.inheritedFromCategoryId ? `<span>${escapeHtml(`Inherited from ${permissionTarget.inheritedFromCategoryId}`)}</span>` : ""}</div><h3>${escapeHtml(conversation.item?.title || "Room access")}</h3><p>${escapeHtml(selectedOverride ? `Showing access for ${selectedOverride.roleName || selectedOverride.subjectId}.` : "Inspect the active access changes for this room.")}</p><div class="shared-card__actions">${permissionTarget.canManage ? `<button class="shared-feed-chip shared-feed-chip--primary" data-action="messaging-permission-sync" data-conversation-id="${escapeHtml(subroute.conversationId)}">Use category defaults</button>` : ""}</div></div></article>
+      <article class="shared-card"><div class="shared-card__body"><h3>Group access</h3><div class="shared-stack">${(permissionTarget.overrides || []).length ? permissionTarget.overrides.map((entry) => `<button class="shared-list-item${normalizeString(entry.subjectId) === normalizeString(subroute.roleId) ? " is-active" : ""}" data-action="navigate" data-route="${escapeHtml(buildMessagingRoomRoute(subroute.scopeType, subroute.scopeId, subroute.conversationId, `/settings/permissions/roles/${encodeURIComponent(normalizeString(entry.subjectId))}`))}"><strong>${escapeHtml(entry.roleName || entry.subjectId || "Access group")}</strong><span>${escapeHtml(entry.roleColor || "")}</span></button>`).join("") : '<div class="shared-page__empty">No group-specific access changes.</div>'}</div></div></article>
       ${
         selectedOverride
-          ? `<article class="shared-card"><div class="shared-card__body"><h3>${escapeHtml(selectedOverride.roleName || "Override detail")}</h3><div class="shared-card__meta">${
+          ? `<article class="shared-card"><div class="shared-card__body"><h3>${escapeHtml(selectedOverride.roleName || "Access detail")}</h3><div class="shared-card__meta">${
               Object.entries(selectedOverride.permissions || {})
                 .filter(
                   ([, value]) =>
@@ -56555,7 +60901,7 @@ function renderMessagingPageLegacy() {
           </div>
         </div>
         <div class="shared-stack">${inboxButtons || '<div class="shared-page__empty">No conversations yet.</div>'}</div>
-        <h2>Servers</h2>
+        <h2>Workspaces</h2>
         <div class="shared-card-grid">${serverCards || '<div class="shared-page__empty">No servers available.</div>'}</div>
       </div>
     </div>`;
@@ -56639,6 +60985,7 @@ function messagingConversationDisplayTitle(conversation = {}, currentUserId = ""
     return explicit;
   }
   const kind = normalizeString(conversation.kind).toLowerCase();
+  const isRoom = ["room", "channel", "server_room", "server-room"].includes(kind);
   const others = messagingConversationOtherParticipants(conversation, currentUserId);
   if (kind === "dm" && others.length) {
     return messagingParticipantDisplayName(others[0], "Direct message");
@@ -56648,7 +60995,7 @@ function messagingConversationDisplayTitle(conversation = {}, currentUserId = ""
     const remaining = Math.max(0, others.length - 1);
     return remaining ? `${first} and ${remaining} more` : first;
   }
-  return explicit || (kind === "room" ? "Room" : "Conversation");
+  return explicit || (isRoom ? "Room" : "Conversation");
 }
 
 function messagingConversationDisplaySubtitle(conversation = {}, currentUserId = "") {
@@ -56667,7 +61014,7 @@ function messagingConversationDisplaySubtitle(conversation = {}, currentUserId =
       messagingConversationOtherParticipants(conversation, currentUserId).length;
     return `${formatCount(count)} in chat`;
   }
-  if (kind === "room") {
+  if (["room", "channel", "server_room", "server-room"].includes(kind)) {
     return conversation.scopeType
       ? `${humanizeLabel(conversation.scopeType)} room`
       : "Room";
@@ -56691,7 +61038,7 @@ function messagingConversationKindLabel(conversation = {}) {
   const kind = normalizeString(conversation.kind).toLowerCase();
   if (kind === "dm") return "Direct";
   if (kind === "group") return "Group";
-  if (kind === "room" || kind === "channel") return "Room";
+  if (kind === "room" || kind === "channel" || kind === "server_room" || kind === "server-room") return "Room";
   return humanizeLabel(kind) || "Conversation";
 }
 
@@ -56790,7 +61137,7 @@ function renderMessagingWorkspaceSidebarSummary(subroute) {
       active: subroute?.view === "conversation",
     },
     {
-      label: "Servers",
+      label: "Workspaces",
       value: servers.length,
       route: "/messages",
       active: subroute?.view === "server" || subroute?.view === "server-room",
@@ -56978,8 +61325,8 @@ function renderMessagingWorkspaceServerCards(servers = []) {
             className: "shared-messaging-avatar--server-card",
           })}
           <div>
-            <p>${escapeHtml(server.scopeBadge || "Server")}</p>
-            <h3>${escapeHtml(server.title || "Server")}</h3>
+            <p>${escapeHtml(server.scopeBadge || "Workspace")}</p>
+            <h3>${escapeHtml(server.title || "Workspace")}</h3>
             <span>${escapeHtml(formatCount(server.memberCount || 0))} members</span>
           </div>
           <button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="${escapeHtml(buildMessagingServerRoute(server.scopeType, server.scopeId))}">Open</button>
@@ -57022,7 +61369,7 @@ function messagingServerSettingsSidebarKey(sectionId = "") {
 
 function renderMessagingWorkspaceServerTools(subroute, activeView = "server") {
   const items = [
-    ["server", "Rooms", "Channel directory", ""],
+    ["server", "Rooms", "Room directory", ""],
     ["server-settings", "Settings", "Notification defaults", "/settings"],
     ["server-customization", "Customize", "Brand and profile", "/settings/customization"],
     ["server-community", "Community", "Onboarding and joins", "/settings/community-settings"],
@@ -57032,7 +61379,7 @@ function renderMessagingWorkspaceServerTools(subroute, activeView = "server") {
     ["server-roles", "Access", "People and room access", "/roles"],
     ["server-members", "Members", "Roster and moderation", "/members"],
     ["server-moderation", "Review", "Reports and held messages", "/moderation"],
-    ["server-workflows", "Workflows", "Automation rules", "/workflows"],
+    ["server-workflows", "Automations", "Triggers and handoffs", "/workflows"],
     ["server-bans", "Restrictions", "Blocked member access", "/bans"],
   ];
   return `<div class="shared-messaging-list shared-messaging-server-tools">${items
@@ -57470,7 +61817,7 @@ function renderMessagingServerMembersPanel(subroute, membersState) {
   return `<section class="shared-messaging-members-panel">
     <div class="shared-messaging-members-panel__header">
       <div>
-        <h3>Server roster</h3>
+        <h3>Member roster</h3>
         <p>Find members, review role context, and open moderation detail without leaving the server workspace.</p>
       </div>
       <button class="shared-feed-chip" type="button" data-action="refresh-current-route"${disabledAttr(membersState.loading)}>Refresh</button>
@@ -57986,7 +62333,7 @@ function renderMessagingWorkflowCard(workflow, subroute, pendingKey = "") {
             `<span class="shared-messaging-workflow__tag">${escapeHtml(messagingWorkflowActionSummary(action))}</span>`,
         )
         .join("")
-    : '<span class="shared-messaging-workflow__tag">Notify moderators</span>';
+    : '<span class="shared-messaging-workflow__tag">Notify safety team</span>';
   const meta = [
     workflow.createdAt ? `Created ${formatAbsoluteDateTime(workflow.createdAt)}` : "",
     workflow.updatedAt ? `Updated ${formatAbsoluteDateTime(workflow.updatedAt)}` : "",
@@ -57996,33 +62343,33 @@ function renderMessagingWorkflowCard(workflow, subroute, pendingKey = "") {
     <div class="shared-messaging-workflow__top">
       <span class="shared-messaging-workflow__trigger is-${escapeHtml(trigger)}">${escapeHtml(triggerLabel)}</span>
       <div>
-        <strong>${escapeHtml(workflow.name || "Workflow")}</strong>
+        <strong>${escapeHtml(workflow.name || "Automation")}</strong>
         <small>${escapeHtml(condition)}</small>
       </div>
       <span class="shared-messaging-workflow__status ${escapeHtml(health.className)}">${escapeHtml(health.label)}</span>
     </div>
-    <div class="shared-messaging-workflow__map" aria-label="Workflow summary">
+    <div class="shared-messaging-workflow__map" aria-label="Automation summary">
       <div>
-        <small>When</small>
+        <small>Starts</small>
         <strong>${escapeHtml(triggerLabel)}</strong>
         <span>${escapeHtml(condition)}</span>
       </div>
       <div>
         <small>Then</small>
         <strong>${escapeHtml(messagingWorkflowActionCountLabel(workflow.actions))}</strong>
-        <span>${escapeHtml((workflow.actions || []).map(messagingWorkflowActionSummary).join(" | ") || "Notify moderators")}</span>
+        <span>${escapeHtml((workflow.actions || []).map(messagingWorkflowActionSummary).join(" | ") || "Notify safety team")}</span>
       </div>
       <div>
-        <small>Health</small>
+        <small>Status</small>
         <strong>${escapeHtml(health.label)}</strong>
         <span>${escapeHtml(health.detail)}</span>
       </div>
     </div>
-    <div class="shared-messaging-workflow__tags" aria-label="Workflow actions">${actionTags}</div>
+    <div class="shared-messaging-workflow__tags" aria-label="Automation actions">${actionTags}</div>
     ${meta.length ? `<div class="shared-messaging-workflow__meta">${meta.map((entry) => `<span>${escapeHtml(entry)}</span>`).join("")}</div>` : ""}
     <div class="shared-messaging-workflow__actions">
-      <button class="shared-feed-chip" type="button" data-action="messaging-workflow-toggle" data-scope-type="${escapeHtml(subroute.scopeType)}" data-scope-id="${escapeHtml(subroute.scopeId)}" data-workflow-id="${escapeHtml(workflowId)}" data-enabled="${enabled ? "false" : "true"}"${disabledAttr(pending)}>${pendingToggle ? "Saving..." : enabled ? "Disable" : "Enable"}</button>
-      <button class="shared-feed-chip shared-messaging-workflow__delete" type="button" data-action="messaging-workflow-delete" data-scope-type="${escapeHtml(subroute.scopeType)}" data-scope-id="${escapeHtml(subroute.scopeId)}" data-workflow-id="${escapeHtml(workflowId)}"${disabledAttr(pending)}>${pendingDelete ? "Deleting..." : "Delete"}</button>
+      <button class="shared-feed-chip" type="button" data-action="messaging-workflow-toggle" data-scope-type="${escapeHtml(subroute.scopeType)}" data-scope-id="${escapeHtml(subroute.scopeId)}" data-workflow-id="${escapeHtml(workflowId)}" data-enabled="${enabled ? "false" : "true"}"${disabledAttr(pending)}>${pendingToggle ? "Saving..." : enabled ? "Pause" : "Resume"}</button>
+      <button class="shared-feed-chip shared-messaging-workflow__delete" type="button" data-action="messaging-workflow-delete" data-scope-type="${escapeHtml(subroute.scopeType)}" data-scope-id="${escapeHtml(subroute.scopeId)}" data-workflow-id="${escapeHtml(workflowId)}"${disabledAttr(pending)}>${pendingDelete ? "Removing..." : "Remove"}</button>
     </div>
   </article>`;
 }
@@ -58033,7 +62380,7 @@ function renderMessagingWorkflowCreateForm(subroute, workflowState) {
     <div class="shared-messaging-workflow-create-panel__header">
       <div>
         <h3>Create automation</h3>
-        <p>Pick the trigger, add the condition Polis should watch for, then choose the handoff.</p>
+        <p>Pick what starts it, add the condition Polis should watch for, then choose what happens next.</p>
       </div>
       <span>Guided setup</span>
     </div>
@@ -58054,7 +62401,7 @@ function renderMessagingWorkflowCreateForm(subroute, workflowState) {
       </select>
     </label>
     <label data-messaging-workflow-field="keyword">
-      <span>Keyword to watch</span>
+      <span>Keyword or phrase</span>
       <input name="keyword" placeholder="volunteer help"${disabledAttr(creating)} />
     </label>
     <label data-messaging-workflow-field="schedule" hidden>
@@ -58067,7 +62414,7 @@ function renderMessagingWorkflowCreateForm(subroute, workflowState) {
       </select>
     </label>
     <label>
-      <span>Handoff</span>
+      <span>Then</span>
       <select name="actionType" data-messaging-workflow-action${disabledAttr(creating)}>
         ${MESSAGING_WORKFLOW_ACTION_OPTIONS.map(
           ([value, label]) =>
@@ -58081,14 +62428,14 @@ function renderMessagingWorkflowCreateForm(subroute, workflowState) {
     </label>
     <label data-messaging-workflow-action-field="message" hidden>
       <span>Room message</span>
-      <textarea name="message" rows="3" placeholder="Post this message when the workflow runs"${disabledAttr(creating)}></textarea>
+      <textarea name="message" rows="3" placeholder="Post this message when the automation runs"${disabledAttr(creating)}></textarea>
     </label>
     <label data-messaging-workflow-action-field="channel" hidden>
       <span>Room</span>
       <input name="channelId" placeholder="room-general"${disabledAttr(creating)} />
     </label>
     <label data-messaging-workflow-action-field="reason" hidden>
-      <span>Moderation reason</span>
+      <span>Review reason</span>
       <input name="reason" placeholder="Needs moderator review"${disabledAttr(creating)} />
     </label>
     <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(creating)}>${creating ? "Creating..." : "Create automation"}</button>
@@ -58107,7 +62454,7 @@ function renderMessagingWorkflowsPanel(subroute, workflowState) {
   const recentlyRunCount = workflows.filter((workflow) => workflow.lastRunAt).length;
   const loading = workflowState.loading && !workflowState.loaded;
   const workflowList = loading
-    ? '<div class="shared-page__loading">Loading workflows...</div>'
+    ? '<div class="shared-page__loading">Loading automations...</div>'
     : workflows.length
       ? `<div class="shared-messaging-workflow-list">${workflows
           .map((workflow) =>
@@ -58118,18 +62465,18 @@ function renderMessagingWorkflowsPanel(subroute, workflowState) {
             ),
           )
           .join("")}</div>`
-      : '<div class="shared-messaging-empty">No automations are configured yet. Create one to route reports, keyword alerts, or scheduled room updates.</div>';
+      : '<div class="shared-messaging-empty">No automations are configured yet. Create one to route reports, keyword alerts, welcome messages, scheduled room updates, or webhooks.</div>';
   return `<section class="shared-messaging-workflow-panel">
     <div class="shared-messaging-workflow-hero">
       <div>
         <span>Automation center</span>
-        <h3>Messaging workflows</h3>
+        <h3>Room automations</h3>
         <p>Keep room operations moving by routing keyword matches, reports, joins, schedules, and webhooks without leaving the web app.</p>
       </div>
       <div class="shared-messaging-workflow-metrics">
         <div><strong>${escapeHtml(formatCount(activeCount))}</strong><span>live</span></div>
         <div><strong>${escapeHtml(formatCount(pausedCount))}</strong><span>paused</span></div>
-        <div><strong>${escapeHtml(formatCount(actionCount))}</strong><span>handoffs</span></div>
+        <div><strong>${escapeHtml(formatCount(actionCount))}</strong><span>steps</span></div>
         <div><strong>${escapeHtml(formatCount(recentlyRunCount))}</strong><span>ran</span></div>
       </div>
     </div>
@@ -58137,7 +62484,7 @@ function renderMessagingWorkflowsPanel(subroute, workflowState) {
     <section class="shared-messaging-workflow-section">
       <div class="shared-messaging-workflow-section__header">
         <div>
-          <h3>Active automations</h3>
+          <h3>Configured automations</h3>
           <p>Review what starts each automation, what happens next, and whether it is live.</p>
         </div>
         <span>${escapeHtml(formatCount(workflows.length))} total</span>
@@ -58941,13 +63288,86 @@ function readMessagingLooseList(source = {}, keys = []) {
   return [];
 }
 
-function renderMessagingLooseCardList(items = [], emptyLabel, fallbackTitle) {
+function normalizeMessagingAutomationListEntry(item, index = 0) {
+  const source = item && typeof item === "object" ? item : { title: item };
+  const triggerValue = normalizeString(
+    source.trigger || source.triggerType || source.event || source.eventType,
+  );
+  const normalizedTrigger = triggerValue
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, "_")
+    .replace(/^_+|_+$/gu, "");
+  const triggerOption = MESSAGING_WORKFLOW_TRIGGER_OPTIONS.find(
+    ([key]) => key === normalizedTrigger,
+  );
+  const triggerLabel = triggerOption?.[1] || humanizeLabel(triggerValue);
+  const actionRows = Array.isArray(source.actions)
+    ? source.actions.filter((action) => normalizeString(action?.type))
+    : [];
+  const actionSummary = actionRows.length
+    ? actionRows
+        .map((action) =>
+          messagingWorkflowActionSummary(normalizeMessagingWorkflowAction(action)),
+        )
+        .join(" | ")
+    : normalizeString(
+        source.actionLabel ||
+          source.action ||
+          source.actionType ||
+          source.destination ||
+          source.webhookUrl ||
+          source.url,
+      );
+  const lastRunAt = normalizeMessagingInviteTimestamp(
+    source.lastRunAt || source.lastRunAtIso || source.updatedAt,
+  );
+  const title =
+    normalizeString(source.title || source.name || source.label) ||
+    (triggerLabel ? `${triggerLabel} automation` : "") ||
+    `Connected automation ${index + 1}`;
+  const subtitle =
+    normalizeString(source.subtitle || source.description || source.summary) ||
+    [
+      triggerLabel ? `Starts with ${triggerLabel.toLowerCase()}` : "",
+      actionSummary ? `then ${actionSummary.toLowerCase()}` : "",
+    ]
+      .filter(Boolean)
+      .join(", ") ||
+    "Ready for workspace handoffs.";
+  const status =
+    source.enabled === false
+      ? "Paused"
+      : messagingServerSettingsDisplayValue(
+          source.status || source.state,
+          actionSummary || source.webhookUrl || source.url
+            ? "Connected"
+            : "Ready",
+        );
+  return {
+    ...source,
+    title,
+    subtitle,
+    status,
+    meta: lastRunAt ? `Last run ${formatAbsoluteDateTime(lastRunAt)}` : status,
+  };
+}
+
+function renderMessagingLooseCardList(
+  items = [],
+  emptyLabel,
+  fallbackTitle,
+  options = {},
+) {
   if (!items.length) {
     return `<div class="shared-messaging-empty">${escapeHtml(emptyLabel)}</div>`;
   }
+  const icon = normalizeString(options.icon) || "messages";
+  const mapEntry =
+    typeof options.mapEntry === "function" ? options.mapEntry : (entry) => entry;
   return `<div class="shared-messaging-card-list">${items
     .map((item, index) => {
-      const entry = item && typeof item === "object" ? item : { title: item };
+      const rawEntry = item && typeof item === "object" ? item : { title: item };
+      const entry = mapEntry(rawEntry, index) || rawEntry;
       const title =
         normalizeString(
           entry.title ||
@@ -58967,12 +63387,13 @@ function renderMessagingLooseCardList(items = [], emptyLabel, fallbackTitle) {
             entry.channelName,
         ) || "No additional metadata.";
       const meta = normalizeString(
-        entry.status ||
+        entry.meta ||
+          entry.status ||
           entry.type ||
           (entry.createdAt ? formatAbsoluteDateTime(entry.createdAt) : ""),
       );
       return `<article class="shared-messaging-request">
-        ${renderMessagingWorkspaceAvatar({ label: title, icon: "messages" })}
+        ${renderMessagingWorkspaceAvatar({ label: title, icon })}
         <div>
           <p>${escapeHtml(meta || fallbackTitle)}</p>
           <h3>${escapeHtml(title)}</h3>
@@ -58988,7 +63409,7 @@ function messagingRoomSettingsConfig(subroute) {
     case "room-settings-notifications":
       return {
         title: "Notification settings",
-        subtitle: "Alert behavior, mute state, and inherited server defaults.",
+        subtitle: "Alert behavior, mute state, and inherited workspace defaults.",
       };
     case "room-settings-pins":
       return {
@@ -58998,17 +63419,17 @@ function messagingRoomSettingsConfig(subroute) {
     case "room-settings-invites":
       return {
         title: "Invite links",
-        subtitle: "Room invite policy, active links, and server invite access.",
+        subtitle: "Room invite policy, active links, and workspace invite access.",
       };
     case "room-settings-integrations":
       return {
-        title: "Room integrations",
-        subtitle: "Automation and workflow entry points attached to this room.",
+        title: "Room automations",
+        subtitle: "Room-specific handoffs and external posting rules.",
       };
     case "room-settings-section":
       return {
         title: humanizeLabel(subroute.sectionId) || "Room settings",
-        subtitle: "Room settings section.",
+        subtitle: "Room area.",
       };
     default:
       return {
@@ -59029,8 +63450,8 @@ function renderMessagingRoomSettingsNav(subroute) {
     ],
     [
       "room-permissions",
-      "Permissions",
-      "Role overrides",
+      "Access",
+      "Who can enter",
       "/settings/permissions",
     ],
     [
@@ -59047,8 +63468,8 @@ function renderMessagingRoomSettingsNav(subroute) {
     ],
     [
       "room-settings-integrations",
-      "Integrations",
-      "Workflow hooks",
+      "Automations",
+      "Room handoffs",
       "/settings/integrations",
     ],
   ];
@@ -59113,7 +63534,7 @@ function messagingRoomNotificationLabel(level) {
       return "Muted";
     case "inherit":
     default:
-      return "Server default";
+      return "Workspace default";
   }
 }
 
@@ -59225,7 +63646,7 @@ function renderMessagingRoomHero({
       className: "shared-messaging-avatar--server-card",
     })}
     <div class="shared-messaging-room-hero__main">
-      <p>${escapeHtml(messagingRoomSettingValue(subroute.scopeType, "Server room"))}</p>
+      <p>${escapeHtml(messagingRoomSettingValue(subroute.scopeType, "Workspace room"))}</p>
       <h3>${escapeHtml(title)}</h3>
       <span>${escapeHtml(subtitle)}</span>
       <div class="shared-messaging-room-chip-cloud">${chips
@@ -59263,7 +63684,7 @@ function renderMessagingRoomSection({
 function renderMessagingRoomModeCards(activeLevel = "server_default") {
   const normalizedActive = normalizeString(activeLevel).toLowerCase();
   const modes = [
-    ["inherit", "Server default", "Use the server-level preference."],
+    ["inherit", "Workspace default", "Use the workspace-level preference."],
     ["all", "All activity", "Receive notifications for every message."],
     ["mentions", "Mentions only", "Notify when you or a role is mentioned."],
     ["mute", "Muted", "Silence notifications for this channel."],
@@ -59580,10 +64001,10 @@ function renderMessagingRoomInviteLinkSection({
     subtitle:
       "Create room-specific invite links, cap usage, and revoke stale access without leaving the room.",
     badge: `${formatCount(inviteCount)} active`,
-    actions: `<button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="${escapeHtml(buildMessagingServerRoute(subroute.scopeType, subroute.scopeId, "/settings/invites"))}">Server invites</button>`,
+    actions: `<button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="${escapeHtml(buildMessagingServerRoute(subroute.scopeType, subroute.scopeId, "/settings/invites"))}">Workspace invites</button>`,
     body: `
       <div class="shared-messaging-settings-grid">
-        <div><strong>Invite access</strong><span>${escapeHtml(raw.invitesEnabled === false ? "Off" : "Server policy")}</span></div>
+        <div><strong>Invite access</strong><span>${escapeHtml(raw.invitesEnabled === false ? "Off" : "Workspace policy")}</span></div>
         <div><strong>Active links</strong><span>${escapeHtml(formatCount(inviteCount))}</span></div>
         <div><strong>Room</strong><span>${escapeHtml(conversation?.title || "Room")}</span></div>
       </div>
@@ -59822,18 +64243,18 @@ function messagingServerSettingsGroups(serverSettings) {
   const groups = [
     {
       key: "settings",
-      title: "Server settings",
-      subtitle: "Core preferences and room defaults.",
+      title: "Workspace defaults",
+      subtitle: "Room alerts, profile, assets, and workspace-level controls.",
     },
     {
       key: "community",
-      title: "Community",
-      subtitle: "Invites, discovery, and member-facing details.",
+      title: "Member entry",
+      subtitle: "Invites, discovery, welcomes, rules, and join behavior.",
     },
     {
       key: "userManagement",
-      title: "User management",
-      subtitle: "Roles, members, moderation, and access tools.",
+      title: "People and safety",
+      subtitle: "Access groups, members, reports, restrictions, and review tools.",
     },
   ];
   return groups
@@ -59863,6 +64284,70 @@ function messagingServerSettingsGroups(serverSettings) {
         : [],
     }))
     .filter((group) => group.items.length);
+}
+
+function messagingServerSettingsItemPresentation(item = {}) {
+  const normalizedId = normalizeString(item.id).toLowerCase().replace(/_/g, "-");
+  const display = {
+    overview: {
+      title: "Overview",
+      description: "Workspace health, room coverage, and available web controls.",
+    },
+    "server-details": {
+      title: "Workspace profile",
+      description: "Identity, scope, access, member count, and stable references.",
+    },
+    customization: {
+      title: "Profile and branding",
+      description: "Name, summary, icon, banner, and member-facing presentation.",
+    },
+    moderation: {
+      title: "Safety review",
+      description: "Reports, held messages, guardrails, and active restrictions.",
+    },
+    channels: {
+      title: "Rooms",
+      description: "Room structure, categories, access, and entry points.",
+    },
+    "community-settings": {
+      title: "Member entry",
+      description: "Discovery, joins, invites, welcomes, rules, and support rooms.",
+    },
+    "audit-log": {
+      title: "Activity history",
+      description: "Admin changes, access updates, safety actions, and workspace events.",
+    },
+    integrations: {
+      title: "Connected automations",
+      description: "External handoffs, webhooks, and automation links.",
+    },
+    emoji: {
+      title: "Custom emoji",
+      description: "Emoji available in rooms and conversations.",
+    },
+    stickers: {
+      title: "Sticker packs",
+      description: "Reusable sticker assets available in the workspace.",
+    },
+    security: {
+      title: "Safety policy",
+      description: "Trusted-device, encrypted-room, invite, and abuse-prevention rules.",
+    },
+    invites: {
+      title: "Invite links",
+      description: "Reusable links, pending joins, approval, and access handoffs.",
+    },
+  }[normalizedId];
+  return {
+    title:
+      display?.title ||
+      normalizeString(item.title || item.label || item.name) ||
+      humanizeLabel(item.id) ||
+      "Workspace area",
+    description:
+      display?.description ||
+      normalizeString(item.description || item.subtitle || item.summary),
+  };
 }
 
 function findMessagingServerSettingsSection(serverSettings, sectionId) {
@@ -59901,7 +64386,7 @@ function renderMessagingServerSettingsHero({
     Number(server.memberCount || currentServer?.memberCount) || 0;
   const defaultLevel = messagingServerNotificationLevel(serverSettings);
   const chips = [
-    server.scopeBadge || messagingServerSettingsValue(subroute.scopeType, "Server"),
+    server.scopeBadge || messagingServerSettingsValue(subroute.scopeType, "Workspace"),
     canManage ? "Management enabled" : "View only",
     `${formatCount(channels.length)} rooms`,
     `${formatCount(categories.length)} categories`,
@@ -59913,17 +64398,17 @@ function renderMessagingServerSettingsHero({
         server.description ||
         server.raw?.description ||
         currentServer?.raw?.description,
-    ) || "Server preferences, community controls, and administration access.";
+    ) || "Workspace preferences, member entry, and administration access.";
   return `<section class="shared-messaging-server-settings-hero">
     ${renderMessagingWorkspaceAvatar({
-      label: server.title || currentServer?.title || "Server settings",
+      label: server.title || currentServer?.title || "Workspace settings",
       imageUrl: server.avatarUrl || currentServer?.avatarUrl,
       icon: "dashboard",
       className: "shared-messaging-avatar--server-card",
     })}
     <div class="shared-messaging-server-settings-hero__main">
-      <p>${escapeHtml(messagingServerSettingsValue(subroute.scopeType, "Server"))}</p>
-      <h3>${escapeHtml(server.title || currentServer?.title || "Server settings")}</h3>
+      <p>${escapeHtml(messagingServerSettingsValue(subroute.scopeType, "Workspace"))}</p>
+      <h3>${escapeHtml(server.title || currentServer?.title || "Workspace settings")}</h3>
       <span>${escapeHtml(subtitle)}</span>
       <div class="shared-messaging-server-settings-chip-cloud">${chips
         .map((chip) => `<span>${escapeHtml(chip)}</span>`)
@@ -59965,13 +64450,13 @@ function renderMessagingServerNotificationForm(
   const activeLevel = messagingServerNotificationLevel(serverSettings);
   const saving = settingsState?.saving === true;
   const modes = [
-    ["all", "All messages", "Alert members for every server-room message."],
+    ["all", "All messages", "Alert members for every workspace room message."],
     [
       "mentions",
       "Mentions only",
       "Alert members when they or their roles are mentioned.",
     ],
-    ["none", "None", "Suppress default server-room alerts."],
+    ["none", "None", "Suppress default workspace room alerts."],
   ];
   return renderMessagingServerSettingsSection({
     title: "Default notifications",
@@ -59996,7 +64481,7 @@ function renderMessagingServerNotificationForm(
           .join("")}
       </div>
       <div class="shared-messaging-server-settings-form__footer">
-        <span>${escapeHtml(saving ? "Saving preference..." : "Changes apply to new server-room defaults.")}</span>
+        <span>${escapeHtml(saving ? "Saving preference..." : "Changes apply to new workspace room defaults.")}</span>
         <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(saving)}>${saving ? "Saving..." : "Save default"}</button>
       </div>
     </form>`,
@@ -60164,14 +64649,14 @@ function renderMessagingServerSettingsOverview({
     {
       icon: "settings",
       title: "Automations",
-      detail: automationSection?.available ? "Workflows ready" : "Workflow setup",
+      detail: automationSection?.available ? "Ready to run" : "Setup needed",
       copy: "Connect keyword, schedule, report, and webhook handoffs.",
       route: buildMessagingServerRoute(
         subroute.scopeType,
         subroute.scopeId,
         "/workflows",
       ),
-      action: "Open workflows",
+      action: "Open automations",
       status: automationSection?.available ? "Ready" : "Setup",
       tone: automationSection?.available ? "ready" : "attention",
     },
@@ -60220,7 +64705,7 @@ function renderMessagingServerSettingsOverview({
       value: formatCount(availableSettings),
       copy: unavailableSettings
         ? `${formatCount(unavailableSettings)} area${unavailableSettings === 1 ? "" : "s"} still unavailable`
-        : "All exposed settings areas are available",
+        : "All exposed workspace areas are available",
       tone: availableSettings ? "ready" : "attention",
     },
     {
@@ -60259,10 +64744,10 @@ function renderMessagingServerSettingsGroups(subroute, serverSettings, sectionId
   const groups = messagingServerSettingsGroups(serverSettings);
   if (!groups.length) {
     return renderMessagingServerSettingsSection({
-      title: "Settings areas",
-      subtitle: "This server has not exposed website-manageable settings yet.",
+      title: "Workspace areas",
+      subtitle: "This workspace has not exposed website-manageable settings yet.",
       badge: "None",
-      body: '<div class="shared-messaging-empty">No server settings sections are available from the app API.</div>',
+      body: '<div class="shared-messaging-empty">No workspace areas are available from the app API.</div>',
     });
   }
   const selectedSection = normalizeString(sectionId);
@@ -60279,6 +64764,7 @@ function renderMessagingServerSettingsGroups(subroute, serverSettings, sectionId
         <div class="shared-messaging-server-settings-list">${group.items
           .map((item) => {
             const active = selectedSection === normalizeString(item.id);
+            const display = messagingServerSettingsItemPresentation(item);
             const route = buildMessagingServerRoute(
               subroute.scopeType,
               subroute.scopeId,
@@ -60286,8 +64772,8 @@ function renderMessagingServerSettingsGroups(subroute, serverSettings, sectionId
             );
             return `<button class="shared-messaging-server-settings-item${active ? " is-active" : ""}${item.available ? "" : " is-disabled"}" type="button"${item.available ? ` data-action="navigate" data-route="${escapeHtml(route)}"` : " disabled"}>
               <span>
-                <strong>${escapeHtml(item.title || humanizeLabel(item.id) || "Section")}</strong>
-                <small>${escapeHtml(item.description || (item.available ? "Open this settings area." : "Not available for this server."))}</small>
+                <strong>${escapeHtml(display.title)}</strong>
+                <small>${escapeHtml(display.description || (item.available ? "Open this workspace area." : "Not available for this workspace."))}</small>
               </span>
               <em>${escapeHtml(item.available ? messagingServerSettingsValue(item.status, active ? "Open" : "Ready") : "Unavailable")}</em>
             </button>`;
@@ -60350,48 +64836,50 @@ const MESSAGING_SERVER_SETTINGS_SECTION_META = {
     description: "Workspace health, readable server state, and available settings.",
   },
   "server-details": {
-    title: "Server details",
-    description: "Identity, scope, access, and stable server references.",
+    title: "Workspace profile",
+    description: "Identity, scope, access, and stable workspace references.",
   },
   customization: {
-    title: "Customization",
+    title: "Profile and branding",
     description: "Branding, icon, banner, and member-facing presentation.",
   },
   moderation: {
-    title: "Moderation",
-    description: "Reports, automod posture, bans, and review queue status.",
+    title: "Safety review",
+    description: "Reports, guardrails, restrictions, and review queue status.",
   },
   channels: {
-    title: "Channels",
-    description: "Room structure, categories, permissions, and room entry points.",
+    title: "Rooms",
+    description: "Room structure, categories, access, and room entry points.",
   },
   "community-settings": {
-    title: "Community settings",
-    description: "Discovery, joins, invites, and onboarding controls.",
+    title: "Member entry",
+    description: "Discovery, joins, invites, welcomes, rules, and support rooms.",
   },
   "audit-log": {
-    title: "Audit log",
-    description: "Administrative changes and security-relevant server activity.",
+    title: "Activity history",
+    description:
+      "Recent admin changes, access updates, safety actions, and workspace events.",
   },
   integrations: {
-    title: "Integrations",
-    description: "Workflow rules, automation, and external messaging hooks.",
+    title: "Connected automations",
+    description:
+      "External handoffs, webhook destinations, and automation links for this workspace.",
   },
   emoji: {
-    title: "Emoji",
-    description: "Custom emoji exposed to rooms and conversations.",
+    title: "Custom emoji",
+    description: "Emoji available in rooms and conversations.",
   },
   stickers: {
-    title: "Stickers",
-    description: "Custom sticker assets available in the workspace.",
+    title: "Sticker packs",
+    description: "Reusable sticker assets available in the workspace.",
   },
   security: {
-    title: "Security",
-    description: "Invite rules, verification, abuse prevention, and retention policies.",
+    title: "Safety policy",
+    description: "Trusted-device, encrypted-room, invite, and abuse-prevention rules.",
   },
   invites: {
-    title: "Invites",
-    description: "Reusable links, pending joins, and access handoffs.",
+    title: "Invite links",
+    description: "Reusable links, pending joins, approval, and access handoffs.",
   },
 };
 
@@ -60500,7 +64988,7 @@ function messagingServerSettingsDisplayValue(value, fallback = "Not set") {
 function renderMessagingServerSettingsFieldGrid(entries = [], emptyLabel = "") {
   const fields = entries.filter((entry) => normalizeString(entry?.label));
   if (!fields.length) {
-    return `<div class="shared-messaging-empty">${escapeHtml(emptyLabel || "No fields were returned for this settings area.")}</div>`;
+    return `<div class="shared-messaging-empty">${escapeHtml(emptyLabel || "No fields were returned for this workspace area.")}</div>`;
   }
   return `<div class="shared-messaging-settings-grid">${fields
     .map(
@@ -60577,7 +65065,7 @@ const MESSAGING_SERVER_SECURITY_POLICY_CONTROLS = [
   {
     key: "requireTrustedDeviceForAdminActions",
     label: "Trusted device for admin actions",
-    description: "Server-management and moderation changes require a trusted device.",
+    description: "Workspace management and moderation changes require a trusted device.",
   },
   {
     key: "requireTrustedDeviceForSensitiveChannels",
@@ -60710,7 +65198,7 @@ function renderMessagingServerCustomizationForm({
     <input type="hidden" name="section" value="customization" />
     <label>
       <span>Display name</span>
-      <input name="title" maxlength="25" value="${escapeHtml(title)}" placeholder="Server name"${disabledAttr(disabled)} required />
+      <input name="title" maxlength="25" value="${escapeHtml(title)}" placeholder="Workspace name"${disabledAttr(disabled)} required />
     </label>
     <label>
       <span>Avatar URL</span>
@@ -60859,8 +65347,8 @@ function renderMessagingServerCommunityForm({
       disabled,
     })}
     <div class="shared-messaging-server-settings-editor__footer">
-      <span>${escapeHtml(!canManage ? "Manager access is required to change community settings." : noChannels ? "Create rooms before enabling a community." : busy ? "Saving community settings..." : "Welcome and rules rooms are required when community access is on.")}</span>
-      <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(disabled)}>${pendingKey === "settings:community" ? "Saving..." : "Save community"}</button>
+      <span>${escapeHtml(!canManage ? "Manager access is required to change member entry." : noChannels ? "Create rooms before enabling member entry." : busy ? "Saving member entry..." : "Welcome and rules rooms are required when member entry is on.")}</span>
+      <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(disabled)}>${pendingKey === "settings:community" ? "Saving..." : "Save entry"}</button>
     </div>
   </form>`;
 }
@@ -60882,7 +65370,7 @@ function renderMessagingServerInviteForm({
     false,
   );
   const blockedReason = !canManage
-    ? "Manager access is required to send server invites."
+    ? "Manager access is required to send workspace invites."
     : !communityEnabled
       ? "Enable community access before sending invites."
       : !communityInvitesEnabled
@@ -61095,7 +65583,7 @@ function renderMessagingServerDirectoryCategoryCard({
               <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(disabled)}>${renderIcon("check")} <span>${updatePending ? "Saving..." : "Save"}</span></button>
             </form>
             <div class="shared-messaging-directory-category__actions">
-              <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(buildMessagingCategoryPermissionRoute(subroute.scopeType, subroute.scopeId, categoryId))}"${disabledAttr(disabled)}>${renderIcon("shield")} <span>Permissions</span></button>
+              <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(buildMessagingCategoryPermissionRoute(subroute.scopeType, subroute.scopeId, categoryId))}"${disabledAttr(disabled)}>${renderIcon("shield")} <span>Access</span></button>
               <button class="shared-feed-chip" type="button" data-action="messaging-category-mute-toggle" data-scope-type="${escapeHtml(subroute.scopeType)}" data-scope-id="${escapeHtml(subroute.scopeId)}" data-category-id="${escapeHtml(categoryId)}" data-muted="${muted ? "false" : "true"}"${disabledAttr(disabled || !items.length)}>${renderIcon(muted ? "soundOn" : "soundOff")} <span>${mutePending ? "Updating..." : muted ? "Unmute" : "Mute"}</span></button>
             </div>
           </div>`
@@ -61222,7 +65710,7 @@ function renderMessagingServerSettingsChannels(
   const directoryMarkup =
     categoryMarkup || uncategorizedMarkup
       ? `<div class="shared-messaging-room-directory shared-messaging-room-directory--managed">${categoryMarkup}${uncategorizedMarkup}</div>`
-      : '<div class="shared-messaging-empty">No rooms have been returned for this server yet.</div>';
+      : '<div class="shared-messaging-empty">No rooms have been returned for this workspace yet.</div>';
   return `${canManage ? renderMessagingServerDirectoryCreatePanel({ subroute, categories, disabled, pendingKey }) : ""}${directoryMarkup}`;
 }
 
@@ -61230,7 +65718,7 @@ function messagingServerScopeLabel(subroute = {}, currentServer = null) {
   return (
     normalizeString(currentServer?.scopeBadge) ||
     humanizeLabel(subroute.scopeType) ||
-    "Server"
+    "Workspace"
   );
 }
 
@@ -61279,7 +65767,7 @@ function renderMessagingServerSettingsAssetGrid(
   { subroute = {}, canManage = false, pendingKey = "" } = {},
 ) {
   if (!items.length) {
-    return `<div class="shared-messaging-empty">No custom ${escapeHtml(assetType)} assets were returned for this server.</div>`;
+    return `<div class="shared-messaging-empty">No custom ${escapeHtml(assetType)} assets were returned for this workspace.</div>`;
   }
   return `<div class="shared-messaging-server-asset-grid">${items
     .map((item, index) => {
@@ -61390,8 +65878,8 @@ function renderMessagingServerSettingsKnownSection({
       badge: server.canManage || currentServer?.canManage ? "Manager" : "Member",
       actions: commonActions,
       body: renderMessagingServerSettingsFieldGrid([
-        { label: "Server type", value: server.scopeBadge || subroute.scopeType },
-        { label: "Server ID", value: server.scopeId || subroute.scopeId },
+        { label: "Workspace type", value: server.scopeBadge || subroute.scopeType },
+        { label: "Workspace ID", value: server.scopeId || subroute.scopeId },
         { label: "Members", value: formatCount(server.memberCount || currentServer?.memberCount || 0) },
         { label: "Rooms", value: formatCount(channels.length) },
         { label: "Categories", value: formatCount(categories.length) },
@@ -61432,12 +65920,12 @@ function renderMessagingServerSettingsKnownSection({
       <div class="shared-messaging-server-media-strip">
         <div><strong>Icon</strong>${
           iconUrl
-            ? `<img src="${escapeHtml(normalizeUrl(iconUrl))}" alt="Server icon" />`
-            : renderMessagingWorkspaceAvatar({ label: server.title || "Server", icon: "dashboard" })
+            ? `<img src="${escapeHtml(normalizeUrl(iconUrl))}" alt="Workspace icon" />`
+            : renderMessagingWorkspaceAvatar({ label: server.title || "Workspace", icon: "dashboard" })
         }</div>
         <div><strong>Banner</strong>${
           bannerUrl
-            ? `<img src="${escapeHtml(normalizeUrl(bannerUrl))}" alt="Server banner" />`
+            ? `<img src="${escapeHtml(normalizeUrl(bannerUrl))}" alt="Workspace banner" />`
             : `<span>${escapeHtml("No banner image returned")}</span>`
         }</div>
       </div>`,
@@ -61483,9 +65971,9 @@ function renderMessagingServerSettingsKnownSection({
         canManage,
         pendingKey,
       })}
-      ${serverInvites?.loading ? '<div class="shared-page__loading">Loading pending server invites...</div>' : ""}
+      ${serverInvites?.loading ? '<div class="shared-page__loading">Loading pending workspace invites...</div>' : ""}
       ${serverInvites?.error ? `<div class="shared-page__error">${escapeHtml(serverInvites.error)}</div>` : ""}
-      ${renderMessagingLooseCardList(invites, "No pending server invites were returned for this community.", "Invite")}`,
+      ${renderMessagingLooseCardList(invites, "No pending workspace invites were returned for member entry.", "Invite")}`,
     });
   }
   if (sectionId === "moderation") {
@@ -61530,14 +66018,18 @@ function renderMessagingServerSettingsKnownSection({
     return renderMessagingServerSettingsSection({
       title: meta.title,
       subtitle: meta.description,
-      badge: `${formatCount(auditEvents.length)} events`,
-      actions: commonActions,
-      body: `${serverAudit?.loading ? '<div class="shared-page__loading">Loading audit log...</div>' : ""}
+      badge: `${formatCount(auditEvents.length)} updates`,
+      actions: renderMessagingServerSettingsActionRow([
+        { label: "Open safety review", route: buildMessagingServerRoute(subroute.scopeType, subroute.scopeId, "/moderation") },
+        { label: "Overview", route: overviewRoute },
+      ]),
+      body: `${serverAudit?.loading ? '<div class="shared-page__loading">Loading activity history...</div>' : ""}
       ${serverAudit?.error ? `<div class="shared-page__error">${escapeHtml(serverAudit.error)}</div>` : ""}
       ${renderMessagingLooseCardList(
         auditEvents,
-        "No audit events were returned for this server yet.",
-        "Audit event",
+        "No activity changes have been returned for this workspace yet.",
+        "Activity update",
+        { icon: "shield" },
       )}`,
     });
   }
@@ -61552,17 +66044,22 @@ function renderMessagingServerSettingsKnownSection({
     return renderMessagingServerSettingsSection({
       title: meta.title,
       subtitle: meta.description,
-      badge: `${formatCount(workflows.length)} rules`,
+      badge: `${formatCount(workflows.length)} connected`,
       actions: renderMessagingServerSettingsActionRow([
-        { label: "Open workflows", route: buildMessagingServerRoute(subroute.scopeType, subroute.scopeId, "/workflows") },
+        { label: "Manage automations", route: buildMessagingServerRoute(subroute.scopeType, subroute.scopeId, "/workflows") },
         { label: "Overview", route: overviewRoute },
       ]),
       body: `${renderMessagingServerSettingsFieldGrid([
-        { label: "Enabled", value: readMessagingServerSettingsValue(sources, ["enabledCount", "activeCount"]) || formatCount(workflows.filter((item) => item?.enabled !== false).length) },
-        { label: "Last run", value: readMessagingServerSettingsValue(sources, ["lastRunAt", "lastSyncAt"]) },
-        { label: "Webhook mode", value: messagingServerSettingsFlag(readMessagingServerSettingsValue(sources, ["webhooksEnabled", "webhookEnabled"]), "Default") },
+        { label: "Active", value: readMessagingServerSettingsValue(sources, ["enabledCount", "activeCount"]) || formatCount(workflows.filter((item) => item?.enabled !== false).length) },
+        { label: "Most recent run", value: readMessagingServerSettingsValue(sources, ["lastRunAt", "lastSyncAt"]) },
+        { label: "External handoffs", value: messagingServerSettingsFlag(readMessagingServerSettingsValue(sources, ["webhooksEnabled", "webhookEnabled"]), "Default") },
       ])}
-      ${renderMessagingLooseCardList(workflows, "No workflow or integration rows were returned from server settings.", "Workflow")}`,
+      ${renderMessagingLooseCardList(
+        workflows,
+        "No connected automations were returned for this workspace.",
+        "Connected automation",
+        { icon: "settings", mapEntry: normalizeMessagingAutomationListEntry },
+      )}`,
     });
   }
   if (sectionId === "emoji" || sectionId === "stickers") {
@@ -61589,7 +66086,7 @@ function renderMessagingServerSettingsKnownSection({
       subtitle: meta.description,
       badge: `${formatCount(assets.length)} assets`,
       actions: commonActions,
-      body: `${serverAssets?.type === assetType && serverAssets.loading ? '<div class="shared-page__loading">Loading server assets...</div>' : ""}
+      body: `${serverAssets?.type === assetType && serverAssets.loading ? '<div class="shared-page__loading">Loading workspace assets...</div>' : ""}
       ${serverAssets?.type === assetType && serverAssets.error ? `<div class="shared-page__error">${escapeHtml(serverAssets.error)}</div>` : ""}
       <form class="shared-messaging-server-asset-form" data-route-form="messaging-server-asset-create">
         <input type="hidden" name="scopeType" value="${escapeHtml(subroute.scopeType)}" />
@@ -61628,7 +66125,7 @@ function renderMessagingServerSettingsKnownSection({
         ? "Loading"
         : `${formatCount(activePolicyCount)} active`,
       actions: commonActions,
-      body: `${serverSecurityPolicy?.loading ? '<div class="shared-page__loading">Loading server security policy...</div>' : ""}
+      body: `${serverSecurityPolicy?.loading ? '<div class="shared-page__loading">Loading safety policy...</div>' : ""}
       ${serverSecurityPolicy?.error ? `<div class="shared-page__error">${escapeHtml(serverSecurityPolicy.error)}</div>` : ""}
       ${renderMessagingServerSettingsFieldGrid([
         { label: "Admin trusted device", value: normalizedPolicy.requireTrustedDeviceForAdminActions },
@@ -61642,7 +66139,7 @@ function renderMessagingServerSettingsKnownSection({
         canManage,
         policyState: serverSecurityPolicy,
       })}
-      ${renderMessagingLooseCardList(policies, "No security policy rows were returned for this server.", "Security policy")}`,
+      ${renderMessagingLooseCardList(policies, "No safety policy rows were returned for this workspace.", "Safety policy")}`,
     });
   }
   if (sectionId === "invites") {
@@ -61674,9 +66171,9 @@ function renderMessagingServerSettingsKnownSection({
         canManage,
         pendingKey,
       })}
-      ${serverInvites?.loading ? '<div class="shared-page__loading">Loading pending server invites...</div>' : ""}
+      ${serverInvites?.loading ? '<div class="shared-page__loading">Loading pending workspace invites...</div>' : ""}
       ${serverInvites?.error ? `<div class="shared-page__error">${escapeHtml(serverInvites.error)}</div>` : ""}
-      ${renderMessagingLooseCardList(invites, "No invite links or pending invite rows were returned for this server.", "Invite")}`,
+      ${renderMessagingLooseCardList(invites, "No invite links or pending invite rows were returned for this workspace.", "Invite")}`,
     });
   }
   return "";
@@ -61704,12 +66201,12 @@ function renderMessagingServerSettingsSectionDetail({
   const knownSectionId = messagingServerSettingsKnownSection(selectedSection);
   if (!section && !knownSectionId) {
     return renderMessagingServerSettingsSection({
-      title: "Settings area not found",
+      title: "Workspace area not found",
       subtitle:
-        "The app API did not return this section for the current server.",
+        "The app API did not return this section for the current workspace.",
       badge: "Unavailable",
       actions: `<button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(buildMessagingServerRoute(subroute.scopeType, subroute.scopeId, "/settings"))}">Back to overview</button>`,
-      body: `<div class="shared-messaging-empty">No settings area named ${escapeHtml(selectedSection)} is available.</div>`,
+      body: `<div class="shared-messaging-empty">No workspace area named ${escapeHtml(selectedSection)} is available.</div>`,
     });
   }
   const effectiveSection =
@@ -61749,12 +66246,12 @@ function renderMessagingServerSettingsSectionDetail({
     ? messagingServerSettingsSectionActionRoute(subroute, effectiveSection.id)
     : "";
   return renderMessagingServerSettingsSection({
-    title: effectiveSection.title || humanizeLabel(effectiveSection.id) || "Settings area",
+    title: effectiveSection.title || humanizeLabel(effectiveSection.id) || "Workspace area",
     subtitle:
       effectiveSection.description ||
       (effectiveSection.available
-        ? "Review the controls connected to this settings area."
-        : "This area is listed by the app API but not enabled for this server."),
+        ? "Review the controls connected to this workspace area."
+        : "This area is listed by the app API but not enabled for this workspace."),
     badge: effectiveSection.available
       ? messagingServerSettingsValue(effectiveSection.status, "Ready")
       : "Unavailable",
@@ -61771,7 +66268,7 @@ function renderMessagingServerSettingsSectionDetail({
                 `<div><strong>${escapeHtml(label)}</strong><span>${escapeHtml(label === "Updated" ? messagingRoomTimestampLabel(value, "Not recorded") : messagingServerSettingsValue(value))}</span></div>`,
             )
             .join("")
-        : '<div><strong>Details</strong><span>No extra metadata was returned for this settings area.</span></div>'
+        : '<div><strong>Details</strong><span>No extra metadata was returned for this workspace area.</span></div>'
     }</div>`,
   });
 }
@@ -61910,16 +66407,22 @@ function renderMessagingRoomSettingsBody(
       Number(raw.integrationCount || raw.workflowCount) || integrations.length;
     return `${nav}${hero}
       ${renderMessagingRoomSection({
-        title: "Workflow integrations",
-        subtitle: "Automation and webhook handoffs that are scoped to this room.",
+        title: "Room handoffs",
+        subtitle:
+          "Automations and webhook destinations that act inside this room.",
         badge: `${formatCount(integrationCount)} connected`,
-        actions: `<button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="${escapeHtml(buildMessagingServerRoute(subroute.scopeType, subroute.scopeId, "/workflows"))}">Server workflows</button>`,
+        actions: `<button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="${escapeHtml(buildMessagingServerRoute(subroute.scopeType, subroute.scopeId, "/workflows"))}">Manage automations</button>`,
         body: `
       <div class="shared-messaging-settings-grid">
-        <div><strong>Integrations</strong><span>${escapeHtml(formatCount(integrationCount))}</span></div>
-        <div><strong>Scope</strong><span>${escapeHtml(conversation?.title || "Room")}</span></div>
+        <div><strong>Connected</strong><span>${escapeHtml(formatCount(integrationCount))}</span></div>
+        <div><strong>Room</strong><span>${escapeHtml(conversation?.title || "Room")}</span></div>
       </div>
-      ${renderMessagingLooseCardList(integrations, "No workflow integrations are attached to this room yet.", "Integration")}`,
+      ${renderMessagingLooseCardList(
+        integrations,
+        "No room-specific automations are attached yet.",
+        "Room automation",
+        { icon: "settings", mapEntry: normalizeMessagingAutomationListEntry },
+      )}`,
       })}`;
   }
   const sectionLabel =
@@ -61937,7 +66440,7 @@ function renderMessagingRoomSettingsBody(
     ${sectionLabel
       ? renderMessagingRoomSection({
           title: sectionLabel,
-          subtitle: "Additional room status for this settings area.",
+          subtitle: "Additional room status for this workspace area.",
           badge: messagingRoomNotificationLabel(notificationLevel),
           body: `<div class="shared-messaging-settings-grid">
             <div><strong>Encryption</strong><span>${conversation?.isEncrypted ? "Enabled" : "Off"}</span></div>
@@ -61973,10 +66476,10 @@ function messagingPermissionTargetTitle(subroute, conversation, directory) {
     const category = findMessagingDirectoryCategory(directory, subroute.categoryId);
     return (
       normalizeString(category?.name || category?.title) ||
-      "Category permissions"
+      "Category access"
     );
   }
-  return conversation?.title || "Channel permissions";
+  return conversation?.title || "Room access";
 }
 
 function messagingPermissionBaseRoute(subroute) {
@@ -62153,7 +66656,7 @@ function messagingPermissionSyncStatus(permissionTarget = {}, isCategory = false
       ? "Inherits category defaults"
       : "Custom room rules",
     description: permissionTarget.inheritedFromCategoryId
-      ? "Category defaults apply unless a role override changes them."
+      ? "Category defaults apply unless an access group changes them."
       : "No category inheritance is reported for this room.",
   };
 }
@@ -62213,7 +66716,7 @@ function renderMessagingPermissionValueChoice({
   disabled,
 }) {
   const label =
-    value === "allow" ? "Allow" : value === "deny" ? "Deny" : "Inherit";
+    value === "allow" ? "Allow" : value === "deny" ? "Block" : "Inherit";
   return `<label class="shared-messaging-permission-choice is-${escapeHtml(value)}${selectedValue === value ? " is-selected" : ""}">
     <input type="radio" name="permission:${escapeHtml(permissionKey)}" value="${escapeHtml(value)}"${checkedAttr(selectedValue === value)}${disabledAttr(disabled)} />
     <span>${escapeHtml(label)}</span>
@@ -62264,11 +66767,11 @@ function renderMessagingPermissionRoleDetail({
 }) {
   if (!selectedOverride) {
     const missingCopy = normalizeString(missingRoleId)
-      ? "That role override is no longer available for this target."
-      : "Choose a role override to inspect or edit the exact access members receive.";
+      ? "That access group is no longer available for this target."
+      : "Choose an access group to inspect or edit the exact access members receive.";
     return `<section class="shared-messaging-permission-detail is-empty">
       <div>
-        <h3>Role access detail</h3>
+        <h3>Group access detail</h3>
         <p>${escapeHtml(missingCopy)}</p>
       </div>
     </section>`;
@@ -62306,7 +66809,7 @@ function renderMessagingPermissionRoleDetail({
     <div class="shared-messaging-permission-detail__header">
       <span class="shared-messaging-permission-role__swatch"></span>
       <div>
-        <h3>${escapeHtml(selectedOverride.roleName || selectedOverride.subjectName || selectedOverride.subjectId || "Role override")}</h3>
+        <h3>${escapeHtml(selectedOverride.roleName || selectedOverride.subjectName || selectedOverride.subjectId || "Access group")}</h3>
         <p>${escapeHtml(messagingPermissionOverrideSummary(selectedOverride))}</p>
       </div>
       <span>${escapeHtml(`${formatCount(counts.explicit)} set`)}</span>
@@ -62328,8 +66831,8 @@ function renderMessagingPermissionRoleDetail({
             <input type="hidden" name="roleId" value="${escapeHtml(selectedOverride.subjectId)}" />
             <div class="shared-messaging-permission-editor-form__header">
               <div>
-                <h3>Advanced overrides</h3>
-                <p>${escapeHtml("Set each action to inherit, allow, or deny for this role on this target.")}</p>
+                <h3>Advanced rules</h3>
+                <p>${escapeHtml("Set each action to inherit, allow, or block for this group on this target.")}</p>
               </div>
             </div>
             ${MESSAGING_PERMISSION_GROUPS.map((group) =>
@@ -62343,9 +66846,9 @@ function renderMessagingPermissionRoleDetail({
               ${
                 selectedOverride.isEveryone
                   ? ""
-                  : `<button class="shared-feed-chip" type="button" data-action="messaging-permission-role-remove" data-target-type="${escapeHtml(targetType)}" data-target-id="${escapeHtml(targetId)}" data-role-id="${escapeHtml(selectedOverride.subjectId)}" data-return-route="${escapeHtml(baseRoute)}"${disabledAttr(removePending || savePending)}>${removePending ? "Removing..." : "Remove override"}</button>`
+                  : `<button class="shared-feed-chip" type="button" data-action="messaging-permission-role-remove" data-target-type="${escapeHtml(targetType)}" data-target-id="${escapeHtml(targetId)}" data-role-id="${escapeHtml(selectedOverride.subjectId)}" data-return-route="${escapeHtml(baseRoute)}"${disabledAttr(removePending || savePending)}>${removePending ? "Removing..." : "Remove group access"}</button>`
               }
-              <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(savePending || removePending)}>${savePending ? "Saving..." : "Save overrides"}</button>
+              <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(savePending || removePending)}>${savePending ? "Saving..." : "Save access"}</button>
             </div>
           </form>`
         : ""
@@ -62365,11 +66868,11 @@ function renderMessagingPermissionPrivateControls({
   return `<section class="shared-messaging-permission-basic">
     <div>
       <h3>${escapeHtml(`Private ${targetKind.toLowerCase()}`)}</h3>
-      <p>${escapeHtml(isPrivate ? `Only roles with explicit view access can see this ${targetKind.toLowerCase()}.` : `Default members can inherit visibility for this ${targetKind.toLowerCase()}.`)}</p>
+      <p>${escapeHtml(isPrivate ? `Only selected access groups can see this ${targetKind.toLowerCase()}.` : `Default members can inherit visibility for this ${targetKind.toLowerCase()}.`)}</p>
     </div>
     <div class="shared-messaging-permission-private">
       <button class="shared-feed-chip${isPrivate ? " shared-feed-chip--primary" : ""}" type="button" data-action="messaging-permission-private-toggle" data-target-type="${escapeHtml(targetType)}" data-target-id="${escapeHtml(targetId)}" data-private="true"${disabledAttr(!canManage || privatePending)}>${privatePending && !isPrivate ? "Updating..." : "Private"}</button>
-      <button class="shared-feed-chip${!isPrivate ? " shared-feed-chip--primary" : ""}" type="button" data-action="messaging-permission-private-toggle" data-target-type="${escapeHtml(targetType)}" data-target-id="${escapeHtml(targetId)}" data-private="false"${disabledAttr(!canManage || privatePending)}>${privatePending && isPrivate ? "Updating..." : "Inherited"}</button>
+      <button class="shared-feed-chip${!isPrivate ? " shared-feed-chip--primary" : ""}" type="button" data-action="messaging-permission-private-toggle" data-target-type="${escapeHtml(targetType)}" data-target-id="${escapeHtml(targetId)}" data-private="false"${disabledAttr(!canManage || privatePending)}>${privatePending && isPrivate ? "Updating..." : "Use defaults"}</button>
     </div>
   </section>`;
 }
@@ -62393,7 +66896,7 @@ function renderMessagingPermissionAddRoleForm({
     <input type="hidden" name="targetId" value="${escapeHtml(targetId)}" />
     <input type="hidden" name="roleRouteTemplate" value="${escapeHtml(messagingPermissionOverrideRoute(subroute, { subjectId: "__ROLE_ID__" }))}" />
     <label>
-      <span>Add role override</span>
+      <span>Add access group</span>
       <select name="roleId"${disabledAttr(!canManage || addPending || !availableRoles.length)} data-messaging-permission-role-select>
         ${
           availableRoles.length
@@ -62403,12 +66906,12 @@ function renderMessagingPermissionAddRoleForm({
                     `<option value="${escapeHtml(role.roleId)}">${escapeHtml(role.name)}</option>`,
                 )
                 .join("")
-            : '<option value="">No available roles</option>'
+            : '<option value="">No available groups</option>'
         }
       </select>
     </label>
-    <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(!canManage || addPending || !availableRoles.length)}>${addPending ? "Adding..." : "Add role"}</button>
-    <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(buildMessagingServerRoute(subroute.scopeType, subroute.scopeId, "/roles"))}">Server roles</button>
+    <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(!canManage || addPending || !availableRoles.length)}>${addPending ? "Adding..." : "Add group"}</button>
+    <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(buildMessagingServerRoute(subroute.scopeType, subroute.scopeId, "/roles"))}">All access groups</button>
   </form>`;
 }
 
@@ -62433,7 +66936,7 @@ function renderMessagingPermissionPanel({
       normalizeString(entry.subjectId) === normalizeString(subroute.roleId),
   );
   const isCategory = messagingPermissionTargetIsCategory(subroute);
-  const targetKind = isCategory ? "Category" : "Channel";
+  const targetKind = isCategory ? "Category" : "Room";
   const targetType = messagingPermissionTargetType(subroute);
   const targetId = messagingPermissionTargetId(subroute);
   const baseRoute = messagingPermissionBaseRoute(subroute);
@@ -62462,8 +66965,8 @@ function renderMessagingPermissionPanel({
   const everyoneOverride = overrides.find((entry) => entry.isEveryone);
   const isPrivate = everyoneOverride?.permissions?.viewChannel === "deny";
   const actions = `${!isCategory && canManage
-    ? `<button class="shared-feed-chip shared-feed-chip--primary" data-action="messaging-permission-sync" data-conversation-id="${escapeHtml(subroute.conversationId)}"${disabledAttr(pendingKey === `${targetId}:sync`)}>${pendingKey === `${targetId}:sync` ? "Syncing..." : "Sync from category"}</button>`
-    : ""}<button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(buildMessagingServerRoute(subroute.scopeType, subroute.scopeId, "/roles"))}">Server roles</button>`;
+    ? `<button class="shared-feed-chip shared-feed-chip--primary" data-action="messaging-permission-sync" data-conversation-id="${escapeHtml(subroute.conversationId)}"${disabledAttr(pendingKey === `${targetId}:sync`)}>${pendingKey === `${targetId}:sync` ? "Syncing..." : "Use category defaults"}</button>`
+    : ""}<button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(buildMessagingServerRoute(subroute.scopeType, subroute.scopeId, "/roles"))}">Access groups</button>`;
   const visibleOverrides = overrides.filter((entry) => !entry.isEveryone);
   const overrideRows = visibleOverrides.length
     ? visibleOverrides
@@ -62471,12 +66974,12 @@ function renderMessagingPermissionPanel({
           renderMessagingPermissionRoleCard(entry, subroute, subroute.roleId),
         )
         .join("")
-    : '<div class="shared-messaging-empty">No role-specific overrides are set for this target.</div>';
+    : '<div class="shared-messaging-empty">No group-specific access changes are set for this target.</div>';
   const targetDescription = isCategory
-    ? "Review the category baseline that rooms can inherit from."
-    : "Review the active room access pattern before changing role coverage.";
+    ? "Review the category access pattern that rooms can inherit from."
+    : "Review who can enter this room before changing group access.";
   return renderMessagingWorkspacePanel({
-    title: targetTitle,
+    title: isCategory ? targetTitle : "Room access",
     subtitle: selectedOverride
       ? `${selectedOverride.roleName || selectedOverride.subjectId} access in this ${targetKind.toLowerCase()}.`
       : targetDescription,
@@ -62491,9 +66994,9 @@ function renderMessagingPermissionPanel({
           <p>${escapeHtml(syncStatus.description)}</p>
         </div>
         <div class="shared-messaging-permission-hero__stats">
-          <div><strong>${escapeHtml(formatCount(overrides.length))}</strong><span>role overrides</span></div>
-          <div><strong>${escapeHtml(formatCount(overridesWithExplicit))}</strong><span>customized roles</span></div>
-          <div><strong>${escapeHtml(formatCount(aggregateCounts.deny))}</strong><span>blocked rules</span></div>
+          <div><strong>${escapeHtml(formatCount(overrides.length))}</strong><span>groups</span></div>
+          <div><strong>${escapeHtml(formatCount(overridesWithExplicit))}</strong><span>custom</span></div>
+          <div><strong>${escapeHtml(formatCount(aggregateCounts.deny))}</strong><span>blocked</span></div>
         </div>
       </section>
       <div class="shared-messaging-permission-summary-grid">
@@ -62503,12 +67006,12 @@ function renderMessagingPermissionPanel({
           <small>${escapeHtml(syncStatus.description)}</small>
         </div>
         <div>
-          <strong>Inheritance</strong>
+          <strong>Default source</strong>
           <span>${escapeHtml(inheritedCategoryLabel || (isCategory ? "Baseline source" : "No category source"))}</span>
           <small>${escapeHtml(inheritedCategoryLabel ? "Room defaults come from this category." : isCategory ? "Rooms can use this category as their default." : "This room is not reporting a category default.")}</small>
         </div>
         <div>
-          <strong>Review scope</strong>
+          <strong>Access summary</strong>
           <span>${escapeHtml(`${formatCount(aggregateCounts.allow)} allowed | ${formatCount(aggregateCounts.deny)} blocked`)}</span>
           <small>${escapeHtml(`${formatCount(aggregateCounts.inherit)} inherited settings across listed roles`)}</small>
         </div>
@@ -62534,8 +67037,8 @@ function renderMessagingPermissionPanel({
         <section class="shared-messaging-permission-overrides">
           <div class="shared-messaging-room-group__header">
             <div>
-              <h3>Role overrides</h3>
-              <p>${escapeHtml("Open a role to see exactly which actions change from the baseline.")}</p>
+              <h3>Group access</h3>
+              <p>${escapeHtml("Open a group to see exactly which actions change from the baseline.")}</p>
             </div>
             <span>${escapeHtml(formatCount(overrides.length))}</span>
           </div>
@@ -62588,7 +67091,212 @@ function renderMessagingWorkspaceRequests(items = []) {
     .join("")}</div>`;
 }
 
-function renderMessagingInboxHomePanel({ inbox, requests, servers }) {
+function messagingServiceRealtimeState(messaging) {
+  const connectionState = normalizeString(
+    messaging?.socket?.connectionState,
+  ).toLowerCase();
+  const hasRealtimeUrl = Boolean(
+    normalizeString(messaging?.bootstrap?.wsUrl) ||
+      normalizeString(runtimeConfig.messaging?.wsUrl),
+  );
+  if (!hasRealtimeUrl && messaging?.initialized) {
+    return {
+      label: "Browser mode",
+      copy: "Live refresh is unavailable in this browser session.",
+      tone: "muted",
+    };
+  }
+  if (connectionState === "connected") {
+    return {
+      label: "Live",
+      copy: "Realtime message updates are connected.",
+      tone: "ready",
+    };
+  }
+  return {
+    label: "Connecting",
+    copy: "Messages still load; live updates are reconnecting.",
+    tone: "attention",
+  };
+}
+
+function messagingServiceRecoveryLabel(messaging) {
+  const recovery = messaging?.recovery || {};
+  const status = recovery.status || {};
+  const backupVersion = Number(status.backupVersion) || 0;
+  if (backupVersion || normalizeString(status.status)) {
+    return "Configured";
+  }
+  if (recovery.loading && !recovery.loaded) {
+    return "Checking";
+  }
+  return "Not enrolled";
+}
+
+function renderMessagingInboxCommandCenter({
+  conversations = [],
+  requestItems = [],
+  serverItems = [],
+  messaging = {},
+}) {
+  const unreadCount = messagingWorkspaceUnreadCount(conversations);
+  const realtime = messagingServiceRealtimeState(messaging);
+  const settings = normalizeMessagingAccountSettings(messaging.settings || {});
+  const recoveryLabel = messagingServiceRecoveryLabel(messaging);
+  const currentDeviceId = normalizeString(messaging.device?.currentDeviceId);
+  const deviceCount = (messaging.devices?.items || []).length;
+  const latestConversation = conversations[0];
+  const firstServer = serverItems[0];
+  const firstServerRoute = firstServer
+    ? buildMessagingServerRoute(firstServer.scopeType, firstServer.scopeId)
+    : "/coalitions";
+  const readinessItems = [
+    {
+      label: "Realtime",
+      value: realtime.label,
+      copy: realtime.copy,
+      tone: realtime.tone,
+    },
+    {
+      label: "Inbox",
+      value: unreadCount ? `${formatCount(unreadCount)} unread` : "Clear",
+      copy: conversations.length
+        ? `${formatCount(conversations.length)} active chat${conversations.length === 1 ? "" : "s"}`
+        : "No active chats yet",
+      tone: unreadCount ? "attention" : "ready",
+    },
+    {
+      label: "Requests",
+      value: formatCount(requestItems.length),
+      copy: requestItems.length
+        ? "Review new DMs and workspace invites"
+        : "No requests waiting",
+      tone: requestItems.length ? "attention" : "ready",
+    },
+    {
+      label: "Workspaces",
+      value: formatCount(serverItems.length),
+      copy: serverItems.length
+        ? "Campaign and coalition room servers"
+        : "Join a campaign or coalition for rooms",
+      tone: serverItems.length ? "ready" : "muted",
+    },
+  ];
+  const commandCards = [
+    {
+      icon: "messages",
+      title: "Inbox",
+      detail: unreadCount ? `${formatCount(unreadCount)} unread` : "All caught up",
+      copy: latestConversation
+        ? "Open the latest direct or group conversation."
+        : "Direct and group chats appear here after you start one.",
+      route: latestConversation?.conversationId
+        ? `/messages/conversations/${encodeURIComponent(latestConversation.conversationId)}`
+        : "/messages",
+      action: latestConversation ? "Open latest" : "Open inbox",
+      status: `${formatCount(conversations.length)} chats`,
+      tone: unreadCount ? "attention" : "ready",
+    },
+    {
+      icon: "create",
+      title: "New message",
+      detail: "Direct or group",
+      copy: "Search people, start a private DM, or build a group conversation.",
+      route: "/messages/compose",
+      action: "Compose",
+      status: "People search",
+      tone: "ready",
+    },
+    {
+      icon: "bell",
+      title: "Requests",
+      detail: requestItems.length
+        ? `${formatCount(requestItems.length)} waiting`
+        : "No queue",
+      copy: "Accept workspace invites and decide which message requests land in chat.",
+      route: "/messages/requests",
+      action: "Review",
+      status: requestItems.length ? "Attention" : "Clear",
+      tone: requestItems.length ? "attention" : "ready",
+    },
+    {
+      icon: "team",
+      title: "Room workspaces",
+      detail: serverItems.length
+        ? `${formatCount(serverItems.length)} available`
+        : "Find one",
+      copy: "Open campaign and coalition room servers with categories and access controls.",
+      route: firstServerRoute,
+      action: serverItems.length ? "Open rooms" : "Find coalitions",
+      status: firstServer?.scopeBadge || "Campaigns + coalitions",
+      tone: serverItems.length ? "ready" : "muted",
+    },
+    {
+      icon: "shield",
+      title: "Privacy",
+      detail: messagingChoiceLabel(
+        MESSAGING_DM_PRIVACY_OPTIONS,
+        settings.dmPrivacy,
+        "Default",
+      ),
+      copy: "Tune who can DM you, receipts, typing indicators, presence, and quiet hours.",
+      route: "/messages/settings",
+      action: "Tune defaults",
+      status: settings.readReceiptsEnabled ? "Receipts on" : "Receipts off",
+      tone: "ready",
+    },
+    {
+      icon: "dashboard",
+      title: "Trusted devices",
+      detail: currentDeviceId ? "This browser linked" : "Browser pending",
+      copy: "Review active devices, revoke stale sessions, or approve another device.",
+      route: "/messages/devices",
+      action: "Manage",
+      status: deviceCount ? `${formatCount(deviceCount)} devices` : "Device center",
+      tone: currentDeviceId ? "ready" : "attention",
+    },
+    {
+      icon: "lock",
+      title: "Recovery",
+      detail: recoveryLabel,
+      copy: "Protect conversation keys and keep encrypted history recoverable.",
+      route: "/messages/recovery",
+      action: recoveryLabel === "Configured" ? "Verify" : "Enroll",
+      status: recoveryLabel === "Configured" ? "Protected" : "Needs setup",
+      tone: recoveryLabel === "Configured" ? "ready" : "attention",
+    },
+    {
+      icon: "settings",
+      title: "Security activity",
+      detail: messaging.security?.loaded ? "Recent events" : "Activity log",
+      copy: "Review device, recovery, and messaging security events from the web.",
+      route: "/messages/security",
+      action: "Review",
+      status: messaging.security?.items?.length
+        ? `${formatCount(messaging.security.items.length)} events`
+        : "No alerts",
+      tone: "ready",
+    },
+  ];
+  return `<section class="shared-messaging-service-center" aria-label="Messaging service command center">
+    <div class="shared-messaging-service-center__header">
+      <div>
+        <span>Service center</span>
+        <h3>Messaging is ready to work like a real inbox.</h3>
+        <p>Jump between chats, requests, campaign and coalition rooms, privacy, devices, recovery, and security without leaving the web app.</p>
+      </div>
+      <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="/messages/compose">${renderIcon("create")} New message</button>
+    </div>
+    <div class="shared-messaging-readiness-strip">
+      ${readinessItems.map(renderMessagingServerReadinessItem).join("")}
+    </div>
+    <div class="shared-messaging-command-grid shared-messaging-command-grid--service">
+      ${commandCards.map(renderMessagingServerCommandCard).join("")}
+    </div>
+  </section>`;
+}
+
+function renderMessagingInboxHomePanel({ inbox, requests, servers, messaging }) {
   const conversations = inbox.items || [];
   const requestItems = requests.items || [];
   const serverItems = servers.items || [];
@@ -62681,12 +67389,18 @@ function renderMessagingInboxHomePanel({ inbox, requests, servers }) {
             : ""
         }
       </section>
+      ${renderMessagingInboxCommandCenter({
+        conversations,
+        requestItems,
+        serverItems,
+        messaging,
+      })}
       <section class="shared-messaging-room-group">
         <h3>Recent</h3>
         ${recentMarkup}
       </section>
       <section class="shared-messaging-room-group">
-        <h3>Servers</h3>
+        <h3>Workspaces</h3>
         ${serverMarkup}
       </section>`,
   });
@@ -62899,21 +67613,434 @@ function messagingMessageStatusLabel(message, isSelf) {
   return "";
 }
 
+function messagingMessageSnapshot(message = {}) {
+  const snapshot =
+    message.snapshot && typeof message.snapshot === "object"
+      ? message.snapshot
+      : message.raw?.snapshot && typeof message.raw.snapshot === "object"
+        ? message.raw.snapshot
+        : {};
+  return snapshot || {};
+}
+
+function messagingMessagePostId(message = {}) {
+  const snapshot = messagingMessageSnapshot(message);
+  return normalizeString(
+    message.postId ||
+      snapshot.postId ||
+      message.raw?.postId ||
+      (message.raw?.missionId ? `mission:${message.raw.missionId}` : ""),
+  );
+}
+
+function messagingMissionIdFromMessage(message = {}) {
+  const postId = messagingMessagePostId(message);
+  if (postId.toLowerCase().startsWith("mission:")) {
+    return postId.slice("mission:".length);
+  }
+  return normalizeString(message.raw?.missionId || message.raw?.id);
+}
+
+function messagingMessageCardDate(value) {
+  const timestamp = Number(value) || Date.parse(value || "");
+  return Number.isFinite(timestamp) && timestamp > 0
+    ? formatAbsoluteDateTime(timestamp)
+    : "";
+}
+
+function messagingMessageImageAlt(label, fallback = "Message media") {
+  return normalizeString(label || fallback).slice(0, 140) || fallback;
+}
+
+function messagingAttachmentType(attachment = {}) {
+  const contentType = inferMessagingAttachmentMimeType(
+    attachment.contentType,
+    attachment.fileName || attachment.url,
+  ).toLowerCase();
+  if (contentType.startsWith("image/")) return "image";
+  if (contentType.startsWith("video/")) return "video";
+  return contentType ? "file" : "";
+}
+
+function renderMessagingMessageMediaPreview({
+  url = "",
+  thumbnailUrl = "",
+  contentType = "",
+  label = "",
+  detail = "",
+  className = "",
+} = {}) {
+  const mediaUrl = normalizeUrl(url);
+  const posterUrl = normalizeUrl(thumbnailUrl);
+  const mimeType = normalizeString(contentType).toLowerCase();
+  const mediaKind =
+    mimeType.startsWith("video/")
+      ? "video"
+      : mimeType.startsWith("image/")
+        ? "image"
+        : "";
+  if (!mediaUrl && !posterUrl) {
+    return "";
+  }
+  const normalizedClassName = normalizeString(className);
+  const caption = [label, detail].map(normalizeString).filter(Boolean).join(" - ");
+  if (mediaKind === "video" && mediaUrl) {
+    return `<figure class="shared-message-media${normalizedClassName ? ` ${escapeHtml(normalizedClassName)}` : ""}">
+      <video controls preload="metadata"${posterUrl ? ` poster="${escapeHtml(posterUrl)}"` : ""} src="${escapeHtml(mediaUrl)}"></video>
+      ${caption ? `<figcaption>${escapeHtml(caption)}</figcaption>` : ""}
+    </figure>`;
+  }
+  const imageUrl = posterUrl || mediaUrl;
+  return `<figure class="shared-message-media${normalizedClassName ? ` ${escapeHtml(normalizedClassName)}` : ""}">
+    <img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(messagingMessageImageAlt(label))}" loading="lazy" />
+    ${caption ? `<figcaption>${escapeHtml(caption)}</figcaption>` : ""}
+  </figure>`;
+}
+
 function renderMessagingMessageAttachments(message) {
   if (!message.attachments?.length) {
     return "";
   }
   return `<div class="shared-message-attachments">${message.attachments
     .map((attachment) => {
-      const contentType = normalizeString(attachment.contentType);
+      const contentType = inferMessagingAttachmentMimeType(
+        attachment.contentType,
+        attachment.fileName || attachment.url,
+      );
       const fileLabel = normalizeString(attachment.fileName) || "Attachment";
-      const detail = contentType ? `<small>${escapeHtml(contentType)}</small>` : "";
-      const inner = `${renderIcon("file")}<span><strong>${escapeHtml(fileLabel)}</strong>${detail}</span>`;
+      const fileSize = attachment.size ? formatComposerFileSize(attachment.size) : "";
+      const detailText = [contentType, fileSize].filter(Boolean).join(" - ");
+      const mediaType = messagingAttachmentType({
+        ...attachment,
+        contentType,
+      });
+      if (attachment.url && (mediaType === "image" || mediaType === "video")) {
+        return renderMessagingMessageMediaPreview({
+          url: attachment.url,
+          thumbnailUrl: attachment.thumbnailUrl,
+          contentType,
+          label: fileLabel,
+          detail: detailText,
+        });
+      }
+      const detail = detailText ? `<small>${escapeHtml(detailText)}</small>` : "";
+      const inner = `${renderIcon(mediaType === "video" ? "video" : "file")}<span><strong>${escapeHtml(fileLabel)}</strong>${detail}</span>`;
       return attachment.url
         ? `<a href="${escapeHtml(attachment.url)}" target="_blank" rel="noopener noreferrer">${inner}</a>`
         : `<span>${inner}</span>`;
     })
     .join("")}</div>`;
+}
+
+function messagingSharePreviewMedia(message = {}) {
+  const snapshot = messagingMessageSnapshot(message);
+  const previewVideoUrl = normalizeUrl(
+    snapshot.previewVideoUrl ||
+      snapshot.playbackUrl ||
+      snapshot.videoUrl ||
+      snapshot.mediaUrl,
+  );
+  const previewMediaThumbnail = normalizeUrl(
+    snapshot.previewMediaThumbnail ||
+      snapshot.thumbnailUrl ||
+      snapshot.imageUrl ||
+      snapshot.mediaThumbnailUrl,
+  );
+  const mediaType = normalizeString(snapshot.mediaType).toLowerCase();
+  const contentType =
+    mediaType === "video" || previewVideoUrl
+      ? "video/mp4"
+      : previewMediaThumbnail
+        ? "image/jpeg"
+        : "";
+  return {
+    url: previewVideoUrl || previewMediaThumbnail,
+    thumbnailUrl: previewMediaThumbnail,
+    contentType,
+  };
+}
+
+function renderMessagingPostShareCard(message) {
+  const snapshot = messagingMessageSnapshot(message);
+  const postId = messagingMessagePostId(message);
+  const title =
+    normalizeString(snapshot.previewTitle) ||
+    normalizeString(snapshot.authorDisplayName) ||
+    "Shared post";
+  const preview = normalizeString(snapshot.previewText || message.text);
+  const author =
+    normalizeString(snapshot.authorDisplayName || snapshot.authorUsername) ||
+    "Polis";
+  const media = messagingSharePreviewMedia(message);
+  const route = postId ? `/posts/${encodeURIComponent(postId)}` : "";
+  const canonicalUrl = normalizeUrl(snapshot.canonicalUrl);
+  const actionMarkup = route
+    ? `<button class="shared-message-rich-card__action" type="button" data-action="navigate" data-route="${escapeHtml(route)}">Open post</button>`
+    : canonicalUrl
+      ? `<a class="shared-message-rich-card__action" href="${escapeHtml(canonicalUrl)}" target="_blank" rel="noopener noreferrer">Open post</a>`
+      : "";
+  return `<article class="shared-message-rich-card shared-message-rich-card--post">
+    ${renderMessagingMessageMediaPreview({
+      ...media,
+      label: title,
+      className: "shared-message-media--card",
+    })}
+    <div class="shared-message-rich-card__body">
+      <div class="shared-message-rich-card__eyebrow">${renderIcon("share")}<span>${escapeHtml(author)}</span></div>
+      <h3>${escapeHtml(title)}</h3>
+      ${preview ? `<p>${escapeHtml(preview)}</p>` : ""}
+      ${actionMarkup ? `<div class="shared-message-rich-card__actions">${actionMarkup}</div>` : ""}
+    </div>
+  </article>`;
+}
+
+function messagingMissionStatusLabel(value = "") {
+  const normalized = normalizeString(value).toLowerCase();
+  if (!normalized) return "";
+  const labels = {
+    needs_changes: "Needs changes",
+    submitted: "Submitted",
+    active: "Active",
+    queued: "Queued",
+    blocked: "Blocked",
+    completed: "Completed",
+    approved: "Completed",
+    failed: "Failed",
+    canceled: "Canceled",
+  };
+  return labels[normalized] || humanizeLabel(normalized);
+}
+
+function renderMessagingMissionChip({ icon = "mission", label = "", emphasized = false } = {}) {
+  const normalizedLabel = normalizeString(label);
+  if (!normalizedLabel) {
+    return "";
+  }
+  return `<span class="shared-message-mission-chip${emphasized ? " is-emphasized" : ""}">${renderIcon(icon)}${escapeHtml(normalizedLabel)}</span>`;
+}
+
+function renderMessagingMissionActionButton({
+  mission,
+  job,
+  action,
+  label = "",
+  icon = "mission",
+  primary = false,
+  disabled = false,
+}) {
+  const normalizedAction = normalizeString(action).toLowerCase();
+  const pendingKey = missionJobActionPendingKey(
+    mission.missionId,
+    job.jobId,
+    normalizedAction,
+  );
+  const currentPending =
+    state.pages.messaging.conversation.missionActionPendingKey;
+  const pending = currentPending === pendingKey;
+  const config = missionJobActionConfig(normalizedAction, job);
+  return `<button class="shared-message-rich-card__action${primary ? " is-primary" : ""}" type="button" data-action="messaging-mission-job-action-run" data-mission-id="${escapeHtml(mission.missionId)}" data-job-id="${escapeHtml(job.jobId)}" data-job-action="${escapeHtml(normalizedAction)}"${disabledAttr(disabled || Boolean(currentPending && !pending) || pending)}>${renderIcon(icon)}<span>${escapeHtml(pending ? "Updating..." : label || config.label)}</span></button>`;
+}
+
+function renderMessagingMissionLifecycle(message, mission, route) {
+  const job = missionNextJob(mission);
+  const actions = [];
+  let helper = "";
+
+  if (!job) {
+    return route
+      ? `<div class="shared-message-rich-card__actions"><button class="shared-message-rich-card__action" type="button" data-action="navigate" data-route="${escapeHtml(route)}">${renderIcon("mission")}<span>Open mission</span></button></div>`
+      : "";
+  }
+
+  const isMine = missionJobIsMine(job);
+  const canWorkJob =
+    isMine && !job.isQueued && !job.isClosed && job.status !== "submitted";
+  const completionBlocker = missionJobCompletionBlocker(job);
+  const requiresNote = missionJobHasRequiredNote(job);
+
+  if (job.isClaimable) {
+    actions.push(
+      renderMessagingMissionActionButton({
+        mission,
+        job,
+        action: "claim",
+        icon: "check",
+        primary: true,
+      }),
+    );
+  }
+
+  if (canWorkJob && !job.isBlocked) {
+    if (
+      ["active", "late", "needs_changes"].includes(job.status) &&
+      !job.lastStartedAt
+    ) {
+      actions.push(
+        renderMessagingMissionActionButton({
+          mission,
+          job,
+          action: "start",
+          icon: "play",
+        }),
+      );
+    }
+    const completionAction = missionJobRequiresApproval(job)
+      ? "submit"
+      : "complete";
+    if (!completionBlocker && !requiresNote) {
+      actions.push(
+        renderMessagingMissionActionButton({
+          mission,
+          job,
+          action: completionAction,
+          icon: "check",
+          primary: true,
+        }),
+      );
+    }
+  }
+
+  if (route) {
+    actions.push(
+      `<button class="shared-message-rich-card__action" type="button" data-action="navigate" data-route="${escapeHtml(route)}">${renderIcon("mission")}<span>Open mission</span></button>`,
+    );
+  }
+
+  if (completionBlocker) {
+    helper = completionBlocker;
+  } else if (requiresNote && canWorkJob) {
+    helper = "Open mission to submit with the required note.";
+  } else if (job.isBlocked) {
+    helper = "This task is blocked and needs review.";
+  } else if (job.status === "submitted") {
+    helper = "Submitted and waiting for review.";
+  }
+
+  const meta = [
+    missionJobOwnerLabel(job),
+    job.dueAt ? `Due ${messagingMessageCardDate(job.dueAt)}` : "",
+    mission.jobs.length
+      ? `${formatCount(mission.completedCount)} of ${formatCount(mission.jobs.length)} tasks`
+      : "",
+  ].filter(Boolean);
+
+  return `<div class="shared-message-mission-work">
+    <div class="shared-message-mission-work__top">
+      <div>
+        <span>Next task</span>
+        <strong>${escapeHtml(job.title)}</strong>
+      </div>
+      <span class="shared-message-mission-status">${escapeHtml(messagingMissionStatusLabel(job.status))}</span>
+    </div>
+    ${meta.length ? `<div class="shared-message-mission-work__meta">${meta.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>` : ""}
+    ${actions.length ? `<div class="shared-message-mission-work__actions">${actions.join("")}</div>` : ""}
+    ${helper ? `<p class="shared-message-mission-work__helper">${escapeHtml(helper)}</p>` : ""}
+  </div>`;
+}
+
+function renderMessagingMissionCard(message) {
+  const snapshot = messagingMessageSnapshot(message);
+  const mission = messagingMissionFromMessage(message);
+  const missionId = messagingMissionIdFromMessage(message);
+  const title =
+    normalizeString(snapshot.previewTitle || mission.title || message.raw?.title) ||
+    "Mission assigned";
+  const preview =
+    normalizeString(snapshot.previewText || message.raw?.previewText || message.text);
+  const priority = normalizeString(snapshot.priority || message.raw?.priority);
+  const status = normalizeString(snapshot.status || message.raw?.status);
+  const dueAt = Number(snapshot.dueAt || message.raw?.dueAt || snapshot.postTimestamp) || 0;
+  const dueLabel = dueAt ? messagingMessageCardDate(dueAt) : "";
+  const route = missionId ? `/missions/${encodeURIComponent(missionId)}` : "";
+  const priorityLabel = priority ? humanizeLabel(priority) : "";
+  const chips = [
+    renderMessagingMissionChip({
+      icon: priority && ["urgent", "high"].includes(priority.toLowerCase()) ? "flag" : "mission",
+      label: priorityLabel,
+      emphasized: ["urgent", "high"].includes(priority.toLowerCase()),
+    }),
+    renderMessagingMissionChip({
+      icon: "check",
+      label: messagingMissionStatusLabel(status),
+    }),
+    renderMessagingMissionChip({
+      icon: "calendar",
+      label: dueLabel ? `Due ${dueLabel}` : "",
+      emphasized: Boolean(dueAt && dueAt <= Date.now() + 24 * 60 * 60 * 1000),
+    }),
+  ].join("");
+  return `<article class="shared-message-rich-card shared-message-rich-card--mission">
+    <div class="shared-message-rich-card__icon">${renderIcon("mission")}</div>
+    <div class="shared-message-rich-card__body">
+      <div class="shared-message-rich-card__eyebrow"><span>Mission</span></div>
+      <h3>${escapeHtml(title)}</h3>
+      ${preview ? `<p>${escapeHtml(preview)}</p>` : ""}
+      ${chips ? `<div class="shared-message-mission-chips">${chips}</div>` : ""}
+      ${renderMessagingMissionLifecycle(message, mission, route)}
+    </div>
+  </article>`;
+}
+
+function renderMessagingMentionedText(message) {
+  const text = normalizeString(message.text);
+  if (!text) {
+    return "";
+  }
+  const mentions = (message.mentions || [])
+    .filter(
+      (mention) =>
+        Number.isFinite(Number(mention.start)) &&
+        Number.isFinite(Number(mention.end)) &&
+        Number(mention.end) > Number(mention.start) &&
+        Number(mention.start) >= 0 &&
+        Number(mention.end) <= text.length,
+    )
+    .sort((left, right) => Number(left.start) - Number(right.start));
+  if (!mentions.length) {
+    return `<p>${escapeHtml(text)}</p>`;
+  }
+  let cursor = 0;
+  const parts = [];
+  mentions.forEach((mention) => {
+    const start = Number(mention.start);
+    const end = Number(mention.end);
+    if (start < cursor) {
+      return;
+    }
+    if (start > cursor) {
+      parts.push(escapeHtml(text.slice(cursor, start)));
+    }
+    const mentionText =
+      text.slice(start, end) ||
+      normalizeString(mention.displayName || mention.username) ||
+      "mention";
+    const userId = normalizeString(mention.userId);
+    const route = userId ? `/profile/${encodeURIComponent(userId)}` : "";
+    parts.push(
+      route
+        ? `<button class="shared-message-mention" type="button" data-action="navigate" data-route="${escapeHtml(route)}">${escapeHtml(mentionText)}</button>`
+        : `<span class="shared-message-mention">${escapeHtml(mentionText)}</span>`,
+    );
+    cursor = end;
+  });
+  if (cursor < text.length) {
+    parts.push(escapeHtml(text.slice(cursor)));
+  }
+  return `<p>${parts.join("")}</p>`;
+}
+
+function renderMessagingMessageBody(message) {
+  const type = normalizeString(message.type || "text").toLowerCase();
+  if (message.isDeleted) {
+    return "<p>Message deleted.</p>";
+  }
+  if (type === "mission_card") {
+    return renderMessagingMissionCard(message);
+  }
+  if (type === "post_share") {
+    return renderMessagingPostShareCard(message);
+  }
+  return renderMessagingMentionedText(message);
 }
 
 function renderMessagingAttachmentMimeOptions(selectedMimeType) {
@@ -62992,6 +68119,94 @@ function renderMessagingComposerAttachmentEditor(conversationState, disabled) {
   </div>`;
 }
 
+function renderMessagingComposerMissionDraft(conversationState, conversation) {
+  const draft = conversationState.missionDraft || createMessagingMissionDraftState();
+  const scope = messagingMissionScopeForConversation(conversation);
+  const pending = draft.pending === true;
+  const priorityKey = normalizeString(draft.priority).toLowerCase() || "normal";
+  const targetModeKey =
+    normalizeString(draft.targetMode).toLowerCase() || "user";
+  const deadlineModeKey =
+    normalizeString(draft.deadlineMode).toLowerCase() || "indefinite";
+  const timeoutPolicyKey =
+    normalizeString(draft.timeoutPolicy).toLowerCase() || "escalate";
+  const commandLabel = normalizeString(draft.command) || "/mission";
+  const scopeLabel = scope
+    ? `${humanizeLabel(scope.scopeType) || "Mission"} workspace`
+    : "Mission workspace";
+  return `<section class="shared-messaging-mission-draft" data-messaging-mission-draft>
+    <input type="hidden" name="presetKey" value="${escapeHtml(draft.presetKey || "general")}" />
+    <input type="hidden" name="sourceExcerpt" value="${escapeHtml(draft.sourceExcerpt || "")}" />
+    <div class="shared-messaging-mission-draft__header">
+      <span>${renderIcon("mission")}</span>
+      <div>
+        <strong>Create mission from chat</strong>
+        <small>${escapeHtml(`${commandLabel} - ${scopeLabel}. A mission card posts after publishing.`)}</small>
+      </div>
+      <button class="shared-feed-chip" type="button" data-action="messaging-mission-cancel"${disabledAttr(pending)}>Cancel</button>
+    </div>
+    <div class="shared-messaging-mission-draft__grid">
+      <label class="is-wide">
+        <span>Mission objective</span>
+        <input name="title" data-messaging-mission-field="title" value="${escapeHtml(draft.title || "")}" placeholder="Follow up with field volunteers"${disabledAttr(pending)} required />
+      </label>
+      <label>
+        <span>Lead owner</span>
+        <input name="assignee" data-messaging-mission-field="assignee" value="${escapeHtml(draft.assignee || "")}" placeholder="User id, all, or role key"${disabledAttr(pending)} required />
+      </label>
+      <label>
+        <span>Target</span>
+        <select name="targetMode" data-messaging-mission-field="targetMode"${disabledAttr(pending)}>
+          <option value="user"${selectedAttr(targetModeKey === "user")}>Specific user</option>
+          <option value="role_claim"${selectedAttr(targetModeKey === "role_claim")}>Role can claim</option>
+          <option value="role_fanout"${selectedAttr(targetModeKey === "role_fanout")}>Fan out to role</option>
+        </select>
+      </label>
+      <label>
+        <span>Priority</span>
+        <select name="priority" data-messaging-mission-field="priority"${disabledAttr(pending)}>
+          ${["low", "normal", "high", "urgent"]
+            .map(
+              (priority) =>
+                `<option value="${escapeHtml(priority)}"${selectedAttr(priority === priorityKey)}>${escapeHtml(humanizeLabel(priority))}</option>`,
+            )
+            .join("")}
+        </select>
+      </label>
+      <label>
+        <span>Deadline</span>
+        <select name="deadlineMode" data-messaging-mission-field="deadlineMode"${disabledAttr(pending)}>
+          <option value="indefinite"${selectedAttr(deadlineModeKey === "indefinite")}>No deadline</option>
+          <option value="due_at"${selectedAttr(deadlineModeKey === "due_at")}>Due in hours</option>
+          <option value="duration_after_activation"${selectedAttr(deadlineModeKey === "duration_after_activation")}>Hours after activation</option>
+        </select>
+      </label>
+      <label>
+        <span>Hours</span>
+        <input name="dueHours" data-messaging-mission-field="dueHours" type="number" min="0" step="1" value="${escapeHtml(draft.dueHours || "")}" placeholder="48"${disabledAttr(pending)} />
+      </label>
+      <label>
+        <span>Timeout</span>
+        <select name="timeoutPolicy" data-messaging-mission-field="timeoutPolicy"${disabledAttr(pending)}>
+          <option value="escalate"${selectedAttr(timeoutPolicyKey === "escalate")}>Escalate</option>
+          <option value="none"${selectedAttr(timeoutPolicyKey === "none")}>None</option>
+          <option value="auto_unassign"${selectedAttr(timeoutPolicyKey === "auto_unassign")}>Auto-unassign</option>
+          <option value="auto_fail"${selectedAttr(timeoutPolicyKey === "auto_fail")}>Auto-fail</option>
+        </select>
+      </label>
+      <label class="is-wide">
+        <span>Context</span>
+        <textarea name="description" data-messaging-mission-field="description" rows="3" placeholder="What should the assignee know before starting?"${disabledAttr(pending)}>${escapeHtml(draft.description || "")}</textarea>
+      </label>
+    </div>
+    ${draft.error ? `<div class="shared-page__error">${escapeHtml(draft.error)}</div>` : ""}
+    <div class="shared-messaging-mission-draft__footer">
+      <span>${escapeHtml(missionPresetForKey(draft.presetKey || "general").label)}</span>
+      <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(pending)}>${pending ? "Publishing..." : "Create mission"}</button>
+    </div>
+  </section>`;
+}
+
 function renderMessagingMessageReactions(message, { conversationId = "" } = {}) {
   if (!message?.messageId || message.isDeleted) {
     return "";
@@ -63064,6 +68279,59 @@ function renderMessagingMessageActions(
         ? `<button class="shared-message-action shared-message-action--warning" type="button" data-action="messaging-message-report" data-conversation-id="${escapeHtml(conversationId || message.conversationId)}" data-message-id="${escapeHtml(message.messageId)}"${disabledAttr(pendingKey === `report:${message.messageId}`)} aria-label="Report message">${renderIcon("flag")}<span>${pendingKey === `report:${message.messageId}` ? "Reporting" : "Report"}</span></button>`
         : ""
     }
+  </div>`;
+}
+
+function renderMessagingSeenByStatus(message, { isSelf = false } = {}) {
+  if (!isSelf || message?.isDeleted) {
+    return "";
+  }
+  const currentUserId = currentMessagingUserId();
+  const seenBy = (message.seenBy || [])
+    .filter((viewer) => {
+      const viewerId = normalizeString(viewer.userId);
+      return !viewerId || viewerId !== currentUserId;
+    })
+    .filter(
+      (viewer, index, items) =>
+        index ===
+        items.findIndex(
+          (item) =>
+            normalizeString(item.userId) === normalizeString(viewer.userId) &&
+            normalizeString(item.displayName) ===
+              normalizeString(viewer.displayName),
+        ),
+    );
+  if (!seenBy.length) {
+    return "";
+  }
+  const visible = seenBy.slice(0, 3);
+  const extraCount = Math.max(0, seenBy.length - visible.length);
+  const label = `Seen by ${seenBy
+    .map((viewer) => normalizeString(viewer.displayName) || "Polis user")
+    .slice(0, 4)
+    .join(", ")}${seenBy.length > 4 ? ` and ${formatCount(seenBy.length - 4)} more` : ""}`;
+  const latestSeenAt = seenBy.reduce((latest, viewer) => {
+    const seenAt = Number(viewer.seenAt) || 0;
+    return seenAt > latest ? seenAt : latest;
+  }, 0);
+  return `<div class="shared-message-seen" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}">
+    <span>${escapeHtml(latestSeenAt ? `Seen ${formatAbsoluteDateTime(latestSeenAt)}` : "Seen")}</span>
+    <div class="shared-message-seen__avatars" aria-hidden="true">
+      ${visible
+        .map((viewer) => {
+          const displayName =
+            normalizeString(viewer.displayName) ||
+            normalizeString(viewer.username) ||
+            "Polis user";
+          const avatarUrl = normalizeUrl(viewer.avatarUrl);
+          return `<span class="shared-message-seen__avatar">
+            ${avatarUrl ? `<img src="${escapeHtml(avatarUrl)}" alt="" loading="lazy" />` : `<strong>${escapeHtml(messagingWorkspaceInitial(displayName))}</strong>`}
+          </span>`;
+        })
+        .join("")}
+      ${extraCount ? `<span class="shared-message-seen__avatar shared-message-seen__avatar--more">+${escapeHtml(formatCount(extraCount))}</span>` : ""}
+    </div>
   </div>`;
 }
 
@@ -63205,7 +68473,7 @@ function renderMessagingRoomContextPanel({
         className: "shared-messaging-avatar--server-card",
       })}
       <div>
-        <p>${escapeHtml(messagingRoomSettingValue(subroute.scopeType, "Server"))}</p>
+        <p>${escapeHtml(messagingRoomSettingValue(subroute.scopeType, "Workspace"))}</p>
         <h3>${escapeHtml(messagingConversationDisplayTitle(conversation, currentMessagingUserId()))}</h3>
         <span>${escapeHtml(messagingConversationDisplaySubtitle(conversation, currentMessagingUserId()))}</span>
       </div>
@@ -63220,8 +68488,8 @@ function renderMessagingRoomContextPanel({
     </section>
     <section class="shared-messaging-room-context__actions">
       <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="${escapeHtml(buildMessagingRoomRoute(subroute.scopeType, subroute.scopeId, subroute.conversationId, "/settings"))}">Room settings</button>
-      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(buildMessagingRoomRoute(subroute.scopeType, subroute.scopeId, subroute.conversationId, "/settings/permissions"))}">Permissions</button>
-      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(buildMessagingServerRoute(subroute.scopeType, subroute.scopeId, "/members"))}">Server members</button>
+      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(buildMessagingRoomRoute(subroute.scopeType, subroute.scopeId, subroute.conversationId, "/settings/permissions"))}">Access</button>
+      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(buildMessagingServerRoute(subroute.scopeType, subroute.scopeId, "/members"))}">Members</button>
       <button class="shared-feed-chip" type="button" data-action="refresh-current-route">Refresh</button>
     </section>
     <section class="shared-messaging-room-context__members">
@@ -63313,14 +68581,19 @@ function renderMessagingThreadMessage(
   message,
   { isSelf, compact, conversationId = "" } = {},
 ) {
+  const type = normalizeString(message.type || "text").toLowerCase();
+  if (type === "system") {
+    const systemText = normalizeString(message.text);
+    if (!systemText) {
+      return "";
+    }
+    return `<article class="shared-message-system" data-message-id="${escapeHtml(message.messageId)}"><span>${escapeHtml(systemText)}</span></article>`;
+  }
   const label = normalizeString(message.senderDisplayName) || "Polis user";
   const statusLabel = messagingMessageStatusLabel(message, isSelf);
   const timestampLabel = message.createdAt
     ? formatAbsoluteDateTime(message.createdAt)
     : "";
-  const messageText = normalizeString(
-    message.isDeleted ? "Message deleted." : message.text,
-  );
   const statePills = [
     statusLabel,
     !statusLabel && message.isEdited ? "Edited" : "",
@@ -63352,13 +68625,1281 @@ function renderMessagingThreadMessage(
             </div>`
       }
       ${renderMessagingReplyPreviewBlock(message.replyTo)}
-      ${messageText ? `<p>${escapeHtml(messageText)}</p>` : ""}
+      ${renderMessagingMessageBody(message)}
       ${renderMessagingMessageAttachments(message)}
       ${statePills ? `<div class="shared-message__footer">${statePills}</div>` : ""}
+      ${renderMessagingSeenByStatus(message, { isSelf })}
       ${renderMessagingMessageActions(message, { conversationId, isSelf })}
       ${renderMessagingMessageReactions(message, { conversationId })}
     </div>
   </article>`;
+}
+
+function messagingConversationIsGroup(conversation = {}) {
+  const kind = normalizeString(conversation.kind).toLowerCase();
+  const raw = conversation.raw || {};
+  return (
+    kind === "group" ||
+    raw.isGroup === true ||
+    raw.group === true ||
+    Number(conversation.participantCount) > 2
+  );
+}
+
+function messagingGroupCanManage(conversation = {}, currentUserId = "") {
+  if (!messagingConversationIsGroup(conversation)) {
+    return false;
+  }
+  const raw = conversation.raw || {};
+  if (conversation.isReadOnly || raw.isReadOnly === true || raw.readOnly === true) {
+    return false;
+  }
+  if (
+    conversation.canManage ||
+    conversation.canManageMembers ||
+    raw.canManage === true ||
+    raw.canManageMembers === true ||
+    raw.canManageGroup === true
+  ) {
+    return true;
+  }
+  const normalizedCurrentUserId = normalizeString(currentUserId);
+  const participant = (conversation.participants || []).find(
+    (item) => normalizeString(item.userId) === normalizedCurrentUserId,
+  );
+  const role = normalizeString(
+    participant?.role ||
+      participant?.raw?.role ||
+      participant?.raw?.memberRole ||
+      participant?.raw?.groupRole ||
+      participant?.raw?.membershipRole,
+  ).toLowerCase();
+  return ["owner", "admin", "manager", "moderator"].includes(role);
+}
+
+function messagingConversationIsRoom(conversation = {}) {
+  const kind = normalizeString(conversation.kind).toLowerCase();
+  return kind === "room" || Boolean(conversation.scopeType && conversation.scopeId);
+}
+
+function messagingRoomPermissionAllowed(conversation = {}, key = "") {
+  const normalizedKey = normalizeString(key);
+  if (!normalizedKey) {
+    return true;
+  }
+  const permissions =
+    conversation?.roomPermissions &&
+    typeof conversation.roomPermissions === "object" &&
+    !Array.isArray(conversation.roomPermissions)
+      ? conversation.roomPermissions
+      : {};
+  return permissions[normalizedKey] !== false;
+}
+
+function messagingMissionScopeForConversation(conversation = {}) {
+  if (!messagingConversationIsRoom(conversation)) {
+    return null;
+  }
+  const scopeType = normalizeString(conversation.scopeType).toLowerCase();
+  const scopeId = normalizeString(conversation.scopeId);
+  if (!scopeId) {
+    return null;
+  }
+  if (scopeType === "candidate" || scopeType === "campaign") {
+    return { scopeType: "candidate", scopeId };
+  }
+  if (scopeType === "coalition") {
+    return { scopeType: "coalition", scopeId };
+  }
+  return null;
+}
+
+function messagingCanUseMissionCommands(conversation = {}) {
+  return Boolean(
+    messagingMissionScopeForConversation(conversation) &&
+      messagingRoomPermissionAllowed(conversation, "useMissionCommands"),
+  );
+}
+
+function parseMessagingMissionCommand(text) {
+  const trimmed = normalizeString(text);
+  if (!trimmed.startsWith("/")) {
+    return null;
+  }
+  const [commandPart = ""] = trimmed.split(/\s+/u);
+  const command = commandPart.toLowerCase();
+  if (!MESSAGING_MISSION_COMMANDS.some((entry) => entry.command === command)) {
+    return null;
+  }
+  const body = trimmed.slice(commandPart.length).trim();
+  const priorityMatch = MESSAGING_MISSION_PRIORITY_PATTERN.exec(body);
+  const priority = normalizeString(priorityMatch?.[1]).toLowerCase();
+  const withoutPriority = body.replace(
+    MESSAGING_MISSION_PRIORITY_PATTERN,
+    " ",
+  );
+  MESSAGING_MISSION_PLAIN_MENTION_PATTERN.lastIndex = 0;
+  const mentions = [];
+  let match = MESSAGING_MISSION_PLAIN_MENTION_PATTERN.exec(withoutPriority);
+  while (match) {
+    const value = normalizeString(match[2]);
+    if (value) {
+      const normalized = value.toLowerCase();
+      mentions.push(
+        normalized === "all" || normalized === "everyone"
+          ? { assignee: "all", targetMode: "role_fanout" }
+          : { assignee: value, targetMode: "role_claim" },
+      );
+    }
+    match = MESSAGING_MISSION_PLAIN_MENTION_PATTERN.exec(withoutPriority);
+  }
+  const title = withoutPriority
+    .replace(MESSAGING_MISSION_PLAIN_MENTION_PATTERN, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  const fallback = mentions[0] || null;
+  return {
+    command,
+    title,
+    priority: priority || "",
+    fallbackAssignee: fallback?.assignee || "",
+    fallbackTargetMode: fallback?.targetMode || "",
+  };
+}
+
+function messagingMissionTargetFromMentions(mentions = []) {
+  for (const mention of normalizeMessagingMentionPayloadsForSend(mentions)) {
+    if (mention.type === "user" && mention.userId) {
+      return { assignee: mention.userId, targetMode: "user" };
+    }
+    if (mention.type === "role" && mention.roleId) {
+      return { assignee: mention.roleId, targetMode: "role_claim" };
+    }
+    if (mention.type === "everyone") {
+      return { assignee: "all", targetMode: "role_fanout" };
+    }
+  }
+  return null;
+}
+
+function messagingMissionTargetFromCommand(command = {}) {
+  const assignee = normalizeString(command.fallbackAssignee);
+  const targetMode = normalizeString(command.fallbackTargetMode);
+  return assignee && targetMode ? { assignee, targetMode } : null;
+}
+
+function messagingMissionTargetFromReply(replyTo = null) {
+  const senderId = normalizeString(replyTo?.senderId);
+  return senderId ? { assignee: senderId, targetMode: "user" } : null;
+}
+
+function messagingMissionTitleFromText(value) {
+  const normalized = normalizeString(value).replace(/\s+/gu, " ");
+  if (!normalized) {
+    return "";
+  }
+  return normalized.length <= 88
+    ? normalized
+    : `${normalized.slice(0, 87).trimEnd()}...`;
+}
+
+function messagingMissionDefaultAssignee() {
+  return currentMessagingUserId() || normalizeString(state.auth.user?.username);
+}
+
+function openMessagingMissionDraftFromCommand(command, { text = "", mentions = [] } = {}) {
+  const conversationState = state.pages.messaging.conversation;
+  const conversation = conversationState.item;
+  const scope = messagingMissionScopeForConversation(conversation);
+  if (!scope) {
+    conversationState.error =
+      "Missions can be created from campaign or coalition rooms.";
+    showToast(conversationState.error);
+    scheduleRender();
+    return false;
+  }
+  if (!messagingRoomPermissionAllowed(conversation, "useMissionCommands")) {
+    conversationState.error = "Mission commands are disabled in this room.";
+    showToast(conversationState.error);
+    scheduleRender();
+    return false;
+  }
+  const target =
+    messagingMissionTargetFromMentions(mentions) ||
+    messagingMissionTargetFromCommand(command) ||
+    messagingMissionTargetFromReply(conversationState.pendingReply) ||
+    { assignee: messagingMissionDefaultAssignee(), targetMode: "user" };
+  const pendingReply = normalizeMessagingReplyPreview(
+    conversationState.pendingReply,
+  );
+  const sourceExcerpt = pendingReply?.isDeleted
+    ? ""
+    : normalizeString(pendingReply?.text) || normalizeString(text);
+  conversationState.missionDraft = createMessagingMissionDraftState({
+    open: true,
+    command: normalizeString(command.command),
+    title:
+      normalizeString(command.title) ||
+      messagingMissionTitleFromText(sourceExcerpt) ||
+      "Follow up",
+    description:
+      pendingReply && sourceExcerpt
+        ? `From chat: ${sourceExcerpt}`
+        : "",
+    priority: normalizeString(command.priority).toLowerCase() || "normal",
+    assignee: normalizeString(target.assignee),
+    targetMode: normalizeString(target.targetMode) || "user",
+    sourceExcerpt,
+  });
+  conversationState.draft = "";
+  conversationState.mention = createMessagingComposerMentionState();
+  conversationState.missionCommand = createMessagingMissionCommandState();
+  conversationState.error = "";
+  scheduleRender();
+  return true;
+}
+
+function closeMessagingMissionDraft() {
+  const conversationState = state.pages.messaging.conversation;
+  conversationState.missionDraft = createMessagingMissionDraftState();
+  conversationState.error = "";
+  scheduleRender();
+  focusMessagingComposerSoon();
+}
+
+function isMessagingMentionBodyChar(character) {
+  return MESSAGING_MENTION_USERNAME_PATTERN.test(normalizeString(character));
+}
+
+function findActiveMessagingMentionQuery(text, cursor) {
+  const source = String(text || "");
+  const offset = Number(cursor);
+  if (!Number.isFinite(offset) || offset < 0 || offset > source.length) {
+    return null;
+  }
+  let atIndex = offset - 1;
+  while (atIndex >= 0 && isMessagingMentionBodyChar(source[atIndex])) {
+    atIndex -= 1;
+  }
+  if (atIndex < 0 || source[atIndex] !== "@") {
+    return null;
+  }
+  if (atIndex > 0 && isMessagingMentionBodyChar(source[atIndex - 1])) {
+    return null;
+  }
+  let end = offset;
+  while (end < source.length && isMessagingMentionBodyChar(source[end])) {
+    end += 1;
+  }
+  return {
+    start: atIndex,
+    end,
+    query: source.slice(atIndex + 1, offset),
+  };
+}
+
+function messagingMentionUsernameCandidate(raw = {}) {
+  const values = [
+    raw.username,
+    raw.handle,
+    raw.displayName,
+    raw.effectiveName,
+    raw.name,
+    raw.userId,
+    raw.id,
+  ];
+  for (const value of values) {
+    const normalized = normalizeString(value).replace(/^@/u, "");
+    if (MESSAGING_MENTION_USERNAME_PATTERN.test(normalized)) {
+      return normalized;
+    }
+  }
+  return "";
+}
+
+function messagingMentionSuggestionKey(suggestion = {}) {
+  const type = normalizeString(suggestion.type).toLowerCase();
+  if (type === "role") {
+    return `role:${normalizeString(suggestion.roleId)}`;
+  }
+  if (type === "everyone") {
+    return "everyone";
+  }
+  const userId = normalizeString(suggestion.userId);
+  if (userId) {
+    return `user:${userId}`;
+  }
+  const username = normalizeString(suggestion.username).toLowerCase();
+  return username ? `username:${username}` : "";
+}
+
+function messagingMentionCandidatesForConversation(conversation = null) {
+  const targetConversation =
+    conversation || state.pages.messaging.conversation.item;
+  if (!targetConversation) {
+    return [];
+  }
+  const currentUserId = currentMessagingUserId();
+  const candidates = [];
+  const seen = new Set();
+  const addCandidate = (candidate) => {
+    const username = normalizeString(candidate.username).replace(/^@/u, "");
+    const type = normalizeString(candidate.type || "user").toLowerCase();
+    if (!username || !type) {
+      return;
+    }
+    const normalized = {
+      ...candidate,
+      type,
+      username,
+      displayName:
+        normalizeString(candidate.displayName || candidate.label || candidate.name) ||
+        username,
+    };
+    const key = messagingMentionSuggestionKey(normalized);
+    if (!key || seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    candidates.push(normalized);
+  };
+
+  if (
+    messagingConversationIsGroup(targetConversation) &&
+    messagingGroupCanManage(targetConversation, currentUserId)
+  ) {
+    addCandidate({
+      type: "everyone",
+      username: "everyone",
+      displayName: "Everyone",
+      subtitle: "Notify this group",
+    });
+  }
+
+  if (messagingConversationIsRoom(targetConversation)) {
+    const scopeType = normalizeString(targetConversation.scopeType).toLowerCase();
+    const scopeId = normalizeString(targetConversation.scopeId);
+    (state.pages.messaging.serverRoles.items || []).forEach((role) => {
+      if (
+        !role?.roleId ||
+        !role.mentionable ||
+        role.isEveryone ||
+        role.raw?.isHidden === true ||
+        (scopeType && normalizeString(role.scopeType).toLowerCase() !== scopeType) ||
+        (scopeId && normalizeString(role.scopeId) !== scopeId)
+      ) {
+        return;
+      }
+      const roleName = normalizeString(role.name);
+      if (!roleName) {
+        return;
+      }
+      addCandidate({
+        type: "role",
+        username: roleName,
+        displayName: roleName,
+        roleId: role.roleId,
+        color: normalizeString(role.color),
+        subtitle: "Access group",
+      });
+    });
+  }
+
+  const addUser = (raw) => {
+    const person = normalizeMessagingGroupPerson(raw);
+    const userId = normalizeString(person.userId);
+    if (!userId || userId === currentUserId) {
+      return;
+    }
+    const username = messagingMentionUsernameCandidate(person);
+    if (!username) {
+      return;
+    }
+    addCandidate({
+      type: "user",
+      username,
+      userId,
+      displayName:
+        normalizeString(person.displayName || person.effectiveName) || username,
+      avatarUrl: normalizeUrl(person.avatarUrl),
+      subtitle: person.isFriend ? "Friend" : "Member",
+    });
+  };
+  (targetConversation.participants || []).forEach(addUser);
+  (targetConversation.members || []).forEach(addUser);
+  if (messagingConversationIsRoom(targetConversation)) {
+    (state.pages.messaging.serverMembers.items || []).forEach(addUser);
+  }
+
+  return candidates;
+}
+
+function messagingMentionSuggestionsForQuery(conversation, query) {
+  const normalizedQuery = normalizeString(query).toLowerCase();
+  return messagingMentionCandidatesForConversation(conversation)
+    .filter((candidate) => {
+      if (!normalizedQuery) {
+        return true;
+      }
+      const haystacks = [
+        candidate.username,
+        candidate.displayName,
+        candidate.subtitle,
+      ]
+        .map((entry) => normalizeString(entry).toLowerCase())
+        .filter(Boolean);
+      return haystacks.some((entry) => entry.includes(normalizedQuery));
+    })
+    .slice(0, 8);
+}
+
+function normalizeMessagingMentionPayloadsForSend(mentions = []) {
+  if (!Array.isArray(mentions)) {
+    return [];
+  }
+  const seen = new Set();
+  return mentions
+    .map((mention) => {
+      const source =
+        mention && typeof mention === "object" && !Array.isArray(mention)
+          ? mention
+          : {};
+      const type = normalizeString(source.type || "user").toLowerCase();
+      const username = normalizeString(source.username).replace(/^@/u, "");
+      const start = Math.max(0, Number(source.start) || 0);
+      const length = Math.max(0, Number(source.length) || 0);
+      if (!username || !length || !["user", "role", "everyone"].includes(type)) {
+        return null;
+      }
+      const payload = { type, username, start, length };
+      if (type === "user") {
+        const userId = normalizeString(source.userId);
+        if (!userId) return null;
+        payload.userId = userId;
+      }
+      if (type === "role") {
+        const roleId = normalizeString(source.roleId);
+        if (!roleId) return null;
+        payload.roleId = roleId;
+      }
+      const key = `${payload.start}:${payload.length}:${messagingMentionSuggestionKey(payload)}`;
+      if (seen.has(key)) {
+        return null;
+      }
+      seen.add(key);
+      return payload;
+    })
+    .filter(Boolean);
+}
+
+function messagingMentionPayloadFromSuggestion(suggestion, { start, length }) {
+  return normalizeMessagingMentionPayloadsForSend([
+    {
+      type: suggestion.type,
+      username: suggestion.username,
+      userId: suggestion.userId,
+      roleId: suggestion.roleId,
+      start,
+      length,
+    },
+  ])[0] || null;
+}
+
+function messagingAppliedMentionsFromMessage(message = {}) {
+  const text = normalizeString(message.text);
+  return normalizeMessagingMentionPayloadsForSend(
+    (message.mentions || []).map((mention) => {
+      const start = Math.max(0, Number(mention.start) || 0);
+      const length =
+        Math.max(0, Number(mention.length) || 0) ||
+        Math.max(0, Number(mention.end) - start);
+      return {
+        type: mention.type,
+        username: mention.username,
+        userId: mention.userId,
+        roleId: mention.roleId,
+        start,
+        length,
+      };
+    }),
+  ).filter((mention) => {
+    const mentionText = `@${mention.username}`;
+    return text.slice(mention.start, mention.start + mention.length) === mentionText;
+  });
+}
+
+function reconcileMessagingAppliedMentions(previousText, nextText, mentions = []) {
+  const previous = String(previousText || "");
+  const next = String(nextText || "");
+  if (!Array.isArray(mentions) || !mentions.length) {
+    return [];
+  }
+  let prefixLength = 0;
+  while (
+    prefixLength < previous.length &&
+    prefixLength < next.length &&
+    previous[prefixLength] === next[prefixLength]
+  ) {
+    prefixLength += 1;
+  }
+  let suffixLength = 0;
+  while (
+    suffixLength + prefixLength < previous.length &&
+    suffixLength + prefixLength < next.length &&
+    previous[previous.length - 1 - suffixLength] ===
+      next[next.length - 1 - suffixLength]
+  ) {
+    suffixLength += 1;
+  }
+  const previousChangeEnd = previous.length - suffixLength;
+  const delta = next.length - previous.length;
+  return normalizeMessagingMentionPayloadsForSend(
+    mentions
+      .map((mention) => {
+        const start = Math.max(0, Number(mention.start) || 0);
+        const length = Math.max(0, Number(mention.length) || 0);
+        const end = start + length;
+        let nextStart = start;
+        if (previousChangeEnd <= start) {
+          nextStart = start + delta;
+        } else if (prefixLength >= end) {
+          nextStart = start;
+        } else {
+          return null;
+        }
+        return {
+          ...mention,
+          start: Math.max(0, nextStart),
+          length,
+        };
+      })
+      .filter(Boolean),
+  ).filter((mention) => {
+    const mentionText = `@${mention.username}`;
+    return next.slice(mention.start, mention.start + mention.length) === mentionText;
+  });
+}
+
+function messagingMentionCandidateByUsername(conversation, username) {
+  const normalizedUsername = normalizeString(username).replace(/^@/u, "").toLowerCase();
+  if (!normalizedUsername) {
+    return null;
+  }
+  return (
+    messagingMentionCandidatesForConversation(conversation).find(
+      (candidate) =>
+        normalizeString(candidate.username).replace(/^@/u, "").toLowerCase() ===
+        normalizedUsername,
+    ) || null
+  );
+}
+
+function buildMessagingMentionsFromText(text, conversation = null) {
+  const source = normalizeString(text);
+  const conversationState = state.pages.messaging.conversation;
+  const mentions = [];
+  const addMention = (mention) => {
+    const normalized = normalizeMessagingMentionPayloadsForSend([mention])[0];
+    if (!normalized) {
+      return;
+    }
+    const mentionText = `@${normalized.username}`;
+    if (
+      source.slice(normalized.start, normalized.start + normalized.length) !==
+      mentionText
+    ) {
+      return;
+    }
+    mentions.push(normalized);
+  };
+
+  (conversationState.mention?.appliedMentions || []).forEach(addMention);
+  MESSAGING_MENTION_SCAN_PATTERN.lastIndex = 0;
+  let match = MESSAGING_MENTION_SCAN_PATTERN.exec(source);
+  while (match) {
+    const prefix = match[1] || "";
+    const username = match[2] || "";
+    const start = match.index + prefix.length;
+    const candidate = messagingMentionCandidateByUsername(conversation, username);
+    if (candidate) {
+      addMention(
+        messagingMentionPayloadFromSuggestion(candidate, {
+          start,
+          length: username.length + 1,
+        }),
+      );
+    }
+    match = MESSAGING_MENTION_SCAN_PATTERN.exec(source);
+  }
+  return normalizeMessagingMentionPayloadsForSend(mentions);
+}
+
+function renderMessagingMentionSuggestionAvatar(suggestion) {
+  const type = normalizeString(suggestion.type);
+  if (suggestion.avatarUrl) {
+    return `<img src="${escapeHtml(suggestion.avatarUrl)}" alt="" loading="lazy" />`;
+  }
+  if (type === "role") {
+    const color = normalizeString(suggestion.color) || "#8f96a3";
+    return `<span style="--mention-color:${escapeHtml(color)}">${renderIcon("shield")}</span>`;
+  }
+  if (type === "everyone") {
+    return `<span>${renderIcon("bell")}</span>`;
+  }
+  return `<span>${renderIcon("profile")}</span>`;
+}
+
+function renderMessagingComposerMentionMenu(mentionState = {}) {
+  const active = mentionState.active;
+  const suggestions = Array.isArray(mentionState.suggestions)
+    ? mentionState.suggestions
+    : [];
+  const selectedIndex = Math.max(0, Number(mentionState.selectedIndex) || 0);
+  if (!active) {
+    return '<div class="shared-messaging-mention-menu" data-messaging-mention-menu hidden></div>';
+  }
+  const body = suggestions.length
+    ? suggestions
+        .map((suggestion, index) => {
+          const selected = index === Math.min(selectedIndex, suggestions.length - 1);
+          const handle = `@${normalizeString(suggestion.username)}`;
+          const subtitle = normalizeString(suggestion.subtitle);
+          return `<button class="shared-messaging-mention-option${selected ? " is-selected" : ""}" type="button" role="option" aria-selected="${selected ? "true" : "false"}" data-action="messaging-mention-apply" data-mention-index="${escapeHtml(String(index))}">
+            <span class="shared-messaging-mention-option__avatar">${renderMessagingMentionSuggestionAvatar(suggestion)}</span>
+            <span class="shared-messaging-mention-option__body">
+              <strong>${escapeHtml(suggestion.displayName || handle)}</strong>
+              <small>${escapeHtml(subtitle ? `${handle} - ${subtitle}` : handle)}</small>
+            </span>
+          </button>`;
+        })
+        .join("")
+    : '<div class="shared-messaging-mention-empty">No matching people or roles</div>';
+  return `<div class="shared-messaging-mention-menu" data-messaging-mention-menu role="listbox" aria-label="Mention suggestions">${body}</div>`;
+}
+
+function syncMessagingMentionMenuDom() {
+  const menu = root?.querySelector("[data-messaging-mention-menu]");
+  if (!menu) {
+    return;
+  }
+  menu.outerHTML = renderMessagingComposerMentionMenu(
+    state.pages.messaging.conversation.mention,
+  );
+}
+
+function updateMessagingComposerMentionState(input) {
+  const conversationState = state.pages.messaging.conversation;
+  const mentionState =
+    conversationState.mention || createMessagingComposerMentionState();
+  conversationState.mention = mentionState;
+  const active = findActiveMessagingMentionQuery(
+    input?.value || "",
+    input?.selectionStart ?? input?.value?.length ?? 0,
+  );
+  if (!active) {
+    mentionState.active = null;
+    mentionState.suggestions = [];
+    mentionState.selectedIndex = 0;
+    syncMessagingMentionMenuDom();
+    return;
+  }
+  mentionState.active = active;
+  mentionState.suggestions = messagingMentionSuggestionsForQuery(
+    conversationState.item,
+    active.query,
+  );
+  mentionState.selectedIndex = Math.min(
+    Math.max(0, Number(mentionState.selectedIndex) || 0),
+    Math.max(0, mentionState.suggestions.length - 1),
+  );
+  syncMessagingMentionMenuDom();
+}
+
+function findActiveMessagingMissionCommand(text, cursor, conversation = null) {
+  if (!messagingCanUseMissionCommands(conversation)) {
+    return null;
+  }
+  const source = String(text || "");
+  const offset = Number(cursor);
+  if (!Number.isFinite(offset) || offset < 0 || offset > source.length) {
+    return null;
+  }
+  const typed = source.slice(0, offset);
+  if (!typed.startsWith("/") || /\s/u.test(typed)) {
+    return null;
+  }
+  let end = offset;
+  while (end < source.length && !/\s/u.test(source[end])) {
+    end += 1;
+  }
+  return { start: 0, end, query: typed.toLowerCase() };
+}
+
+function messagingMissionCommandSuggestions(query) {
+  const normalized = normalizeString(query).toLowerCase();
+  return MESSAGING_MISSION_COMMANDS.filter((entry) =>
+    entry.command.startsWith(normalized || "/"),
+  );
+}
+
+function renderMessagingMissionCommandMenu(commandState = {}) {
+  const active = commandState.active;
+  const suggestions = Array.isArray(commandState.suggestions)
+    ? commandState.suggestions
+    : [];
+  const selectedIndex = Math.max(0, Number(commandState.selectedIndex) || 0);
+  if (!active || !suggestions.length) {
+    return '<div class="shared-messaging-command-menu" data-messaging-command-menu hidden></div>';
+  }
+  const body = suggestions
+    .map((suggestion, index) => {
+      const selected = index === Math.min(selectedIndex, suggestions.length - 1);
+      return `<button class="shared-messaging-command-option${selected ? " is-selected" : ""}" type="button" role="option" aria-selected="${selected ? "true" : "false"}" data-action="messaging-command-apply" data-command-index="${escapeHtml(String(index))}">
+        <span class="shared-messaging-command-option__icon">${renderIcon("mission")}</span>
+        <span class="shared-messaging-command-option__body">
+          <strong>${escapeHtml(suggestion.title)}</strong>
+          <small>${escapeHtml(suggestion.subtitle)}</small>
+        </span>
+      </button>`;
+    })
+    .join("");
+  return `<div class="shared-messaging-command-menu" data-messaging-command-menu role="listbox" aria-label="Mission command suggestions">${body}</div>`;
+}
+
+function syncMessagingMissionCommandMenuDom() {
+  const menu = root?.querySelector("[data-messaging-command-menu]");
+  if (!menu) {
+    return;
+  }
+  menu.outerHTML = renderMessagingMissionCommandMenu(
+    state.pages.messaging.conversation.missionCommand,
+  );
+}
+
+function updateMessagingMissionCommandState(input) {
+  const conversationState = state.pages.messaging.conversation;
+  const commandState =
+    conversationState.missionCommand || createMessagingMissionCommandState();
+  conversationState.missionCommand = commandState;
+  if (conversationState.missionDraft?.open) {
+    commandState.active = null;
+    commandState.suggestions = [];
+    commandState.selectedIndex = 0;
+    syncMessagingMissionCommandMenuDom();
+    return;
+  }
+  const active = findActiveMessagingMissionCommand(
+    input?.value || "",
+    input?.selectionStart ?? input?.value?.length ?? 0,
+    conversationState.item,
+  );
+  if (!active) {
+    commandState.active = null;
+    commandState.suggestions = [];
+    commandState.selectedIndex = 0;
+    syncMessagingMissionCommandMenuDom();
+    return;
+  }
+  commandState.active = active;
+  commandState.suggestions = messagingMissionCommandSuggestions(active.query);
+  commandState.selectedIndex = Math.min(
+    Math.max(0, Number(commandState.selectedIndex) || 0),
+    Math.max(0, commandState.suggestions.length - 1),
+  );
+  syncMessagingMissionCommandMenuDom();
+}
+
+function closeMessagingMissionCommandMenu() {
+  const conversationState = state.pages.messaging.conversation;
+  conversationState.missionCommand = createMessagingMissionCommandState();
+  syncMessagingMissionCommandMenuDom();
+}
+
+function applyMessagingMissionCommandSuggestion(index = 0) {
+  const conversationState = state.pages.messaging.conversation;
+  const commandState =
+    conversationState.missionCommand || createMessagingMissionCommandState();
+  const active = commandState.active;
+  const suggestions = commandState.suggestions || [];
+  const suggestion = suggestions[Math.max(0, Number(index) || 0)];
+  const input = root?.querySelector(
+    '[data-route-form="messaging-send"] textarea[name="text"]',
+  );
+  if (!active || !suggestion || !input) {
+    closeMessagingMissionCommandMenu();
+    return;
+  }
+  const previousText = input.value || "";
+  const replacement = `${suggestion.command} `;
+  const nextText = `${replacement}${previousText.slice(active.end)}`;
+  input.value = nextText;
+  conversationState.draft = nextText;
+  conversationState.mention = createMessagingComposerMentionState();
+  conversationState.missionCommand = createMessagingMissionCommandState();
+  syncMessagingMentionMenuDom();
+  syncMessagingMissionCommandMenuDom();
+  try {
+    input.focus();
+    input.setSelectionRange(replacement.length, replacement.length);
+  } catch {
+    // Best effort after DOM insertion.
+  }
+}
+
+function closeMessagingComposerMentionMenu() {
+  const conversationState = state.pages.messaging.conversation;
+  conversationState.mention = {
+    ...(conversationState.mention || createMessagingComposerMentionState()),
+    active: null,
+    suggestions: [],
+    selectedIndex: 0,
+  };
+  syncMessagingMentionMenuDom();
+}
+
+function applyMessagingMentionSuggestion(index = 0) {
+  const conversationState = state.pages.messaging.conversation;
+  const mentionState =
+    conversationState.mention || createMessagingComposerMentionState();
+  const active = mentionState.active;
+  const suggestions = mentionState.suggestions || [];
+  const suggestion = suggestions[Math.max(0, Number(index) || 0)];
+  const input = root?.querySelector(
+    '[data-route-form="messaging-send"] textarea[name="text"]',
+  );
+  if (!active || !suggestion || !input) {
+    closeMessagingComposerMentionMenu();
+    return;
+  }
+  const previousText = input.value || "";
+  const mentionText = `@${suggestion.username}`;
+  const replacement = `${mentionText} `;
+  const nextText = `${previousText.slice(0, active.start)}${replacement}${previousText.slice(active.end)}`;
+  const nextCursor = active.start + replacement.length;
+  input.value = nextText;
+  conversationState.mention.appliedMentions = reconcileMessagingAppliedMentions(
+    conversationState.draft,
+    nextText,
+    conversationState.mention.appliedMentions,
+  ).filter((mention) => {
+    const start = Number(mention.start) || 0;
+    const end = start + (Number(mention.length) || 0);
+    return end <= active.start || start >= active.start + replacement.length;
+  });
+  const payload = messagingMentionPayloadFromSuggestion(suggestion, {
+    start: active.start,
+    length: mentionText.length,
+  });
+  if (payload) {
+    conversationState.mention.appliedMentions = [
+      ...conversationState.mention.appliedMentions,
+      payload,
+    ];
+  }
+  conversationState.draft = nextText;
+  conversationState.mention.active = null;
+  conversationState.mention.suggestions = [];
+  conversationState.mention.selectedIndex = 0;
+  syncMessagingMentionMenuDom();
+  try {
+    input.focus();
+    input.setSelectionRange(nextCursor, nextCursor);
+  } catch {
+    // Best effort after DOM insertion.
+  }
+}
+
+function normalizeMessagingGroupPerson(raw = {}) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  const nestedRaw =
+    source.raw && typeof source.raw === "object" && !Array.isArray(source.raw)
+      ? source.raw
+      : {};
+  const userId = normalizeString(
+    source.userId || nestedRaw.userId || nestedRaw.id || source.id,
+  );
+  const username = normalizeString(
+    source.username || source.handle || nestedRaw.username || nestedRaw.handle,
+  ).replace(/^@/u, "");
+  const displayName = normalizeString(
+    source.displayName ||
+      source.effectiveName ||
+      source.name ||
+      nestedRaw.displayName ||
+      nestedRaw.effectiveName ||
+      nestedRaw.name ||
+      username ||
+      userId,
+  );
+  const avatarUrl = normalizeUrl(
+    source.avatarUrl ||
+      source.imageUrl ||
+      nestedRaw.avatarUrl ||
+      nestedRaw.imageUrl,
+  );
+  const roles = (
+    Array.isArray(source.roles)
+      ? source.roles
+      : Array.isArray(nestedRaw.roles)
+        ? nestedRaw.roles
+        : [
+            source.role ||
+              source.memberRole ||
+              source.groupRole ||
+              nestedRaw.role ||
+              nestedRaw.memberRole ||
+              nestedRaw.groupRole,
+          ]
+  ).filter(Boolean);
+  const sourceTags = Array.isArray(source.sourceTags)
+    ? source.sourceTags
+    : Array.isArray(nestedRaw.sourceTags)
+      ? nestedRaw.sourceTags
+      : [];
+  const isFriend =
+    source.isFriend === true ||
+    source.friend === true ||
+    nestedRaw.isFriend === true ||
+    nestedRaw.friend === true ||
+    sourceTags.some((tag) => normalizeString(tag).toLowerCase() === "friend");
+  const normalizedTags = [
+    ...sourceTags.map((tag) => normalizeString(tag)).filter(Boolean),
+    ...(isFriend ? ["friend"] : []),
+  ];
+  return {
+    userId,
+    username,
+    displayName,
+    effectiveName: displayName || username || userId || "Polis user",
+    avatarUrl,
+    roles,
+    sourceTags: [...new Set(normalizedTags)],
+    isFriend,
+    raw: source,
+  };
+}
+
+function messagingGroupPersonKey(person = {}) {
+  const userId = normalizeString(person.userId);
+  if (userId) return `user:${userId}`;
+  const username = normalizeString(person.username).replace(/^@/u, "");
+  return username ? `username:${username.toLowerCase()}` : "";
+}
+
+function messagingGroupPeople(conversation, membersState) {
+  const peopleByKey = new Map();
+  const addPerson = (raw) => {
+    const person = normalizeMessagingGroupPerson(raw);
+    const key = messagingGroupPersonKey(person);
+    if (!key) return;
+    const existing = peopleByKey.get(key);
+    if (existing) {
+      peopleByKey.set(key, {
+        ...existing,
+        ...person,
+        roles: person.roles.length ? person.roles : existing.roles,
+        sourceTags: [...new Set([...existing.sourceTags, ...person.sourceTags])],
+      });
+      return;
+    }
+    peopleByKey.set(key, person);
+  };
+  (conversation?.participants || []).forEach(addPerson);
+  (membersState?.items || []).forEach(addPerson);
+  return [...peopleByKey.values()];
+}
+
+function messagingGroupExistingPeopleKeys(conversation, membersState) {
+  return new Set(
+    messagingGroupPeople(conversation, membersState)
+      .map(messagingGroupPersonKey)
+      .filter(Boolean),
+  );
+}
+
+function messagingGroupPeopleCandidates(conversation, membersState, peopleState) {
+  const existingKeys = messagingGroupExistingPeopleKeys(conversation, membersState);
+  const friendItems = (peopleState.friends.items || []).filter(
+    (candidate) => !existingKeys.has(messagingComposeCandidateKey(candidate)),
+  );
+  const friendKeys = new Set(
+    friendItems.map(messagingComposeCandidateKey).filter(Boolean),
+  );
+  const searchItems = (peopleState.search.items || []).filter((candidate) => {
+    const key = messagingComposeCandidateKey(candidate);
+    return key && !existingKeys.has(key) && !friendKeys.has(key);
+  });
+  const query = normalizeString(peopleState.query).toLowerCase();
+  if (query.length >= 3) {
+    return [
+      ...friendItems.filter(
+        (candidate) =>
+          normalizeString(candidate.displayName).toLowerCase().includes(query) ||
+          normalizeString(candidate.username).toLowerCase().includes(query),
+      ),
+      ...searchItems,
+    ];
+  }
+  return friendItems;
+}
+
+function renderMessagingGroupPersonRow(
+  person,
+  {
+    currentUserId = "",
+    canManage = false,
+    pendingKey = "",
+    conversationId = "",
+  } = {},
+) {
+  const userId = normalizeString(person.userId);
+  const username = normalizeString(person.username).replace(/^@/u, "");
+  const isCurrentUser = userId && userId === normalizeString(currentUserId);
+  const personKey = messagingGroupPersonKey(person);
+  const removePending = pendingKey === `remove:${userId}`;
+  const roleLabels = (person.roles || []).map(messagingMemberRoleLabel).filter(Boolean);
+  const handle = username ? `@${username}` : userId;
+  const meta = [
+    isCurrentUser ? "You" : "",
+    roleLabels.join(", "),
+    handle,
+  ].filter(Boolean).join(" - ") || "Group member";
+  const tags = [
+    ...(person.sourceTags || []).map((tag) => humanizeLabel(tag) || tag),
+    ...(removePending ? ["Removing"] : []),
+  ]
+    .map((tag) => normalizeString(tag))
+    .filter(Boolean)
+    .slice(0, 3);
+  const profileRoute = userId ? `/profile/${encodeURIComponent(userId)}` : "";
+  return `<article class="shared-messaging-person-row${removePending ? " is-pending" : ""}">
+    ${renderMessagingWorkspaceAvatar({
+      label: person.effectiveName,
+      imageUrl: person.avatarUrl,
+      icon: "profile",
+    })}
+    <div class="shared-messaging-person-row__main">
+      <strong>${escapeHtml(person.effectiveName)}</strong>
+      <span>${escapeHtml(meta)}</span>
+      ${
+        tags.length
+          ? `<div class="shared-messaging-people-tags">${tags
+              .map((tag) => `<span>${escapeHtml(tag)}</span>`)
+              .join("")}</div>`
+          : ""
+      }
+    </div>
+    <div class="shared-messaging-person-row__actions">
+      ${
+        !isCurrentUser && (userId || username)
+          ? `<button class="shared-feed-chip" type="button" data-action="messaging-group-person-message" data-user-id="${escapeHtml(userId)}" data-username="${escapeHtml(username)}">Message</button>`
+          : ""
+      }
+      ${
+        profileRoute
+          ? `<button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(profileRoute)}">Profile</button>`
+          : ""
+      }
+      ${
+        canManage && !isCurrentUser && userId
+          ? `<button class="shared-feed-chip" type="button" data-action="messaging-group-person-remove" data-conversation-id="${escapeHtml(conversationId)}" data-user-id="${escapeHtml(userId)}" data-person-key="${escapeHtml(personKey)}"${disabledAttr(Boolean(pendingKey))}>${removePending ? "Removing..." : "Remove"}</button>`
+          : ""
+      }
+    </div>
+  </article>`;
+}
+
+function renderMessagingGroupPeopleBucket(
+  title,
+  people,
+  renderOptions,
+  emptyLabel = "",
+) {
+  return `<section class="shared-messaging-people-section">
+    <div class="shared-messaging-people-section__header">
+      <h3>${escapeHtml(title)}</h3>
+      <span>${escapeHtml(formatCount(people.length))}</span>
+    </div>
+    <div class="shared-messaging-people-list">${
+      people.length
+        ? people.map((person) => renderMessagingGroupPersonRow(person, renderOptions)).join("")
+        : `<div class="shared-messaging-empty">${escapeHtml(emptyLabel || `No ${title.toLowerCase()} listed.`)}</div>`
+    }</div>
+  </section>`;
+}
+
+function renderMessagingGroupPeopleCandidates(
+  conversation,
+  membersState,
+  peopleState,
+  canManage,
+) {
+  if (!canManage) {
+    return '<div class="shared-messaging-people-note">Only group managers can add or remove people.</div>';
+  }
+  const pendingKey = normalizeString(peopleState.actionPendingKey);
+  const candidates = messagingGroupPeopleCandidates(
+    conversation,
+    membersState,
+    peopleState,
+  );
+  const loading = peopleState.friends.loading || peopleState.search.loading;
+  const error =
+    normalizeString(peopleState.error) ||
+    normalizeString(peopleState.friends.error) ||
+    normalizeString(peopleState.search.error);
+  const candidateMarkup = candidates.length
+    ? candidates
+        .map((candidate) => {
+          const key = messagingComposeCandidateKey(candidate);
+          const pending = pendingKey === `add:${key}`;
+          const blocked = candidate.blockedByPrivacy === true;
+          const title =
+            normalizeString(candidate.displayName) ||
+            normalizeString(candidate.username) ||
+            normalizeString(candidate.userId) ||
+            "Polis user";
+          return `<article class="shared-messaging-people-candidate${blocked ? " is-blocked" : ""}${pending ? " is-pending" : ""}">
+            ${renderMessagingWorkspaceAvatar({
+              label: title,
+              imageUrl: candidate.avatarUrl,
+              icon: "profile",
+            })}
+            <div>
+              <strong>${escapeHtml(title)}</strong>
+              <span>${escapeHtml(messagingComposeCandidateSubtitle(candidate))}</span>
+            </div>
+            <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="messaging-group-person-add" data-conversation-id="${escapeHtml(conversation.conversationId)}" data-candidate-key="${escapeHtml(key)}"${disabledAttr(Boolean(pendingKey) || blocked || !key)}>${pending ? "Adding..." : "Add"}</button>
+          </article>`;
+        })
+        .join("")
+    : `<div class="shared-messaging-empty">${escapeHtml(
+        normalizeString(peopleState.query).length >= 3
+          ? "No matching people found."
+          : "Friend suggestions will appear here.",
+      )}</div>`;
+  return `<div class="shared-messaging-people-add">
+    <label class="shared-messaging-people-search">
+      <span>Find people</span>
+      <div>
+        ${renderIcon("search")}
+        <input name="query" data-messaging-group-people-field="query" value="${escapeHtml(peopleState.query || "")}" placeholder="Name or username" autocomplete="off"${disabledAttr(Boolean(pendingKey))} />
+        ${
+          peopleState.query
+            ? `<button type="button" data-action="messaging-group-people-clear-search" aria-label="Clear search"${disabledAttr(Boolean(pendingKey))}>${renderIcon("close")}</button>`
+            : ""
+        }
+      </div>
+    </label>
+    <div class="shared-messaging-people-candidates">
+      ${candidateMarkup}
+      ${loading ? '<div class="shared-messaging-compose-status">Searching...</div>' : ""}
+      ${error ? `<div class="shared-page__error">${escapeHtml(error)}</div>` : ""}
+    </div>
+    <details class="shared-messaging-people-exact">
+      <summary>Add exact username or user ID</summary>
+      <form class="shared-messaging-people-exact-form" data-route-form="messaging-group-member-add">
+        <input type="hidden" name="conversationId" value="${escapeHtml(conversation.conversationId)}" />
+        <label><span>Username</span><input name="username" placeholder="@username"${disabledAttr(Boolean(pendingKey))} autocomplete="off" /></label>
+        <label><span>User ID</span><input name="userId" placeholder="user_..."${disabledAttr(Boolean(pendingKey))} autocomplete="off" /></label>
+        <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(Boolean(pendingKey))}>Add person</button>
+      </form>
+    </details>
+  </div>`;
+}
+
+function renderMessagingGroupPeoplePanel({
+  conversation,
+  membersState,
+  peopleState,
+  subroute,
+}) {
+  const conversationId = normalizeString(subroute?.conversationId);
+  if (!conversation) {
+    return renderMessagingWorkspacePanel({
+      title: "People",
+      subtitle: "Group conversation members",
+      body: '<div class="shared-page__loading">Loading group people...</div>',
+    });
+  }
+  const currentUserId = currentMessagingUserId();
+  const displayTitle = messagingConversationDisplayTitle(
+    conversation,
+    currentUserId,
+  );
+  const chatRoute = `/messages/conversations/${encodeURIComponent(conversationId)}`;
+  if (!messagingConversationIsGroup(conversation)) {
+    return renderMessagingWorkspacePanel({
+      title: "People",
+      subtitle: displayTitle,
+      actions: `<button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(chatRoute)}">Back to chat</button>`,
+      body: '<div class="shared-messaging-empty">People management is available for group conversations.</div>',
+    });
+  }
+  const canManage = messagingGroupCanManage(conversation, currentUserId);
+  const people = messagingGroupPeople(conversation, membersState);
+  const you = people.filter(
+    (person) => normalizeString(person.userId) === currentUserId,
+  );
+  const friends = people.filter(
+    (person) =>
+      normalizeString(person.userId) !== currentUserId && person.isFriend,
+  );
+  const others = people.filter(
+    (person) =>
+      normalizeString(person.userId) !== currentUserId && !person.isFriend,
+  );
+  const memberCount = Math.max(
+    Number(conversation.participantCount) || 0,
+    people.length,
+  );
+  const pendingKey = normalizeString(membersState.actionPendingKey);
+  const renderOptions = {
+    currentUserId,
+    canManage,
+    pendingKey,
+    conversationId,
+  };
+  return renderMessagingWorkspacePanel({
+    title: "People",
+    subtitle: displayTitle,
+    actions: `<button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(chatRoute)}">Back to chat</button>`,
+    className: "shared-messaging-panel--people",
+    body: `<div class="shared-messaging-people-panel">
+      <section class="shared-messaging-people-hero">
+        ${renderMessagingWorkspaceAvatar({
+          label: displayTitle,
+          imageUrl: conversation.avatarUrl,
+          icon: "team",
+        })}
+        <div class="shared-messaging-people-hero__main">
+          <p>${escapeHtml(canManage ? "Manager access" : "Member view")}</p>
+          <h3>${escapeHtml(displayTitle)}</h3>
+          <span>${escapeHtml(`${formatCount(memberCount)} people in this group`)}</span>
+        </div>
+        <div class="shared-messaging-people-metrics">
+          <div><strong>${escapeHtml(formatCount(you.length + friends.length + others.length))}</strong><span>Loaded</span></div>
+          <div><strong>${escapeHtml(formatCount(friends.length))}</strong><span>Friends</span></div>
+          <div><strong>${escapeHtml(canManage ? "Manage" : "View")}</strong><span>Access</span></div>
+        </div>
+      </section>
+      ${membersState.error ? `<div class="shared-page__error">${escapeHtml(membersState.error)}</div>` : ""}
+      ${membersState.loading && !membersState.loaded ? '<div class="shared-page__loading">Loading members...</div>' : ""}
+      <div class="shared-messaging-people-layout">
+        <div class="shared-messaging-people-roster">
+          ${renderMessagingGroupPeopleBucket("You", you, renderOptions, "Your account was not included in the loaded member list.")}
+          ${renderMessagingGroupPeopleBucket("Friends", friends, renderOptions, "No friends are listed in this group yet.")}
+          ${renderMessagingGroupPeopleBucket("Others", others, renderOptions, "No other people are listed.")}
+        </div>
+        ${renderMessagingGroupPeopleCandidates(
+          conversation,
+          membersState,
+          peopleState,
+          canManage,
+        )}
+      </div>
+    </div>`,
+  });
 }
 
 function renderMessagingWorkspaceThread({
@@ -63423,8 +69964,17 @@ function renderMessagingWorkspaceThread({
   const roomActionMarkup =
     roomActions && subroute?.scopeType && subroute?.scopeId && subroute?.conversationId
       ? `<button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(buildMessagingRoomRoute(subroute.scopeType, subroute.scopeId, subroute.conversationId, "/settings"))}">Room settings</button>
-         <button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(buildMessagingRoomRoute(subroute.scopeType, subroute.scopeId, subroute.conversationId, "/settings/permissions"))}">Permissions</button>`
+         <button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(buildMessagingRoomRoute(subroute.scopeType, subroute.scopeId, subroute.conversationId, "/settings/permissions"))}">Access</button>`
       : "";
+  const groupActionMarkup =
+    !roomActions &&
+    messagingConversationIsGroup(conversation) &&
+    conversation.conversationId
+      ? `<button class="shared-feed-chip" data-action="navigate" data-route="/messages/conversations/${escapeHtml(encodeURIComponent(conversation.conversationId))}/people">People</button>`
+      : "";
+  const headerActionMarkup = [roomActionMarkup, groupActionMarkup]
+    .filter(Boolean)
+    .join("");
   const threadReturnRoute =
     roomActions && subroute?.scopeType && subroute?.scopeId
       ? buildMessagingServerRoute(subroute.scopeType, subroute.scopeId)
@@ -63471,6 +70021,17 @@ function renderMessagingWorkspaceThread({
         composerDisabled,
       )
     : "";
+  const mentionMenuMarkup = renderMessagingComposerMentionMenu(
+    conversationState.mention,
+  );
+  const missionDraftOpen =
+    !editingMessageId && conversationState.missionDraft?.open === true;
+  const missionCommandMenuMarkup = renderMessagingMissionCommandMenu(
+    conversationState.missionCommand,
+  );
+  const missionDraftMarkup = missionDraftOpen
+    ? renderMessagingComposerMissionDraft(conversationState, conversation)
+    : "";
   const editBannerMarkup = editingMessageId
     ? `<div class="shared-messaging-edit-banner">
         <span>${renderIcon("edit")}</span>
@@ -63512,9 +70073,14 @@ function renderMessagingWorkspaceThread({
     ? renderMessagingSecureHandoff()
     : `<form class="shared-messaging-composer" data-route-form="messaging-send">
       <input type="hidden" name="conversationId" value="${escapeHtml(conversation.conversationId)}" />
-      ${editBannerMarkup}
       ${replyBannerMarkup}
+      ${
+        missionDraftOpen
+          ? missionDraftMarkup
+          : `${editBannerMarkup}
       ${attachmentEditorMarkup}
+      ${missionCommandMenuMarkup}
+      ${mentionMenuMarkup}
       <div class="shared-messaging-composer__tools">
         ${composerTools}
       </div>
@@ -63522,7 +70088,8 @@ function renderMessagingWorkspaceThread({
         <span class="shared-sr-only">Message</span>
         <textarea name="text" rows="1" placeholder="${escapeHtml(composerPlaceholder)}">${escapeHtml(draftValue)}</textarea>
       </label>
-      <button class="shared-feed-chip shared-feed-chip--primary shared-messaging-composer__send" type="submit"${disabledAttr(composerDisabled)} aria-label="${escapeHtml(editingMessageId ? "Save edited message" : pendingReply ? "Send reply" : "Send message")}">${renderIcon(editingMessageId ? "check" : pendingReply ? "reply" : "send")}<span>${escapeHtml(sendButtonLabel)}</span></button>
+      <button class="shared-feed-chip shared-feed-chip--primary shared-messaging-composer__send" type="submit"${disabledAttr(composerDisabled)} aria-label="${escapeHtml(editingMessageId ? "Save edited message" : pendingReply ? "Send reply" : "Send message")}">${renderIcon(editingMessageId ? "check" : pendingReply ? "reply" : "send")}<span>${escapeHtml(sendButtonLabel)}</span></button>`
+      }
     </form>`;
   const threadMarkup = `<article class="shared-messaging-panel shared-messaging-panel--thread">
     <div class="shared-messaging-thread-header">
@@ -63543,7 +70110,7 @@ function renderMessagingWorkspaceThread({
         ${conversation.unreadCount ? `<span>${escapeHtml(`${formatCount(conversation.unreadCount)} unread`)}</span>` : ""}
         ${conversation.isEncrypted ? `<span>${renderIcon("lock")}${escapeHtml("Encrypted")}</span>` : ""}
       </div>
-      ${roomActionMarkup ? `<div class="shared-messaging-thread-header__actions">${roomActionMarkup}</div>` : ""}
+      ${headerActionMarkup ? `<div class="shared-messaging-thread-header__actions">${headerActionMarkup}</div>` : ""}
     </div>
     ${conversationState.error ? `<div class="shared-page__error shared-messaging-thread-error">${escapeHtml(conversationState.error)}</div>` : ""}
     <div class="shared-message-list">${conversationState.loading && !conversationState.loaded ? '<div class="shared-page__loading">Loading messages...</div>' : messageMarkup}</div>
@@ -63587,6 +70154,14 @@ function renderMessagingWorkspaceShell({
     normalizedMainBody.includes("shared-messaging-moderation-panel") ||
     normalizedMainBody.includes("shared-messaging-ban-panel")
       ? " shared-messaging-workspace--safety-focus"
+      : ""
+  }${
+    normalizedMainBody.includes("shared-messaging-workflow-panel")
+      ? " shared-messaging-workspace--automation-focus"
+      : ""
+  }${
+    normalizedMainBody.includes("shared-messaging-permissions")
+      ? " shared-messaging-workspace--room-access-focus"
       : ""
   }`;
   return `<div class="shared-messaging-workspace${workspaceClassName}">
@@ -63677,7 +70252,7 @@ function renderMessagingPage() {
       sidebarBody: inboxRows,
       mainBody: renderMessagingWorkspacePanel({
         title: "Review requests",
-        subtitle: "Accept server invites or refuse unwanted conversations.",
+        subtitle: "Accept workspace invites or refuse unwanted conversations.",
         body: renderMessagingWorkspaceRequests(requests.items || []),
       }),
     });
@@ -63703,10 +70278,24 @@ function renderMessagingPage() {
         subroute,
       }),
     });
+  } else if (subroute.view === "conversation-people") {
+    workspaceMarkup = renderMessagingWorkspaceShell({
+      subroute,
+      sidebarTitle: "People",
+      sidebarSubtitle: "Group conversation members",
+      sidebarActions: miniNav,
+      sidebarBody: inboxRows,
+      mainBody: renderMessagingGroupPeoplePanel({
+        conversation: conversation.item,
+        membersState: roomMembers,
+        peopleState: messagingGroupPeopleState(),
+        subroute,
+      }),
+    });
   } else if (subroute.view === "server-room") {
     workspaceMarkup = renderMessagingWorkspaceShell({
       subroute,
-      sidebarTitle: currentServer?.title || "Server rooms",
+      sidebarTitle: currentServer?.title || "Rooms",
       sidebarSubtitle: currentServer?.scopeBadge || "Campaign workspace",
       sidebarActions: renderMessagingWorkspaceServerTools(subroute, "server"),
       sidebarBody: channelRows,
@@ -63876,7 +70465,7 @@ function renderMessagingPage() {
             </div>
             ${
               canManageDirectory
-                ? `<button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(buildMessagingCategoryPermissionRoute(subroute.scopeType, subroute.scopeId, categoryId))}">Permissions</button>`
+                ? `<button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(buildMessagingCategoryPermissionRoute(subroute.scopeType, subroute.scopeId, categoryId))}">Access</button>`
                 : ""
             }
           </div>
@@ -63919,7 +70508,7 @@ function renderMessagingPage() {
       : "";
     workspaceMarkup = renderMessagingWorkspaceShell({
       subroute,
-      sidebarTitle: currentServer?.title || "Server",
+      sidebarTitle: currentServer?.title || "Workspace",
       sidebarSubtitle: scopeLabel,
       sidebarActions: renderMessagingWorkspaceServerTools(subroute, "server"),
       sidebarBody: channelRows,
@@ -63939,10 +70528,13 @@ function renderMessagingPage() {
     subroute.view === "server-settings-section"
   ) {
     const selectedSection = normalizeString(subroute.sectionId);
+    const selectedSectionDisplay = messagingServerSettingsItemPresentation({
+      id: selectedSection,
+    });
     workspaceMarkup = renderMessagingWorkspaceShell({
       subroute,
-      sidebarTitle: currentServer?.title || "Server settings",
-      sidebarSubtitle: "Preferences and community controls",
+      sidebarTitle: currentServer?.title || "Workspace settings",
+      sidebarSubtitle: "Preferences and member entry controls",
       sidebarActions: renderMessagingWorkspaceServerTools(
         subroute,
         messagingServerSettingsSidebarKey(selectedSection),
@@ -63952,10 +70544,10 @@ function renderMessagingPage() {
         title:
           serverSettings?.server?.title ||
           currentServer?.title ||
-          "Server settings",
+          "Workspace settings",
         subtitle: selectedSection
-          ? `${humanizeLabel(selectedSection)} section`
-          : "Overview and server preferences.",
+          ? `${selectedSectionDisplay.title} area`
+          : "Overview and workspace preferences.",
         body: renderMessagingServerSettingsBody({
           subroute,
           serverSettings,
@@ -63997,7 +70589,7 @@ function renderMessagingPage() {
       ),
       sidebarBody: channelRows,
       mainBody: renderMessagingWorkspacePanel({
-        title: "Server members",
+        title: "Members",
         subtitle: "Review roles, nicknames, and moderation targets.",
         body: renderMessagingServerMembersPanel(subroute, serverMembers),
       }),
@@ -64029,17 +70621,17 @@ function renderMessagingPage() {
   } else if (subroute.view === "server-workflows") {
     workspaceMarkup = renderMessagingWorkspaceShell({
       subroute,
-      sidebarTitle: currentServer?.title || "Workflows",
-      sidebarSubtitle: "Automation rules",
+      sidebarTitle: currentServer?.title || "Automations",
+      sidebarSubtitle: "Triggers and handoffs",
       sidebarActions: renderMessagingWorkspaceServerTools(
         subroute,
         "server-workflows",
       ),
       sidebarBody: channelRows,
       mainBody: renderMessagingWorkspacePanel({
-        title: "Server workflows",
+        title: "Room automations",
         subtitle:
-          "Create low-friction automation for reports, member events, schedules, and webhook handoffs.",
+          "Route reports, joins, schedules, room notices, and external handoffs without manual follow-up.",
         actions: `<button class="shared-feed-chip" type="button" data-action="refresh-current-route">Refresh</button>`,
         body: renderMessagingWorkflowsPanel(subroute, serverWorkflows),
       }),
@@ -64125,7 +70717,7 @@ function renderMessagingPage() {
             ? activeRoomConversation?.subtitle || roomSettingsConfig.subtitle
             : `${activeRoomConversation?.title || "Room"} | ${roomSettingsConfig.subtitle}`,
         actions: `<button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(buildMessagingRoomRoute(subroute.scopeType, subroute.scopeId, subroute.conversationId))}">Open room</button>
-          <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(buildMessagingRoomRoute(subroute.scopeType, subroute.scopeId, subroute.conversationId, "/settings/permissions"))}">Permissions</button>`,
+          <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(buildMessagingRoomRoute(subroute.scopeType, subroute.scopeId, subroute.conversationId, "/settings/permissions"))}">Access</button>`,
         body: renderMessagingRoomSettingsBody(
           subroute,
           activeRoomConversation,
@@ -64150,7 +70742,7 @@ function renderMessagingPage() {
     );
     workspaceMarkup = renderMessagingWorkspaceShell({
       subroute,
-      sidebarTitle: currentServer?.title || "Permissions",
+      sidebarTitle: currentServer?.title || "Room access",
       sidebarSubtitle: permissionsTitle,
       sidebarActions: renderMessagingWorkspaceServerTools(subroute, "server"),
       sidebarBody: channelRows,
@@ -64188,6 +70780,7 @@ function renderMessagingPage() {
         inbox,
         requests,
         servers: messaging.servers,
+        messaging,
       }),
     });
   }
@@ -64654,13 +71247,29 @@ function renderSettingsAuthGate() {
 
 function renderSettingsReturnBanner() {
   const params = readCurrentSearchParams();
+  const socialFallbackStatus = connectedAccountReturnPathStatus();
+  const calendarFallbackStatus =
+    calendarReturnTargetPathFromLocation() === "/settings/connected-accounts"
+      ? calendarReturnPathStatus()
+      : "";
+  const fallbackStatus = socialFallbackStatus || calendarFallbackStatus;
   const status = normalizeString(
-    params.get("social_status") || params.get("status"),
+    params.get("social_status") ||
+      params.get("calendar_status") ||
+      params.get("status") ||
+      fallbackStatus,
   ).toLowerCase();
   const provider = normalizeSettingsProvider(params.get("provider"));
-  const message = normalizeString(
-    params.get("social_message") || params.get("message"),
-  );
+  const message =
+    normalizeString(
+      params.get("social_message") ||
+        params.get("calendar_message") ||
+        params.get("message"),
+    ) ||
+    (fallbackStatus === "error"
+      ? "Connection returned before it finished. Please try reconnecting."
+      : "");
+  const fallbackKind = calendarFallbackStatus ? "calendar" : "social";
   if (!status && !message) {
     return "";
   }
@@ -64671,7 +71280,7 @@ function renderSettingsReturnBanner() {
       message ||
         (provider
           ? `${providerLabel(provider)} returned to Polis.`
-          : "The social connection flow returned to Polis."),
+          : `The ${fallbackKind} connection flow returned to Polis.`),
     )}</span>
   </div>`;
 }
@@ -64753,6 +71362,10 @@ function renderSettingsOverview() {
     normalizeNotificationPreferences(settings.notifications.item);
   const enabledCategories = Object.values(notifications.categories).filter(Boolean)
     .length;
+  const profileResource = settings.voterProfile.profile;
+  const accountUsername = normalizeSettingsAccountUsername(
+    profileResource.item?.username || state.auth.user?.username,
+  );
   const audienceGroupCount = settings.audienceGroups.items.length;
   const audienceMemberCount = new Set(
     settings.audienceGroups.items.flatMap((group) => group.memberUserIds),
@@ -64765,6 +71378,13 @@ function renderSettingsOverview() {
         copy: `${formatCount(targetCount)} discovered publishing target${targetCount === 1 ? "" : "s"} across social providers.`,
         route: "/settings/connected-accounts",
         actionLabel: "Manage accounts",
+      })}
+      ${renderSettingsSummaryCard({
+        title: "Username",
+        value: accountUsername ? `@${accountUsername}` : "Not set",
+        copy: "Public handle used across posts, messages, campaign staff, and coalition invites.",
+        route: "/settings/account-username",
+        actionLabel: accountUsername ? "Change handle" : "Claim handle",
       })}
       ${renderSettingsSummaryCard({
         title: "Publishing defaults",
@@ -64819,6 +71439,7 @@ function renderSettingsOverview() {
     ${renderSettingsResourceStatus(settings.audienceGroups, "audience groups")}
     ${renderSettingsResourceStatus(settings.crosspost, "crosspost defaults")}
     ${renderSettingsResourceStatus(settings.notifications, "notification preferences")}
+    ${renderSettingsResourceStatus(profileResource, "profile")}
   </div>`;
 }
 
@@ -66293,6 +72914,62 @@ function voterIntelScore(profile, key) {
   return Number(profile?.scoreSummary?.[key]) || 0;
 }
 
+const VOTER_INTEL_TAB_CONFIG = [
+  {
+    key: "profile",
+    label: "Profile",
+    icon: "profile",
+    copy: "Matrix and policy signals",
+  },
+  {
+    key: "elections",
+    label: "Elections",
+    icon: "election",
+    copy: "District races and ballot work",
+  },
+  {
+    key: "guide",
+    label: "Guide",
+    icon: "registry",
+    copy: "Saved rankings and email",
+  },
+];
+
+function getVoterIntelActiveTab() {
+  const tab = normalizeString(readCurrentSearchParams().get("tab")).toLowerCase();
+  return VOTER_INTEL_TAB_CONFIG.some((item) => item.key === tab)
+    ? tab
+    : "profile";
+}
+
+function isVoterIntelGuidedMode() {
+  const params = readCurrentSearchParams();
+  return normalizeString(params.get("game")).toLowerCase() === "ballot";
+}
+
+function voterIntelTabRoute(tab, guidedMode = isVoterIntelGuidedMode()) {
+  const normalizedTab = VOTER_INTEL_TAB_CONFIG.some((item) => item.key === tab)
+    ? tab
+    : "profile";
+  return buildRouteWithQuery("/settings/voter-intelligence", {
+    tab: normalizedTab === "profile" ? "" : normalizedTab,
+    game: normalizedTab === "elections" && guidedMode ? "ballot" : "",
+  });
+}
+
+function renderVoterIntelTabNav(activeTab, guidedMode) {
+  return `<nav class="shared-voter-intel-tabs" aria-label="Voter intelligence sections">
+    ${VOTER_INTEL_TAB_CONFIG.map((item) => {
+      const active = item.key === activeTab;
+      return `<button class="shared-voter-intel-tab${active ? " is-active" : ""}" type="button" data-action="navigate" data-route="${escapeHtml(voterIntelTabRoute(item.key, guidedMode))}" aria-current="${active ? "page" : "false"}">
+        <span>${renderIcon(item.icon)}</span>
+        <strong>${escapeHtml(item.label)}</strong>
+        <small>${escapeHtml(item.copy)}</small>
+      </button>`;
+    }).join("")}
+  </nav>`;
+}
+
 function renderVoterIntelMetric({ label, value, copy }) {
   return `<article class="shared-voter-intel-metric">
     <strong>${escapeHtml(value)}</strong>
@@ -66470,23 +73147,8 @@ function renderVoterIntelQuestions() {
   </section>`;
 }
 
-function renderSettingsVoterIntelligence() {
-  const voterIntel = state.pages.settings.voterIntel;
-  const snapshot = voterIntel.snapshot.item;
-  const profile = snapshot?.profile || normalizeVoterIntelProfile();
-  return `<div class="shared-settings-main shared-voter-intel">
-    <section class="shared-voter-intel-hero">
-      <div>
-        <span class="shared-settings-eyebrow">Voter intelligence</span>
-        <h2>Turn your civic signals into a working ballot profile.</h2>
-        <p>Track profile readiness, matrix confidence, jurisdiction coverage, ballot-guide progress, and reviewed policy questions from the web app.</p>
-      </div>
-      <div class="shared-settings-header__actions">
-        <button class="shared-feed-chip" data-action="settings-refresh">Refresh</button>
-        <button class="shared-feed-chip" data-action="navigate" data-route="/election-day">Election Day</button>
-      </div>
-    </section>
-    ${renderSettingsResourceStatus(voterIntel.snapshot, "voter intelligence")}
+function renderVoterIntelProfileTab(profile, snapshot) {
+  return `
     <div class="shared-voter-intel-metrics">
       ${renderVoterIntelMetric({
         label: "Engagement",
@@ -66513,8 +73175,419 @@ function renderSettingsVoterIntelligence() {
         : ""
     }
     ${renderVoterIntelCapability(snapshot)}
-    ${renderVoterIntelGuide()}
     ${renderVoterIntelQuestions()}
+  `;
+}
+
+function voterIntelRaceCardRoute(districts) {
+  return settingsDistrictElectionRoute(districts) || "/election-day";
+}
+
+function voterIntelCandidateInitials(candidate = {}) {
+  const explicit = normalizeString(candidate.initials);
+  if (explicit) return explicit.slice(0, 3).toUpperCase();
+  return (
+    normalizeString(candidate.displayName || candidate.name)
+      .split(/\s+/u)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part.slice(0, 1).toUpperCase())
+      .join("") || "?"
+  );
+}
+
+function voterIntelRankingPreferencesForContest(contestId) {
+  return normalizeContestRankingPreferences(
+    voterIntelRankingsState().preferencesByContestId[contestId] || [],
+  );
+}
+
+function voterIntelHydratedRankingCandidate(race, preference) {
+  const candidatesById = new Map(
+    voterIntelRaceCandidates(race).map((candidate) => [
+      candidate.candidateId,
+      candidate,
+    ]),
+  );
+  const candidate = candidatesById.get(preference.candidateId) || {};
+  return {
+    ...candidate,
+    ...preference,
+    displayName:
+      normalizeString(preference.displayName || candidate.displayName) ||
+      preference.candidateId,
+    partyLabel: normalizeString(candidate.partyLabel || preference.partyLabel),
+    partyToken: normalizeString(candidate.partyToken || preference.partyToken),
+    avatarUrl: normalizeUrl(candidate.avatarUrl || preference.avatarUrl),
+    initials: normalizeString(candidate.initials || preference.initials),
+  };
+}
+
+function renderVoterIntelCandidateIdentity(candidate = {}) {
+  const imageUrl = normalizeUrl(candidate.avatarUrl);
+  const subtitle =
+    normalizeString(candidate.partyLabel || candidate.partyToken) || "Candidate";
+  return `<span class="shared-voter-intel-ranking__avatar">
+      ${imageUrl ? `<img src="${escapeHtml(imageUrl)}" alt="" loading="lazy" />` : `<strong>${escapeHtml(voterIntelCandidateInitials(candidate))}</strong>`}
+    </span>
+    <span class="shared-voter-intel-ranking__candidate-main">
+      <strong>${escapeHtml(candidate.displayName || candidate.name || "Candidate")}</strong>
+      <small>${escapeHtml(subtitle)}</small>
+    </span>`;
+}
+
+function renderVoterIntelRankedCandidate(candidate, index, count, saving) {
+  const candidateId = normalizeString(candidate.candidateId);
+  return `<li class="shared-voter-intel-ranking__candidate">
+    <span class="shared-voter-intel-ranking__rank">${escapeHtml(String(index + 1))}</span>
+    ${renderVoterIntelCandidateIdentity(candidate)}
+    <span class="shared-voter-intel-ranking__tools">
+      <button class="shared-voter-intel-icon-button" type="button" data-action="voter-intel-rank-move" data-contest-id="${escapeHtml(candidate.contestId || "")}" data-candidate-id="${escapeHtml(candidateId)}" data-direction="-1" aria-label="${escapeHtml(`Move ${candidate.displayName} up`)}"${disabledAttr(saving || index === 0)}>${renderIcon("chevronUp")}</button>
+      <button class="shared-voter-intel-icon-button" type="button" data-action="voter-intel-rank-move" data-contest-id="${escapeHtml(candidate.contestId || "")}" data-candidate-id="${escapeHtml(candidateId)}" data-direction="1" aria-label="${escapeHtml(`Move ${candidate.displayName} down`)}"${disabledAttr(saving || index >= count - 1)}>${renderIcon("chevronDown")}</button>
+      <button class="shared-voter-intel-icon-button" type="button" data-action="voter-intel-rank-remove" data-contest-id="${escapeHtml(candidate.contestId || "")}" data-candidate-id="${escapeHtml(candidateId)}" aria-label="${escapeHtml(`Remove ${candidate.displayName}`)}"${disabledAttr(saving)}>${renderIcon("trash")}</button>
+    </span>
+  </li>`;
+}
+
+function renderVoterIntelUnrankedCandidate(candidate, contestId, saving) {
+  return `<li class="shared-voter-intel-ranking__candidate">
+    <span class="shared-voter-intel-ranking__rank">${renderIcon("create")}</span>
+    ${renderVoterIntelCandidateIdentity(candidate)}
+    <button class="shared-feed-chip" type="button" data-action="voter-intel-rank-add" data-contest-id="${escapeHtml(contestId)}" data-candidate-id="${escapeHtml(candidate.candidateId)}"${disabledAttr(saving)}>Add</button>
+  </li>`;
+}
+
+function renderVoterIntelRankingAggregate(race, aggregate, loading) {
+  const contestId = voterIntelRaceContestId(race);
+  const candidatesById = new Map(
+    voterIntelRaceCandidates(race).map((candidate) => [
+      candidate.candidateId,
+      candidate,
+    ]),
+  );
+  if (loading && !aggregate) {
+    return `<div class="shared-page__loading">Loading community ranking...</div>`;
+  }
+  if (!aggregate) {
+    return `<div class="shared-settings-empty">Community ranking has not been loaded for this race yet.</div>
+      <button class="shared-feed-chip" type="button" data-action="voter-intel-rank-refresh" data-contest-id="${escapeHtml(contestId)}">Load consensus</button>`;
+  }
+  if (!aggregate.available || aggregate.privacySuppressed) {
+    return `<div class="shared-voter-intel-ranking__privacy">
+      <strong>${escapeHtml(formatCount(aggregate.totalRankings))} ranking${aggregate.totalRankings === 1 ? "" : "s"} submitted</strong>
+      <p>Consensus unlocks after ${escapeHtml(formatCount(aggregate.minTotalRankings))} rankings, with enough support per candidate segment to preserve voter privacy.</p>
+    </div>`;
+  }
+  const rows = aggregate.candidates.slice(0, 6);
+  if (!rows.length) {
+    return `<div class="shared-settings-empty">Consensus is available, but no candidate has enough ranked support to display yet.</div>`;
+  }
+  return `<ol class="shared-voter-intel-ranking__aggregate-list">
+    ${rows
+      .map((entry) => {
+        const candidate = candidatesById.get(entry.candidateId) || {
+          candidateId: entry.candidateId,
+          displayName: entry.candidateId,
+        };
+        const percent = Math.max(
+          0,
+          Math.min(100, Number(entry.firstChoicePct) || 0),
+        );
+        return `<li class="shared-voter-intel-ranking__aggregate-item">
+          <div>
+            <strong>${escapeHtml(candidate.displayName || candidate.name || entry.candidateId)}</strong>
+            <small>${escapeHtml(`${formatCount(entry.firstChoiceCount)} first-choice - avg rank ${entry.avgRank ? Number(entry.avgRank).toFixed(1) : "n/a"}`)}</small>
+          </div>
+          <span>${escapeHtml(`${percent.toFixed(percent % 1 === 0 ? 0 : 1)}%`)}</span>
+          <i style="width: ${escapeHtml(String(percent))}%"></i>
+        </li>`;
+      })
+      .join("")}
+  </ol>
+  <button class="shared-feed-chip" type="button" data-action="voter-intel-rank-refresh" data-contest-id="${escapeHtml(contestId)}"${disabledAttr(loading)}>${loading ? "Refreshing..." : "Refresh consensus"}</button>`;
+}
+
+function renderVoterIntelRankingWorkspace(race) {
+  const contestId = voterIntelRaceContestId(race);
+  const rankingState = voterIntelRankingsState();
+  const candidates = voterIntelRaceCandidates(race);
+  const candidateIds = new Set(candidates.map((candidate) => candidate.candidateId));
+  const saving = rankingState.savingContestId === contestId;
+  const loading = rankingState.loadingContestId === contestId;
+  const ranked = voterIntelRankingPreferencesForContest(contestId).map(
+    (preference) =>
+      voterIntelHydratedRankingCandidate(race, {
+        ...preference,
+        contestId,
+      }),
+  );
+  const rankedIds = new Set(ranked.map((candidate) => candidate.candidateId));
+  const unranked = candidates.filter(
+    (candidate) =>
+      !rankedIds.has(candidate.candidateId) && candidateIds.has(candidate.candidateId),
+  );
+  const aggregate = rankingState.aggregateByContestId[contestId];
+  const error = normalizeString(rankingState.errorByContestId[contestId]);
+  const electionLabel = [
+    race.electionDay ? formatCalendarDate(race.electionDay) : "",
+    race.jurisdiction,
+  ]
+    .map(normalizeString)
+    .filter(Boolean)
+    .join(" - ");
+  return `<section class="shared-voter-intel-ranking" aria-label="${escapeHtml(`${race.title || race.officeTitle} ranking workspace`)}">
+    <div class="shared-voter-intel-ranking__header">
+      <div>
+        <span class="shared-settings-eyebrow">Ballot ranking</span>
+        <h3>${escapeHtml(race.title || race.officeTitle || "Election race")}</h3>
+        <p>${escapeHtml(electionLabel || "Rank candidates in the order you would prefer them on your ballot guide.")}</p>
+      </div>
+      <div class="shared-voter-intel-ranking__actions">
+        <button class="shared-feed-chip" type="button" data-action="voter-intel-rank-close">Close</button>
+        <button class="shared-feed-chip" type="button" data-action="voter-intel-rank-refresh" data-contest-id="${escapeHtml(contestId)}"${disabledAttr(loading)}>${loading ? "Refreshing..." : "Refresh"}</button>
+        <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="voter-intel-rank-save" data-contest-id="${escapeHtml(contestId)}"${disabledAttr(saving || !ranked.length)}>${saving ? "Saving..." : "Save ranking"}</button>
+      </div>
+    </div>
+    ${error ? `<div class="shared-page__error">${escapeHtml(error)}</div>` : ""}
+    <div class="shared-voter-intel-ranking__layout">
+      <section class="shared-voter-intel-ranking__panel">
+        <div class="shared-voter-intel-ranking__panel-title">
+          <strong>Your ranking</strong>
+          <span>${escapeHtml(`${formatCount(ranked.length)} selected`)}</span>
+        </div>
+        ${
+          ranked.length
+            ? `<ol class="shared-voter-intel-ranking__list">${ranked
+                .map((candidate, index) =>
+                  renderVoterIntelRankedCandidate(
+                    candidate,
+                    index,
+                    ranked.length,
+                    saving,
+                  ),
+                )
+                .join("")}</ol>`
+            : `<div class="shared-settings-empty">Add candidates from the pool to start your ballot order.</div>`
+        }
+      </section>
+      <section class="shared-voter-intel-ranking__panel">
+        <div class="shared-voter-intel-ranking__panel-title">
+          <strong>Candidate pool</strong>
+          <span>${escapeHtml(`${formatCount(unranked.length)} remaining`)}</span>
+        </div>
+        ${
+          unranked.length
+            ? `<ul class="shared-voter-intel-ranking__list">${unranked
+                .map((candidate) =>
+                  renderVoterIntelUnrankedCandidate(candidate, contestId, saving),
+                )
+                .join("")}</ul>`
+            : `<div class="shared-settings-empty">Every listed candidate is already in your ranking.</div>`
+        }
+      </section>
+      <section class="shared-voter-intel-ranking__panel">
+        <div class="shared-voter-intel-ranking__panel-title">
+          <strong>Community consensus</strong>
+          <span>${escapeHtml(aggregate ? `${formatCount(aggregate.totalRankings)} rankings` : "Not loaded")}</span>
+        </div>
+        ${renderVoterIntelRankingAggregate(race, aggregate, loading)}
+      </section>
+    </div>
+  </section>`;
+}
+
+function renderVoterIntelRaceCard(districts, entry, rankableRace = null) {
+  const { office, index } = entry;
+  const level = settingsDistrictLevelConfig(
+    settingsDistrictOfficeLevelKey(office?.level),
+  );
+  const reelection = settingsDistrictOfficeReelection(office);
+  const candidateGroups = settingsDistrictCandidateGroups(reelection);
+  const race = rankableRace || voterIntelRankableRaceFromDistrictEntry(districts, entry);
+  const contestId = voterIntelRaceContestId(race);
+  const selected =
+    contestId && voterIntelRankingsState().selectedContestId === contestId;
+  const candidateCount = candidateGroups.reduce(
+    (sum, group) => sum + group.candidates.length,
+    0,
+  );
+  const incumbents = settingsDistrictOfficeIncumbents(office);
+  const status = normalizeString(reelection.status);
+  const electionDay = normalizeString(reelection.electionDay);
+  const title =
+    normalizeString(office?.office || office?.title || office?.officeTitle) ||
+    `Race ${index + 1}`;
+  const district = [
+    office?.jurisdiction,
+    office?.district,
+    office?.state,
+  ]
+    .map(normalizeString)
+    .filter(Boolean)
+    .join(" - ");
+  return `<article class="shared-voter-intel-race-card${selected ? " is-selected" : ""}">
+    <div class="shared-voter-intel-race-card__top">
+      <span>${renderIcon(level.icon || "election")}</span>
+      <div>
+        <small>${escapeHtml(level.label)}</small>
+        <h3>${escapeHtml(title)}</h3>
+        <p>${escapeHtml(district || level.description)}</p>
+      </div>
+      ${renderSettingsStatusPill(status ? humanizeLabel(status) : "Election data", settingsDistrictReelectionTone(status))}
+    </div>
+    <div class="shared-voter-intel-race-card__meta">
+      <span><strong>${escapeHtml(formatCount(candidateCount))}</strong><small>Candidates</small></span>
+      <span><strong>${escapeHtml(formatCount(incumbents.length))}</strong><small>Incumbents</small></span>
+      <span><strong>${escapeHtml(electionDay ? formatCalendarDate(electionDay) : "Pending")}</strong><small>Election day</small></span>
+    </div>
+    ${
+      candidateGroups.length
+        ? `<div class="shared-voter-intel-race-card__candidates">
+            ${candidateGroups
+              .slice(0, 4)
+              .map((group) => `<span>${escapeHtml(group.partyLabel || "Candidates")} ${escapeHtml(formatCount(group.candidates.length))}</span>`)
+              .join("")}
+          </div>`
+        : `<div class="shared-settings-empty">Candidate roster is not available for this race yet.</div>`
+    }
+    <div class="shared-voter-intel-race-card__actions">
+      ${
+        race.candidates.length
+          ? `<button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="voter-intel-rank-open" data-contest-id="${escapeHtml(contestId)}">${selected ? "Ranking open" : "Rank race"}</button>`
+          : ""
+      }
+      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(voterIntelRaceCardRoute(districts))}">Election Day</button>
+      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/settings/preferences/my-districts">District details</button>
+    </div>
+  </article>`;
+}
+
+function renderVoterIntelElectionsTab(profile, guidedMode) {
+  const voterProfile = state.pages.settings.voterProfile;
+  const districtsResource = voterProfile.districts;
+  const districts = districtsResource.item;
+  const offices = settingsDistrictOffices(districts);
+  const grouped = settingsDistrictGroupedOffices(offices);
+  const districtId = settingsDistrictFederalId(districts, voterProfile.profile.item || normalizeMyProfile());
+  const electionRoute = settingsDistrictElectionRoute(districts) || "/election-day";
+  const raceEntries = SETTINGS_DISTRICT_LEVELS.flatMap((level) => grouped[level.key] || []);
+  const raceItems = raceEntries.map((entry) => ({
+    entry,
+    race: voterIntelRankableRaceFromDistrictEntry(districts, entry),
+  }));
+  const selectedContestId = voterIntelRankingsState().selectedContestId;
+  const selectedRace =
+    raceItems.find(
+      (item) => voterIntelRaceContestId(item.race) === selectedContestId,
+    )?.race || null;
+  const openRaceCount = raceEntries.filter((entry) => {
+    const status = normalizeString(settingsDistrictOfficeReelection(entry.office).status).toLowerCase();
+    return status.includes("up_for") || status.includes("open");
+  }).length;
+  return `<div class="shared-voter-intel-tab-body shared-voter-intel-elections">
+    ${
+      guidedMode
+        ? `<section class="shared-voter-intel-guided">
+            <span>${renderIcon("election")}</span>
+            <div>
+              <strong>Ballot ranking</strong>
+              <p>Pick one race from your district context, open it in Election Day, and build the rankings that feed your ballot guide.</p>
+            </div>
+          </section>`
+        : ""
+    }
+    <section class="shared-voter-intel-election-hero">
+      <div>
+        <span class="shared-settings-eyebrow">Elections</span>
+        <h2>${escapeHtml(districtId || "District election workspace")}</h2>
+        <p>${escapeHtml(profile.ballotGame.nextAction || "Review district races, candidate rosters, and ballot-guide readiness from the browser.")}</p>
+      </div>
+      <div class="shared-voter-intel-election-hero__actions">
+        <button class="shared-feed-chip" type="button" data-action="settings-voter-profile-refresh-districts"${disabledAttr(districtsResource.loading)}>${districtsResource.loading ? "Refreshing..." : "Refresh races"}</button>
+        <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="${escapeHtml(electionRoute)}">Election Day</button>
+      </div>
+    </section>
+    ${renderSettingsResourceStatus(districtsResource, "district election data")}
+    <div class="shared-voter-intel-metrics">
+      ${renderVoterIntelMetric({
+        label: "Races",
+        value: formatCount(raceEntries.length),
+        copy: "Offices returned for your saved home location.",
+      })}
+      ${renderVoterIntelMetric({
+        label: "Open",
+        value: formatCount(openRaceCount),
+        copy: "Races currently marked open or up for reelection.",
+      })}
+      ${renderVoterIntelMetric({
+        label: "Ranked",
+        value: formatCount(profile.ballotGame.completedContestCount),
+        copy: "Contests already saved into your ballot guide.",
+      })}
+    </div>
+    ${selectedRace ? renderVoterIntelRankingWorkspace(selectedRace) : ""}
+    ${
+      raceEntries.length
+        ? `<section class="shared-voter-intel-election-grid">
+            ${raceItems.map((item) => renderVoterIntelRaceCard(districts, item.entry, item.race)).join("")}
+          </section>`
+        : `<section class="shared-voter-intel-panel">
+            <div class="shared-settings-empty">No upcoming races were returned yet. Add or verify your home location, then refresh district election data.</div>
+            <div class="shared-settings-form-actions">
+              <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="/settings/voter-profile/home-location">Home location</button>
+              <button class="shared-feed-chip" type="button" data-action="settings-voter-profile-refresh-districts">Retry</button>
+            </div>
+          </section>`
+    }
+  </div>`;
+}
+
+function renderVoterIntelGuideTab() {
+  return `<div class="shared-voter-intel-tab-body">
+    ${renderVoterIntelGuide()}
+  </div>`;
+}
+
+function renderVoterIntelActiveTab(activeTab, profile, snapshot, guidedMode) {
+  if (activeTab === "elections") {
+    return renderVoterIntelElectionsTab(profile, guidedMode);
+  }
+  if (activeTab === "guide") {
+    return renderVoterIntelGuideTab();
+  }
+  return `<div class="shared-voter-intel-tab-body">${renderVoterIntelProfileTab(profile, snapshot)}</div>`;
+}
+
+function renderSettingsVoterIntelligence() {
+  const voterIntel = state.pages.settings.voterIntel;
+  const snapshot = voterIntel.snapshot.item;
+  const profile = snapshot?.profile || normalizeVoterIntelProfile();
+  const activeTab = getVoterIntelActiveTab();
+  const guidedMode = isVoterIntelGuidedMode();
+  const activeConfig =
+    VOTER_INTEL_TAB_CONFIG.find((item) => item.key === activeTab) ||
+    VOTER_INTEL_TAB_CONFIG[0];
+  return `<div class="shared-settings-main shared-voter-intel">
+    <section class="shared-voter-intel-hero">
+      <div>
+        <span class="shared-settings-eyebrow">Voter intelligence</span>
+        <h2>${escapeHtml(activeConfig.label === "Profile" ? "Turn your civic signals into a working ballot profile." : activeConfig.label)}</h2>
+        <p>${escapeHtml(
+          activeTab === "elections"
+            ? "Review district races and continue the ballot-ranking workflow from the website."
+            : activeTab === "guide"
+              ? "Build, review, and email the ballot guide generated from saved race rankings."
+              : "Track profile readiness, matrix confidence, jurisdiction coverage, and reviewed policy questions from the web app.",
+        )}</p>
+      </div>
+      <div class="shared-settings-header__actions">
+        <button class="shared-feed-chip" data-action="settings-refresh">Refresh</button>
+        <button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(voterIntelTabRoute("elections", guidedMode))}">Elections</button>
+      </div>
+    </section>
+    ${renderVoterIntelTabNav(activeTab, guidedMode)}
+    ${renderSettingsResourceStatus(voterIntel.snapshot, "voter intelligence")}
+    ${renderVoterIntelActiveTab(activeTab, profile, snapshot, guidedMode)}
   </div>`;
 }
 
@@ -66645,6 +73718,99 @@ function renderSettingsSecurityStatus({ error = "", notice = "" } = {}) {
   return "";
 }
 
+function renderSettingsAccountUsername() {
+  const resource = state.pages.settings.voterProfile.profile;
+  const profile = resource.item || {};
+  const currentUsername = normalizeSettingsAccountUsername(
+    profile.username || state.auth.user?.username,
+  );
+  const displayName =
+    normalizeString(profile.displayName || profile.fullName || state.auth.user?.name) ||
+    "Your Polis account";
+  const handleLabel = currentUsername ? `@${currentUsername}` : "No username set";
+  const cooldownText = settingsAccountUsernameCooldownText(profile);
+  const updatedLabel = profile.usernameUpdatedAt
+    ? `Last changed ${formatSettingsDate(profile.usernameUpdatedAt)}`
+    : currentUsername
+      ? "No recent change recorded"
+      : "Ready to claim";
+  const inputDisabled = resource.loading || resource.saving || Boolean(cooldownText);
+  return `<div class="shared-settings-main shared-settings-username">
+    <section class="shared-settings-panel shared-settings-username-hero">
+      <div class="shared-settings-username-hero__main">
+        <span class="shared-settings-eyebrow">Account handle</span>
+        <h2>${escapeHtml(handleLabel)}</h2>
+        <p>${escapeHtml(
+          currentUsername
+            ? `${displayName} is currently shown around posts, messages, coalitions, and campaign workspaces with this handle.`
+            : "Claim a unique handle so people can recognize you across posts, messages, coalitions, and campaign workspaces.",
+        )}</p>
+      </div>
+      <div class="shared-settings-username-hero__status">
+        ${renderSettingsStatusPill(cooldownText ? "Locked" : "Editable", cooldownText ? "pending" : "good")}
+        <strong>${escapeHtml(updatedLabel)}</strong>
+        <span>${escapeHtml(cooldownText || "Username changes are limited to once every 90 days after the first claim.")}</span>
+      </div>
+    </section>
+
+    <section class="shared-settings-panel shared-settings-username-panel">
+      <div class="shared-settings-panel__header">
+        <div>
+          <h2>Change username</h2>
+          <p>Use the same 3-20 character handle rules as the mobile app. Polis will check availability when you save.</p>
+        </div>
+        <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/profile/edit">Edit profile</button>
+      </div>
+      ${renderSettingsResourceStatus(resource, "profile")}
+      ${renderSettingsSecurityStatus({ notice: resource.notice })}
+      <form class="shared-settings-form shared-settings-username-form" data-route-form="settings-account-username">
+        <label class="shared-settings-username-field">
+          <span>New username</span>
+          <div class="shared-settings-username-input">
+            <em>@</em>
+            <input name="username" value="${escapeHtml(currentUsername)}" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="20" pattern="[a-z0-9_]{3,20}" placeholder="polis_user" required${disabledAttr(inputDisabled)} />
+          </div>
+        </label>
+        <div class="shared-settings-username-rules">
+          <span>${renderIcon("check")} 3-20 characters</span>
+          <span>${renderIcon("check")} Lowercase letters, numbers, underscores</span>
+          <span>${renderIcon("check")} Unique across Polis</span>
+        </div>
+        <div class="shared-settings-form-actions">
+          <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(inputDisabled)}>${resource.saving ? "Saving..." : currentUsername ? "Save username" : "Claim username"}</button>
+          <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/settings/account-security">Account security</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="shared-settings-panel shared-settings-username-support">
+      <div class="shared-settings-panel__header">
+        <div>
+          <h2>Where this appears</h2>
+          <p>The web app now treats this as a real account setting, not an app-only placeholder.</p>
+        </div>
+      </div>
+      <div class="shared-settings-username-map">
+        <article>
+          <span>${renderIcon("profile")}</span>
+          <strong>Profile and posts</strong>
+          <p>Your handle travels with public profile cards, comments, and feed attribution.</p>
+        </article>
+        <article>
+          <span>${renderIcon("messages")}</span>
+          <strong>Messaging</strong>
+          <p>People can find and recognize you when starting direct messages or joining rooms.</p>
+        </article>
+        <article>
+          <span>${renderIcon("team")}</span>
+          <strong>Campaigns and coalitions</strong>
+          <p>Candidate dashboards and coalition workspaces can invite staff by username.</p>
+        </article>
+      </div>
+    </section>
+  </div>`;
+}
+
 function renderSettingsAccountSecurityHub() {
   const account = settingsAccountSecurity();
   const reset = account.reset;
@@ -66660,6 +73826,14 @@ function renderSettingsAccountSecurityHub() {
         </div>
       </div>
       <div class="shared-settings-security-grid">
+        <article class="shared-settings-security-card">
+          <span>${renderIcon("profile")}</span>
+          <div>
+            <h3>Username</h3>
+            <p>Claim or change the public handle used across posts, messages, campaign staff, and coalition invites.</p>
+          </div>
+          <button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="/settings/account-username">Manage username</button>
+        </article>
         <article class="shared-settings-security-card">
           <span>${renderIcon("settings")}</span>
           <div>
@@ -67491,7 +74665,7 @@ function renderSettingsSecurityHub() {
           <h3>Recovery</h3>
           <p>Enroll, rotate, verify, or restore encrypted message history from a saved key.</p>
         </div>
-        <small>${escapeHtml(`Server backup ${settingsSecurityBackupLabel(messaging.recovery)}.`)}</small>
+        <small>${escapeHtml(`Encrypted backup ${settingsSecurityBackupLabel(messaging.recovery)}.`)}</small>
         <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/settings/security/restore">Open recovery</button>
       </article>
       <article class="shared-settings-security-card">
@@ -67676,7 +74850,7 @@ function renderSettingsSecurityRestore() {
             <h2>Restore encrypted history</h2>
             <p>Enter your recovery key to restore the server backup on this browser. If you saved a recovery kit, paste it as a fallback.</p>
           </div>
-          ${renderSettingsStatusPill(hasBundle ? "Server backup ready" : "Kit required", hasBundle ? "good" : "pending")}
+          ${renderSettingsStatusPill(hasBundle ? "Encrypted backup ready" : "Kit required", hasBundle ? "good" : "pending")}
         </div>
         <form class="shared-settings-form" data-route-form="messaging-recovery-restore">
           <label><span>Recovery key</span><input name="recoveryCode" autocomplete="off" placeholder="XXXX-XXXX-XXXX-XXXX"${disabledAttr(recovery.actionPending)} /></label>
@@ -67847,7 +75021,7 @@ function renderSettingsHelpAboutLicenses() {
     ["Frontend package", "polisapp-io-frontend", "ISC"],
     ["Sanitized HTML", "DOMPurify", "Apache-2.0 OR MPL-2.0"],
     ["Markdown rendering", "marked", "MIT"],
-    ["Server framework", "Express", "MIT"],
+    ["Backend framework", "Express", "MIT"],
     ["Database ORM", "Sequelize", "MIT"],
     ["Build tooling", "Webpack and Babel", "MIT"],
   ];
@@ -68267,6 +75441,8 @@ function renderSettingsPage() {
     activeSection === "accessibility"
   ) {
     body = renderSettingsDisplayPreferences();
+  } else if (activeSection === "account-username") {
+    body = renderSettingsAccountUsername();
   } else if (activeSection === "account-security") {
     body = renderSettingsAccountSecurity();
   } else if (activeSection === "candidate-access") {
@@ -68430,6 +75606,1051 @@ function renderAdminRawFields(item) {
       )
       .join("")}
   </div>`;
+}
+
+function adminDetailSource(item) {
+  return item?.raw && typeof item.raw === "object" ? item.raw : {};
+}
+
+function readAdminPath(source, path) {
+  const parts = normalizeString(path).split(".").filter(Boolean);
+  let value = source;
+  for (const part of parts) {
+    if (!value || typeof value !== "object" || !(part in value)) {
+      return undefined;
+    }
+    value = value[part];
+  }
+  return value;
+}
+
+function adminDetailSimpleValue(value) {
+  if (value === undefined || value === null || value === "") {
+    return "";
+  }
+  if (typeof value === "boolean") {
+    return value ? "Yes" : "No";
+  }
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => adminDetailSimpleValue(entry))
+      .filter(Boolean)
+      .slice(0, 6)
+      .join(", ");
+  }
+  if (typeof value === "object") {
+    return "";
+  }
+  return normalizeString(value);
+}
+
+function adminFirstValue(source, keys = []) {
+  for (const key of keys) {
+    const value = readAdminPath(source, key);
+    const simple = adminDetailSimpleValue(value);
+    if (simple) {
+      return simple;
+    }
+  }
+  return "";
+}
+
+function adminFirstNumber(source, keys = []) {
+  for (const key of keys) {
+    const value = readAdminPath(source, key);
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) {
+      return numeric;
+    }
+  }
+  return 0;
+}
+
+function adminFirstArray(source, keys = []) {
+  for (const key of keys) {
+    const value = readAdminPath(source, key);
+    if (Array.isArray(value)) {
+      return value;
+    }
+  }
+  return [];
+}
+
+function adminFirstObject(source, keys = []) {
+  for (const key of keys) {
+    const value = readAdminPath(source, key);
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      return value;
+    }
+  }
+  return {};
+}
+
+function adminTimestamp(value) {
+  if (value === undefined || value === null || value === "") {
+    return 0;
+  }
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && numeric > 0) {
+    return numeric < 10000000000 ? numeric * 1000 : numeric;
+  }
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function adminDateLabel(value, fallback = "") {
+  const timestamp = adminTimestamp(value);
+  if (!timestamp) {
+    return fallback;
+  }
+  return new Date(timestamp).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function adminRelativeDateLabel(value) {
+  const timestamp = adminTimestamp(value);
+  return timestamp ? formatRelativeTime(timestamp) : "";
+}
+
+function formatAdminCurrency(amountCents, currency = "usd") {
+  const cents = Number(amountCents);
+  const normalizedCurrency = normalizeString(currency).toUpperCase() || "USD";
+  if (!Number.isFinite(cents)) {
+    return "$0.00";
+  }
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: normalizedCurrency,
+    }).format(cents / 100);
+  } catch {
+    return `$${(cents / 100).toFixed(2)}`;
+  }
+}
+
+function adminFormatBytes(value) {
+  const bytes = Number(value);
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return "";
+  }
+  if (bytes >= 1024 * 1024) {
+    const mb = bytes / (1024 * 1024);
+    return `${mb >= 10 ? mb.toFixed(0) : mb.toFixed(1)} MB`;
+  }
+  const kb = bytes / 1024;
+  return `${kb >= 10 ? kb.toFixed(0) : kb.toFixed(1)} KB`;
+}
+
+function adminField(label, value) {
+  return { label, value: adminDetailSimpleValue(value) };
+}
+
+function adminFieldFrom(source, label, keys = []) {
+  return adminField(label, adminFirstValue(source, keys));
+}
+
+function renderAdminInfoGrid(fields = []) {
+  const visible = fields
+    .map((field) => ({
+      label: normalizeString(field?.label),
+      value: adminDetailSimpleValue(field?.value),
+    }))
+    .filter((field) => field.label && field.value);
+  if (!visible.length) {
+    return "";
+  }
+  return `<div class="shared-admin-case-grid">
+    ${visible
+      .map(
+        (field) => `<span>
+          <small>${escapeHtml(field.label)}</small>
+          <strong>${escapeHtml(field.value)}</strong>
+        </span>`,
+      )
+      .join("")}
+  </div>`;
+}
+
+function renderAdminCaseChips(fields = []) {
+  const visible = fields
+    .map((field) => ({
+      label: normalizeString(field?.label),
+      value: adminDetailSimpleValue(field?.value),
+      tone: normalizeString(field?.tone),
+    }))
+    .filter((field) => field.label && field.value);
+  if (!visible.length) {
+    return "";
+  }
+  return `<div class="shared-admin-case-chip-list">
+    ${visible
+      .map(
+        (field) => `<span class="shared-admin-case-chip${field.tone ? ` is-${escapeHtml(field.tone)}` : ""}">
+          <small>${escapeHtml(field.label)}</small>
+          <strong>${escapeHtml(field.value)}</strong>
+        </span>`,
+      )
+      .join("")}
+  </div>`;
+}
+
+function renderAdminCaseSection(title, body, copy = "") {
+  const normalizedTitle = normalizeString(title);
+  const normalizedBody = normalizeString(body);
+  if (!normalizedTitle || !normalizedBody) {
+    return "";
+  }
+  return `<section class="shared-admin-case-section">
+    <div class="shared-admin-case-section__header">
+      <h3>${escapeHtml(normalizedTitle)}</h3>
+      ${copy ? `<p>${escapeHtml(copy)}</p>` : ""}
+    </div>
+    ${normalizedBody}
+  </section>`;
+}
+
+function adminObjectRows(object = {}, { exclude = [], limit = 12 } = {}) {
+  if (!object || typeof object !== "object" || Array.isArray(object)) {
+    return [];
+  }
+  const excluded = new Set(exclude);
+  return Object.entries(object)
+    .filter(([key]) => !excluded.has(key))
+    .map(([key, value]) => adminField(humanizeLabel(key), value))
+    .filter((field) => field.value)
+    .slice(0, limit);
+}
+
+function renderAdminObjectSection(title, object, options = {}) {
+  const grid = renderAdminInfoGrid(adminObjectRows(object, options));
+  return renderAdminCaseSection(title, grid, options.copy || "");
+}
+
+function adminHasDetailObject(value) {
+  if (Array.isArray(value)) {
+    return value.length > 0;
+  }
+  return Boolean(value && typeof value === "object" && Object.keys(value).length);
+}
+
+function adminJsonPreview(value) {
+  try {
+    const serialized = JSON.stringify(value, null, 2);
+    return serialized.length > 5000
+      ? `${serialized.slice(0, 5000)}\n...`
+      : serialized;
+  } catch {
+    return normalizeString(value);
+  }
+}
+
+function renderAdminJsonCard(title, value, copy = "") {
+  if (!adminHasDetailObject(value)) {
+    return "";
+  }
+  return `<details class="shared-admin-json-card">
+    <summary>
+      <span>${escapeHtml(title)}</span>
+      ${copy ? `<small>${escapeHtml(copy)}</small>` : ""}
+    </summary>
+    <pre><code>${escapeHtml(adminJsonPreview(value))}</code></pre>
+  </details>`;
+}
+
+function renderAdminTimelineEntry(title, meta = [], copy = "") {
+  const visibleMeta = meta.map(adminDetailSimpleValue).filter(Boolean);
+  return `<article class="shared-admin-timeline-entry">
+    <span aria-hidden="true"></span>
+    <div>
+      <strong>${escapeHtml(title || "Entry")}</strong>
+      ${visibleMeta.length ? `<small>${escapeHtml(visibleMeta.join(" | "))}</small>` : ""}
+      ${copy ? `<p>${escapeHtml(copy)}</p>` : ""}
+    </div>
+  </article>`;
+}
+
+function renderAdminTimeline(title, items = [], renderer, emptyCopy = "No entries recorded.") {
+  const entries = Array.isArray(items) ? items : [];
+  if (!entries.length) {
+    return renderAdminCaseSection(
+      title,
+      `<div class="shared-settings-empty">${escapeHtml(emptyCopy)}</div>`,
+    );
+  }
+  return renderAdminCaseSection(
+    title,
+    `<div class="shared-admin-timeline">
+      ${entries.map((entry, index) => renderer(entry, index)).join("")}
+    </div>`,
+  );
+}
+
+function renderAdminAttachmentList(attachments = []) {
+  const items = Array.isArray(attachments) ? attachments : [];
+  if (!items.length) {
+    return "";
+  }
+  return renderAdminCaseSection(
+    "Attachments",
+    `<div class="shared-admin-attachment-list">
+      ${items
+        .map((attachment, index) => {
+          const source =
+            attachment && typeof attachment === "object" ? attachment : {};
+          const fileName =
+            adminFirstValue(source, ["fileName", "name", "filename", "key"]) ||
+            `Attachment ${index + 1}`;
+          const url = adminFirstValue(source, ["url", "href", "signedUrl"]);
+          const meta = [
+            adminFirstValue(source, ["contentType", "mimeType", "type"]),
+            adminFormatBytes(adminFirstValue(source, ["size", "sizeBytes", "bytes"])),
+          ].filter(Boolean);
+          const body = `<span>
+              <strong>${escapeHtml(fileName)}</strong>
+              ${meta.length ? `<small>${escapeHtml(meta.join(" | "))}</small>` : ""}
+            </span>`;
+          return url
+            ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${body}<em>Open</em></a>`
+            : `<article>${body}</article>`;
+        })
+        .join("")}
+    </div>`,
+  );
+}
+
+function renderAdminApplicationDetail(item) {
+  const source = adminDetailSource(item);
+  const details = adminFirstObject(source, ["details", "applicationDetails", "form"]);
+  const submittedAt =
+    adminDateLabel(
+      adminFirstValue(source, ["submittedAt", "submittedAtIso", "createdAt"]),
+    ) || adminFirstValue(source, ["submittedLabel"]);
+  return `<div class="shared-admin-case-stack">
+    ${renderAdminCaseChips([
+      { label: "Status", value: item.status, tone: adminStatusTone(item.status) },
+      { label: "Submitted", value: submittedAt },
+      { label: "Office", value: adminFirstValue(source, ["officeName", "office", "race.office"]) },
+      { label: "State", value: adminFirstValue(source, ["state", "race.state"]) },
+    ])}
+    ${renderAdminCaseSection(
+      "Applicant",
+      renderAdminInfoGrid([
+        adminFieldFrom(source, "Full name", ["fullName", "name", "displayName"]),
+        adminFieldFrom(source, "Email", ["email", "contactEmail"]),
+        adminFieldFrom(source, "Phone", ["phone", "phoneNumber"]),
+        adminFieldFrom(source, "Candidate", ["candidateName", "campaignName"]),
+        adminFieldFrom(source, "Party", ["party", "partyLabel"]),
+        adminFieldFrom(source, "District", ["district", "districtLabel"]),
+      ]),
+      "Identity and campaign context used before granting candidate dashboard access.",
+    )}
+    ${renderAdminObjectSection("Application Fields", details, {
+      copy: "Submitted form values retained for the admin audit trail.",
+    })}
+  </div>`;
+}
+
+function renderAdminReportDetail(item) {
+  const source = adminDetailSource(item);
+  const categoryCounts = adminFirstObject(source, ["categoryCounts", "categories"]);
+  const postSnapshot = adminFirstObject(source, ["postSnapshot", "post"]);
+  const reporters = adminFirstArray(source, ["reporters"]);
+  const audit = adminFirstArray(source, ["audit", "actions", "moderationActions"]);
+  return `<div class="shared-admin-case-stack">
+    ${renderAdminCaseChips([
+      { label: "Status", value: item.status, tone: adminStatusTone(item.status) },
+      { label: "Distribution", value: adminFirstValue(source, ["distributionState"]) },
+      { label: "Moderation", value: adminFirstValue(source, ["moderationStatus"]) },
+      { label: "Severity", value: adminFirstValue(source, ["severityMax", "severity"]) },
+    ])}
+    ${renderAdminCaseSection(
+      "Report Summary",
+      renderAdminInfoGrid([
+        adminField("Open reports", adminFirstNumber(source, ["openCount", "open"])),
+        adminField("Total reports", adminFirstNumber(source, ["totalCount", "total"])),
+        adminField("Reports per hour", adminFirstValue(source, ["reportRateHour"])),
+        adminField("Reports per day", adminFirstValue(source, ["reportRateDay"])),
+        adminField("Updated", adminDateLabel(adminFirstValue(source, ["updatedAt", "updatedAtIso"]))),
+      ]),
+      "Moderator context for deciding whether to suspend or restore post distribution.",
+    )}
+    ${renderAdminObjectSection("Categories", categoryCounts)}
+    ${renderAdminObjectSection("Post Snapshot", postSnapshot, {
+      copy: "Content and author metadata captured when the report queue item was built.",
+      limit: 16,
+    })}
+    ${renderAdminTimeline(
+      "Reporters",
+      reporters,
+      (reporter) => {
+        const row = reporter && typeof reporter === "object" ? reporter : {};
+        const trust = adminFirstValue(row, ["trustWeight"]);
+        return renderAdminTimelineEntry(
+          adminFirstValue(row, ["reporterId", "userId", "id"]) || "Redacted reporter",
+          [
+            adminFirstValue(row, ["category"]),
+            adminFirstValue(row, ["severity"]),
+            trust ? `Trust ${trust}` : "",
+            adminDateLabel(adminFirstValue(row, ["reportedAt", "createdAt"])),
+          ],
+        );
+      },
+      "No reporters listed for this post.",
+    )}
+    ${renderAdminTimeline(
+      "Audit Trail",
+      audit,
+      (entry) => {
+        const row = entry && typeof entry === "object" ? entry : {};
+        return renderAdminTimelineEntry(
+          humanizeLabel(adminFirstValue(row, ["action"]) || "Action"),
+          [
+            adminFirstValue(row, ["resolution"]),
+            adminFirstValue(row, ["actorId", "actor"]),
+            adminDateLabel(adminFirstValue(row, ["createdAt", "createdAtIso"])),
+          ],
+          adminFirstValue(row, ["note", "notes"]),
+        );
+      },
+    )}
+  </div>`;
+}
+
+function renderAdminDonationDetail(item) {
+  const source = adminDetailSource(item);
+  const amountCents = adminFirstNumber(source, ["amountCents", "amount_cents"]);
+  const currency = adminFirstValue(source, ["currency"]) || "usd";
+  const jsonCards = [
+    ["Candidate Snapshot", adminFirstObject(source, ["candidateSnapshot"])],
+    ["Donor Snapshot", adminFirstObject(source, ["donorSnapshot"])],
+    ["Rule Snapshot", adminFirstObject(source, ["ruleSnapshot"])],
+    ["Compliance Snapshot", adminFirstObject(source, ["complianceSnapshot"])],
+    ["Stripe Objects", adminFirstObject(source, ["stripe"])],
+    ["Current Donor Profile", adminFirstObject(source, ["donorProfile"])],
+    ["Identity Binding", adminFirstObject(source, ["identityBinding"])],
+    ["Candidate Readiness", adminFirstObject(source, ["candidateReadiness"])],
+    ["Candidate Jurisdiction", adminFirstObject(source, ["candidateJurisdiction"])],
+  ]
+    .map(([title, value]) => renderAdminJsonCard(title, value))
+    .join("");
+  return `<div class="shared-admin-case-stack">
+    ${renderAdminCaseChips([
+      { label: "Amount", value: formatAdminCurrency(amountCents, currency), tone: "good" },
+      { label: "Status", value: item.status, tone: adminStatusTone(item.status) },
+      { label: "Method", value: adminFirstValue(source, ["paymentMethod"]) },
+      { label: "Cycle", value: adminFirstValue(source, ["electionCycle"]) },
+    ])}
+    ${renderAdminCaseSection(
+      "Ledger",
+      renderAdminInfoGrid([
+        adminFieldFrom(source, "Donation ID", ["donationId", "id"]),
+        adminFieldFrom(source, "Candidate", ["candidateDisplayName", "candidateId"]),
+        adminFieldFrom(source, "Donor", ["donorName", "donorUserId"]),
+        adminFieldFrom(source, "Identity key", ["donorIdentityKey"]),
+        adminFieldFrom(source, "Aggregate key", ["contributionAggregateKey"]),
+        adminField("Created", adminDateLabel(adminFirstValue(source, ["createdAt", "createdAtIso"]))),
+        adminField("Updated", adminDateLabel(adminFirstValue(source, ["updatedAt", "updatedAtIso"]))),
+      ]),
+      "Compliance and payment context for the admin donation record.",
+    )}
+    ${renderAdminTimeline(
+      "Status Timeline",
+      adminFirstArray(source, ["timeline"]),
+      (entry) => {
+        const row = entry && typeof entry === "object" ? entry : {};
+        return renderAdminTimelineEntry(
+          humanizeLabel(adminFirstValue(row, ["status", "event", "type"]) || "Timeline event"),
+          [
+            adminDateLabel(adminFirstValue(row, ["createdAt", "at", "timestamp"])),
+            adminFirstValue(row, ["actorId", "source"]),
+          ],
+          adminFirstValue(row, ["message", "note", "reason"]),
+        );
+      },
+      "No donation status timeline has been recorded.",
+    )}
+    ${renderAdminTimeline(
+      "Donor Compliance Events",
+      adminFirstArray(source, ["donorComplianceEvents"]),
+      (entry) => {
+        const row = entry && typeof entry === "object" ? entry : {};
+        return renderAdminTimelineEntry(
+          humanizeLabel(adminFirstValue(row, ["type", "event", "status"]) || "Compliance event"),
+          [adminDateLabel(adminFirstValue(row, ["createdAt", "at", "timestamp"]))],
+          adminFirstValue(row, ["message", "reason", "details"]),
+        );
+      },
+      "No donor compliance events have been recorded.",
+    )}
+    ${jsonCards ? renderAdminCaseSection("Snapshots", jsonCards) : ""}
+  </div>`;
+}
+
+function renderAdminAddressChangeDetail(item) {
+  const source = adminDetailSource(item);
+  const addressObject = adminFirstObject(source, [
+    "requestedAddress",
+    "address",
+    "newAddress",
+  ]);
+  const addressFields = Object.keys(addressObject).length
+    ? adminObjectRows(addressObject, { limit: 12 })
+    : [
+        adminFieldFrom(source, "Address line 1", ["addressLine1", "line1"]),
+        adminFieldFrom(source, "Address line 2", ["addressLine2", "line2"]),
+        adminFieldFrom(source, "City", ["city"]),
+        adminFieldFrom(source, "State", ["state"]),
+        adminFieldFrom(source, "Postal code", ["postalCode", "zip", "zipCode"]),
+        adminFieldFrom(source, "Country", ["country"]),
+      ];
+  return `<div class="shared-admin-case-stack">
+    ${renderAdminCaseChips([
+      { label: "Status", value: item.status, tone: adminStatusTone(item.status) },
+      { label: "Submitted", value: adminDateLabel(adminFirstValue(source, ["submittedAt", "createdAt", "createdAtIso"])) },
+      { label: "County", value: adminFirstValue(source, ["county"]) },
+      { label: "District", value: adminFirstValue(source, ["district", "districtLabel"]) },
+    ])}
+    ${renderAdminCaseSection(
+      "Requested Address",
+      renderAdminInfoGrid(addressFields),
+      "Address correction evidence before approving district and home-location changes.",
+    )}
+    ${renderAdminCaseSection(
+      "Requester",
+      renderAdminInfoGrid([
+        adminFieldFrom(source, "User", ["userDisplayName", "userId", "requesterId"]),
+        adminFieldFrom(source, "Email", ["email", "userEmail"]),
+        adminFieldFrom(source, "Current district", ["currentDistrict", "previousDistrict"]),
+        adminFieldFrom(source, "Reason", ["justification", "reason", "message"]),
+      ]),
+    )}
+    ${renderAdminAttachmentList(adminFirstArray(source, ["attachments", "files", "evidence"]))}
+  </div>`;
+}
+
+function renderAdminElectionLifecycleDetail(item) {
+  const source = adminDetailSource(item);
+  const evidence = adminFirstArray(source, ["evidence"]);
+  const approvals = adminFirstArray(source, ["approvals"]);
+  const audit = adminFirstArray(source, ["audit", "history"]);
+  const blockers = adminFirstArray(source, ["blockers"]);
+  return `<div class="shared-admin-case-stack">
+    ${renderAdminCaseChips([
+      { label: "Status", value: item.status, tone: adminStatusTone(item.status) },
+      { label: "Action", value: adminFirstValue(source, ["lifecycleAction", "proposedAction", "action"]) },
+      { label: "Score", value: adminFirstValue(source, ["verificationScore"]) },
+      { label: "Exact IDs", value: adminFirstValue(source, ["exactIdentityMatch"]) },
+      { label: "Certified", value: adminFirstValue(source, ["hasCertifiedEvidence"]) },
+    ])}
+    ${renderAdminCaseSection(
+      "Candidate and Race",
+      renderAdminInfoGrid([
+        adminFieldFrom(source, "Candidate", ["candidateName", "candidateId"]),
+        adminFieldFrom(source, "Office", ["office"]),
+        adminFieldFrom(source, "State", ["state"]),
+        adminFieldFrom(source, "District", ["district"]),
+        adminFieldFrom(source, "Stage", ["electionStage"]),
+        adminFieldFrom(source, "Purpose", ["stagePurpose", "sourceElection.stagePurpose"]),
+        adminFieldFrom(source, "Provider race ID", ["providerRaceId"]),
+        adminFieldFrom(source, "Provider candidate ID", ["providerCandidateId"]),
+      ]),
+      "Lifecycle review context before changing candidate or elected-official access.",
+    )}
+    ${renderAdminCaseSection(
+      "Verification",
+      `${renderAdminInfoGrid([
+        adminFieldFrom(source, "Verification status", ["verificationStatus"]),
+        adminFieldFrom(source, "Observation count", ["observationCount"]),
+        adminFieldFrom(source, "Stable observations", ["stableObservationCount"]),
+        adminField("Grace deadline", adminDateLabel(adminFirstValue(source, ["graceDeadline"]))),
+        adminFieldFrom(source, "Match type", ["matchType"]),
+        adminFieldFrom(source, "Review type", ["reviewEventType"]),
+      ])}${
+        blockers.length
+          ? `<ul class="shared-admin-blocker-list">${blockers
+              .map((blocker) => `<li>${escapeHtml(adminDetailSimpleValue(blocker))}</li>`)
+              .join("")}</ul>`
+          : ""
+      }`,
+      adminFirstValue(source, ["reason"]) || "Evidence and blockers used for the admin decision.",
+    )}
+    ${renderAdminObjectSection("Mutation Preview", adminFirstObject(source, ["mutationPreview", "serverTransition"]), {
+      copy: "Backend preview of the account, server, and notification changes this decision will apply.",
+      limit: 16,
+    })}
+    ${renderAdminTimeline(
+      "Evidence",
+      evidence,
+      (entry) => {
+        const row = entry && typeof entry === "object" ? entry : {};
+        return renderAdminTimelineEntry(
+          adminFirstValue(row, ["provider", "evidenceId"]) || "Evidence",
+          [
+            adminFirstValue(row, ["raceCallStatus"]),
+            adminFirstValue(row, ["matchType"]),
+            adminFirstValue(row, ["lifecycleAction"]),
+            adminDateLabel(adminFirstValue(row, ["observedAt"])),
+          ],
+          adminFirstValue(row, ["sourceSnapshotHash"]),
+        );
+      },
+      "No evidence recorded.",
+    )}
+    ${renderAdminTimeline(
+      "Approvals",
+      approvals,
+      (entry) => {
+        const row = entry && typeof entry === "object" ? entry : {};
+        return renderAdminTimelineEntry(
+          adminFirstValue(row, ["actorId"]) || "Admin approval",
+          [
+            adminFirstValue(row, ["status"]),
+            adminDateLabel(adminFirstValue(row, ["createdAt"])),
+          ],
+          adminFirstValue(row, ["reason"]),
+        );
+      },
+      "No approvals recorded.",
+    )}
+    ${renderAdminTimeline(
+      "Audit",
+      audit.slice(0, 8),
+      (entry) => {
+        const row = entry && typeof entry === "object" ? entry : {};
+        return renderAdminTimelineEntry(
+          humanizeLabel(adminFirstValue(row, ["action"]) || "Audit event"),
+          [
+            adminFirstValue(row, ["actorId", "actor"]),
+            adminDateLabel(adminFirstValue(row, ["createdAt", "createdAtIso"])),
+          ],
+          adminFirstValue(row, ["note", "reason"]),
+        );
+      },
+      "No audit entries recorded.",
+    )}
+  </div>`;
+}
+
+function renderAdminElectionSourceDetail(item) {
+  const source = adminDetailSource(item);
+  const regions = adminFirstArray(source, ["regions", "items"]);
+  return `<div class="shared-admin-case-stack">
+    ${renderAdminCaseChips([
+      { label: "Health", value: item.status, tone: adminStatusTone(item.status) },
+      { label: "Authority", value: adminFirstValue(source, ["authorityStatus"]) },
+      { label: "Provider", value: adminFirstValue(source, ["provider", "sourceKey"]) },
+      { label: "Last run", value: adminRelativeDateLabel(adminFirstValue(source, ["lastRunAt", "lastSeenAtIso", "updatedAt"])) },
+    ])}
+    ${renderAdminCaseSection(
+      "Source Operations",
+      renderAdminInfoGrid([
+        adminFieldFrom(source, "Source ID", ["sourceId", "id"]),
+        adminFieldFrom(source, "Name", ["sourceName", "name", "label"]),
+        adminFieldFrom(source, "Scheduler", ["schedulerStatus", "scheduleStatus"]),
+        adminFieldFrom(source, "Polling", ["pollingStatus"]),
+        adminFieldFrom(source, "Region count", ["regionCount", "regions.length"]),
+        adminFieldFrom(source, "Error", ["lastError", "error"]),
+      ]),
+      "Election source health, authority state, and region catalog context.",
+    )}
+    ${renderAdminTimeline(
+      "Regions",
+      regions.slice(0, 12),
+      (entry) => {
+        const row = entry && typeof entry === "object" ? entry : {};
+        return renderAdminTimelineEntry(
+          adminFirstValue(row, ["name", "regionName", "label", "regionId"]) || "Region",
+          [
+            adminFirstValue(row, ["status", "state"]),
+            adminFirstValue(row, ["raceCount", "electionCount"]),
+            adminDateLabel(adminFirstValue(row, ["updatedAt", "lastSeenAt"])),
+          ],
+        );
+      },
+      "No regions returned for this source.",
+    )}
+  </div>`;
+}
+
+function renderAdminPolicyQuestionInput({
+  label,
+  name,
+  value = "",
+  placeholder = "",
+  type = "text",
+  wide = false,
+  disabled = false,
+  inputmode = "",
+} = {}) {
+  return `<label class="${wide ? "is-wide" : ""}">
+    <span>${escapeHtml(label)}</span>
+    <input type="${escapeHtml(type)}" name="${escapeHtml(name)}" value="${escapeHtml(value)}"${placeholder ? ` placeholder="${escapeHtml(placeholder)}"` : ""}${inputmode ? ` inputmode="${escapeHtml(inputmode)}"` : ""}${disabledAttr(disabled)} />
+  </label>`;
+}
+
+function renderAdminPolicyQuestionTextarea({
+  label,
+  name,
+  value = "",
+  rows = 3,
+  placeholder = "",
+  wide = true,
+  disabled = false,
+} = {}) {
+  return `<label class="${wide ? "is-wide" : ""}">
+    <span>${escapeHtml(label)}</span>
+    <textarea name="${escapeHtml(name)}" rows="${escapeHtml(String(rows))}"${placeholder ? ` placeholder="${escapeHtml(placeholder)}"` : ""}${disabledAttr(disabled)}>${escapeHtml(value)}</textarea>
+  </label>`;
+}
+
+function renderAdminPolicyQuestionSection(title, copy, body, action = "") {
+  return `<section class="shared-admin-policy-section">
+    <div class="shared-admin-policy-section__header">
+      <div>
+        <h3>${escapeHtml(title)}</h3>
+        ${copy ? `<p>${escapeHtml(copy)}</p>` : ""}
+      </div>
+      ${action}
+    </div>
+    ${body}
+  </section>`;
+}
+
+function renderAdminPolicyQuestionStatus(slice) {
+  return `${slice?.notice ? `<div class="shared-settings-return is-success">${escapeHtml(slice.notice)}</div>` : ""}
+    ${slice?.error ? `<div class="shared-page__error">${escapeHtml(slice.error)}</div>` : ""}
+    ${slice?.validationMessage ? `<div class="shared-settings-return is-success">${escapeHtml(slice.validationMessage)}</div>` : ""}
+    ${slice?.validationError ? `<div class="shared-settings-return is-error">${escapeHtml(slice.validationError)}</div>` : ""}`;
+}
+
+function renderAdminPolicyQuestionOption(option, index, draft, disabled) {
+  const canRemove = (draft.options || []).length > 1;
+  const none = option?.isNoneOfAbove === true;
+  return `<article class="shared-admin-policy-option" data-admin-policy-question-option>
+    <div class="shared-admin-policy-option__header">
+      <strong>Option ${escapeHtml(String(index + 1))}</strong>
+      <button class="shared-feed-chip is-danger" type="button" data-action="admin-policy-question-remove-option" data-index="${escapeHtml(String(index))}"${disabledAttr(disabled || !canRemove)}>Remove</button>
+    </div>
+    <div class="shared-admin-policy-grid">
+      ${renderAdminPolicyQuestionTextarea({
+        label: "Option text",
+        name: "optionText",
+        value: option?.text,
+        rows: 3,
+        disabled,
+      })}
+      ${renderAdminPolicyQuestionInput({
+        label: "Option ID",
+        name: "optionId",
+        value: option?.optionId,
+        placeholder: `option-${index + 1}`,
+        disabled,
+      })}
+      ${renderAdminPolicyQuestionInput({
+        label: "Stance label",
+        name: "stanceLabel",
+        value: option?.stanceLabel,
+        placeholder: "Strong support, mixed, no position",
+        disabled,
+      })}
+      ${renderAdminPolicyQuestionInput({
+        label: "Opinion label",
+        name: "opinion",
+        value: option?.opinion,
+        placeholder: "support, oppose, neutral",
+        disabled,
+      })}
+    </div>
+    <label class="shared-admin-policy-check">
+      <input type="checkbox" name="isNoneOfAbove"${checkedAttr(none)}${disabledAttr(disabled)} />
+      <span>
+        <strong>None of the above</strong>
+        <small>Records an answer while contributing neutral matrix scoring.</small>
+      </span>
+    </label>
+    <div class="shared-admin-policy-matrix">
+      ${renderAdminPolicyQuestionInput({
+        label: "Matrix X",
+        name: "matrixX",
+        value: option?.matrixX,
+        placeholder: "-1 to 1",
+        inputmode: "decimal",
+        disabled: disabled || none,
+      })}
+      ${renderAdminPolicyQuestionInput({
+        label: "Matrix Y",
+        name: "matrixY",
+        value: option?.matrixY,
+        placeholder: "-1 to 1",
+        inputmode: "decimal",
+        disabled: disabled || none,
+      })}
+      ${renderAdminPolicyQuestionInput({
+        label: "Weight",
+        name: "weight",
+        value: option?.weight,
+        placeholder: "0 to 2",
+        inputmode: "decimal",
+        disabled: disabled || none,
+      })}
+    </div>
+  </article>`;
+}
+
+function renderAdminPolicyQuestionChartTypeOptions(selected) {
+  return ["pie", "bar", "line", "stat", "map"]
+    .map(
+      (type) =>
+        `<option value="${escapeHtml(type)}"${selectedAttr(type === selected)}>${escapeHtml(humanizeLabel(type))}</option>`,
+    )
+    .join("");
+}
+
+function renderAdminPolicyQuestionChartRow(row, index, draft, disabled) {
+  const canRemove = (draft.chart?.data || []).length > 1;
+  return `<article class="shared-admin-policy-row" data-admin-policy-question-chart-row>
+    ${renderAdminPolicyQuestionInput({
+      label: "Label",
+      name: "chartLabel",
+      value: row?.label,
+      placeholder: `Value ${index + 1}`,
+      disabled,
+    })}
+    ${renderAdminPolicyQuestionInput({
+      label: "Value",
+      name: "chartValue",
+      value: row?.value,
+      inputmode: "decimal",
+      disabled,
+    })}
+    ${renderAdminPolicyQuestionInput({
+      label: "Color",
+      name: "chartColor",
+      value: row?.color,
+      placeholder: "#2563eb",
+      disabled,
+    })}
+    <button class="shared-feed-chip is-danger" type="button" data-action="admin-policy-question-remove-chart-row" data-index="${escapeHtml(String(index))}"${disabledAttr(disabled || !canRemove)}>Remove</button>
+  </article>`;
+}
+
+function renderAdminPolicyQuestionCitation(citation, index, draft, disabled) {
+  const canRemove = (draft.citations || []).length > 1;
+  return `<article class="shared-admin-policy-row" data-admin-policy-question-citation>
+    ${renderAdminPolicyQuestionInput({
+      label: "Label",
+      name: "citationLabel",
+      value: citation?.label,
+      placeholder: `Citation ${index + 1}`,
+      disabled,
+    })}
+    ${renderAdminPolicyQuestionInput({
+      label: "URL",
+      name: "citationUrl",
+      value: citation?.url,
+      placeholder: "https://",
+      type: "url",
+      wide: true,
+      disabled,
+    })}
+    <button class="shared-feed-chip is-danger" type="button" data-action="admin-policy-question-remove-citation" data-index="${escapeHtml(String(index))}"${disabledAttr(disabled || !canRemove)}>Remove</button>
+  </article>`;
+}
+
+function renderAdminPolicyQuestionDetail(item) {
+  const source = adminDetailSource(item);
+  const slice = adminPolicyQuestionSlice();
+  const draft =
+    syncAdminPolicyQuestionDraft(slice, item) ||
+    adminPolicyQuestionDraftFromItem(item);
+  const validationErrors = adminFirstArray(source, ["validationErrors", "errors"]);
+  const busy = Boolean(slice?.actionPendingKey || slice?.loading);
+  const savePending =
+    slice?.actionPendingKey === adminPendingKey(draft.questionId, "save");
+  const chart = draft.chart || { type: "bar", data: [] };
+  return `<div class="shared-admin-case-stack">
+    ${renderAdminCaseChips([
+      { label: "Status", value: item.status, tone: adminStatusTone(item.status) },
+      { label: "Valid", value: validationErrors.length ? "No" : "Yes", tone: validationErrors.length ? "bad" : "good" },
+      { label: "Options", value: formatCount((draft.options || []).length) },
+      { label: "Citations", value: formatCount((draft.citations || []).filter((citation) => normalizeString(citation?.url)).length) },
+    ])}
+    ${renderAdminPolicyQuestionStatus(slice)}
+    <form class="shared-admin-policy-editor" data-route-form="admin-policy-question-save" data-admin-policy-question-id="${escapeHtml(draft.questionId)}">
+      <input type="hidden" name="questionId" value="${escapeHtml(draft.questionId)}" />
+      <input type="hidden" name="status" value="${escapeHtml(draft.status || item.status)}" />
+      <input type="hidden" name="categoryId" value="${escapeHtml(draft.categoryId)}" />
+      ${renderAdminPolicyQuestionSection(
+        "Question",
+        "Core voter-facing copy and taxonomy used by the policy question list, detail page, and voter-intelligence scoring.",
+        `<div class="shared-admin-policy-grid">
+          ${renderAdminPolicyQuestionInput({
+            label: "Title",
+            name: "title",
+            value: draft.title,
+            placeholder: "Short editor title",
+            wide: true,
+            disabled: busy,
+          })}
+          ${renderAdminPolicyQuestionTextarea({
+            label: "Question text",
+            name: "questionText",
+            value: draft.questionText,
+            rows: 4,
+            placeholder: "The exact question voters answer",
+            disabled: busy,
+          })}
+          ${renderAdminPolicyQuestionInput({
+            label: "Category label",
+            name: "categoryLabel",
+            value: draft.categoryLabel,
+            placeholder: "Housing, taxes, public safety",
+            disabled: busy,
+          })}
+          ${renderAdminPolicyQuestionTextarea({
+            label: "Issue IDs",
+            name: "issueIds",
+            value: (draft.issueIds || []).join(", "),
+            rows: 2,
+            placeholder: "housing, zoning, transit",
+            wide: false,
+            disabled: busy,
+          })}
+        </div>`,
+      )}
+      ${renderAdminPolicyQuestionSection(
+        "Background",
+        "Short copy appears in compact surfaces; long copy supports the full voter-facing context panel.",
+        `<div class="shared-admin-policy-grid">
+          ${renderAdminPolicyQuestionTextarea({
+            label: "Short background",
+            name: "shortBackground",
+            value: draft.shortBackground,
+            rows: 3,
+            disabled: busy,
+          })}
+          ${renderAdminPolicyQuestionTextarea({
+            label: "Long background",
+            name: "longBackground",
+            value: draft.longBackground,
+            rows: 7,
+            disabled: busy,
+          })}
+        </div>`,
+      )}
+      ${renderAdminPolicyQuestionSection(
+        "Answer Options",
+        "Each option can carry voter-facing stance copy plus matrix coordinates used by scoring.",
+        `<div class="shared-admin-policy-list">
+          ${(draft.options || [])
+            .map((option, index) =>
+              renderAdminPolicyQuestionOption(option, index, draft, busy),
+            )
+            .join("")}
+        </div>`,
+        `<button class="shared-feed-chip" type="button" data-action="admin-policy-question-add-option"${disabledAttr(busy)}>Add option</button>`,
+      )}
+      ${renderAdminPolicyQuestionSection(
+        "Chart",
+        "Optional source-backed chart data for explaining the policy context.",
+        `<div class="shared-admin-policy-grid">
+          <label>
+            <span>Chart type</span>
+            <select name="chartType"${disabledAttr(busy)}>
+              ${renderAdminPolicyQuestionChartTypeOptions(normalizeString(chart.type) || "bar")}
+            </select>
+          </label>
+          ${renderAdminPolicyQuestionInput({
+            label: "Chart title",
+            name: "chartTitle",
+            value: chart.title,
+            disabled: busy,
+          })}
+          ${renderAdminPolicyQuestionInput({
+            label: "Source label",
+            name: "chartSourceLabel",
+            value: chart.sourceLabel,
+            disabled: busy,
+          })}
+          ${renderAdminPolicyQuestionInput({
+            label: "Source URL",
+            name: "chartSourceUrl",
+            value: chart.sourceUrl,
+            type: "url",
+            wide: true,
+            disabled: busy,
+          })}
+        </div>
+        <div class="shared-admin-policy-list is-compact">
+          ${(chart.data || [])
+            .map((row, index) =>
+              renderAdminPolicyQuestionChartRow(row, index, draft, busy),
+            )
+            .join("")}
+        </div>`,
+        `<button class="shared-feed-chip" type="button" data-action="admin-policy-question-add-chart-row"${disabledAttr(busy)}>Add data</button>`,
+      )}
+      ${renderAdminPolicyQuestionSection(
+        "Citations",
+        "Citation rows with URLs are saved into the published question payload.",
+        `<div class="shared-admin-policy-list is-compact">
+          ${(draft.citations || [])
+            .map((citation, index) =>
+              renderAdminPolicyQuestionCitation(citation, index, draft, busy),
+            )
+            .join("")}
+        </div>`,
+        `<button class="shared-feed-chip" type="button" data-action="admin-policy-question-add-citation"${disabledAttr(busy)}>Add citation</button>`,
+      )}
+      ${
+        validationErrors.length
+          ? renderAdminPolicyQuestionSection(
+              "Validation",
+              "",
+              `<ul class="shared-admin-blocker-list">${validationErrors
+                .map((error) => `<li>${escapeHtml(adminDetailSimpleValue(error))}</li>`)
+                .join("")}</ul>`,
+            )
+          : ""
+      }
+      <div class="shared-admin-policy-editor__footer">
+        <span>PUT /api/admin/policy-questions/${escapeHtml(draft.questionId)}</span>
+        <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(busy)}>${savePending ? "Saving..." : "Save Draft"}</button>
+      </div>
+    </form>
+    ${renderAdminJsonCard("Generated Metadata", adminFirstObject(source, ["generatedMeta"]))}
+    ${renderAdminJsonCard("Editorial Metadata", adminFirstObject(source, ["editorialMeta"]))}
+  </div>`;
+}
+
+function renderAdminDetailWorkspace(sectionKey, item) {
+  if (sectionKey === "applications") {
+    return renderAdminApplicationDetail(item);
+  }
+  if (sectionKey === "reports") {
+    return renderAdminReportDetail(item);
+  }
+  if (sectionKey === "donations") {
+    return renderAdminDonationDetail(item);
+  }
+  if (sectionKey === "address-change-requests") {
+    return renderAdminAddressChangeDetail(item);
+  }
+  if (sectionKey === "election-lifecycle") {
+    return renderAdminElectionLifecycleDetail(item);
+  }
+  if (sectionKey === "election-sources") {
+    return renderAdminElectionSourceDetail(item);
+  }
+  if (sectionKey === "policy-questions") {
+    return renderAdminPolicyQuestionDetail(item);
+  }
+  return renderAdminRawFields(item);
 }
 
 function renderAdminActionCard(sectionKey, item, actionDefinition, slice) {
@@ -68804,6 +77025,274 @@ function renderAdminFeedConfigSection(slice) {
   </div>`;
 }
 
+function renderAdminPolicyGenerationIssueDatalist(issues = [], id = "") {
+  if (!issues.length || !id) return "";
+  return `<datalist id="${escapeHtml(id)}">
+    ${issues
+      .slice(0, 300)
+      .map(
+        (issue) =>
+          `<option value="${escapeHtml(issue.issueId)}">${escapeHtml([
+            issue.label,
+            issue.categoryLabel,
+          ].filter(Boolean).join(" - "))}</option>`,
+      )
+      .join("")}
+  </datalist>`;
+}
+
+function renderAdminPolicyGenerationIssueChips(topic, topicIndex, issues = []) {
+  const issueIds = Array.isArray(topic.issueIds) ? topic.issueIds : [];
+  if (!issueIds.length) {
+    return `<div class="shared-admin-policy-generation-empty">No issues selected.</div>`;
+  }
+  return `<div class="shared-admin-policy-generation-issues">
+    ${issueIds
+      .map((issueId) => {
+        const issue = adminPolicyGenerationIssueById(issueId, issues);
+        const label = issue?.label || issueId;
+        const meta = issue?.categoryLabel || issueId;
+        return `<span class="shared-admin-policy-generation-issue">
+          <span>
+            <strong>${escapeHtml(label)}</strong>
+            <small>${escapeHtml(meta)}</small>
+          </span>
+          <button type="button" data-action="admin-policy-generation-remove-issue" data-topic-index="${escapeHtml(String(topicIndex))}" data-issue-id="${escapeHtml(issueId)}">Remove</button>
+        </span>`;
+      })
+      .join("")}
+  </div>`;
+}
+
+function renderAdminPolicyGenerationSource(source, topicIndex, sourceIndex, topic, disabled) {
+  const canRemove = (topic.sources || []).length > 1;
+  return `<article class="shared-admin-policy-generation-source" data-admin-policy-generation-source>
+    <div class="shared-admin-policy-option__header">
+      <strong>Source ${escapeHtml(String(sourceIndex + 1))}</strong>
+      <button class="shared-feed-chip is-danger" type="button" data-action="admin-policy-generation-remove-source" data-topic-index="${escapeHtml(String(topicIndex))}" data-source-index="${escapeHtml(String(sourceIndex))}"${disabledAttr(disabled || !canRemove)}>Remove</button>
+    </div>
+    <div class="shared-admin-policy-grid">
+      ${renderAdminPolicyQuestionInput({
+        label: "URL",
+        name: "sourceUrl",
+        value: source?.url,
+        placeholder: "https://",
+        type: "url",
+        wide: true,
+        disabled,
+      })}
+      ${renderAdminPolicyQuestionInput({
+        label: "Source label",
+        name: "sourceLabel",
+        value: source?.label,
+        placeholder: "Agency, report, outlet, dataset",
+        disabled,
+      })}
+      ${renderAdminPolicyQuestionTextarea({
+        label: "Notes or excerpts",
+        name: "sourceNotes",
+        value: source?.notes,
+        rows: 3,
+        placeholder: "Facts, statistics, or excerpts the generator is allowed to use",
+        wide: true,
+        disabled,
+      })}
+    </div>
+  </article>`;
+}
+
+function renderAdminPolicyGenerationTopic(topic, topicIndex, draft, slice, disabled) {
+  const issues = Array.isArray(slice?.generationIssues) ? slice.generationIssues : [];
+  const canRemove = (draft.topics || []).length > 1;
+  const datalistId = `admin-policy-generation-issues-${topicIndex}`;
+  const issueCatalogReady = Boolean(
+    slice?.generationIssuesLoaded &&
+      !slice?.generationIssuesLoading &&
+      !slice?.generationIssuesError,
+  );
+  return `<article class="shared-admin-policy-generation-topic" data-admin-policy-generation-topic data-topic-client-id="${escapeHtml(topic.clientId || `topic-${topicIndex + 1}`)}">
+    <input type="hidden" name="topicIssueIds" value="${escapeHtml((topic.issueIds || []).join(", "))}" />
+    ${renderAdminPolicyGenerationIssueDatalist(issues, datalistId)}
+    <div class="shared-admin-policy-option__header">
+      <div>
+        <strong>Topic ${escapeHtml(String(topicIndex + 1))}</strong>
+        <p>${escapeHtml(draft.allowWebSearch ? "Sources are optional when web search is allowed." : "Add at least one reviewed source URL before generating.")}</p>
+      </div>
+      <button class="shared-feed-chip is-danger" type="button" data-action="admin-policy-generation-remove-topic" data-topic-index="${escapeHtml(String(topicIndex))}"${disabledAttr(disabled || !canRemove)}>Remove topic</button>
+    </div>
+    <div class="shared-admin-policy-grid">
+      ${renderAdminPolicyQuestionInput({
+        label: "Topic title",
+        name: "topicTitle",
+        value: topic.title,
+        placeholder: "Diversity Visa Program",
+        disabled,
+      })}
+      ${renderAdminPolicyQuestionInput({
+        label: "Category label",
+        name: "topicCategory",
+        value: topic.category,
+        placeholder: "Immigration, Education, Healthcare",
+        disabled,
+      })}
+    </div>
+    <section class="shared-admin-policy-generation-picker">
+      <div>
+        <span>Issues</span>
+        <small>${escapeHtml(slice?.generationIssuesLoading || !slice?.generationIssuesLoaded ? "Loading issue catalog..." : slice?.generationIssuesError || "Choose existing issue IDs from the catalog.")}</small>
+      </div>
+      ${renderAdminPolicyGenerationIssueChips(topic, topicIndex, issues)}
+      <div class="shared-admin-policy-generation-issue-add">
+        <input name="topicIssueInput" value="${escapeHtml(topic.issueInput)}" list="${escapeHtml(datalistId)}" placeholder="Type an issue ID or label"${disabledAttr(disabled || !issueCatalogReady)} />
+        <button class="shared-feed-chip" type="button" data-action="admin-policy-generation-add-issue" data-topic-index="${escapeHtml(String(topicIndex))}"${disabledAttr(disabled || !issueCatalogReady)}>Add issue</button>
+      </div>
+    </section>
+    ${renderAdminPolicyQuestionTextarea({
+      label: "Topic instructions",
+      name: "topicNotes",
+      value: topic.notes,
+      rows: 3,
+      placeholder: "Specific context, boundaries, or option balance for this topic",
+      disabled,
+    })}
+    <section class="shared-admin-policy-generation-sources">
+      <div class="shared-admin-policy-section__header">
+        <div>
+          <h3>Sources</h3>
+          <p>${escapeHtml(draft.allowWebSearch ? "Reviewed source URLs improve the output even when search is enabled." : "The backend will reject generation without a source URL for each topic.")}</p>
+        </div>
+        <button class="shared-feed-chip" type="button" data-action="admin-policy-generation-add-source" data-topic-index="${escapeHtml(String(topicIndex))}"${disabledAttr(disabled)}>Add source</button>
+      </div>
+      <div class="shared-admin-policy-list is-compact">
+        ${(topic.sources || [])
+          .map((source, sourceIndex) =>
+            renderAdminPolicyGenerationSource(
+              source,
+              topicIndex,
+              sourceIndex,
+              topic,
+              disabled,
+            ),
+          )
+          .join("")}
+      </div>
+    </section>
+  </article>`;
+}
+
+function renderAdminPolicyGenerationResult(slice) {
+  const result = slice?.generationResult;
+  if (!result || typeof result !== "object") return "";
+  const job = result.job && typeof result.job === "object" ? result.job : {};
+  const drafts = Array.isArray(result.drafts) ? result.drafts : [];
+  const jobId = normalizeString(job.jobId);
+  const draftIds = Array.isArray(job.draftQuestionIds) ? job.draftQuestionIds : [];
+  const count = drafts.length || Number(job.draftCount) || draftIds.length || 0;
+  return `<section class="shared-admin-policy-generation-result">
+    <div class="shared-admin-policy-section__header">
+      <div>
+        <span class="shared-settings-eyebrow">Generation result</span>
+        <h3>${escapeHtml(result.duplicate === true ? "Existing job reused" : "Draft generation complete")}</h3>
+        <p>${escapeHtml(jobId || "Generation job returned without a job id.")}</p>
+      </div>
+      ${jobId ? `<button class="shared-feed-chip" type="button" data-action="admin-policy-generation-refresh-job" data-job-id="${escapeHtml(jobId)}"${disabledAttr(Boolean(slice?.actionPendingKey))}>Refresh job</button>` : ""}
+    </div>
+    ${renderAdminCaseChips([
+      { label: "Status", value: job.status, tone: adminStatusTone(job.status) },
+      { label: "Drafts", value: formatCount(count), tone: count ? "good" : "pending" },
+      { label: "Validation", value: formatCount(job.validationFailures || 0), tone: Number(job.validationFailures || 0) ? "bad" : "good" },
+      { label: "Model", value: job.model },
+    ])}
+    ${
+      drafts.length
+        ? `<div class="shared-admin-policy-generation-drafts">
+            ${drafts
+              .map((draft) => {
+                const questionId = normalizeString(draft.questionId || draft.id);
+                return `<button class="shared-admin-policy-generation-draft" type="button" data-action="navigate" data-route="/admin/policy-questions/${escapeHtml(encodeURIComponent(questionId))}"${disabledAttr(!questionId)}>
+                  <span>
+                    <strong>${escapeHtml(draft.title || draft.questionText || questionId)}</strong>
+                    <small>${escapeHtml([draft.categoryLabel, draft.status].filter(Boolean).join(" | "))}</small>
+                  </span>
+                  <em>Open</em>
+                </button>`;
+              })
+              .join("")}
+          </div>`
+        : draftIds.length
+          ? `<div class="shared-admin-policy-generation-drafts">
+              ${draftIds
+                .map((questionId) => `<button class="shared-admin-policy-generation-draft" type="button" data-action="navigate" data-route="/admin/policy-questions/${escapeHtml(encodeURIComponent(questionId))}">
+                    <span><strong>${escapeHtml(questionId)}</strong><small>Generated draft</small></span><em>Open</em>
+                  </button>`)
+                .join("")}
+            </div>`
+          : ""
+    }
+  </section>`;
+}
+
+function renderAdminPolicyQuestionGenerationPanel(slice) {
+  const draft = ensureAdminPolicyQuestionGenerationState(slice);
+  const busy = slice?.actionPendingKey === "policy-question-generation";
+  if (!draft) return "";
+  return `<section class="shared-admin-panel shared-admin-policy-generator">
+    <div class="shared-admin-panel__header">
+      <div>
+        <span class="shared-settings-eyebrow">Seeded Generation</span>
+        <h2>Generate policy drafts</h2>
+        <p>Create source-backed topic seeds, choose existing issues, and generate five-step policy-position ladders for review.</p>
+      </div>
+      <button class="shared-feed-chip" type="button" data-action="admin-policy-generation-add-topic"${disabledAttr(busy || draft.topics.length >= ADMIN_POLICY_QUESTION_GENERATION_MAX_TOPICS)}>Add topic</button>
+    </div>
+    ${slice?.generationNotice ? `<div class="shared-settings-return is-success">${escapeHtml(slice.generationNotice)}</div>` : ""}
+    ${slice?.generationValidationError ? `<div class="shared-settings-return is-error">${escapeHtml(slice.generationValidationError)}</div>` : ""}
+    ${slice?.generationError ? `<div class="shared-page__error">${escapeHtml(slice.generationError)}</div>` : ""}
+    <form class="shared-admin-policy-generation-form" data-route-form="admin-policy-question-generate">
+      <section class="shared-admin-policy-generation-settings">
+        <label>
+          <span>Draft count</span>
+          <input type="number" name="requestedCount" min="1" max="${escapeHtml(String(ADMIN_POLICY_QUESTION_GENERATION_MAX_DRAFTS))}" step="1" value="${escapeHtml(String(draft.requestedCount))}"${disabledAttr(busy)} />
+        </label>
+        <label class="shared-admin-policy-check">
+          <input type="checkbox" name="force"${checkedAttr(draft.force)}${disabledAttr(busy)} />
+          <span>
+            <strong>Regenerate used seeds</strong>
+            <small>Off reuses a previous successful job for identical seeds.</small>
+          </span>
+        </label>
+        <label class="shared-admin-policy-check">
+          <input type="checkbox" name="allowWebSearch"${checkedAttr(draft.allowWebSearch)}${disabledAttr(busy)} />
+          <span>
+            <strong>Allow web search</strong>
+            <small>When on, source URLs become optional and OpenAI may search for current sources.</small>
+          </span>
+        </label>
+        ${renderAdminPolicyQuestionTextarea({
+          label: "Global instructions",
+          name: "generationNotes",
+          value: draft.notes,
+          rows: 3,
+          placeholder: "Optional tone, coverage goals, regional scope, or editorial constraints",
+          disabled: busy,
+        })}
+      </section>
+      <div class="shared-admin-policy-list">
+        ${draft.topics
+          .map((topic, topicIndex) =>
+            renderAdminPolicyGenerationTopic(topic, topicIndex, draft, slice, busy),
+          )
+          .join("")}
+      </div>
+      <div class="shared-admin-policy-editor__footer">
+        <span>${escapeHtml(`POST /api/admin/policy-questions/generation-jobs | ${formatCount(draft.topics.length)} topic${draft.topics.length === 1 ? "" : "s"}`)}</span>
+        <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(busy)}>${busy ? "Generating..." : "Generate Drafts"}</button>
+      </div>
+    </form>
+    ${renderAdminPolicyGenerationResult(slice)}
+  </section>`;
+}
+
 function renderAdminItemCard(sectionKey, item) {
   const tone = adminStatusTone(item.status);
   return `<article class="shared-admin-item">
@@ -68867,7 +77356,7 @@ function renderAdminDetail(sectionKey, slice) {
     </div>
     <h2>${escapeHtml(item.title)}</h2>
     <p>${escapeHtml(item.summary)}</p>
-    ${renderAdminRawFields(item)}
+    ${renderAdminDetailWorkspace(sectionKey, item)}
     ${renderAdminActions(sectionKey, item, slice)}
     <div class="shared-admin-actions">
       <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(config.route)}">Back to list</button>
@@ -68935,6 +77424,7 @@ function renderAdminSection() {
   }
   const hasDetail = Boolean(getAdminDetailId());
   return `<div class="shared-admin-main">
+    ${section === "policy-questions" ? renderAdminPolicyQuestionGenerationPanel(slice) : ""}
     <div class="shared-admin-split${hasDetail ? " has-detail" : ""}">
       <section class="shared-admin-panel">
         <div class="shared-admin-panel__header">
@@ -68969,12 +77459,33 @@ function renderAdminPage() {
 function renderRouteStage() {
   if (isProtectedRoute() && !state.auth.session) {
     const routeKey = getCurrentRoute().routeKey;
+    if (routeKey === ROUTE_KEY_FEED) {
+      return renderFeedAuthGate();
+    }
+    if (routeKey === ROUTE_KEY_ACHIEVEMENTS) {
+      return renderAchievementsAuthGate();
+    }
+    if (
+      routeKey === ROUTE_KEY_CANDIDATES ||
+      routeKey === ROUTE_KEY_CANDIDATE_DETAIL ||
+      routeKey === ROUTE_KEY_CANDIDATE_EDIT ||
+      routeKey === ROUTE_KEY_CONGRESSIONAL_REPORT_CARD ||
+      routeKey === ROUTE_KEY_OFFICIAL_DETAIL ||
+      routeKey === ROUTE_KEY_OFFICIAL_REPORT_CARD ||
+      routeKey === ROUTE_KEY_AUTO_CANDIDATE_DETAIL
+    ) {
+      return renderCandidatesAuthGate();
+    }
+    if (
+      routeKey === ROUTE_KEY_CANDIDATE_VOTER_MAP ||
+      routeKey === ROUTE_KEY_CANDIDATE_VOTER_MAP_SECTION
+    ) {
+      return renderCandidateVoterMapAuthGate();
+    }
     if (
       routeKey === ROUTE_KEY_CANDIDATE_DASHBOARD ||
       routeKey === ROUTE_KEY_CANDIDATE_DASHBOARD_DETAIL ||
-      routeKey === ROUTE_KEY_CANDIDATE_DASHBOARD_SECTION ||
-      routeKey === ROUTE_KEY_CANDIDATE_VOTER_MAP ||
-      routeKey === ROUTE_KEY_CANDIDATE_VOTER_MAP_SECTION
+      routeKey === ROUTE_KEY_CANDIDATE_DASHBOARD_SECTION
     ) {
       return renderCandidateDashboardAuthGate();
     }
@@ -68994,10 +77505,44 @@ function renderRouteStage() {
       return renderMissionsAuthGate();
     }
     if (
+      routeKey === ROUTE_KEY_MANAGE_EVENTS ||
+      routeKey === ROUTE_KEY_MANAGE_EVENTS_NEW ||
+      routeKey === ROUTE_KEY_MANAGE_EVENTS_EDIT
+    ) {
+      return renderManageEventsAuthGate();
+    }
+    if (
+      routeKey === ROUTE_KEY_EVENTS ||
+      routeKey === ROUTE_KEY_EVENT_DETAIL ||
+      routeKey === ROUTE_KEY_EVENT_SIGNUP ||
+      routeKey === ROUTE_KEY_EVENT_PAYMENT
+    ) {
+      return renderEventsAuthGate();
+    }
+    if (
+      routeKey === ROUTE_KEY_PROFILE_SELF ||
+      routeKey === ROUTE_KEY_PROFILE_USER ||
+      routeKey === ROUTE_KEY_PROFILE_EDIT ||
+      routeKey === ROUTE_KEY_PROFILE_CONNECTIONS ||
+      routeKey === ROUTE_KEY_PROFILE_NOTIFICATIONS
+    ) {
+      return renderProfileAuthGate();
+    }
+    if (
+      routeKey === ROUTE_KEY_MESSAGES_ROOT ||
+      routeKey === ROUTE_KEY_MESSAGES_WILDCARD
+    ) {
+      return renderMessagesAuthGate();
+    }
+    if (
+      routeKey === ROUTE_KEY_TOPICS ||
+      routeKey === ROUTE_KEY_ONBOARDING_TOPICS
+    ) {
+      return renderTopicsAuthGate();
+    }
+    if (
       routeKey === ROUTE_KEY_SETTINGS ||
       routeKey === ROUTE_KEY_SETTINGS_SECTION ||
-      routeKey === ROUTE_KEY_TOPICS ||
-      routeKey === ROUTE_KEY_ONBOARDING_TOPICS ||
       routeKey === ROUTE_KEY_ONBOARDING_PROFILE ||
       routeKey === ROUTE_KEY_ONBOARDING_PHOTO ||
       routeKey === ROUTE_KEY_ONBOARDING_LOCATION ||
@@ -69015,12 +77560,15 @@ function renderRouteStage() {
       return renderAdminAuthGate();
     }
     if (
-      routeKey === ROUTE_KEY_DISCOVER ||
-      routeKey === ROUTE_KEY_ACHIEVEMENTS ||
+      routeKey === ROUTE_KEY_DISCOVER
+    ) {
+      return renderDiscoverAuthGate();
+    }
+    if (
       routeKey === ROUTE_KEY_POLICY_QUESTIONS ||
       routeKey === ROUTE_KEY_POLICY_QUESTION_DETAIL
     ) {
-      return renderDiscoverAuthGate();
+      return renderPolicyQuestionsAuthGate();
     }
     return `<section class="shared-page">
       ${renderTopChrome()}
@@ -69527,6 +78075,7 @@ function renderApp() {
     return;
   }
 
+  syncDocumentTitle();
   ensureActiveIndexInBounds();
   const playbackSnapshot = snapshotPlaybackState();
   const scrollSnapshot = snapshotFeedScrollState();
@@ -70515,6 +79064,46 @@ function handleRootClick(event) {
     return;
   }
 
+  if (action === "post-composer-capture-mode") {
+    const composer = state.pages.create;
+    if (composer.pending || composer.camera?.recording) {
+      return;
+    }
+    if (composer.file) {
+      showToast("Remove the current clip before changing mode.");
+      return;
+    }
+    composer.captureMode = postComposerCaptureModeConfig(
+      target.getAttribute("data-mode"),
+    ).key;
+    composer.error = "";
+    scheduleRender();
+    return;
+  }
+
+  if (action === "post-composer-teleprompter-toggle") {
+    const teleprompter = normalizePostComposerTeleprompter(state.pages.create);
+    teleprompter.expanded = !teleprompter.expanded;
+    scheduleRender();
+    return;
+  }
+
+  if (action === "post-composer-teleprompter-reset") {
+    const composer = state.pages.create;
+    composer.teleprompter = {
+      enabled: false,
+      expanded: true,
+      script: "",
+      speed: 34,
+      fontSize: 28,
+      opacity: 0.58,
+      height: 25,
+      delaySeconds: 3,
+    };
+    scheduleRender();
+    return;
+  }
+
   if (action === "candidate-avatar-pick") {
     root?.querySelector("[data-candidate-avatar-file]")?.click();
     return;
@@ -70762,6 +79351,15 @@ function handleRootClick(event) {
     return;
   }
 
+  if (action === "messaging-mission-job-action-run") {
+    runMessagingMissionJobAction({
+      missionId: target.getAttribute("data-mission-id"),
+      jobId: target.getAttribute("data-job-id"),
+      action: target.getAttribute("data-job-action"),
+    }).catch(() => {});
+    return;
+  }
+
   if (action === "candidate-missions-refresh") {
     const candidateId = currentCandidateDashboardId();
     if (candidateId) {
@@ -70821,6 +79419,15 @@ function handleRootClick(event) {
     claimCandidateDashboardMissionJob(
       target.getAttribute("data-mission-id"),
       target.getAttribute("data-job-id"),
+    ).catch(() => {});
+    return;
+  }
+
+  if (action === "candidate-mission-job-action-run") {
+    runCandidateDashboardMissionJobAction(
+      target.getAttribute("data-mission-id"),
+      target.getAttribute("data-job-id"),
+      target.getAttribute("data-job-action"),
     ).catch(() => {});
     return;
   }
@@ -70890,6 +79497,15 @@ function handleRootClick(event) {
     claimCoalitionMissionJob(
       target.getAttribute("data-mission-id"),
       target.getAttribute("data-job-id"),
+    ).catch(() => {});
+    return;
+  }
+
+  if (action === "coalition-mission-job-action-run") {
+    runCoalitionMissionJobAction(
+      target.getAttribute("data-mission-id"),
+      target.getAttribute("data-job-id"),
+      target.getAttribute("data-job-action"),
     ).catch(() => {});
     return;
   }
@@ -72019,6 +80635,71 @@ function handleRootClick(event) {
     return;
   }
 
+  if (action === "voter-intel-rank-open") {
+    const contestId = normalizeString(target.getAttribute("data-contest-id"));
+    const race = findVoterIntelRankableRace(contestId);
+    if (!race) {
+      showToast("Race ranking is unavailable.");
+      return;
+    }
+    voterIntelRankingsState().selectedContestId = voterIntelRaceContestId(race);
+    ensureVoterIntelRaceRanking(race);
+    scheduleRender();
+    return;
+  }
+
+  if (action === "voter-intel-rank-close") {
+    voterIntelRankingsState().selectedContestId = "";
+    scheduleRender();
+    return;
+  }
+
+  if (action === "voter-intel-rank-add") {
+    addVoterIntelRaceRankingCandidate(
+      target.getAttribute("data-contest-id"),
+      target.getAttribute("data-candidate-id"),
+    );
+    return;
+  }
+
+  if (action === "voter-intel-rank-remove") {
+    removeVoterIntelRaceRankingCandidate(
+      target.getAttribute("data-contest-id"),
+      target.getAttribute("data-candidate-id"),
+    );
+    return;
+  }
+
+  if (action === "voter-intel-rank-move") {
+    moveVoterIntelRaceRankingCandidate(
+      target.getAttribute("data-contest-id"),
+      target.getAttribute("data-candidate-id"),
+      target.getAttribute("data-direction"),
+    );
+    return;
+  }
+
+  if (action === "voter-intel-rank-refresh") {
+    loadVoterIntelContestAggregate(target.getAttribute("data-contest-id"), {
+      refresh: true,
+    }).catch(() => {
+      showToast("Ranking data refresh failed.");
+    });
+    return;
+  }
+
+  if (action === "voter-intel-rank-save") {
+    const race = findVoterIntelRankableRace(
+      target.getAttribute("data-contest-id"),
+    );
+    if (!race) {
+      showToast("Race ranking is unavailable.");
+      return;
+    }
+    saveVoterIntelRaceRanking(race).catch(() => {});
+    return;
+  }
+
   if (action === "voter-intel-questions-refresh") {
     loadVoterIntelPolicyQuestions({ refresh: true }).catch(() => {
       showToast("Policy question refresh failed.");
@@ -72483,6 +81164,7 @@ function handleRootClick(event) {
       lookupCode: "",
     };
     state.pages.messaging.compose = createMessagingComposeState();
+    state.pages.messaging.groupPeople = createMessagingGroupPeopleState();
     state.pages.settings.social = {
       connections: [],
       loading: false,
@@ -72536,6 +81218,14 @@ function handleRootClick(event) {
         loaded: false,
         nextCursor: null,
         actionPendingKey: "",
+      },
+      rankings: {
+        selectedContestId: "",
+        loadingContestId: "",
+        savingContestId: "",
+        errorByContestId: {},
+        aggregateByContestId: {},
+        preferencesByContestId: {},
       },
     };
     state.pages.settings.privacySafety = createSettingsPrivacySafetyState();
@@ -72708,6 +81398,15 @@ function handleRootClick(event) {
     return;
   }
 
+  if (action === "event-address-select") {
+    selectEventAddressSuggestion(target.getAttribute("data-index")).catch(
+      () => {
+        showToast("Address selection failed.");
+      },
+    );
+    return;
+  }
+
   if (action === "manage-events-status") {
     const status =
       normalizeString(target.getAttribute("data-status")) || "active";
@@ -72774,6 +81473,32 @@ function handleRootClick(event) {
   if (action === "messaging-compose-clear-search") {
     state.pages.messaging.compose.query = "";
     loadMessagingComposeSearch("").catch(() => {});
+    return;
+  }
+
+  if (action === "messaging-group-person-add") {
+    addMessagingGroupPeopleCandidate(
+      target.getAttribute("data-conversation-id"),
+      target.getAttribute("data-candidate-key"),
+    ).catch(() => {
+      showToast("Person could not be added.");
+    });
+    return;
+  }
+
+  if (action === "messaging-group-person-message") {
+    createMessagingDmFromTarget({
+      recipientId: target.getAttribute("data-user-id"),
+      username: target.getAttribute("data-username"),
+    }).catch(() => {
+      showToast("Direct message could not start.");
+    });
+    return;
+  }
+
+  if (action === "messaging-group-people-clear-search") {
+    messagingGroupPeopleState().query = "";
+    loadMessagingGroupPeopleSearch("").catch(() => {});
     return;
   }
 
@@ -72867,6 +81592,23 @@ function handleRootClick(event) {
     conversationState.attachmentEditorOpen = false;
     conversationState.error = "";
     scheduleRender();
+    return;
+  }
+
+  if (action === "messaging-mention-apply") {
+    applyMessagingMentionSuggestion(target.getAttribute("data-mention-index"));
+    return;
+  }
+
+  if (action === "messaging-command-apply") {
+    applyMessagingMissionCommandSuggestion(
+      target.getAttribute("data-command-index"),
+    );
+    return;
+  }
+
+  if (action === "messaging-mission-cancel") {
+    closeMessagingMissionDraft();
     return;
   }
 
@@ -72974,13 +81716,13 @@ function handleRootClick(event) {
       target.getAttribute("data-workflow-id"),
       target.getAttribute("data-enabled") === "true",
     ).catch(() => {
-      showToast("Workflow update failed.");
+      showToast("Automation update failed.");
     });
     return;
   }
 
   if (action === "messaging-workflow-delete") {
-    if (!window.confirm("Delete this workflow?")) {
+    if (!window.confirm("Remove this automation?")) {
       return;
     }
     deleteMessagingWorkflow(
@@ -72988,7 +81730,7 @@ function handleRootClick(event) {
       target.getAttribute("data-scope-id"),
       target.getAttribute("data-workflow-id"),
     ).catch(() => {
-      showToast("Workflow delete failed.");
+      showToast("Automation remove failed.");
     });
     return;
   }
@@ -73088,6 +81830,23 @@ function handleRootClick(event) {
     ) {
       removeMessagingConversationMember(conversationId, userId).catch(() => {
         showToast("Room-member remove failed.");
+      });
+    }
+    return;
+  }
+
+  if (action === "messaging-group-person-remove") {
+    const conversationId = normalizeString(
+      target.getAttribute("data-conversation-id"),
+    );
+    const userId = normalizeString(target.getAttribute("data-user-id"));
+    if (
+      conversationId &&
+      userId &&
+      window.confirm("Remove this person from the group?")
+    ) {
+      removeMessagingConversationMember(conversationId, userId).catch(() => {
+        showToast("Person remove failed.");
       });
     }
     return;
@@ -73223,6 +81982,180 @@ function handleRootClick(event) {
     return;
   }
 
+  if (action === "admin-policy-question-add-option") {
+    mutateAdminPolicyQuestionDraft((draft) => {
+      draft.options = Array.isArray(draft.options) ? draft.options : [];
+      draft.options.push(adminPolicyQuestionDefaultOption(draft.options.length));
+    });
+    return;
+  }
+
+  if (action === "admin-policy-question-remove-option") {
+    const index = Number(target.getAttribute("data-index"));
+    mutateAdminPolicyQuestionDraft((draft) => {
+      draft.options = Array.isArray(draft.options) ? draft.options : [];
+      if (Number.isInteger(index) && draft.options.length > 1) {
+        draft.options.splice(index, 1);
+      }
+    });
+    return;
+  }
+
+  if (action === "admin-policy-question-add-chart-row") {
+    mutateAdminPolicyQuestionDraft((draft) => {
+      draft.chart = draft.chart && typeof draft.chart === "object"
+        ? draft.chart
+        : { type: "bar", data: [] };
+      draft.chart.data = Array.isArray(draft.chart.data) ? draft.chart.data : [];
+      draft.chart.data.push(
+        adminPolicyQuestionDefaultChartDatum(draft.chart.data.length),
+      );
+    });
+    return;
+  }
+
+  if (action === "admin-policy-question-remove-chart-row") {
+    const index = Number(target.getAttribute("data-index"));
+    mutateAdminPolicyQuestionDraft((draft) => {
+      draft.chart = draft.chart && typeof draft.chart === "object"
+        ? draft.chart
+        : { type: "bar", data: [] };
+      draft.chart.data = Array.isArray(draft.chart.data) ? draft.chart.data : [];
+      if (Number.isInteger(index) && draft.chart.data.length > 1) {
+        draft.chart.data.splice(index, 1);
+      }
+    });
+    return;
+  }
+
+  if (action === "admin-policy-question-add-citation") {
+    mutateAdminPolicyQuestionDraft((draft) => {
+      draft.citations = Array.isArray(draft.citations) ? draft.citations : [];
+      draft.citations.push(
+        adminPolicyQuestionCitationDraft({}, draft.citations.length),
+      );
+    });
+    return;
+  }
+
+  if (action === "admin-policy-question-remove-citation") {
+    const index = Number(target.getAttribute("data-index"));
+    mutateAdminPolicyQuestionDraft((draft) => {
+      draft.citations = Array.isArray(draft.citations) ? draft.citations : [];
+      if (Number.isInteger(index) && draft.citations.length > 1) {
+        draft.citations.splice(index, 1);
+      }
+    });
+    return;
+  }
+
+  if (action === "admin-policy-generation-add-topic") {
+    mutateAdminPolicyQuestionGenerationDraft((draft) => {
+      draft.topics = Array.isArray(draft.topics) ? draft.topics : [];
+      if (draft.topics.length < ADMIN_POLICY_QUESTION_GENERATION_MAX_TOPICS) {
+        draft.topics.push(
+          createAdminPolicyQuestionGenerationTopic(draft.topics.length),
+        );
+      }
+    });
+    return;
+  }
+
+  if (action === "admin-policy-generation-remove-topic") {
+    const topicIndex = Number(target.getAttribute("data-topic-index"));
+    mutateAdminPolicyQuestionGenerationDraft((draft) => {
+      draft.topics = Array.isArray(draft.topics) ? draft.topics : [];
+      if (Number.isInteger(topicIndex) && draft.topics.length > 1) {
+        draft.topics.splice(topicIndex, 1);
+      }
+    });
+    return;
+  }
+
+  if (action === "admin-policy-generation-add-source") {
+    const topicIndex = Number(target.getAttribute("data-topic-index"));
+    mutateAdminPolicyQuestionGenerationDraft((draft) => {
+      const topic = draft.topics?.[topicIndex];
+      if (!topic) return;
+      topic.sources = Array.isArray(topic.sources) ? topic.sources : [];
+      topic.sources.push(createAdminPolicyQuestionGenerationSource());
+    });
+    return;
+  }
+
+  if (action === "admin-policy-generation-remove-source") {
+    const topicIndex = Number(target.getAttribute("data-topic-index"));
+    const sourceIndex = Number(target.getAttribute("data-source-index"));
+    mutateAdminPolicyQuestionGenerationDraft((draft) => {
+      const topic = draft.topics?.[topicIndex];
+      if (!topic) return;
+      topic.sources = Array.isArray(topic.sources) ? topic.sources : [];
+      if (Number.isInteger(sourceIndex) && topic.sources.length > 1) {
+        topic.sources.splice(sourceIndex, 1);
+      }
+    });
+    return;
+  }
+
+  if (action === "admin-policy-generation-add-issue") {
+    const topicIndex = Number(target.getAttribute("data-topic-index"));
+    const slice = adminPolicyQuestionSlice();
+    const draft =
+      syncAdminPolicyQuestionGenerationDraftFromCurrentForm() ||
+      ensureAdminPolicyQuestionGenerationState(slice);
+    const topic = draft?.topics?.[topicIndex];
+    const input = normalizeString(topic?.issueInput);
+    if (!slice?.generationIssuesLoaded || slice?.generationIssuesLoading) {
+      slice.generationValidationError = "Issue catalog is still loading.";
+      showToast(slice.generationValidationError);
+      scheduleRender();
+      return;
+    }
+    const issueId = adminPolicyGenerationResolveIssueId(
+      input,
+      slice?.generationIssues || [],
+    );
+    if (!topic || !input) {
+      showToast("Type an issue ID or label first.");
+      return;
+    }
+    if (!issueId) {
+      slice.generationValidationError = "Choose an issue from the loaded catalog.";
+      showToast(slice.generationValidationError);
+      scheduleRender();
+      return;
+    }
+    topic.issueIds = Array.isArray(topic.issueIds) ? topic.issueIds : [];
+    if (!topic.issueIds.includes(issueId)) {
+      topic.issueIds.push(issueId);
+    }
+    topic.issueInput = "";
+    slice.generationDraft = draft;
+    slice.generationValidationError = "";
+    scheduleRender();
+    return;
+  }
+
+  if (action === "admin-policy-generation-remove-issue") {
+    const topicIndex = Number(target.getAttribute("data-topic-index"));
+    const issueId = normalizeString(target.getAttribute("data-issue-id"));
+    mutateAdminPolicyQuestionGenerationDraft((draft) => {
+      const topic = draft.topics?.[topicIndex];
+      if (!topic) return;
+      topic.issueIds = (Array.isArray(topic.issueIds) ? topic.issueIds : []).filter(
+        (id) => id !== issueId,
+      );
+    });
+    return;
+  }
+
+  if (action === "admin-policy-generation-refresh-job") {
+    refreshAdminPolicyQuestionGenerationJob(target.getAttribute("data-job-id")).catch(
+      () => {},
+    );
+    return;
+  }
+
   if (action === "admin-feed-config-validate") {
     validateAdminFeedConfigDraft();
     return;
@@ -73330,6 +82263,70 @@ function syncMessagingWorkflowCreateForm(form) {
   if (reasonField) reasonField.hidden = actionType !== "create_moderation_task";
 }
 
+function handleRootKeydown(event) {
+  const messageInput = event.target.closest(
+    '[data-route-form="messaging-send"] textarea[name="text"]',
+  );
+  if (!messageInput) {
+    return;
+  }
+  const commandState = state.pages.messaging.conversation.missionCommand;
+  const commandSuggestions = commandState?.suggestions || [];
+  if (commandState?.active) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeMessagingMissionCommandMenu();
+      return;
+    }
+    if (commandSuggestions.length) {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        const delta = event.key === "ArrowDown" ? 1 : -1;
+        commandState.selectedIndex =
+          (Math.max(0, Number(commandState.selectedIndex) || 0) +
+            delta +
+            commandSuggestions.length) %
+          commandSuggestions.length;
+        syncMessagingMissionCommandMenuDom();
+        return;
+      }
+      if (event.key === "Enter" || event.key === "Tab") {
+        event.preventDefault();
+        applyMessagingMissionCommandSuggestion(commandState.selectedIndex);
+        return;
+      }
+    }
+  }
+  const mentionState = state.pages.messaging.conversation.mention;
+  const suggestions = mentionState?.suggestions || [];
+  if (!mentionState?.active) {
+    return;
+  }
+  if (event.key === "Escape") {
+    event.preventDefault();
+    closeMessagingComposerMentionMenu();
+    return;
+  }
+  if (!suggestions.length) {
+    return;
+  }
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    event.preventDefault();
+    const delta = event.key === "ArrowDown" ? 1 : -1;
+    mentionState.selectedIndex =
+      (Math.max(0, Number(mentionState.selectedIndex) || 0) +
+        delta +
+        suggestions.length) %
+      suggestions.length;
+    syncMessagingMentionMenuDom();
+    return;
+  }
+  if (event.key === "Enter" || event.key === "Tab") {
+    event.preventDefault();
+    applyMessagingMentionSuggestion(mentionState.selectedIndex);
+  }
+}
+
 function handleRootInput(event) {
   const customNameField = event.target.closest(
     '[data-election-custom-field="name"]',
@@ -73370,6 +82367,24 @@ function handleRootInput(event) {
     return;
   }
 
+  const eventEditorField = event.target.closest("[data-event-editor-field]");
+  if (eventEditorField) {
+    const fieldName = normalizeString(
+      eventEditorField.getAttribute("data-event-editor-field"),
+    );
+    if (fieldName && fieldName !== "isFree") {
+      const draft = updateEventEditorDraftField(
+        fieldName,
+        eventEditorField.value,
+      );
+      if (fieldName === "address") {
+        queueEventAddressLookup();
+      }
+      refreshEventEditorPreviewFromDraft(draft);
+    }
+    return;
+  }
+
   const candidateAccessField = event.target.closest(
     "[data-candidate-access-field]",
   );
@@ -73402,6 +82417,20 @@ function handleRootInput(event) {
     }
     if (fieldName === "query") {
       queueMessagingComposeSearch();
+    }
+    return;
+  }
+
+  const groupPeopleField = event.target.closest(
+    "[data-messaging-group-people-field]",
+  );
+  if (groupPeopleField) {
+    const fieldName = normalizeString(
+      groupPeopleField.getAttribute("data-messaging-group-people-field"),
+    );
+    if (fieldName === "query") {
+      messagingGroupPeopleState().query = normalizeString(groupPeopleField.value);
+      queueMessagingGroupPeopleSearch();
     }
     return;
   }
@@ -73472,11 +82501,38 @@ function handleRootInput(event) {
     return;
   }
 
+  const missionDraftField = event.target.closest(
+    "[data-messaging-mission-field]",
+  );
+  if (missionDraftField) {
+    const fieldName = normalizeString(
+      missionDraftField.getAttribute("data-messaging-mission-field"),
+    );
+    if (fieldName) {
+      const conversationState = state.pages.messaging.conversation;
+      conversationState.missionDraft = {
+        ...(conversationState.missionDraft || createMessagingMissionDraftState()),
+        [fieldName]: missionDraftField.value,
+      };
+    }
+    return;
+  }
+
   const messageInput = event.target.closest(
     '[data-route-form="messaging-send"] input[name="text"], [data-route-form="messaging-send"] textarea[name="text"]',
   );
   if (messageInput) {
-    state.pages.messaging.conversation.draft = messageInput.value;
+    const conversationState = state.pages.messaging.conversation;
+    conversationState.mention =
+      conversationState.mention || createMessagingComposerMentionState();
+    conversationState.mention.appliedMentions = reconcileMessagingAppliedMentions(
+      conversationState.draft,
+      messageInput.value,
+      conversationState.mention.appliedMentions,
+    );
+    conversationState.draft = messageInput.value;
+    updateMessagingMissionCommandState(messageInput);
+    updateMessagingComposerMentionState(messageInput);
     const conversationId = normalizeString(
       root?.querySelector(
         '[data-route-form="messaging-send"] input[name="conversationId"]',
@@ -73502,6 +82558,22 @@ function handleRootInput(event) {
     return;
   }
 
+  const policyQuestionField = event.target.closest(
+    '[data-route-form="admin-policy-question-save"] input, [data-route-form="admin-policy-question-save"] textarea',
+  );
+  if (policyQuestionField) {
+    syncAdminPolicyQuestionDraftFromCurrentForm();
+    return;
+  }
+
+  const policyGenerationField = event.target.closest(
+    '[data-route-form="admin-policy-question-generate"] input, [data-route-form="admin-policy-question-generate"] textarea',
+  );
+  if (policyGenerationField) {
+    syncAdminPolicyQuestionGenerationDraftFromCurrentForm();
+    return;
+  }
+
   const slider = event.target.closest("[data-scrubber-input]");
   if (!slider) {
     return;
@@ -73519,6 +82591,41 @@ function handleRootInput(event) {
 }
 
 function handleRootChange(event) {
+  const missionDraftField = event.target.closest(
+    "[data-messaging-mission-field]",
+  );
+  if (missionDraftField) {
+    const fieldName = normalizeString(
+      missionDraftField.getAttribute("data-messaging-mission-field"),
+    );
+    if (fieldName) {
+      const conversationState = state.pages.messaging.conversation;
+      conversationState.missionDraft = {
+        ...(conversationState.missionDraft || createMessagingMissionDraftState()),
+        [fieldName]: missionDraftField.value,
+      };
+    }
+    return;
+  }
+
+  const policyQuestionField = event.target.closest(
+    '[data-route-form="admin-policy-question-save"] input, [data-route-form="admin-policy-question-save"] textarea, [data-route-form="admin-policy-question-save"] select',
+  );
+  if (policyQuestionField) {
+    syncAdminPolicyQuestionDraftFromCurrentForm();
+    scheduleRender();
+    return;
+  }
+
+  const policyGenerationField = event.target.closest(
+    '[data-route-form="admin-policy-question-generate"] input, [data-route-form="admin-policy-question-generate"] textarea',
+  );
+  if (policyGenerationField) {
+    syncAdminPolicyQuestionGenerationDraftFromCurrentForm();
+    scheduleRender();
+    return;
+  }
+
   const staffInviteRole = event.target.closest("[data-candidate-staff-invite-role]");
   if (staffInviteRole) {
     const resource = state.pages.candidateDashboard.detail.staffAdmin;
@@ -73558,6 +82665,31 @@ function handleRootChange(event) {
       donationCertification.checked === true,
     );
     scheduleRender();
+    return;
+  }
+
+  const eventEditorField = event.target.closest("[data-event-editor-field]");
+  if (eventEditorField) {
+    const fieldName = normalizeString(
+      eventEditorField.getAttribute("data-event-editor-field"),
+    );
+    if (fieldName === "isFree") {
+      const draft = updateEventEditorDraftField(
+        "isFree",
+        eventEditorField.checked === true,
+      );
+      const costInput = root?.querySelector('input[name="costAmount"]');
+      if (costInput) {
+        costInput.disabled = draft.isFree;
+      }
+      refreshEventEditorPreviewFromDraft(draft);
+    } else if (fieldName) {
+      const draft = updateEventEditorDraftField(
+        fieldName,
+        eventEditorField.value,
+      );
+      refreshEventEditorPreviewFromDraft(draft);
+    }
     return;
   }
 
@@ -73663,12 +82795,16 @@ function handleRootChange(event) {
 
   const createField = event.target.closest("[data-create-field]");
   if (createField) {
+    const fieldName = normalizeString(createField.getAttribute("data-create-field"));
     const type = normalizeString(createField.type).toLowerCase();
     updatePostComposerField(
-      createField.getAttribute("data-create-field"),
+      fieldName,
       type === "checkbox" ? createField.checked : createField.value,
       "change",
     );
+    if (fieldName.startsWith("teleprompter.")) {
+      scheduleRender();
+    }
     return;
   }
 
@@ -74371,6 +83507,14 @@ function handleCommentSubmit(event) {
       saveAdminFeedConfig(formData).catch(() => {});
       return;
     }
+    if (formKind === "admin-policy-question-save") {
+      saveAdminPolicyQuestion(routeForm).catch(() => {});
+      return;
+    }
+    if (formKind === "admin-policy-question-generate") {
+      submitAdminPolicyQuestionGeneration(routeForm).catch(() => {});
+      return;
+    }
     if (formKind === "admin-action") {
       submitAdminActionForm(formData)
         .then((saved) => {
@@ -74429,6 +83573,10 @@ function handleCommentSubmit(event) {
       saveSettingsDisplayPreferences(formData);
       return;
     }
+    if (formKind === "settings-account-username") {
+      saveSettingsAccountUsername(formData).catch(() => {});
+      return;
+    }
     if (formKind === "settings-voter-profile") {
       saveSettingsVoterProfile(formData).catch(() => {});
       return;
@@ -74483,7 +83631,7 @@ function handleCommentSubmit(event) {
         normalizeString(formData.get("scopeId")),
         normalizeString(formData.get("notificationLevel")),
       ).catch(() => {
-        showToast("Server preference update failed.");
+        showToast("Workspace preference update failed.");
       });
       return;
     }
@@ -74563,6 +83711,14 @@ function handleCommentSubmit(event) {
       return;
     }
     if (formKind === "messaging-room-member-add") {
+      addMessagingConversationMember(formData)
+        .then((added) => {
+          if (added) routeForm.reset();
+        })
+        .catch(() => {});
+      return;
+    }
+    if (formKind === "messaging-group-member-add") {
       addMessagingConversationMember(formData)
         .then((added) => {
           if (added) routeForm.reset();
@@ -74668,12 +83824,37 @@ function handleCommentSubmit(event) {
     if (formKind === "messaging-send") {
       const conversationId = normalizeString(formData.get("conversationId"));
       const conversationState = state.pages.messaging.conversation;
+      const text = normalizeString(formData.get("text"));
+      const mentions = buildMessagingMentionsFromText(
+        text,
+        conversationState.item,
+      );
+      if (conversationState.missionDraft?.open === true) {
+        createMessagingMissionFromComposer(formData, conversationId)
+          .then((created) => {
+            if (created) routeForm.reset();
+          })
+          .catch(() => {});
+        return;
+      }
       if (normalizeString(conversationState.editingMessageId)) {
-        editMessagingDraft(conversationId, normalizeString(formData.get("text")))
+        editMessagingDraft(conversationId, text, mentions)
           .then((saved) => {
             if (saved) routeForm.reset();
           })
           .catch(() => {});
+        return;
+      }
+      const missionCommand = parseMessagingMissionCommand(text);
+      if (missionCommand) {
+        if (
+          openMessagingMissionDraftFromCommand(missionCommand, {
+            text,
+            mentions,
+          })
+        ) {
+          routeForm.reset();
+        }
         return;
       }
       (async () => {
@@ -74689,9 +83870,9 @@ function handleCommentSubmit(event) {
         }
         const sent = await sendMessagingDraft(
           conversationId,
-          normalizeString(formData.get("text")),
+          text,
           attachmentResult.attachments,
-          { replyTo: conversationState.pendingReply },
+          { replyTo: conversationState.pendingReply, mentions },
         );
           if (sent) routeForm.reset();
       })().catch((error) => {
@@ -74735,6 +83916,9 @@ async function bootstrapAuth() {
       : await restoreSharedFeedSession(state.auth.config);
   state.auth.session = session;
   state.auth.user = getAuthenticatedUser(session);
+  if (session) {
+    state.ui.authModal = null;
+  }
   const postAuthPath = completed.handled ? consumeSharedFeedPostAuthPath() : "";
   if (completed.error) {
     state.auth.message = completed.error;
@@ -74751,6 +83935,7 @@ async function bootstrapAuth() {
 
 function attachGlobalListeners() {
   root?.addEventListener("click", handleRootClick);
+  root?.addEventListener("keydown", handleRootKeydown);
   root?.addEventListener("input", handleRootInput);
   root?.addEventListener("change", handleRootChange);
   root?.addEventListener("submit", handleCommentSubmit);
