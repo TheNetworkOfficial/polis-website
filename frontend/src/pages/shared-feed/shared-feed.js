@@ -88448,6 +88448,46 @@ function restoreFeedScrollState(snapshot = null) {
   scrollRoot.scrollTop = Math.max(0, Number(snapshot.scrollTop) || 0);
 }
 
+function snapshotPetitionAddressFocusState() {
+  const active = document.activeElement;
+  if (
+    !active ||
+    !root?.contains(active) ||
+    !active.matches?.("[data-petition-address-field]")
+  ) {
+    return null;
+  }
+  return {
+    fieldId: normalizeString(active.getAttribute("data-petition-address-field")),
+    selectionStart: active.selectionStart,
+    selectionEnd: active.selectionEnd,
+  };
+}
+
+function restorePetitionAddressFocusState(snapshot) {
+  if (!snapshot?.fieldId) return;
+  const input = root?.querySelector(
+    `[data-petition-address-field="${CSS.escape(snapshot.fieldId)}"]`,
+  );
+  if (!input) return;
+  try {
+    input.focus({ preventScroll: true });
+  } catch {
+    input.focus();
+  }
+  if (
+    Number.isFinite(snapshot.selectionStart) &&
+    Number.isFinite(snapshot.selectionEnd) &&
+    typeof input.setSelectionRange === "function"
+  ) {
+    const max = input.value.length;
+    input.setSelectionRange(
+      Math.min(snapshot.selectionStart, max),
+      Math.min(snapshot.selectionEnd, max),
+    );
+  }
+}
+
 function renderApp() {
   if (!root) {
     return;
@@ -88457,6 +88497,7 @@ function renderApp() {
   ensureActiveIndexInBounds();
   const playbackSnapshot = snapshotPlaybackState();
   const scrollSnapshot = snapshotFeedScrollState();
+  const petitionAddressFocusSnapshot = snapshotPetitionAddressFocusState();
   const publicPetitionRoute = isPublicPetitionRoute();
   const shell = publicPetitionRoute
     ? `<div class="shared-feed-shell shared-feed-shell--public">
@@ -88473,6 +88514,7 @@ function renderApp() {
       ${renderToast()}`;
   root.innerHTML = shell;
   restoreFeedScrollState(scrollSnapshot);
+  restorePetitionAddressFocusState(petitionAddressFocusSnapshot);
   bindObservers();
   bindVideos();
   bindPostComposerCameraPreview();
