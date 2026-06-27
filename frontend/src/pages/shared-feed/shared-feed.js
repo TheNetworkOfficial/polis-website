@@ -15696,28 +15696,16 @@ async function createPublicPetitionVideoUpload(publicSlug, fieldId, file) {
     },
   );
   const upload = payload.upload || payload.item || payload;
-  const uploadUrl =
-    normalizeString(upload.tusUploadUrl || upload.uploadUrl || upload.uploadURL);
-  if (!uploadUrl) {
+  const normalizedUpload = normalizeCreateUploadPayload(upload);
+  if (!normalizedUpload.uid || !normalizedUpload.uploadUrl) {
     throw new Error("upload_url_missing");
   }
-  const uploadResponse = await fetch(uploadUrl, {
-    method: "PATCH",
-    headers: {
-      "Tus-Resumable": "1.0.0",
-      "Upload-Offset": "0",
-      "Content-Type": "application/offset+octet-stream",
-    },
-    body: file,
-  });
-  if (!uploadResponse.ok) {
-    throw new Error("video_upload_failed");
-  }
+  await uploadPostComposerFile(normalizedUpload, file);
   return {
     ...upload,
     fieldId: normalizedFieldId,
-    uploadId: upload.uploadId || upload.uid,
-    uid: upload.uid || upload.uploadId,
+    uploadId: normalizedUpload.uid,
+    uid: normalizedUpload.uid,
     fileName: normalizeString(file?.name),
     mimeType,
     sizeBytes: Number(file?.size) || null,
@@ -15843,7 +15831,7 @@ function buildPetitionDraftFromForm(formData, fallback = {}) {
       label:
         normalizeString(formData.get(`${prefix}:label`)) ||
         createPetitionFieldDraft(type, index).label,
-      required: formData.get(`${prefix}:required`) === "on" || type === "cta_video",
+      required: formData.get(`${prefix}:required`) === "on",
       helpText: normalizeString(formData.get(`${prefix}:helpText`)),
       order: index,
       ...(type === "select" ? { options } : {}),
