@@ -15752,8 +15752,12 @@ async function submitPublicPetitionForm(formData) {
         values[field.id] = formData.get(key) === "on";
       } else if (field.type === "cta_video") {
         const file = page.videoFiles[field.id] || null;
+        const existingUpload = page.videoUploads[field.id] || null;
+        if (!field.required && !existingUpload && !file) {
+          continue;
+        }
         const consentAccepted = formData.get(`${key}:consent`) === "on";
-        if (!page.videoUploads[field.id] && file) {
+        if (!existingUpload && file) {
           page.videoUploads[field.id] = await createPublicPetitionVideoUpload(
             petition.publicSlug,
             field.id,
