@@ -15768,6 +15768,10 @@ async function submitPublicPetitionForm(formData) {
         values[field.id] = normalizeString(formData.get(key));
       }
     }
+    page.values = {
+      ...page.values,
+      ...values,
+    };
     await fetchJson(
       `/api/petitions/${encodeURIComponent(petition.publicSlug)}/responses`,
       {
@@ -60239,11 +60243,11 @@ function renderPublicPetitionAddressField(field, page, pending) {
   const activeLookup = lookup.fieldId === field.id;
   const key = `field:${field.id}`;
   return `<div class="shared-petition-public-field shared-petition-public-address">
-    <label class="is-wide"><span>${escapeHtml(field.label)}${field.required ? " *" : ""}</span><input name="${escapeHtml(key)}:line1" value="${escapeHtml(value.line1 || "")}" autocomplete="address-line1" data-petition-address-field="${escapeHtml(field.id)}"${field.required ? " required" : ""}${disabledAttr(pending)} /></label>
-    <label><span>Address line 2</span><input name="${escapeHtml(key)}:line2" value="${escapeHtml(value.line2 || "")}" autocomplete="address-line2"${disabledAttr(pending)} /></label>
-    <label><span>City</span><input name="${escapeHtml(key)}:city" value="${escapeHtml(value.city || "")}" autocomplete="address-level2"${field.required ? " required" : ""}${disabledAttr(pending)} /></label>
-    <label><span>State</span><input name="${escapeHtml(key)}:state" value="${escapeHtml(value.state || "")}" autocomplete="address-level1"${field.required ? " required" : ""}${disabledAttr(pending)} /></label>
-    <label><span>Postal code</span><input name="${escapeHtml(key)}:postalCode" value="${escapeHtml(value.postalCode || "")}" autocomplete="postal-code"${field.required ? " required" : ""}${disabledAttr(pending)} /></label>
+    <label class="is-wide"><span>${escapeHtml(field.label)}${field.required ? " *" : ""}</span><input name="${escapeHtml(key)}:line1" value="${escapeHtml(value.line1 || "")}" autocomplete="address-line1" data-petition-address-field="${escapeHtml(field.id)}" data-petition-public-field="${escapeHtml(field.id)}" data-petition-public-part="line1"${field.required ? " required" : ""}${disabledAttr(pending)} /></label>
+    <label><span>Address line 2</span><input name="${escapeHtml(key)}:line2" value="${escapeHtml(value.line2 || "")}" autocomplete="address-line2" data-petition-public-field="${escapeHtml(field.id)}" data-petition-public-part="line2"${disabledAttr(pending)} /></label>
+    <label><span>City</span><input name="${escapeHtml(key)}:city" value="${escapeHtml(value.city || "")}" autocomplete="address-level2" data-petition-public-field="${escapeHtml(field.id)}" data-petition-public-part="city"${field.required ? " required" : ""}${disabledAttr(pending)} /></label>
+    <label><span>State</span><input name="${escapeHtml(key)}:state" value="${escapeHtml(value.state || "")}" autocomplete="address-level1" data-petition-public-field="${escapeHtml(field.id)}" data-petition-public-part="state"${field.required ? " required" : ""}${disabledAttr(pending)} /></label>
+    <label><span>Postal code</span><input name="${escapeHtml(key)}:postalCode" value="${escapeHtml(value.postalCode || "")}" autocomplete="postal-code" data-petition-public-field="${escapeHtml(field.id)}" data-petition-public-part="postalCode"${field.required ? " required" : ""}${disabledAttr(pending)} /></label>
     <input type="hidden" name="${escapeHtml(key)}:placeId" value="${escapeHtml(value.placeId || "")}" />
     <input type="hidden" name="${escapeHtml(key)}:formattedAddress" value="${escapeHtml(value.formattedAddress || "")}" />
     <input type="hidden" name="${escapeHtml(key)}:lat" value="${escapeHtml(value.lat || "")}" />
@@ -60306,10 +60310,12 @@ function renderPublicPetitionField(field, page, pending) {
   const required = field.required ? " required" : "";
   const label = `${field.label}${field.required ? " *" : ""}`;
   const help = field.helpText ? `<em>${escapeHtml(field.helpText)}</em>` : "";
+  const value = page.values[field.id];
+  const objectValue = value && typeof value === "object" ? value : {};
   if (field.type === "name") {
     return `<div class="shared-petition-public-field">
-      <label><span>First name${field.required ? " *" : ""}</span><input name="${escapeHtml(key)}:firstName" autocomplete="given-name"${required}${disabledAttr(pending)} /></label>
-      <label><span>Last name${field.required ? " *" : ""}</span><input name="${escapeHtml(key)}:lastName" autocomplete="family-name"${required}${disabledAttr(pending)} /></label>
+      <label><span>First name${field.required ? " *" : ""}</span><input name="${escapeHtml(key)}:firstName" value="${escapeHtml(objectValue.firstName || "")}" autocomplete="given-name" data-petition-public-field="${escapeHtml(field.id)}" data-petition-public-part="firstName"${required}${disabledAttr(pending)} /></label>
+      <label><span>Last name${field.required ? " *" : ""}</span><input name="${escapeHtml(key)}:lastName" value="${escapeHtml(objectValue.lastName || "")}" autocomplete="family-name" data-petition-public-field="${escapeHtml(field.id)}" data-petition-public-part="lastName"${required}${disabledAttr(pending)} /></label>
       ${help}
     </div>`;
   }
@@ -60317,10 +60323,11 @@ function renderPublicPetitionField(field, page, pending) {
     return renderPublicPetitionAddressField(field, page, pending);
   }
   if (field.type === "checkbox") {
-    return `<label class="shared-form__checkbox shared-petition-public-checkbox"><input type="checkbox" name="${escapeHtml(key)}"${required}${disabledAttr(pending)} /> ${escapeHtml(label)}</label>`;
+    return `<label class="shared-form__checkbox shared-petition-public-checkbox"><input type="checkbox" name="${escapeHtml(key)}" data-petition-public-field="${escapeHtml(field.id)}"${checkedAttr(value === true)}${required}${disabledAttr(pending)} /> ${escapeHtml(label)}</label>`;
   }
   if (field.type === "select") {
-    return `<label class="shared-petition-public-field"><span>${escapeHtml(label)}</span><select name="${escapeHtml(key)}"${required}${disabledAttr(pending)}><option value="">Choose...</option>${(field.options || []).map((option) => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`).join("")}</select>${help}</label>`;
+    const selectedValue = normalizeString(value);
+    return `<label class="shared-petition-public-field"><span>${escapeHtml(label)}</span><select name="${escapeHtml(key)}" data-petition-public-field="${escapeHtml(field.id)}"${required}${disabledAttr(pending)}><option value=""${selectedAttr(!selectedValue)}>Choose...</option>${(field.options || []).map((option) => `<option value="${escapeHtml(option.value)}"${selectedAttr(selectedValue === normalizeString(option.value))}>${escapeHtml(option.label)}</option>`).join("")}</select>${help}</label>`;
   }
   if (field.type === "cta_video") {
     const previewUrl = normalizeString(page.videoPreviews[field.id]);
@@ -60337,18 +60344,18 @@ function renderPublicPetitionField(field, page, pending) {
         <input type="file" accept="video/*" data-petition-video-field="${escapeHtml(field.id)}"${disabledAttr(pending)} />
         <strong>${hasFile ? "Video selected" : "Choose video"}</strong>
       </label>
-      <label class="shared-form__checkbox shared-petition-public-video-consent"><input type="checkbox" name="${escapeHtml(key)}:consent"${consentRequired}${disabledAttr(pending || !hasFile)} /> ${escapeHtml(field.config?.consentCopy || "I understand this video response may be used as part of this CTA.")}</label>
+      <label class="shared-form__checkbox shared-petition-public-video-consent"><input type="checkbox" name="${escapeHtml(key)}:consent" data-petition-public-field="${escapeHtml(field.id)}" data-petition-public-part="consent"${checkedAttr(objectValue.consent === true || objectValue.consentAccepted === true)}${consentRequired}${disabledAttr(pending || !hasFile)} /> ${escapeHtml(field.config?.consentCopy || "I understand this video response may be used as part of this CTA.")}</label>
     </div>`;
   }
   if (field.type === "long_text") {
-    return `<label class="shared-petition-public-field"><span>${escapeHtml(label)}</span><textarea name="${escapeHtml(key)}" rows="5"${required}${disabledAttr(pending)}></textarea>${help}</label>`;
+    return `<label class="shared-petition-public-field"><span>${escapeHtml(label)}</span><textarea name="${escapeHtml(key)}" rows="5" data-petition-public-field="${escapeHtml(field.id)}"${required}${disabledAttr(pending)}>${escapeHtml(typeof value === "string" ? value : "")}</textarea>${help}</label>`;
   }
   if (field.type === "signature") {
-    return `<label class="shared-petition-public-field"><span>${escapeHtml(label)}</span><input name="${escapeHtml(key)}" autocomplete="name"${required}${disabledAttr(pending)} /><em>Type your signer name.</em></label>`;
+    return `<label class="shared-petition-public-field"><span>${escapeHtml(label)}</span><input name="${escapeHtml(key)}" value="${escapeHtml(objectValue.typedName || "")}" autocomplete="name" data-petition-public-field="${escapeHtml(field.id)}" data-petition-public-part="typedName"${required}${disabledAttr(pending)} /><em>Type your signer name.</em></label>`;
   }
   const inputType = field.type === "email" ? "email" : field.type === "phone" ? "tel" : "text";
   const autocomplete = field.type === "email" ? "email" : field.type === "phone" ? "tel" : "off";
-  return `<label class="shared-petition-public-field"><span>${escapeHtml(label)}</span><input type="${escapeHtml(inputType)}" name="${escapeHtml(key)}" autocomplete="${escapeHtml(autocomplete)}"${required}${disabledAttr(pending)} />${help}</label>`;
+  return `<label class="shared-petition-public-field"><span>${escapeHtml(label)}</span><input type="${escapeHtml(inputType)}" name="${escapeHtml(key)}" value="${escapeHtml(typeof value === "string" ? value : "")}" autocomplete="${escapeHtml(autocomplete)}" data-petition-public-field="${escapeHtml(field.id)}"${required}${disabledAttr(pending)} />${help}</label>`;
 }
 
 function renderPublicPetitionPage() {
@@ -92958,6 +92965,32 @@ function syncMessagingWorkflowCreateForm(form) {
   if (reasonField) reasonField.hidden = actionType !== "create_moderation_task";
 }
 
+function syncPublicPetitionFieldControl(control) {
+  const fieldId = normalizeString(
+    control?.getAttribute("data-petition-public-field"),
+  );
+  if (!fieldId) {
+    return null;
+  }
+  const page = state.pages.petitions.public;
+  const part = normalizeString(
+    control.getAttribute("data-petition-public-part"),
+  );
+  const nextValue =
+    control.type === "checkbox" ? control.checked === true : control.value;
+  if (part) {
+    page.values[fieldId] = {
+      ...(page.values[fieldId] && typeof page.values[fieldId] === "object"
+        ? page.values[fieldId]
+        : {}),
+      [part]: nextValue,
+    };
+  } else {
+    page.values[fieldId] = nextValue;
+  }
+  return { fieldId, part, value: nextValue };
+}
+
 function handleRootKeydown(event) {
   const messageInput = event.target.closest(
     '[data-route-form="messaging-send"] textarea[name="text"]',
@@ -93080,19 +93113,15 @@ function handleRootInput(event) {
     return;
   }
 
-  const petitionAddressField = event.target.closest("[data-petition-address-field]");
-  if (petitionAddressField) {
-    const fieldId = normalizeString(
-      petitionAddressField.getAttribute("data-petition-address-field"),
-    );
-    const page = state.pages.petitions.public;
-    page.values[fieldId] = {
-      ...(page.values[fieldId] && typeof page.values[fieldId] === "object"
-        ? page.values[fieldId]
-        : {}),
-      line1: petitionAddressField.value,
-    };
-    queuePetitionAddressLookup(fieldId, petitionAddressField.value);
+  const petitionPublicField = event.target.closest("[data-petition-public-field]");
+  if (petitionPublicField) {
+    const synced = syncPublicPetitionFieldControl(petitionPublicField);
+    if (
+      synced?.part === "line1" &&
+      petitionPublicField.matches("[data-petition-address-field]")
+    ) {
+      queuePetitionAddressLookup(synced.fieldId, petitionPublicField.value);
+    }
     return;
   }
 
@@ -93438,6 +93467,18 @@ function handleRootChange(event) {
         eventEditorField.value,
       );
       refreshEventEditorPreviewFromDraft(draft);
+    }
+    return;
+  }
+
+  const petitionPublicField = event.target.closest("[data-petition-public-field]");
+  if (petitionPublicField) {
+    const synced = syncPublicPetitionFieldControl(petitionPublicField);
+    if (
+      synced?.part === "line1" &&
+      petitionPublicField.matches("[data-petition-address-field]")
+    ) {
+      queuePetitionAddressLookup(synced.fieldId, petitionPublicField.value);
     }
     return;
   }
