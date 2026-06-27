@@ -102,6 +102,11 @@ a {
   grid-template-columns: 260px minmax(0, 1fr);
 }
 
+.shared-feed-shell--public {
+  display: block;
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .shared-feed-rail {
   position: sticky;
   top: 0;
@@ -43259,42 +43264,372 @@ button.shared-settings-district-person:focus-visible {
   background: color-mix(in srgb, var(--sf-red) 8%, transparent);
 }
 
-.shared-petition-public-shell {
-  max-width: 860px;
+.shared-petition-public-page {
+  --sf-ink: #f7f8fb;
+  --sf-muted: rgba(232, 235, 245, 0.72);
+  --sf-line: rgba(255, 255, 255, 0.14);
+  --sf-panel-soft: rgba(255, 255, 255, 0.065);
+  min-height: 100vh;
+  color: var(--sf-ink);
+  background:
+    linear-gradient(135deg, rgba(255, 51, 95, 0.18) 0%, transparent 32%),
+    linear-gradient(215deg, rgba(38, 244, 238, 0.12) 0%, transparent 34%),
+    linear-gradient(180deg, #101017 0%, #06070a 58%, #030406 100%);
+  overflow: hidden;
+}
+
+.shared-petition-public-page__content {
+  width: min(1180px, 100%);
   margin: 0 auto;
+  padding: 30px 24px 56px;
+  gap: 34px;
+}
+
+.shared-petition-public-brand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.shared-petition-public-brand__lockup {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.shared-petition-public-brand__mark {
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.shared-petition-public-brand__mark img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.shared-petition-public-brand strong {
+  display: block;
+  font-family: var(--sf-font-display);
+  font-size: 1.06rem;
+}
+
+.shared-petition-public-brand small {
+  display: block;
+  margin-top: 2px;
+  color: var(--sf-muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.shared-petition-public-brand__app {
+  min-height: 42px;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.shared-petition-public-state {
+  min-height: 56vh;
+  display: grid;
+  place-items: center;
+}
+
+.shared-petition-public-state > div {
+  width: min(560px, 100%);
+}
+
+.shared-petition-public-shell {
+  max-width: none;
+  margin: 0;
+  display: grid;
+  grid-template-columns: minmax(280px, 0.82fr) minmax(480px, 1fr);
+  gap: clamp(28px, 5vw, 64px);
+  align-items: start;
+}
+
+.shared-petition-public-copy {
+  position: sticky;
+  top: 28px;
   display: grid;
   gap: 18px;
+  padding-top: clamp(18px, 5vh, 58px);
+}
+
+.shared-petition-public-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: rgba(247, 248, 251, 0.68);
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.shared-petition-public-meta span + span {
+  padding-left: 12px;
+  border-left: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.shared-petition-public-copy h1 {
+  margin: 0;
+  max-width: 700px;
+  font-family: var(--sf-font-display);
+  font-size: clamp(2.15rem, 4.2vw, 4.8rem);
+  line-height: 0.98;
+}
+
+.shared-petition-public-copy__body {
+  max-width: 660px;
+  margin: 0;
+  color: rgba(232, 235, 245, 0.78);
+  font-size: 1rem;
+  line-height: 1.72;
+  white-space: pre-wrap;
 }
 
 .shared-petition-public-form {
   display: grid;
-  gap: 16px;
+  gap: 18px;
+  padding: clamp(18px, 3vw, 30px);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 22px;
+  background:
+    linear-gradient(180deg, rgba(19, 22, 30, 0.94), rgba(8, 10, 15, 0.96)),
+    rgba(9, 11, 16, 0.95);
+  box-shadow: 0 26px 80px rgba(0, 0, 0, 0.42);
+}
+
+.shared-petition-public-form__header {
+  padding-bottom: 4px;
+}
+
+.shared-petition-public-form__header h2 {
+  margin: 0;
+  font-family: var(--sf-font-display);
+  font-size: 1.34rem;
+}
+
+.shared-petition-public-form > label.shared-petition-public-field,
+.shared-petition-public-field label,
+.shared-petition-public-address label {
+  display: grid;
+  gap: 8px;
+}
+
+.shared-petition-public-form > label.shared-petition-public-field {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.shared-petition-public-field span,
+.shared-petition-public-address label span,
+.shared-petition-public-upload span {
+  color: rgba(247, 248, 251, 0.9);
+  font-size: 0.83rem;
+  font-weight: 850;
+}
+
+.shared-petition-public-form input:not([type="checkbox"]):not([type="file"]),
+.shared-petition-public-form textarea,
+.shared-petition-public-form select {
+  width: 100%;
+  min-height: 48px;
+  padding: 0 14px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.075);
+  color: #fff;
+  outline: none;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.shared-petition-public-form textarea {
+  min-height: 132px;
+  padding-block: 13px;
+  resize: vertical;
+}
+
+.shared-petition-public-form select {
+  appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, rgba(247, 248, 251, 0.78) 50%),
+    linear-gradient(135deg, rgba(247, 248, 251, 0.78) 50%, transparent 50%);
+  background-position:
+    calc(100% - 18px) 21px,
+    calc(100% - 13px) 21px;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+  padding-right: 36px;
+}
+
+.shared-petition-public-form input:not([type="checkbox"]):not([type="file"]):focus,
+.shared-petition-public-form textarea:focus,
+.shared-petition-public-form select:focus {
+  border-color: rgba(38, 244, 238, 0.62);
+  background: rgba(255, 255, 255, 0.1);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 0 0 4px rgba(38, 244, 238, 0.1);
 }
 
 .shared-petition-public-field em,
 .shared-petition-field em {
   color: var(--sf-muted);
   font-size: 0.84rem;
+  line-height: 1.45;
 }
 
-.shared-petition-public-checkbox {
+.shared-petition-public-checkbox,
+.shared-petition-public-video-consent {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
+  color: rgba(247, 248, 251, 0.88);
+  line-height: 1.45;
+}
+
+.shared-petition-public-checkbox input,
+.shared-petition-public-video-consent input {
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  accent-color: var(--sf-red);
+  flex: 0 0 auto;
+}
+
+.shared-petition-public-address {
+  position: relative;
+}
+
+.shared-petition-public-address .shared-event-address-lookup__status,
+.shared-petition-public-address .shared-event-address-lookup__error,
+.shared-petition-public-address .shared-event-address-lookup__results {
+  grid-column: 1 / -1;
+}
+
+.shared-petition-public-address .shared-event-address-lookup__results {
+  position: static;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(8, 10, 15, 0.96);
 }
 
 .shared-petition-video-field {
-  padding: 14px;
-  border: 1px solid var(--sf-line);
-  border-radius: 8px;
-  background: var(--sf-panel-soft);
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  padding: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 18px;
+  background:
+    linear-gradient(135deg, rgba(255, 51, 95, 0.1), transparent 42%),
+    rgba(255, 255, 255, 0.055);
+}
+
+.shared-petition-video-field__copy {
+  display: grid;
+  gap: 6px;
+}
+
+.shared-petition-video-field__copy strong {
+  font-family: var(--sf-font-display);
+  font-size: 1.02rem;
+}
+
+.shared-petition-video-field__copy p {
+  margin: 0;
+  color: var(--sf-muted);
+  line-height: 1.58;
 }
 
 .shared-petition-video-field video {
   width: 100%;
   max-height: 360px;
-  border-radius: 8px;
+  border-radius: 14px;
   background: #000;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.shared-petition-public-upload {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border: 1px dashed rgba(255, 255, 255, 0.22);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.045);
+  cursor: pointer;
+}
+
+.shared-petition-public-upload input[type="file"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.shared-petition-public-upload strong {
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(38, 244, 238, 0.13);
+  color: #bffcf9;
+  font-size: 0.86rem;
+}
+
+.shared-petition-public-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 4px;
+}
+
+.shared-petition-public-submit {
+  min-width: 150px;
+  justify-content: center;
+}
+
+@media (max-width: 980px) {
+  .shared-petition-public-page__content {
+    padding: 22px 18px 44px;
+    gap: 26px;
+  }
+
+  .shared-petition-public-shell {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 26px;
+  }
+
+  .shared-petition-public-copy {
+    position: static;
+    padding-top: 8px;
+  }
+
+  .shared-petition-public-copy h1 {
+    font-size: clamp(2rem, 8vw, 3.4rem);
+  }
 }
 
 @media (max-width: 760px) {
@@ -43310,5 +43645,59 @@ button.shared-settings-district-person:focus-visible {
   .shared-petition-field__top {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .shared-petition-public-page__content {
+    padding: 18px 14px 34px;
+  }
+
+  .shared-petition-public-brand {
+    align-items: flex-start;
+  }
+
+  .shared-petition-public-brand__app {
+    min-height: 38px;
+    padding-inline: 14px;
+  }
+
+  .shared-petition-public-meta {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .shared-petition-public-meta span + span {
+    padding-left: 8px;
+  }
+
+  .shared-petition-public-copy__body {
+    font-size: 0.96rem;
+    line-height: 1.64;
+  }
+
+  .shared-petition-public-form {
+    padding: 16px;
+    border-radius: 18px;
+  }
+
+  .shared-petition-public-form input:not([type="checkbox"]):not([type="file"]),
+  .shared-petition-public-form textarea,
+  .shared-petition-public-form select {
+    min-height: 46px;
+  }
+
+  .shared-petition-public-upload {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .shared-petition-public-upload strong {
+    width: 100%;
+  }
+
+  .shared-petition-public-actions {
+    justify-content: stretch;
+  }
+
+  .shared-petition-public-submit {
+    width: 100%;
   }
 }

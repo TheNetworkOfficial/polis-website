@@ -4044,6 +4044,10 @@ function getPathnameFromRouteTarget(value) {
 
 function getRouteDocumentTitle(route = state.route) {
   const routeKey = normalizeString(route?.routeKey);
+  if (routeKey === ROUTE_KEY_PUBLIC_PETITION) {
+    const petitionTitle = normalizeString(state.pages?.petitions?.public?.item?.title);
+    return `${petitionTitle || "Petition"} | Polis`;
+  }
   const exactTitles = {
     [ROUTE_KEY_AUTH]: "Account",
     [ROUTE_KEY_FEED]: "Feed",
@@ -46184,6 +46188,7 @@ function getTopChromeTitle(route = state.route) {
     [ROUTE_KEY_POLICY_QUESTION_DETAIL]: "Policy Questions",
     [ROUTE_KEY_ADMIN]: "Admin",
     [ROUTE_KEY_ADMIN_SECTION]: "Admin",
+    [ROUTE_KEY_PUBLIC_PETITION]: "Petition",
   };
   if (exactTitles[routeKey]) {
     return exactTitles[routeKey];
@@ -60282,6 +60287,32 @@ function renderPublicPetitionAddressField(field, page, pending) {
   </div>`;
 }
 
+function renderPublicPetitionBrandHeader() {
+  return `<header class="shared-petition-public-brand">
+    <button class="shared-petition-public-brand__lockup" type="button" data-action="navigate" data-route="/feed" aria-label="Go to Polis feed">
+      <span class="shared-petition-public-brand__mark">
+        <img src="${escapeHtml(resolveSharedAssetUrl(polisLogoUrl))}" alt="" />
+      </span>
+      <span>
+        <strong>Polis</strong>
+        <small>Public petition</small>
+      </span>
+    </button>
+    <button class="shared-feed-chip shared-petition-public-brand__app" type="button" data-action="open-app-shell">Open app</button>
+  </header>`;
+}
+
+function renderPublicPetitionState(message, kind = "loading") {
+  return `<section class="shared-page shared-petition-public-page">
+    <div class="shared-page__content shared-petition-public-page__content">
+      ${renderPublicPetitionBrandHeader()}
+      <main class="shared-petition-public-state">
+        <div class="${kind === "error" ? "shared-page__error" : "shared-page__loading"}">${escapeHtml(message)}</div>
+      </main>
+    </div>
+  </section>`;
+}
+
 function renderPublicPetitionField(field, page, pending) {
   const key = `field:${field.id}`;
   const required = field.required ? " required" : "";
@@ -60289,8 +60320,8 @@ function renderPublicPetitionField(field, page, pending) {
   const help = field.helpText ? `<em>${escapeHtml(field.helpText)}</em>` : "";
   if (field.type === "name") {
     return `<div class="shared-petition-public-field">
-      <label><span>First name *</span><input name="${escapeHtml(key)}:firstName" autocomplete="given-name"${required}${disabledAttr(pending)} /></label>
-      <label><span>Last name *</span><input name="${escapeHtml(key)}:lastName" autocomplete="family-name"${required}${disabledAttr(pending)} /></label>
+      <label><span>First name${field.required ? " *" : ""}</span><input name="${escapeHtml(key)}:firstName" autocomplete="given-name"${required}${disabledAttr(pending)} /></label>
+      <label><span>Last name${field.required ? " *" : ""}</span><input name="${escapeHtml(key)}:lastName" autocomplete="family-name"${required}${disabledAttr(pending)} /></label>
       ${help}
     </div>`;
   }
@@ -60306,14 +60337,19 @@ function renderPublicPetitionField(field, page, pending) {
   if (field.type === "cta_video") {
     const previewUrl = normalizeString(page.videoPreviews[field.id]);
     const hasFile = Boolean(page.videoFiles[field.id] || page.videoUploads[field.id]);
+    const consentRequired = field.required || hasFile ? " required" : "";
     return `<div class="shared-petition-public-field shared-petition-video-field">
-      <div>
+      <div class="shared-petition-video-field__copy">
         <strong>${escapeHtml(field.label)}</strong>
         ${field.config?.instructions ? `<p>${escapeHtml(field.config.instructions)}</p>` : ""}
       </div>
       ${previewUrl ? `<video controls src="${escapeHtml(previewUrl)}"></video>` : ""}
-      <label><span>Upload video</span><input type="file" accept="video/*" data-petition-video-field="${escapeHtml(field.id)}"${disabledAttr(pending)} /></label>
-      <label class="shared-form__checkbox"><input type="checkbox" name="${escapeHtml(key)}:consent"${required}${disabledAttr(pending || !hasFile)} /> ${escapeHtml(field.config?.consentCopy || "I understand this video response may be used as part of this CTA.")}</label>
+      <label class="shared-petition-public-upload">
+        <span>Upload video</span>
+        <input type="file" accept="video/*" data-petition-video-field="${escapeHtml(field.id)}"${disabledAttr(pending)} />
+        <strong>${hasFile ? "Video selected" : "Choose video"}</strong>
+      </label>
+      <label class="shared-form__checkbox shared-petition-public-video-consent"><input type="checkbox" name="${escapeHtml(key)}:consent"${consentRequired}${disabledAttr(pending || !hasFile)} /> ${escapeHtml(field.config?.consentCopy || "I understand this video response may be used as part of this CTA.")}</label>
     </div>`;
   }
   if (field.type === "long_text") {
@@ -60330,33 +60366,34 @@ function renderPublicPetitionField(field, page, pending) {
 function renderPublicPetitionPage() {
   const page = state.pages.petitions.public;
   if (page.loading && !page.item) {
-    return `<section class="shared-page shared-petition-public-page">${renderTopChrome()}<div class="shared-page__content"><div class="shared-page__loading">Loading petition...</div></div></section>`;
+    return renderPublicPetitionState("Loading petition...");
   }
   if (page.error && !page.item) {
-    return `<section class="shared-page shared-petition-public-page">${renderTopChrome()}<div class="shared-page__content"><div class="shared-page__error">${escapeHtml(page.error)}</div></div></section>`;
+    return renderPublicPetitionState(page.error, "error");
   }
   const petition = page.item;
   if (!petition) {
-    return `<section class="shared-page shared-petition-public-page">${renderTopChrome()}<div class="shared-page__content"><div class="shared-page__error">Petition unavailable.</div></div></section>`;
+    return renderPublicPetitionState("Petition unavailable.", "error");
   }
   const pending = page.submitting;
   return `<section class="shared-page shared-petition-public-page">
-    ${renderTopChrome()}
-    <div class="shared-page__content">
+    <div class="shared-page__content shared-petition-public-page__content">
+      ${renderPublicPetitionBrandHeader()}
       <section class="shared-petition-public-shell">
-        <div class="shared-page__header">
-          <div>
-            <div class="shared-card__meta"><span>Petition</span><span>Guest response</span></div>
-            <h1>${escapeHtml(petition.title || "Petition")}</h1>
-            ${petition.bodyText ? `<p>${escapeHtml(petition.bodyText)}</p>` : ""}
-          </div>
+        <div class="shared-petition-public-copy">
+          <div class="shared-petition-public-meta"><span>Petition</span><span>Guest response</span></div>
+          <h1>${escapeHtml(petition.title || "Petition")}</h1>
+          ${petition.bodyText ? `<p class="shared-petition-public-copy__body">${escapeHtml(petition.bodyText)}</p>` : ""}
         </div>
-        ${page.error ? `<div class="shared-page__error">${escapeHtml(page.error)}</div>` : ""}
-        ${page.notice ? `<div class="shared-page__notice">${escapeHtml(page.notice)}</div>` : ""}
         <form class="shared-petition-public-form" data-route-form="petition-public-submit">
+          <div class="shared-petition-public-form__header">
+            <h2>Your response</h2>
+          </div>
+          ${page.error ? `<div class="shared-page__error">${escapeHtml(page.error)}</div>` : ""}
+          ${page.notice ? `<div class="shared-page__notice">${escapeHtml(page.notice)}</div>` : ""}
           ${(petition.fieldSchema || []).map((field) => renderPublicPetitionField(field, page, pending)).join("")}
-          <div class="shared-card__actions">
-            <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(pending)}>${pending ? "Submitting..." : "Submit"}</button>
+          <div class="shared-petition-public-actions">
+            <button class="shared-feed-chip shared-feed-chip--primary shared-petition-public-submit" type="submit"${disabledAttr(pending)}>${pending ? "Submitting..." : "Submit"}</button>
           </div>
         </form>
       </section>
@@ -88432,14 +88469,20 @@ function renderApp() {
   ensureActiveIndexInBounds();
   const playbackSnapshot = snapshotPlaybackState();
   const scrollSnapshot = snapshotFeedScrollState();
-  const shell = `<div class="shared-feed-shell">
-    ${renderRail()}
-    ${renderRouteStage()}
-  </div>
-  ${isShareRoute() ? renderCommentsPanel() : ""}
-  ${renderAuthModal()}
-  ${renderCandidateDonationFlowModal()}
-  ${renderToast()}`;
+  const publicPetitionRoute = isPublicPetitionRoute();
+  const shell = publicPetitionRoute
+    ? `<div class="shared-feed-shell shared-feed-shell--public">
+        ${renderRouteStage()}
+      </div>
+      ${renderToast()}`
+    : `<div class="shared-feed-shell">
+        ${renderRail()}
+        ${renderRouteStage()}
+      </div>
+      ${isShareRoute() ? renderCommentsPanel() : ""}
+      ${renderAuthModal()}
+      ${renderCandidateDonationFlowModal()}
+      ${renderToast()}`;
   root.innerHTML = shell;
   restoreFeedScrollState(scrollSnapshot);
   bindObservers();
