@@ -46590,22 +46590,22 @@ function renderFeedAuthGate() {
 function renderDiscoverAuthGate() {
   const quickPaths = [
     {
-      label: "Feed",
-      copy: "Open posts, media, and civic conversations.",
-      route: "/feed",
-      icon: "feed",
-    },
-    {
       label: "Calendar",
-      copy: "Open campaign events, shifts, bookings, and reminders.",
+      copy: "Events, shifts, and bookings.",
       route: "/candidate-dashboard",
       icon: "calendar",
     },
     {
       label: "Schedule",
-      copy: "Jump into the next seven days of calendar-linked work.",
+      copy: "Next 7 days of calendar work.",
       route: "/candidate-dashboard",
       icon: "calendar",
+    },
+    {
+      label: "Feed",
+      copy: "Open posts, media, and civic conversations.",
+      route: "/feed",
+      icon: "feed",
     },
     {
       label: "People",

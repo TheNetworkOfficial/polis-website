@@ -40663,6 +40663,21 @@ button.shared-settings-district-person:focus-visible {
     -webkit-line-clamp: unset;
   }
 
+  .shared-discover-page--auth .shared-discover-hero .shared-discover-stats {
+    display: none;
+  }
+
+  .shared-discover-page--auth .shared-discover-paths {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .shared-discover-page--auth .shared-discover-path {
+    min-height: 124px;
+    padding: 13px;
+    border-radius: 18px;
+  }
+
   .shared-policy-questions-page .shared-feed-topbar,
   .shared-achievements-page .shared-feed-topbar,
   .shared-topics-page--auth .shared-feed-topbar,
