@@ -16,7 +16,7 @@
       <section class="container card legal-card">
         <h1>Privacy Policy (Declaration)</h1>
         <p><strong>App:</strong> Polis</p>
-        <p><strong>Last updated:</strong> February 13, 2026</p>
+        <p><strong>Last updated:</strong> July 1, 2026</p>
         <p><strong>Operator:</strong> Lux Corp ("Polis", "we", "us")</p>
         <p>
           <strong>Contact:</strong>
@@ -79,6 +79,46 @@
           </li>
         </ul>
 
+        <h3>Connected calendar and Google API data</h3>
+        <p>
+          Calendar integrations are optional. If you choose to connect a Google
+          Calendar account, Polis may access the Google Calendar data you
+          authorize through Google's OAuth consent flow. This may include:
+        </p>
+        <ul>
+          <li>
+            <strong>Calendar list information</strong> such as calendar names,
+            calendar IDs, primary-calendar status, and which calendars you
+            choose to import from or publish to.
+          </li>
+          <li>
+            <strong>Availability information</strong> such as free/busy blocks
+            used to prevent scheduling conflicts and to show available
+            appointment times.
+          </li>
+          <li>
+            <strong>Calendar event information</strong> such as event titles,
+            start and end times, recurrence, locations, descriptions, attendees,
+            reminders, status, and provider event IDs when needed to sync the
+            calendar item.
+          </li>
+          <li>
+            <strong>OAuth account and token information</strong> needed to keep
+            the calendar connection active, refresh access, and disconnect the
+            integration when requested.
+          </li>
+        </ul>
+        <p>
+          Polis currently requests Google Calendar permissions for viewing and
+          editing calendar events, reading the user's calendar list, and reading
+          free/busy availability. Polis uses these permissions only for the
+          calendar features shown in the app, including importing availability,
+          building a master Polis calendar, detecting conflicts, publishing
+          Polis-created calendar items to selected external calendars, and
+          updating or deleting external calendar copies that Polis created or
+          that you instruct Polis to manage.
+        </p>
+
         <h3>Notifications</h3>
         <p>
           If enabled, the app may show notifications related to app activity
@@ -102,6 +142,12 @@
           </li>
           <li>Analyze and improve reliability and performance.</li>
           <li>Comply with legal obligations and protect rights and safety.</li>
+          <li>
+            Sync connected calendars, show combined availability, prevent
+            scheduling conflicts, process appointment requests, and publish,
+            update, or delete calendar items on connected calendars when
+            requested through Polis.
+          </li>
         </ul>
 
         <h2>How we share information</h2>
@@ -119,11 +165,98 @@
           processing/delivery, and location-related services.
         </p>
 
+        <h3>Connected calendar providers</h3>
+        <p>
+          If you connect Google Calendar or another external calendar provider,
+          Polis exchanges data with that provider only as needed to provide the
+          calendar integration you enabled. For example, Polis may retrieve
+          calendar lists and free/busy information, import event data into the
+          Polis calendar view, or send event create, update, and delete requests
+          to a selected external calendar. Public booking pages show available
+          time slots and do not expose private calendar details. Candidate or
+          campaign staff may see or manage calendar information only if the
+          candidate or authorized administrator grants them permission in Polis.
+        </p>
+
         <h3>Legal and safety</h3>
         <p>
           We may disclose information if required by law, or to protect users,
           enforce terms, and prevent fraud or abuse.
         </p>
+
+        <h2>Google API Limited Use</h2>
+        <p>
+          Polis's use and transfer to any other app of information received from
+          Google APIs will adhere to the
+          <a
+            href="https://developers.google.com/terms/api-services-user-data-policy"
+          >
+            Google API Services User Data Policy
+          </a>
+          , including the Limited Use requirements. Polis does not sell Google
+          user data, does not use Google Calendar data for advertising or
+          retargeting, does not transfer Google Calendar data to data brokers or
+          information resellers, and does not use Google Calendar data to train
+          general machine learning or artificial intelligence models.
+        </p>
+        <p>
+          Human access to Google Calendar data is limited to the account owner,
+          authorized candidate or campaign staff within Polis permissions, and
+          Polis personnel only when necessary for user-requested support,
+          security, abuse investigation, legal compliance, or service
+          maintenance.
+        </p>
+
+        <h2>Data protection and security</h2>
+        <p>
+          Polis uses administrative, technical, and organizational safeguards
+          designed to protect personal information and sensitive connected
+          account data, including Google Calendar data, from unauthorized
+          access, use, alteration, disclosure, or destruction. These safeguards
+          include:
+        </p>
+        <ul>
+          <li>
+            <strong>Encryption in transit:</strong> communication with Polis,
+            Google APIs, and other service providers is transmitted using secure
+            protocols such as HTTPS/TLS.
+          </li>
+          <li>
+            <strong>Encryption at rest:</strong> production databases, storage
+            systems, backups, and sensitive calendar connection records are
+            protected using encryption at rest where supported by the hosting or
+            storage provider.
+          </li>
+          <li>
+            <strong>OAuth token protection:</strong> Google OAuth access tokens,
+            refresh tokens, and similar connected-account credentials are stored
+            server-side, are not stored in the mobile app, and are encrypted at
+            rest using server-side key-management controls.
+          </li>
+          <li>
+            <strong>Access controls:</strong> access to production systems and
+            sensitive user data is limited to authorized personnel and service
+            components that need access to operate, secure, debug, or support
+            the Service.
+          </li>
+          <li>
+            <strong>Least-privilege calendar access:</strong> Polis requests
+            calendar permissions only for the calendar integration features
+            provided in the app and lets users choose which connected calendars
+            are imported from or written to where supported.
+          </li>
+          <li>
+            <strong>Monitoring and audit controls:</strong> Polis may use logs,
+            alerts, and operational reviews to detect errors, abuse,
+            unauthorized access, and synchronization failures.
+          </li>
+          <li>
+            <strong>Deletion and disconnect controls:</strong> users can
+            disconnect connected calendars in Polis, revoke Google access from
+            their Google Account settings, request deletion of Polis account
+            data, and contact us for privacy requests.
+          </li>
+        </ul>
 
         <h2>Data retention</h2>
         <p>
@@ -132,6 +265,15 @@
           dispute resolution, and compliance. Some records may be retained for
           longer where required.
         </p>
+        <p>
+          Connected calendar data and OAuth tokens are retained while the
+          calendar integration remains connected or as needed for security,
+          abuse prevention, audit, backup, dispute resolution, or legal
+          compliance. When a calendar connection is disconnected, Polis stops
+          using that connection for new sync activity and deletes or deactivates
+          stored tokens according to our operational deletion processes, subject
+          to limited backup, security, and legal-retention needs.
+        </p>
 
         <h2>Your choices and controls</h2>
         <ul>
@@ -139,6 +281,17 @@
           <li>
             Control permissions for location, camera, photos/media, and
             notifications through device settings.
+          </li>
+          <li>
+            Connect or disconnect external calendar accounts and choose which
+            calendars Polis imports from or publishes to where these controls
+            are available.
+          </li>
+          <li>
+            Revoke Polis's Google access at any time through your
+            <a href="https://myaccount.google.com/permissions">
+              Google Account permissions page</a
+            >.
           </li>
           <li>Report content and block/mute users through in-app tools.</li>
           <li>
