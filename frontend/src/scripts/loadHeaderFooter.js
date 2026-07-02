@@ -12,8 +12,8 @@ async function loadSharedLayout() {
 
   try {
     const [headerData, footerData] = await Promise.all([
-      fetch("header.html").then((response) => response.text()),
-      fetch("footer.html").then((response) => response.text()),
+      fetch("/header").then((response) => response.text()),
+      fetch("/footer").then((response) => response.text()),
     ]);
 
     headerPlaceholder.innerHTML = headerData;

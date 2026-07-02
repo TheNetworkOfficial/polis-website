@@ -34,13 +34,19 @@ const frontendRouteRewrites = [
   [/^\/auth\/signup\/email(?:\/.*)?$/u, "auth/signup/email/index.html"],
   [/^\/auth\/signup\/password(?:\/.*)?$/u, "auth/signup/password/index.html"],
   [/^\/auth\/confirm-code(?:\/.*)?$/u, "auth/confirm-code/index.html"],
-  [/^\/auth\/forgot-password\/confirm(?:\/.*)?$/u, "auth/forgot-password/confirm/index.html"],
+  [
+    /^\/auth\/forgot-password\/confirm(?:\/.*)?$/u,
+    "auth/forgot-password/confirm/index.html",
+  ],
   [/^\/auth\/forgot-password(?:\/.*)?$/u, "auth/forgot-password/index.html"],
   [/^\/auth(?:\/.*)?$/u, "auth/index.html"],
   [/^\/social-return(?:\/.*)?$/u, "social-return/index.html"],
   [/^\/oauth\/complete(?:\/.*)?$/u, "oauth/complete/index.html"],
   [/^\/calendar-return(?:\/.*)?$/u, "calendar-return/index.html"],
-  [/^\/settings\/voter-intelligence(?:\/.*)?$/u, "settings/voter-intelligence/index.html"],
+  [
+    /^\/settings\/voter-intelligence(?:\/.*)?$/u,
+    "settings/voter-intelligence/index.html",
+  ],
   [/^\/messages(?:\/.*)?$/u, "messages/index.html"],
   [/^\/candidate-dashboard(?:\/.*)?$/u, "candidate-dashboard/index.html"],
   [/^\/coalitions(?:\/.*)?$/u, "coalitions/index.html"],
@@ -67,12 +73,47 @@ const frontendRouteRewrites = [
   [/^\/onboarding(?:\/.*)?$/u, "onboarding/index.html"],
   [/^\/topics(?:\/.*)?$/u, "topics/index.html"],
   [/^\/questions(?:\/.*)?$/u, "questions/index.html"],
-  [/^\/account-deletion-requested(?:\/.*)?$/u, "account-deletion-requested/index.html"],
+  [
+    /^\/account-deletion-requested(?:\/.*)?$/u,
+    "account-deletion-requested/index.html",
+  ],
   [/^\/admin(?:\/.*)?$/u, "admin/index.html"],
 ];
 
+function cleanPathFromLegacyHtmlPath(pathname) {
+  if (pathname === "/index.html") {
+    return "/";
+  }
+  if (pathname.endsWith("/index.html")) {
+    return pathname.slice(0, -"/index.html".length) || "/";
+  }
+  if (/^\/[^/]+\.html$/u.test(pathname)) {
+    return pathname.slice(0, -".html".length);
+  }
+  return "";
+}
+
+function redirectLegacyHtml(req, res, next) {
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    next();
+    return;
+  }
+  const targetPath = cleanPathFromLegacyHtmlPath(req.path || "");
+  if (!targetPath) {
+    next();
+    return;
+  }
+  const queryIndex = req.originalUrl.indexOf("?");
+  const query = queryIndex >= 0 ? req.originalUrl.slice(queryIndex) : "";
+  const host = req.get("host");
+  const origin = host ? `${req.protocol}://${host}` : "";
+  res.redirect(301, `${origin}${targetPath}${query}`);
+}
+
 function mountFrontendRoutes(app) {
   const frontendDistPath = resolveFrontendDistPath();
+  app.use(redirectLegacyHtml);
+
   if (fs.existsSync(frontendDistPath)) {
     app.use(
       express.static(frontendDistPath, {
@@ -83,21 +124,24 @@ function mountFrontendRoutes(app) {
     );
   }
 
-  app.get(frontendRouteRewrites.map(([pattern]) => pattern), (req, res, next) => {
-    const rewrite = frontendRouteRewrites.find(([pattern]) =>
-      pattern.test(req.path || ""),
-    );
-    if (!rewrite) {
+  app.get(
+    frontendRouteRewrites.map(([pattern]) => pattern),
+    (req, res, next) => {
+      const rewrite = frontendRouteRewrites.find(([pattern]) =>
+        pattern.test(req.path || ""),
+      );
+      if (!rewrite) {
+        next();
+        return;
+      }
+      const filePath = fileIfExists(frontendDistPath, rewrite[1]);
+      if (filePath) {
+        res.sendFile(filePath);
+        return;
+      }
       next();
-      return;
-    }
-    const filePath = fileIfExists(frontendDistPath, rewrite[1]);
-    if (filePath) {
-      res.sendFile(filePath);
-      return;
-    }
-    next();
-  });
+    },
+  );
 }
 
 (async () => {
@@ -203,6 +247,7 @@ function mountFrontendRoutes(app) {
   const socialOAuthRoutes = require("./routes/socialOAuth");
   const recoveryRoutes = require("./routes/accountRecovery");
 
+  app.use(redirectLegacyHtml);
   app.use(postShareRoutes);
   app.use(socialOAuthRoutes);
   app.use("/api/auth", authLimiter, authRoutes);

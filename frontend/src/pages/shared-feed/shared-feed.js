@@ -1575,7 +1575,7 @@ const COALITION_FEATURE_COPY = {
   missions: {
     eyebrow: "Operations",
     description:
-      "Create, assign, claim, approve, and track coalition missions with files, deadlines, and role-based access.",
+      "Create, assign, claim, approve, and track coalition missions with files, deadlines, and access groups.",
     cta: "Open missions",
   },
   petitions: {
@@ -60795,7 +60795,7 @@ function coalitionCommandItems(coalition, membership) {
     makeSectionItem(
       "members",
       "Members & Access",
-      "Invite, approve, assign roles, and tune permissions.",
+      "Invite, approve, assign access groups, and tune workspace access.",
       "primary",
       coalitionMembersCommandPath(coalitionId, membership),
     ),
@@ -62941,7 +62941,7 @@ function renderCoalitionRoomsAdminPanel(coalition, membership, directory) {
     <div>
       <span class="shared-card__meta"><span>${escapeHtml(canManage ? "Admin tools" : "Room tools")}</span></span>
       <h2>${escapeHtml(canManage ? "Manage coalition messaging" : "Open messaging tools")}</h2>
-      <p>${escapeHtml(canManage ? "Keep room defaults, permissions, moderation, and automations close to the coalition workspace." : "Room administration is limited by your coalition role, but you can still open available rooms.")}</p>
+      <p>${escapeHtml(canManage ? "Keep room defaults, access, safety review, and automations close to the coalition workspace." : "Room administration is limited by your coalition access, but you can still open available rooms.")}</p>
     </div>
     <div class="shared-coalition-room-admin__actions">
       ${actions
@@ -81691,7 +81691,7 @@ function renderSettingsOverview() {
             icon: "trash",
             title: "Delete account",
             copy: "Open the account deletion request and data removal page.",
-            href: "/delete-account.html",
+            href: "/delete-account",
             meta: "Danger",
             danger: true,
           },
@@ -85374,17 +85374,17 @@ function renderSettingsHelpAbout() {
         ${renderSettingsHelpLink({
           title: "Support",
           copy: "Contact Polis support from the website.",
-          href: "/contact.html",
+          href: "/contact",
         })}
         ${renderSettingsHelpLink({
           title: "FAQ",
           copy: "Review common product and account questions.",
-          href: "/faq.html",
+          href: "/faq",
         })}
         ${renderSettingsHelpLink({
           title: "Delete account",
           copy: "Open the account deletion request page.",
-          href: "/delete-account.html",
+          href: "/delete-account",
         })}
       </div>
     </section>
@@ -85399,22 +85399,22 @@ function renderSettingsHelpAbout() {
         ${renderSettingsHelpLink({
           title: "Privacy policy",
           copy: "How Polis handles personal information.",
-          href: "/privacy-policy.html",
+          href: "/privacy-policy",
         })}
         ${renderSettingsHelpLink({
           title: "Terms",
           copy: "Terms that apply to Polis products.",
-          href: "/terms.html",
+          href: "/terms",
         })}
         ${renderSettingsHelpLink({
           title: "Data safety",
           copy: "Data collection and safety disclosures.",
-          href: "/data-safety.html",
+          href: "/data-safety",
         })}
         ${renderSettingsHelpLink({
           title: "Child safety",
           copy: "Safety policy and reporting information.",
-          href: "/child-safety.html",
+          href: "/child-safety",
         })}
         <button class="shared-settings-resource-card" type="button" data-action="navigate" data-route="/settings/help-about/licenses">
           <div>

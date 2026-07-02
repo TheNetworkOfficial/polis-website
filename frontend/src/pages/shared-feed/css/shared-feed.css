@@ -12793,8 +12793,10 @@ a {
 
 .shared-coalition-auth--workspace {
   min-height: auto;
-  grid-template-columns: minmax(260px, 0.56fr) minmax(0, 1fr);
+  grid-template-columns: minmax(380px, 0.68fr) minmax(0, 1fr);
+  gap: clamp(22px, 3vw, 34px);
   align-items: start;
+  padding: clamp(22px, 3.2vw, 34px);
 }
 
 .shared-coalition-auth__copy {
@@ -12806,6 +12808,10 @@ a {
 
 .shared-coalition-auth__copy .shared-card__actions {
   margin-top: 2px;
+}
+
+.shared-coalition-auth--workspace .shared-card__actions {
+  gap: 8px;
 }
 
 .shared-coalition-auth h1,
@@ -12822,12 +12828,24 @@ a {
   line-height: 0.96;
 }
 
+.shared-coalition-auth--workspace h1 {
+  max-width: 560px;
+  font-size: clamp(2.65rem, 4.1vw, 4.25rem);
+  line-height: 1;
+}
+
 .shared-coalition-auth p,
 .shared-coalition-hero p,
 .shared-coalition-card p,
 .shared-coalition-panel p {
   max-width: 720px;
   color: var(--sf-muted);
+}
+
+.shared-coalition-auth--workspace p {
+  max-width: 560px;
+  font-size: 0.98rem;
+  line-height: 1.55;
 }
 
 .shared-coalition-auth__grid,
@@ -12843,9 +12861,9 @@ a {
 }
 
 .shared-coalition-auth__grid--workspace {
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   align-self: stretch;
-  gap: 12px;
+  gap: 10px;
 }
 
 .shared-coalition-auth__tile,
@@ -12867,18 +12885,18 @@ a {
 
 .shared-coalition-auth__tile--feature {
   min-width: 0;
-  min-height: 168px;
-  padding: 16px;
+  min-height: 126px;
+  padding: 13px;
   display: grid;
-  grid-template-columns: 38px minmax(0, 1fr);
+  grid-template-columns: 34px minmax(0, 1fr);
   align-items: start;
-  gap: 12px;
+  gap: 10px;
 }
 
 .shared-coalition-auth__tile-icon {
-  width: 38px;
-  height: 38px;
-  border-radius: 14px;
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
   display: grid;
   place-items: center;
   color: var(--sf-cyan);
@@ -12886,8 +12904,8 @@ a {
 }
 
 .shared-coalition-auth__tile-icon svg {
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   fill: currentColor;
 }
 
@@ -12895,26 +12913,30 @@ a {
   min-width: 0;
   display: grid;
   align-content: start;
-  gap: 7px;
+  gap: 5px;
 }
 
 .shared-coalition-auth__tile-copy .shared-card__meta {
-  font-size: 0.66rem;
+  font-size: 0.61rem;
 }
 
 .shared-coalition-auth__tile-copy strong {
   min-width: 0;
   font-family: var(--sf-font-display);
-  font-size: 1.03rem;
+  font-size: 0.98rem;
   line-height: 1.12;
   overflow-wrap: anywhere;
 }
 
 .shared-coalition-auth__tile-copy small {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
   color: var(--sf-muted);
-  font-size: 0.88rem;
+  font-size: 0.78rem;
   font-weight: 650;
-  line-height: 1.42;
+  line-height: 1.32;
 }
 
 :root[data-polis-theme-resolved="light"] .shared-campaign-dashboard .shared-campaign-auth,

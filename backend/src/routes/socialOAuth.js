@@ -93,7 +93,7 @@ function buildDataDeletionResponse(req, provider) {
     .randomBytes(8)
     .toString("hex")}`;
   return {
-    url: `${origin}/delete-account.html`,
+    url: `${origin}/delete-account`,
     confirmation_code: confirmationCode,
   };
 }

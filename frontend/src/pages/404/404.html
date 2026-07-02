@@ -12,7 +12,7 @@
         var token = path.split("/").filter(Boolean)[1] || "";
         if (!token) return;
         window.location.replace(
-          "/cta-invite/index.html?token=" + encodeURIComponent(token)
+          "/cta-invite/index.html?token=" + encodeURIComponent(token),
         );
       })();
     </script>
@@ -26,8 +26,8 @@
         <h1>Page not found</h1>
         <p>The page you requested is unavailable or has moved.</p>
         <div class="not-found-actions">
-          <a href="index.html" class="btn btn-primary">Back to Home</a>
-          <a href="contact.html" class="btn btn-outline">Contact Support</a>
+          <a href="/" class="btn btn-primary">Back to Home</a>
+          <a href="/contact" class="btn btn-outline">Contact Support</a>
         </div>
       </section>
     </main>

@@ -639,6 +639,20 @@ const sharedAppRouteRewrites = [
   [/^\/admin(?:\/.*)?$/u, "/admin/index.html"],
 ].map(([from, to]) => ({ from, to }));
 
+const publicPageRouteRewrites = [
+  [/^\/header\/?$/u, "/header.html"],
+  [/^\/footer\/?$/u, "/footer.html"],
+  [/^\/features\/?$/u, "/features.html"],
+  [/^\/about\/?$/u, "/about.html"],
+  [/^\/faq\/?$/u, "/faq.html"],
+  [/^\/contact\/?$/u, "/contact.html"],
+  [/^\/terms\/?$/u, "/terms.html"],
+  [/^\/privacy-policy\/?$/u, "/privacy-policy.html"],
+  [/^\/data-safety\/?$/u, "/data-safety.html"],
+  [/^\/child-safety\/?$/u, "/child-safety.html"],
+  [/^\/delete-account\/?$/u, "/delete-account.html"],
+].map(([from, to]) => ({ from, to }));
+
 const deleteAccountDefineEnv = {
   __DELETE_ACCOUNT_API_BASE_URL__: JSON.stringify(
     process.env.DELETE_ACCOUNT_API_BASE_URL || "",
@@ -835,7 +849,7 @@ module.exports = {
   ],
   devServer: {
     historyApiFallback: {
-      rewrites: sharedAppRouteRewrites,
+      rewrites: [...publicPageRouteRewrites, ...sharedAppRouteRewrites],
     },
     proxy: [
       {
