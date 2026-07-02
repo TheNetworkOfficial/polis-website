@@ -28738,14 +28738,14 @@ div.shared-messaging-row {
 .shared-discover-schedule-item {
   min-width: 0;
   width: 100%;
-  padding: 9px;
+  padding: 10px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.045);
   color: inherit;
   display: grid;
-  grid-template-columns: 48px minmax(0, 1fr);
-  gap: 9px;
+  grid-template-columns: 50px minmax(0, 1fr);
+  gap: 10px;
   text-align: left;
   cursor: pointer;
 }
@@ -28757,35 +28757,57 @@ div.shared-messaging-row {
 }
 
 .shared-discover-schedule-item__date {
-  min-height: 44px;
-  border-radius: 12px;
-  background: rgba(38, 244, 238, 0.1);
-  color: var(--sf-cyan);
+  height: 52px;
+  overflow: hidden;
+  border: 2px solid rgba(38, 244, 238, 0.64);
+  border-radius: 10px;
+  background: rgba(8, 12, 18, 0.68);
+  display: grid;
+  grid-template-rows: 18px 1fr;
+  text-align: center;
+}
+
+.shared-discover-schedule-item__date span {
   display: grid;
   place-items: center;
-  font-size: 0.72rem;
+  background: var(--sf-cyan);
+  color: #071014;
+  font-size: 0.58rem;
   font-weight: 950;
-  text-align: center;
+  line-height: 1;
+}
+
+.shared-discover-schedule-item__date strong {
+  display: grid;
+  place-items: center;
+  color: var(--sf-cyan);
+  font-size: 1.12rem;
+  font-weight: 950;
+  line-height: 1;
 }
 
 .shared-discover-schedule-item__body {
   min-width: 0;
   display: grid;
-  gap: 3px;
+  align-content: center;
+  gap: 5px;
 }
 
 .shared-discover-schedule-item__body strong,
 .shared-discover-schedule-item__body small {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .shared-discover-schedule-item__body strong {
   color: var(--sf-ink);
-  font-size: 0.88rem;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-size: 0.9rem;
   font-weight: 900;
+  line-height: 1.14;
 }
 
 .shared-discover-schedule-item__body small,
@@ -28793,6 +28815,7 @@ div.shared-messaging-row {
   color: var(--sf-muted);
   font-size: 0.78rem;
   font-weight: 800;
+  line-height: 1.28;
 }
 
 .shared-discover-schedule-empty {

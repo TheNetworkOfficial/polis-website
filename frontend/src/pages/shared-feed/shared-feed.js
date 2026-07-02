@@ -46596,6 +46596,18 @@ function renderDiscoverAuthGate() {
       icon: "feed",
     },
     {
+      label: "Calendar",
+      copy: "Open campaign events, shifts, bookings, and reminders.",
+      route: "/candidate-dashboard",
+      icon: "calendar",
+    },
+    {
+      label: "Schedule",
+      copy: "Jump into the next seven days of calendar-linked work.",
+      route: "/candidate-dashboard",
+      icon: "calendar",
+    },
+    {
       label: "People",
       copy: "Find candidates, officials, and civic profiles.",
       route: "/candidates",
@@ -46640,8 +46652,14 @@ function renderDiscoverAuthGate() {
       icon: "election",
     },
     {
-      title: "Calendar and schedule",
-      copy: "Surface events, mission deadlines, and calendar-linked civic work.",
+      title: "Calendar",
+      copy: "Review today, booking requests, shifts, reminders, and campaign events.",
+      meta: "Today",
+      icon: "calendar",
+    },
+    {
+      title: "Schedule",
+      copy: "Open upcoming calendar items with date badges and direct item routing.",
       meta: "Next 7 days",
       icon: "calendar",
     },
@@ -49876,16 +49894,37 @@ function renderDiscoverCalendarCard() {
 
 function renderDiscoverScheduleItem(item, access) {
   const route = discoverCalendarItemRoute(access, item);
-  const dateLabel = item.startAt
-    ? formatCalendarDate(item.startAt).replace(/,.*$/u, "")
-    : "Date TBD";
+  const dateParts = discoverCalendarItemDateParts(item);
   return `<button class="shared-discover-schedule-item" type="button" data-action="discover-calendar-open" data-route="${escapeHtml(route)}">
-    <span class="shared-discover-schedule-item__date">${escapeHtml(dateLabel)}</span>
+    <span class="shared-discover-schedule-item__date" aria-hidden="true">
+      <span>${escapeHtml(dateParts.month)}</span>
+      <strong>${escapeHtml(dateParts.day)}</strong>
+    </span>
     <span class="shared-discover-schedule-item__body">
       <strong>${escapeHtml(discoverCalendarItemTitle(item))}</strong>
       <small>${escapeHtml(`${discoverCalendarItemTimeLabel(item)} / ${discoverCalendarItemLocationLabel(item)}`)}</small>
     </span>
   </button>`;
+}
+
+function discoverCalendarItemDateParts(item = {}) {
+  const rawStart = item.startAt;
+  if (!rawStart) {
+    return { month: "TBD", day: "" };
+  }
+  const numericStart = Number(rawStart);
+  const date = Number.isFinite(numericStart)
+    ? new Date(numericStart < 10000000000 ? numericStart * 1000 : numericStart)
+    : new Date(rawStart);
+  if (Number.isNaN(date.getTime())) {
+    return { month: "TBD", day: "" };
+  }
+  return {
+    month: new Intl.DateTimeFormat(undefined, { month: "short" })
+      .format(date)
+      .toUpperCase(),
+    day: new Intl.DateTimeFormat(undefined, { day: "numeric" }).format(date),
+  };
 }
 
 function renderDiscoverScheduleCard() {
