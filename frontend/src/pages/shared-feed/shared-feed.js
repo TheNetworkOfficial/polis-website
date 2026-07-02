@@ -1557,55 +1557,55 @@ const COALITION_FEATURE_COPY = {
   overview: {
     eyebrow: "Workspace",
     description:
-      "Coalition metrics, recent work, member access, contact details, and route shortcuts in one browser workspace.",
+      "Coalition metrics, recent work, access, contacts, and route shortcuts in one browser workspace.",
     cta: "Open overview",
   },
   members: {
     eyebrow: "Access",
     description:
-      "Review members, approve requests, assign access groups, and tune coalition staff access for field and communications work.",
+      "Review members, approve requests, assign access groups, and set staff access.",
     cta: "Open members",
   },
   rooms: {
     eyebrow: "Messaging",
     description:
-      "Open coalition chat rooms with the same workspace structure used by the Polis app.",
+      "Open organized coalition chat rooms from the web.",
     cta: "Open rooms",
   },
   missions: {
     eyebrow: "Operations",
     description:
-      "Create, assign, claim, approve, and track coalition missions with files, deadlines, and access groups.",
+      "Create, assign, claim, approve, and track missions with files and deadlines.",
     cta: "Open missions",
   },
   petitions: {
     eyebrow: "Petitions",
     description:
-      "Publish shareable petition forms, collect guest responses, review videos, and resolve duplicates.",
+      "Publish petitions, review responses, and resolve duplicates.",
     cta: "Open petitions",
   },
   "voter-map": {
     eyebrow: "Field",
     description:
-      "Use district search, voter records, CTA events, transport, territories, scripts, and field notes.",
+      "Search districts, review voters, manage CTAs, scripts, and field notes.",
     cta: "Open voter map",
   },
   calendar: {
     eyebrow: "Schedule",
     description:
-      "Coordinate coalition events, shifts, promotion windows, shared availability, and calendar work.",
+      "Coordinate events, shifts, promotion windows, availability, and bookings.",
     cta: "Open calendar",
   },
   governance: {
     eyebrow: "Governance",
     description:
-      "Read the constitution, create proposals, manage ballots, review results, and use speaker controls.",
+      "Read the constitution, create proposals, manage ballots, and review results.",
     cta: "Open governance",
   },
   amplify: {
     eyebrow: "Promotion",
     description:
-      "Create amplify requests, respond with platform links, and keep coalition promotion work moving.",
+      "Create requests, collect platform links, and move promotion work.",
     cta: "Open amplify",
   },
 };

@@ -40634,6 +40634,12 @@ button.shared-settings-district-person:focus-visible {
 }
 
 @media (max-width: 680px) {
+  .shared-coalition-auth__tile-copy small {
+    display: block;
+    overflow: visible;
+    -webkit-line-clamp: unset;
+  }
+
   .shared-policy-questions-page .shared-feed-topbar,
   .shared-achievements-page .shared-feed-topbar,
   .shared-topics-page--auth .shared-feed-topbar,
