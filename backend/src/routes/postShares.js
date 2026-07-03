@@ -1,5 +1,7 @@
 const express = require("express");
 const crypto = require("crypto");
+const fs = require("fs");
+const path = require("path");
 const { Resvg } = require("@resvg/resvg-js");
 
 const router = express.Router();
@@ -75,6 +77,18 @@ const APP_SHELL_ROUTE_DEFINITIONS = [
     routeKey: "cta-invite",
     pattern: /^\/cta-invite\/([^/]+)$/u,
     params: ["token"],
+    requiresAuth: false,
+  },
+  {
+    routeKey: "public-petition-results",
+    pattern: /^\/petitions\/results\/([^/]+)$/u,
+    params: ["shareToken"],
+    requiresAuth: false,
+  },
+  {
+    routeKey: "public-petition",
+    pattern: /^\/petitions\/([^/]+)$/u,
+    params: ["publicSlug"],
     requiresAuth: false,
   },
   {
@@ -588,6 +602,177 @@ async function fetchShareCard(postId) {
       error: error instanceof Error ? error.message : String(error),
     };
   }
+}
+
+function buildPublicPetitionEndpoint(publicSlug) {
+  const baseUrl = normalizeBaseUrl(process.env.VIDEO_BACKEND_BASE_URL);
+  const slug = normalizeString(publicSlug);
+  if (!baseUrl || !slug) {
+    return "";
+  }
+  return `${baseUrl}/api/petitions/${encodeURIComponent(slug)}`;
+}
+
+function buildPublicPetitionResultsEndpoint(shareToken) {
+  const baseUrl = normalizeBaseUrl(process.env.VIDEO_BACKEND_BASE_URL);
+  const token = normalizeString(shareToken);
+  if (!baseUrl || !token) {
+    return "";
+  }
+  return `${baseUrl}/api/petitions/results/${encodeURIComponent(token)}`;
+}
+
+async function fetchPublicJson(endpoint) {
+  const normalizedEndpoint = normalizeString(endpoint);
+  if (!normalizedEndpoint) {
+    return {
+      ok: false,
+      statusCode: 500,
+      error: "VIDEO_BACKEND_BASE_URL missing",
+    };
+  }
+  try {
+    const response = await fetch(normalizedEndpoint, {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(SOCIAL_CARD_FETCH_TIMEOUT_MS),
+    });
+    const payload = await response.json().catch(() => ({}));
+    return {
+      ok: response.ok,
+      statusCode: response.status,
+      payload,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      statusCode: 502,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+function normalizePublicPetitionPayload(payload = {}) {
+  const source =
+    payload.petition && typeof payload.petition === "object"
+      ? payload.petition
+      : payload.item && typeof payload.item === "object"
+        ? payload.item
+        : payload;
+  return {
+    petitionId: normalizeString(source.petitionId || source.id),
+    title: normalizeString(source.title) || "Petition",
+    bodyText: normalizeString(source.bodyText || source.description),
+    publicSlug: normalizeString(source.publicSlug),
+    coverImageUrl: normalizeString(source.coverImageUrl),
+  };
+}
+
+async function fetchPublicPetition(publicSlug) {
+  const result = await fetchPublicJson(buildPublicPetitionEndpoint(publicSlug));
+  return result.ok ? normalizePublicPetitionPayload(result.payload) : null;
+}
+
+async function fetchPublicPetitionResults(shareToken) {
+  const result = await fetchPublicJson(
+    buildPublicPetitionResultsEndpoint(shareToken),
+  );
+  return result.ok ? normalizePublicPetitionPayload(result.payload) : null;
+}
+
+let cachedPolisLogoDataUri = "";
+
+function readPolisLogoDataUri() {
+  if (cachedPolisLogoDataUri) {
+    return cachedPolisLogoDataUri;
+  }
+  const candidates = [
+    path.resolve(__dirname, "../../../frontend/dist/assets/Polis.png"),
+    path.resolve(__dirname, "../../../frontend/dist/Polis.png"),
+  ];
+  for (const candidate of candidates) {
+    try {
+      if (fs.existsSync(candidate)) {
+        cachedPolisLogoDataUri = `data:image/png;base64,${fs
+          .readFileSync(candidate)
+          .toString("base64")}`;
+        return cachedPolisLogoDataUri;
+      }
+    } catch {
+      // Continue to the text fallback if the logo cannot be read.
+    }
+  }
+  return "";
+}
+
+function renderPetitionSocialCardSvg({ petition, coverImage = "" }) {
+  const title = trimToLength(petition?.title, 110) || "Petition";
+  const brandName = DEFAULT_BRAND_NAME;
+  const titleLines = wrapSvgText(title, { maxCharsPerLine: 42, maxLines: 2 });
+  const titleMarkup = titleLines
+    .map(
+      (line, index) =>
+        `<tspan x="64" dy="${index === 0 ? 0 : 52}">${escapeXml(line)}</tspan>`,
+    )
+    .join("");
+  const coverMarkup = coverImage
+    ? `<image href="${coverImage}" x="0" y="0" width="${SOCIAL_CARD_WIDTH}" height="${SOCIAL_CARD_HEIGHT}" preserveAspectRatio="xMidYMid slice" />`
+    : `<rect width="${SOCIAL_CARD_WIDTH}" height="${SOCIAL_CARD_HEIGHT}" fill="url(#fallbackBg)" />`;
+  const logoDataUri = readPolisLogoDataUri();
+  const logoMarkup = logoDataUri
+    ? `<image href="${logoDataUri}" x="1052" y="486" width="84" height="84" preserveAspectRatio="xMidYMid meet" />`
+    : `<text x="1094" y="537" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="900" fill="#0D7C66">${escapeXml(brandName.toUpperCase())}</text>`;
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${SOCIAL_CARD_WIDTH}" height="${SOCIAL_CARD_HEIGHT}" viewBox="0 0 ${SOCIAL_CARD_WIDTH} ${SOCIAL_CARD_HEIGHT}">
+    <defs>
+      <linearGradient id="fade" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="rgba(10,19,31,0.04)" />
+        <stop offset="48%" stop-color="rgba(10,19,31,0.08)" />
+        <stop offset="100%" stop-color="rgba(10,19,31,0.76)" />
+      </linearGradient>
+      <linearGradient id="fallbackBg" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0%" stop-color="#0B1624" />
+        <stop offset="55%" stop-color="#17314B" />
+        <stop offset="100%" stop-color="#0D7C66" />
+      </linearGradient>
+    </defs>
+    ${coverMarkup}
+    <rect width="${SOCIAL_CARD_WIDTH}" height="${SOCIAL_CARD_HEIGHT}" fill="url(#fade)" />
+    <text x="64" y="444" font-family="Arial, Helvetica, sans-serif" font-size="46" font-weight="850" fill="#FFFFFF">${titleMarkup}</text>
+    <rect x="1028" y="462" width="132" height="132" rx="30" fill="rgba(255,255,255,0.9)" />
+    ${logoMarkup}
+  </svg>`;
+}
+
+async function renderPetitionSocialCardPng(petition) {
+  const coverImage = await fetchImageDataUri(petition?.coverImageUrl);
+  const svg = renderPetitionSocialCardSvg({ petition, coverImage });
+  const resvg = new Resvg(svg, {
+    fitTo: {
+      mode: "width",
+      value: SOCIAL_CARD_WIDTH,
+    },
+  });
+  return resvg.render().asPng();
+}
+
+function buildPetitionSocialCardImageUrl(req, routeMatch, petition) {
+  const origin = requestOrigin(req);
+  if (!origin) {
+    return "";
+  }
+  const slug =
+    normalizeString(petition?.publicSlug) ||
+    normalizeString(routeMatch?.routeParams?.publicSlug);
+  if (slug) {
+    return `${origin}/petitions/${encodeURIComponent(slug)}/social-card.png`;
+  }
+  const shareToken = normalizeString(routeMatch?.routeParams?.shareToken);
+  if (shareToken) {
+    return `${origin}/petitions/results/${encodeURIComponent(
+      shareToken,
+    )}/social-card.png`;
+  }
+  return "";
 }
 
 function serializeForInlineScript(value) {
@@ -1111,6 +1296,24 @@ function getAppShellPageMeta(routeMatch) {
         supportingCopy:
           "Review event details, sign in, and accept your coalition invitation from the browser.",
       };
+    case "public-petition":
+      return {
+        title: "Petition | Polis",
+        description: "Review and sign a Polis petition from a shared link.",
+        eyebrow: "Petition",
+        headline: "Opening petition",
+        supportingCopy:
+          "Review the petition, complete required fields, and submit your response from the browser.",
+      };
+    case "public-petition-results":
+      return {
+        title: "Petition Results | Polis",
+        description: "Review shared Polis petition results from the browser.",
+        eyebrow: "Petition Results",
+        headline: "Opening petition results",
+        supportingCopy:
+          "Review shared petition responses and download the CSV from the browser.",
+      };
     case "post-analytics":
       return {
         title: "Post analytics | Polis",
@@ -1368,10 +1571,57 @@ function getAppShellPageMeta(routeMatch) {
   }
 }
 
-function renderAppShellPage(req, routeMatch) {
+function petitionMetaDescription(petition, fallback) {
+  const body = trimToLength(petition?.bodyText, 180);
+  if (body) {
+    return body;
+  }
+  return fallback;
+}
+
+async function renderAppShellPage(req, routeMatch) {
   const requestUrl = `${requestOrigin(req)}${req.originalUrl}`;
   const canonicalUrl = `${requestOrigin(req)}${req.path}`;
-  const meta = getAppShellPageMeta(routeMatch);
+  let meta = getAppShellPageMeta(routeMatch);
+  let metaImage = "";
+  let extraMeta = "";
+  if (routeMatch.routeKey === "public-petition") {
+    const petition = await fetchPublicPetition(routeMatch.routeParams.publicSlug);
+    if (petition) {
+      meta = {
+        ...meta,
+        title: `${petition.title} | Polis`,
+        description: petitionMetaDescription(petition, meta.description),
+        headline: petition.title,
+        supportingCopy: petitionMetaDescription(
+          petition,
+          "Review the petition and submit your response from the browser.",
+        ),
+      };
+      metaImage = buildPetitionSocialCardImageUrl(req, routeMatch, petition);
+      extraMeta = `
+        <meta property="og:image:alt" content="${escapeAttribute(`${DEFAULT_BRAND_NAME} petition cover for ${petition.title}`)}" />
+        <meta name="twitter:image:alt" content="${escapeAttribute(`${DEFAULT_BRAND_NAME} petition cover for ${petition.title}`)}" />
+      `;
+    }
+  } else if (routeMatch.routeKey === "public-petition-results") {
+    const petition = await fetchPublicPetitionResults(routeMatch.routeParams.shareToken);
+    if (petition) {
+      meta = {
+        ...meta,
+        title: `${petition.title} Results | Polis`,
+        description: `Shared results for ${petition.title}.`,
+        headline: `${petition.title} results`,
+        supportingCopy:
+          "Review shared petition responses and download the CSV from the browser.",
+      };
+      metaImage = buildPetitionSocialCardImageUrl(req, routeMatch, petition);
+      extraMeta = `
+        <meta property="og:image:alt" content="${escapeAttribute(`${DEFAULT_BRAND_NAME} petition results cover for ${petition.title}`)}" />
+        <meta name="twitter:image:alt" content="${escapeAttribute(`${DEFAULT_BRAND_NAME} petition results cover for ${petition.title}`)}" />
+      `;
+    }
+  }
   const runtimeConfig = buildWebRuntimeConfig(req, {
     routePath: routeMatch.routePath,
     routeKey: routeMatch.routeKey,
@@ -1385,11 +1635,13 @@ function renderAppShellPage(req, routeMatch) {
     pageTitle: meta.title,
     description: meta.description,
     canonicalUrl,
+    metaImage,
     brandName: runtimeConfig.brandName || DEFAULT_BRAND_NAME,
     runtimeConfig,
     eyebrow: meta.eyebrow,
     headline: meta.headline,
     supportingCopy: meta.supportingCopy,
+    extraMeta,
     primaryAction:
       '<button class="shared-feed-shell-fallback__button shared-feed-shell-fallback__button--primary" type="button">Loading…</button>',
   });
@@ -1602,6 +1854,46 @@ router.get("/profile-tab", (req, res) => {
   res.redirect(302, `/profile${query}`);
 });
 
+router.get("/petitions/:publicSlug/social-card.png", async (req, res) => {
+  const petition = await fetchPublicPetition(req.params.publicSlug);
+  if (!petition) {
+    res.status(404).send(
+      renderUnavailablePage({
+        title: "Petition unavailable",
+        subtitle: "This petition social card could not be loaded.",
+        statusCode: 404,
+      }),
+    );
+    return;
+  }
+  const png = await renderPetitionSocialCardPng(petition);
+  res
+    .status(200)
+    .type("png")
+    .set("Cache-Control", "public, max-age=300")
+    .send(png);
+});
+
+router.get("/petitions/results/:shareToken/social-card.png", async (req, res) => {
+  const petition = await fetchPublicPetitionResults(req.params.shareToken);
+  if (!petition) {
+    res.status(404).send(
+      renderUnavailablePage({
+        title: "Petition results unavailable",
+        subtitle: "This petition results social card could not be loaded.",
+        statusCode: 404,
+      }),
+    );
+    return;
+  }
+  const png = await renderPetitionSocialCardPng(petition);
+  res
+    .status(200)
+    .type("png")
+    .set("Cache-Control", "public, max-age=300")
+    .send(png);
+});
+
 router.get(
   [
     "/auth",
@@ -1615,6 +1907,8 @@ router.get(
     "/calendar-return",
     "/cta-invite",
     "/cta-invite/:token",
+    "/petitions/:publicSlug",
+    "/petitions/results/:shareToken",
     "/posts/:postId/analytics",
     "/feed",
     "/create",
@@ -1671,7 +1965,7 @@ router.get(
     "/admin",
     "/admin/*",
   ],
-  (req, res) => {
+  async (req, res) => {
     const routeMatch = matchAppShellRoute(req.path);
     if (!routeMatch) {
       res.status(404).send(
@@ -1684,7 +1978,7 @@ router.get(
       return;
     }
 
-    res.status(200).type("html").send(renderAppShellPage(req, routeMatch));
+    res.status(200).type("html").send(await renderAppShellPage(req, routeMatch));
   },
 );
 

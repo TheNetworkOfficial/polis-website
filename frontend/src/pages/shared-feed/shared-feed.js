@@ -34,6 +34,10 @@ const root = document.getElementById("shared-feed-app");
 let stripeJsLoadPromise = null;
 const initialCommentId =
   new URL(window.location.href).searchParams.get("commentId") || "";
+const initialEngagementCandidateId =
+  new URL(window.location.href).searchParams.get("engagementCandidateId") || "";
+const initialEngagementResponseMode =
+  new URL(window.location.href).searchParams.get("engagementResponseMode") || "";
 
 const FEED_MODE_FOR_YOU = "for_you";
 const FEED_MODE_FOLLOWING = "following";
@@ -161,6 +165,7 @@ const MESSAGING_PRESENCE_VISIBILITY_OPTIONS = [
   ["nobody", "Nobody", "Keep presence hidden from other accounts."],
 ];
 const STRIPE_JS_URL = "https://js.stripe.com/v3/";
+const ROUTE_KEY_POST_VIEW = "post-view";
 const ROUTE_KEY_SHARE_POST = "share-post";
 const ROUTE_KEY_POST_ANALYTICS = "post-analytics";
 const ROUTE_KEY_BOOTSTRAP = "bootstrap";
@@ -174,6 +179,7 @@ const ROUTE_KEY_SEARCH = "search";
 const ROUTE_KEY_SEARCH_RESULTS = "search-results";
 const ROUTE_KEY_CTA_INVITE = "cta-invite";
 const ROUTE_KEY_PUBLIC_PETITION = "public-petition";
+const ROUTE_KEY_PUBLIC_PETITION_RESULTS = "public-petition-results";
 const ROUTE_KEY_CANDIDATES = "candidates";
 const ROUTE_KEY_ELECTION_DAY = "election-day";
 const ROUTE_KEY_CONGRESSIONAL_REPORT_CARD = "congressional-report-card";
@@ -255,12 +261,170 @@ const CANDIDATE_PARTY_COLLAPSE_STORAGE_KEY =
   "polis:candidates:collapsed-party-groups";
 const FRIEND_ACTIVITY_SHARING_STORAGE_KEY =
   "prefs.discover.friendActivitySharing.v1";
+const DISCOVER_MODULE_PREFERENCES_STORAGE_KEY =
+  "prefs.discover.modules.v1";
 const DISCOVER_OPENED_CALENDAR_DATES_STORAGE_KEY =
   "polis.discover.openedCalendarDates.v1";
+const DISCOVER_VIEWED_ACHIEVEMENTS_STORAGE_KEY =
+  "prefs.discover.achievements.viewed.v1";
 const CANDIDATE_VOTER_MAP_PIN_CAP_STORAGE_KEY =
   "prefs.candidateVoterMap.pinCap.v1";
 const CANDIDATE_VOTER_MAP_OFFLINE_CELLULAR_STORAGE_KEY =
   "prefs.candidateVoterMap.offlineCellular.v1";
+const DISCOVER_MODULE_CONFIGS = [
+  {
+    key: "civic_challenges",
+    title: "Civic Challenge",
+    description: "A focused next action for questions, ballot work, and local tasks.",
+    icon: "check",
+    group: "action",
+  },
+  {
+    key: "achievements",
+    title: "Achievements",
+    description: "Badges, streaks, first answers, and ballot milestones.",
+    icon: "chart",
+    group: "action",
+  },
+  {
+    key: "calendar",
+    title: "Calendar",
+    description: "Today cards for campaign events, shifts, meetings, and reminders.",
+    icon: "calendar",
+    group: "action",
+    defaultHidden: true,
+  },
+  {
+    key: "schedule",
+    title: "Schedule",
+    description: "The next seven days of calendar work with direct item routing.",
+    icon: "calendar",
+    group: "action",
+    defaultHidden: true,
+  },
+  {
+    key: "trending_civic_feed",
+    title: "Trending Civic Feed",
+    description: "Recent posts and conversations sized for browsing.",
+    icon: "feed",
+    group: "section",
+  },
+  {
+    key: "policy_questions",
+    title: "Policy Questions",
+    description: "Issue prompts that improve ballot and candidate guidance.",
+    icon: "search",
+    group: "section",
+  },
+  {
+    key: "events_near_you",
+    title: "Events Near You",
+    description: "Upcoming civic events with detail, RSVP, and signup paths.",
+    icon: "calendar",
+    group: "section",
+  },
+  {
+    key: "voter_guide",
+    title: "Your Ballot",
+    description: "Election guide and voter-intelligence context for your area.",
+    icon: "election",
+    group: "action",
+  },
+  {
+    key: "people_organizations",
+    title: "People to Follow",
+    description: "Candidate and official profiles worth checking next.",
+    icon: "candidate",
+    group: "section",
+  },
+  {
+    key: "community_conversations",
+    title: "Community Conversations",
+    description: "Campaign, coalition, and public rooms available in web messaging.",
+    icon: "messages",
+    group: "section",
+  },
+  {
+    key: "creator_prompts",
+    title: "Creator Prompt",
+    description: "Publish a photo, video, or civic note from the browser composer.",
+    icon: "create",
+    group: "action",
+  },
+  {
+    key: "local_pulse",
+    title: "Local Pulse",
+    description: "Posts, events, and public profiles connected to your civic graph.",
+    icon: "map",
+    group: "action",
+  },
+  {
+    key: "voter_registration_deadlines",
+    title: "Voter Deadlines",
+    description: "Registration, ballot, district, and polling-place guidance.",
+    icon: "election",
+    group: "action",
+  },
+  {
+    key: "friend_activity",
+    title: "Friend Activity",
+    description: "Civic actions from people connected to your Polis account.",
+    icon: "team",
+    group: "section",
+    defaultHidden: true,
+  },
+  {
+    key: "candidate_amas_live_rooms",
+    title: "Candidate AMAs (coming soon)",
+    description: "Candidate AMAs, town halls, and livestream clips will land here.",
+    icon: "video",
+    group: "future",
+    defaultHidden: true,
+    locked: true,
+  },
+  {
+    key: "volunteer_opportunities",
+    title: "Volunteer Opportunities",
+    description: "Campaign and coalition mission work that can be claimed from web.",
+    icon: "mission",
+    group: "action",
+    defaultHidden: true,
+  },
+  {
+    key: "petitions_pledges",
+    title: "Petitions & Pledges",
+    description: "Campaign and coalition petitions you can create, share, and review from web.",
+    icon: "file",
+    group: "action",
+  },
+  {
+    key: "fact_checks_source_cards",
+    title: "Fact Checks (coming soon)",
+    description: "Source cards will turn on after claim and ballot explainers are wired in.",
+    icon: "shield",
+    group: "future",
+    defaultHidden: true,
+    locked: true,
+  },
+];
+const DISCOVER_MODULE_CONFIG_BY_KEY = new Map(
+  DISCOVER_MODULE_CONFIGS.map((moduleConfig) => [
+    moduleConfig.key,
+    moduleConfig,
+  ]),
+);
+const DISCOVER_DEFAULT_MODULE_ORDER = DISCOVER_MODULE_CONFIGS.map(
+  (moduleConfig) => moduleConfig.key,
+);
+const DISCOVER_DEFAULT_HIDDEN_MODULES = new Set(
+  DISCOVER_MODULE_CONFIGS.filter((moduleConfig) => moduleConfig.defaultHidden)
+    .map((moduleConfig) => moduleConfig.key),
+);
+const DISCOVER_LOCKED_MODULES = new Set(
+  DISCOVER_MODULE_CONFIGS.filter((moduleConfig) => moduleConfig.locked).map(
+    (moduleConfig) => moduleConfig.key,
+  ),
+);
 const SETTINGS_SEARCH_HISTORY_STORAGE_KEYS = [
   "search_history_v1",
   "polis:search:history",
@@ -472,9 +636,11 @@ const SETTINGS_SECTION_PARENT_BY_KEY = {
   "campaign-data-sharing": "privacy-safety",
   "data-storage": "privacy-safety",
   location: "privacy-safety",
+  "home-location": "preferences",
   "my-districts": "preferences",
   "muted-users": "privacy-safety",
   permissions: "privacy-safety",
+  "quiet-hours": "notifications",
   security: "privacy-safety",
   donations: "payments",
   "donation-history": "payments",
@@ -515,6 +681,13 @@ const SETTINGS_CHILD_SECTION_CONFIGS = {
     status: "Web",
     description: "Home location, district context, and foreground GPS preference.",
   },
+  "home-location": {
+    key: "home-location",
+    label: "Home Location",
+    route: "/settings/voter-profile/home-location",
+    status: "Web",
+    description: "Address, review requests, and manual district fallback for voter context.",
+  },
   "muted-users": {
     key: "muted-users",
     label: "Muted Users",
@@ -528,6 +701,13 @@ const SETTINGS_CHILD_SECTION_CONFIGS = {
     route: "/settings/permissions",
     status: "Web",
     description: "Browser notification, location, camera, microphone, and file access.",
+  },
+  "quiet-hours": {
+    key: "quiet-hours",
+    label: "Quiet Hours",
+    route: "/settings/quiet-hours",
+    status: "Web",
+    description: "Global, message, and notification quiet-hour schedules.",
   },
   security: {
     key: "security",
@@ -572,6 +752,59 @@ const SETTINGS_CHILD_SECTION_CONFIGS = {
     description: "Districts, offices, incumbents, and election context tied to your home location.",
   },
 };
+const SETTINGS_US_STATES = [
+  ["AL", "Alabama"],
+  ["AK", "Alaska"],
+  ["AZ", "Arizona"],
+  ["AR", "Arkansas"],
+  ["CA", "California"],
+  ["CO", "Colorado"],
+  ["CT", "Connecticut"],
+  ["DE", "Delaware"],
+  ["DC", "District of Columbia"],
+  ["FL", "Florida"],
+  ["GA", "Georgia"],
+  ["HI", "Hawaii"],
+  ["ID", "Idaho"],
+  ["IL", "Illinois"],
+  ["IN", "Indiana"],
+  ["IA", "Iowa"],
+  ["KS", "Kansas"],
+  ["KY", "Kentucky"],
+  ["LA", "Louisiana"],
+  ["ME", "Maine"],
+  ["MD", "Maryland"],
+  ["MA", "Massachusetts"],
+  ["MI", "Michigan"],
+  ["MN", "Minnesota"],
+  ["MS", "Mississippi"],
+  ["MO", "Missouri"],
+  ["MT", "Montana"],
+  ["NE", "Nebraska"],
+  ["NV", "Nevada"],
+  ["NH", "New Hampshire"],
+  ["NJ", "New Jersey"],
+  ["NM", "New Mexico"],
+  ["NY", "New York"],
+  ["NC", "North Carolina"],
+  ["ND", "North Dakota"],
+  ["OH", "Ohio"],
+  ["OK", "Oklahoma"],
+  ["OR", "Oregon"],
+  ["PA", "Pennsylvania"],
+  ["RI", "Rhode Island"],
+  ["SC", "South Carolina"],
+  ["SD", "South Dakota"],
+  ["TN", "Tennessee"],
+  ["TX", "Texas"],
+  ["UT", "Utah"],
+  ["VT", "Vermont"],
+  ["VA", "Virginia"],
+  ["WA", "Washington"],
+  ["WV", "West Virginia"],
+  ["WI", "Wisconsin"],
+  ["WY", "Wyoming"],
+];
 const SETTINGS_THEME_MODE_STORAGE_KEY = "prefs.themeMode";
 const SETTINGS_DISPLAY_SIZE_STORAGE_KEY = "prefs.displaySize";
 const SETTINGS_THEME_MODES = [
@@ -1675,7 +1908,7 @@ const COALITION_VOTER_MAP_SECTION_CONFIG = [
   },
   {
     key: "scripts",
-    path: "voter-map/scripts",
+    path: "voter-map/outreach-scripts",
     label: "Scripts",
     icon: "edit",
     description: "Manage call, text, email, and postal outreach templates.",
@@ -1910,6 +2143,18 @@ function decodeRouteSegment(value) {
   }
 }
 
+function splitDecodedRoutePath(value) {
+  return decodeRouteSegment(value)
+    .replace(/^\/+|\/+$/gu, "")
+    .split("/")
+    .map(normalizeString)
+    .filter(Boolean);
+}
+
+function routeKeyword(value) {
+  return normalizeString(value).toLowerCase();
+}
+
 function normalizeRouteParams(value) {
   if (!value || typeof value !== "object") {
     return {};
@@ -1996,8 +2241,8 @@ function parseRouteFromLocation(pathname = window.location.pathname) {
       };
     }
     return {
-      routeKey: ROUTE_KEY_FEED,
-      routePath: "/feed",
+      routeKey: ROUTE_KEY_POST_VIEW,
+      routePath: "/posts/view",
       routeParams: {},
     };
   }
@@ -2016,6 +2261,7 @@ function parseRouteFromLocation(pathname = window.location.pathname) {
       [],
     ],
     [ROUTE_KEY_POST_ANALYTICS, /^\/posts\/([^/]+)\/analytics$/u, ["postId"]],
+    [ROUTE_KEY_POST_VIEW, /^\/posts\/view$/u, []],
     [ROUTE_KEY_SHARE_POST, /^\/posts\/([^/]+)$/u, ["postId"]],
     [ROUTE_KEY_FEED, /^\/feed$/u, []],
     [ROUTE_KEY_CREATE, /^\/create$/u, []],
@@ -2025,6 +2271,11 @@ function parseRouteFromLocation(pathname = window.location.pathname) {
     [ROUTE_KEY_SEARCH_RESULTS, /^\/search\/results$/u, []],
     [ROUTE_KEY_SEARCH, /^\/search$/u, []],
     [ROUTE_KEY_CTA_INVITE, /^\/cta-invite\/([^/]+)$/u, ["token"]],
+    [
+      ROUTE_KEY_PUBLIC_PETITION_RESULTS,
+      /^\/petitions\/results\/([^/]+)$/u,
+      ["shareToken"],
+    ],
     [ROUTE_KEY_PUBLIC_PETITION, /^\/petitions\/([^/]+)$/u, ["publicSlug"]],
     [ROUTE_KEY_CANDIDATES, /^\/candidates$/u, []],
     [ROUTE_KEY_ELECTION_DAY, /^\/election-day$/u, []],
@@ -2049,7 +2300,7 @@ function parseRouteFromLocation(pathname = window.location.pathname) {
       /^\/candidates\/([^/]+)\/edit$/u,
       ["candidateId"],
     ],
-    [ROUTE_KEY_CANDIDATE_EDIT, /^\/settings\/candidate-edit$/u, []],
+    [ROUTE_KEY_CANDIDATE_EDIT, /^\/settings\/candidate-edit\/?$/u, []],
     [ROUTE_KEY_CANDIDATE_DETAIL, /^\/candidates\/([^/]+)$/u, ["candidateId"]],
     [
       ROUTE_KEY_CANDIDATE_DASHBOARD_SECTION,
@@ -2299,6 +2550,7 @@ function createMessagingConversationState() {
     settingsPending: false,
     deletePending: false,
     messageActionPendingKey: "",
+    openMessageActionId: "",
     reactionPendingKey: "",
     missionActionPendingKey: "",
     reportingMessageId: "",
@@ -2775,6 +3027,7 @@ function createCandidateDashboardDonationsState() {
     },
     selectedTransaction: null,
     pendingPayoutSession: null,
+    confirmingPayoutBankRemoval: false,
     loading: false,
     transactionsLoading: false,
     loadingMore: false,
@@ -2796,6 +3049,27 @@ function readSettingsActivitySharingPreference() {
   } catch {
     return true;
   }
+}
+
+function isDiscoverFriendActivitySharingEnabled() {
+  const privacySafety = state.pages.settings?.privacySafety;
+  if (typeof privacySafety?.activitySharingEnabled === "boolean") {
+    return privacySafety.activitySharingEnabled;
+  }
+  return readSettingsActivitySharingPreference();
+}
+
+function applyDiscoverFriendActivitySharingState() {
+  const slice = state.pages.discover?.friendActivity;
+  if (!slice || isDiscoverFriendActivitySharingEnabled()) {
+    return;
+  }
+  slice.items = [];
+  slice.nextCursor = null;
+  slice.loading = false;
+  slice.loadingMore = false;
+  slice.error = "";
+  slice.loaded = true;
 }
 
 function createSettingsSafetyListState() {
@@ -2866,6 +3140,19 @@ function createSettingsAddressChangeRequestState() {
   };
 }
 
+function createSettingsManualDistrictState() {
+  return {
+    stateId: "",
+    selectedDistrictId: "",
+    items: [],
+    loadedStateId: "",
+    loading: false,
+    saving: false,
+    acknowledged: false,
+    error: "",
+  };
+}
+
 function createSettingsVoterProfileState() {
   return {
     profile: {
@@ -2883,6 +3170,8 @@ function createSettingsVoterProfileState() {
       loaded: false,
     },
     homeLocationSaving: false,
+    homeLocationClearing: false,
+    manualDistrict: createSettingsManualDistrictState(),
     addressChange: createSettingsAddressChangeRequestState(),
   };
 }
@@ -2956,10 +3245,20 @@ function createPostAnalyticsPageState() {
 function createAchievementsPageState() {
   return {
     snapshot: null,
+    answeredQuestionCount: 0,
     loading: false,
     error: "",
     loaded: false,
     selectedId: "",
+  };
+}
+
+function createDiscoverAchievementState() {
+  return {
+    snapshot: null,
+    loading: false,
+    error: "",
+    loaded: false,
   };
 }
 
@@ -3050,6 +3349,8 @@ function createPetitionsWorkspaceState() {
     draft: createPetitionDraft(),
     responses: [],
     duplicateGroups: [],
+    responseNameSearch: "",
+    responseAddressSearch: "",
     loading: false,
     responsesLoading: false,
     error: "",
@@ -3079,6 +3380,19 @@ function createPublicPetitionState() {
     submitting: false,
     error: "",
     notice: "",
+    loaded: false,
+  };
+}
+
+function createPublicPetitionResultsState() {
+  return {
+    shareToken: "",
+    item: null,
+    responses: [],
+    duplicateGroups: [],
+    loading: false,
+    downloading: false,
+    error: "",
     loaded: false,
   };
 }
@@ -3167,6 +3481,7 @@ function createPostComposerPageState() {
     saveToDevice: false,
     savePostsWithWatermark: true,
     brandingOverlayEnabled: true,
+    cover: createPostComposerCoverState(),
     publishingDefaultsApplied: false,
     pending: false,
     stage: "",
@@ -3185,6 +3500,76 @@ function createCandidateAvatarUploadState() {
     fileName: "",
     previousAvatarUrl: "",
     previousAvatarUploadId: "",
+  };
+}
+
+function createPostComposerCoverState(seed = {}) {
+  const source = normalizeString(seed.source).toLowerCase();
+  const normalizedSource =
+    source === "uploaded_image" || source === "uploaded-image" || source === "upload"
+      ? "uploaded_image"
+      : "frame";
+  const numericX = Number(seed.x);
+  const numericY = Number(seed.y);
+  const numericScale = Number(seed.scale);
+  const textAlign = normalizeString(seed.textAlign).toLowerCase();
+  const presetId = normalizeString(seed.presetId).toLowerCase();
+  return {
+    source: normalizedSource,
+    frameMs: Math.max(0, Number(seed.frameMs) || 0),
+    imageFile: null,
+    imagePreviewUrl: "",
+    renderedUploadId: normalizeString(seed.renderedUploadId),
+    renderedUrl: normalizeString(seed.renderedUrl),
+    titleText: normalizeString(seed.titleText),
+    presetId: ["none", "outline", "fill"].includes(presetId) ? presetId : "none",
+    textColorHex: normalizePostComposerCoverColor(seed.textColorHex, "#FFFFFF"),
+    backgroundColorHex: normalizePostComposerCoverColor(
+      seed.backgroundColorHex,
+      "#111820",
+    ),
+    x: Number.isFinite(numericX) ? Math.max(0.05, Math.min(0.95, numericX)) : 0.5,
+    y: Number.isFinite(numericY) ? Math.max(0.08, Math.min(0.92, numericY)) : 0.76,
+    scale: Number.isFinite(numericScale)
+      ? Math.max(0.6, Math.min(1.8, numericScale))
+      : 1,
+    textAlign: ["left", "center", "right"].includes(textAlign)
+      ? textAlign
+      : "center",
+    uploading: false,
+    error: "",
+    notice: "",
+  };
+}
+
+function createProfileAvatarUploadState() {
+  return {
+    uploading: false,
+    error: "",
+    uploadId: "",
+    remoteUrl: "",
+    previewUrl: "",
+    fileName: "",
+    previousAvatarUrl: "",
+    previousAvatarUploadId: "",
+  };
+}
+
+function createProfileNotificationsState() {
+  return {
+    items: [],
+    unreadCount: 0,
+    lastSeenAt: 0,
+    seenThroughTs: 0,
+    nextCursor: null,
+    loading: false,
+    loadingMore: false,
+    error: "",
+    notice: "",
+    loaded: false,
+    filter: "all",
+    expandedAggregateId: "",
+    actionPendingKey: "",
   };
 }
 
@@ -3249,6 +3634,18 @@ function createFeedPromptState() {
   };
 }
 
+function createPostShareState(seed = {}) {
+  return {
+    open: seed.open === true,
+    postId: normalizeString(seed.postId),
+    preview: seed.preview || null,
+    loading: seed.loading === true,
+    sendingConversationId: normalizeString(seed.sendingConversationId),
+    error: normalizeString(seed.error),
+    notice: normalizeString(seed.notice),
+  };
+}
+
 function createDiscoverCalendarPreviewState() {
   return {
     candidateId: "",
@@ -3296,18 +3693,33 @@ const state = {
       loading: false,
       submitting: false,
       postId: "",
+      candidateId: normalizeString(initialEngagementCandidateId),
+      responseMode: normalizeCandidateEngagementResponseMode(
+        initialEngagementResponseMode,
+      ),
       items: [],
       cursor: null,
       error: "",
       replyTo: null,
       highlightedCommentId: initialCommentId,
     },
+    likers: {
+      open: false,
+      loading: false,
+      loadingMore: false,
+      postId: "",
+      items: [],
+      cursor: null,
+      error: "",
+    },
+    postShare: createPostShareState(),
   },
   pages: {
     feedPrompts: createFeedPromptState(),
     create: createPostComposerPageState(),
     petitions: {
       public: createPublicPetitionState(),
+      results: createPublicPetitionResultsState(),
     },
     discover: {
       feed: createPagedState(),
@@ -3317,9 +3729,16 @@ const state = {
       standaloneServers: createPagedState(),
       friendActivity: createPagedState(),
       policyQuestions: createPagedState(),
+      issues: createPagedState(),
+      followedIssues: createPagedState(),
       campaigns: createPagedState(),
       coalitions: createPagedState(),
+      missionScopes: createPagedState(),
+      missionPreviews: createPagedState(),
+      achievements: createDiscoverAchievementState(),
       calendarPreview: createDiscoverCalendarPreviewState(),
+      preferences: readDiscoverModulePreferences(),
+      manageOpen: false,
       loading: false,
       error: "",
       loaded: false,
@@ -3450,6 +3869,7 @@ const state = {
         actionDraft: null,
         artifactPendingKey: "",
         followUpPendingKey: "",
+        followUpDrafts: {},
       },
     },
     elections: {
@@ -3508,6 +3928,7 @@ const state = {
         error: "",
         saving: false,
         signupSaving: false,
+        pendingPaymentReview: null,
         editorDraft: null,
         addressLookup: {
           query: "",
@@ -3531,16 +3952,11 @@ const state = {
         kind: "followers",
         ...createPagedState(),
       },
-      notifications: {
-        items: [],
-        unreadCount: 0,
-        loading: false,
-        error: "",
-        loaded: false,
-      },
+      notifications: createProfileNotificationsState(),
       loading: false,
       error: "",
       saving: false,
+      avatarUpload: createProfileAvatarUploadState(),
     },
     topics: createTopicsPageState(),
     policyQuestions: createPolicyQuestionsPageState(),
@@ -3893,7 +4309,11 @@ function isCtaInviteRoute(route = state.route) {
 }
 
 function isPublicPetitionRoute(route = state.route) {
-  return normalizeString(route?.routeKey) === ROUTE_KEY_PUBLIC_PETITION;
+  const routeKey = normalizeString(route?.routeKey);
+  return (
+    routeKey === ROUTE_KEY_PUBLIC_PETITION ||
+    routeKey === ROUTE_KEY_PUBLIC_PETITION_RESULTS
+  );
 }
 
 function isPublicAccountRoute(route = state.route) {
@@ -3905,9 +4325,14 @@ function isPublicAccountRoute(route = state.route) {
   );
 }
 
+function isStandalonePostViewRoute(route = state.route) {
+  return normalizeString(route?.routeKey) === ROUTE_KEY_POST_VIEW;
+}
+
 function isProtectedRoute(route = state.route) {
   return (
     !isShareRoute(route) &&
+    !isStandalonePostViewRoute(route) &&
     !isElectionDayRoute(route) &&
     !isCtaInviteRoute(route) &&
     !isPublicPetitionRoute(route) &&
@@ -3977,6 +4402,7 @@ function getRouteSection(route = state.route) {
     routeKey === ROUTE_KEY_EVENTS ||
     routeKey === ROUTE_KEY_CTA_INVITE ||
     routeKey === ROUTE_KEY_PUBLIC_PETITION ||
+    routeKey === ROUTE_KEY_PUBLIC_PETITION_RESULTS ||
     routeKey === ROUTE_KEY_EVENT_DETAIL ||
     routeKey === ROUTE_KEY_EVENT_SIGNUP ||
     routeKey === ROUTE_KEY_EVENT_PAYMENT ||
@@ -4042,15 +4468,328 @@ function getPathnameFromRouteTarget(value) {
   }
 }
 
+function getSettingsDocumentTitle(route = state.route) {
+  const settingsPath = getSettingsRoutePath(route).replace(/\/$/u, "");
+  if (!settingsPath) {
+    return "Settings";
+  }
+  const exactTitles = {
+    "account-security/totp": "Authenticator App",
+    "candidate-access/name": "Candidate Access",
+    "candidate-access/office": "Candidate Office",
+    "preferences/home-location": "Home Location",
+    "preferences/home-location/request": "Location Request",
+    "preferences/my-districts": "My Districts",
+    "security/device-link": "Trusted Devices",
+    "security/restore": "Message Recovery",
+    "voter-profile/home-location": "Home Location",
+    "voter-profile/home-location/request": "Location Request",
+  };
+  if (exactTitles[settingsPath]) {
+    return exactTitles[settingsPath];
+  }
+  return normalizeString(getSettingsSectionConfig(getSettingsSection(route))?.label) || "Settings";
+}
+
+function getAuthDocumentTitle() {
+  const mode = authRouteModeFromPath();
+  const titles = {
+    signup: "Create Account",
+    confirm: "Confirm Account",
+    reset: "Reset Password",
+    "reset-confirm": "Reset Password",
+    login: "Sign In",
+  };
+  return titles[mode] || "Account";
+}
+
+function routeTitleFromConfig(configs = [], key = "", fallback = "") {
+  const normalizedKey = normalizeString(key);
+  const match = configs.find((item) => item.key === normalizedKey);
+  return normalizeString(match?.label) || normalizeString(fallback);
+}
+
+function prefixRouteTitle(prefix, title, fallback) {
+  const normalizedPrefix = normalizeString(prefix);
+  const normalizedTitle = normalizeString(title);
+  if (!normalizedTitle) {
+    return fallback;
+  }
+  if (!normalizedPrefix) {
+    return normalizedTitle;
+  }
+  return normalizedTitle.toLowerCase().includes(normalizedPrefix.toLowerCase())
+    ? normalizedTitle
+    : `${normalizedPrefix} ${normalizedTitle}`;
+}
+
+function getCandidateDashboardDocumentTitle(route = state.route) {
+  const sectionKey = candidateDashboardSectionForRoute(route);
+  if (!sectionKey || sectionKey === CANDIDATE_DASHBOARD_DEFAULT_SECTION) {
+    return "Candidate Dashboard";
+  }
+  const label = routeTitleFromConfig(
+    CANDIDATE_DASHBOARD_SECTION_CONFIG,
+    sectionKey,
+    humanizeLabel(sectionKey),
+  );
+  return prefixRouteTitle("Campaign", label, "Candidate Dashboard");
+}
+
+function getCandidateVoterMapDocumentTitle(route = state.route) {
+  const sectionKey = candidateVoterMapSectionForRoute(route);
+  const exactTitles = {
+    menu: "Candidate Voter Map",
+    map: "Candidate Voter Map",
+    connected: "Connected Voters",
+    add: "Add Voters",
+    "territories/admin": "Territory Admin",
+    scripts: "Outreach Scripts",
+    notes: "Voter Notes",
+  };
+  if (exactTitles[sectionKey]) {
+    return exactTitles[sectionKey];
+  }
+  return routeTitleFromConfig(
+    CANDIDATE_VOTER_MAP_SECTION_CONFIG,
+    sectionKey,
+    "Candidate Voter Map",
+  );
+}
+
+function getCoalitionDocumentTitle(route = state.route) {
+  const routeKey = normalizeString(route?.routeKey);
+  if (routeKey === ROUTE_KEY_COALITION_START) {
+    return "Start Coalition";
+  }
+  if (routeKey === ROUTE_KEY_COALITION_JOIN) {
+    return "Join Coalition";
+  }
+  const parts = coalitionRouteKeywordParts(route);
+  if (!parts.length) {
+    return routeKey === ROUTE_KEY_COALITIONS ? "Coalitions" : "Coalition";
+  }
+  if (parts[0] === "admin" && parts[1] === "edit") {
+    return "Edit Coalition";
+  }
+  if (parts[0] === "admin") {
+    return "Coalition Admin";
+  }
+  if (parts[0] === "amplify" && parts[1] === "create") {
+    return "Create Amplify Request";
+  }
+  if (parts[0] === "constitution" || parts[0] === "voting") {
+    const governance = coalitionGovernanceRouteForRoute(route);
+    const governanceTitles = {
+      constitution: "Coalition Constitution",
+      voting: "Coalition Voting",
+      speaker: "Speaker Console",
+      "proposal-create": "New Coalition Proposal",
+      "vote-detail": "Coalition Vote",
+      "vote-results": "Coalition Vote Results",
+    };
+    return governanceTitles[governance.key] || "Coalition Governance";
+  }
+  if (parts[0] === "voter-map") {
+    const sectionKey = coalitionVoterMapSectionForRoute(route);
+    const voterMapTitles = {
+      menu: "Coalition Voter Map",
+      map: "Coalition Voter Map",
+      "federal-districts": "Coalition Districts",
+      connected: "Coalition Connected Voters",
+      add: "Add Coalition Voters",
+      cta: "Coalition CTA",
+      "cta/transport": "CTA Transport",
+      members: "Coalition Voter Map Members",
+      "territories/admin": "Coalition Territories",
+      scripts: "Coalition Outreach Scripts",
+      notes: "Coalition Voter Notes",
+    };
+    return (
+      voterMapTitles[sectionKey] ||
+      prefixRouteTitle(
+        "Coalition",
+        routeTitleFromConfig(
+          COALITION_VOTER_MAP_SECTION_CONFIG,
+          sectionKey,
+          humanizeLabel(sectionKey),
+        ),
+        "Coalition Voter Map",
+      )
+    );
+  }
+  const sectionKey = coalitionSectionForRoute(route);
+  if (!sectionKey || sectionKey === COALITION_DEFAULT_SECTION) {
+    return "Coalition";
+  }
+  const label = routeTitleFromConfig(
+    COALITION_SECTION_CONFIG,
+    sectionKey,
+    humanizeLabel(sectionKey),
+  );
+  return prefixRouteTitle("Coalition", label, "Coalition");
+}
+
+function getMessagingDocumentTitle(route = state.route) {
+  const subroute = parseMessagingSubroute(route);
+  if (subroute.view === "server-settings-section") {
+    const display = messagingServerSettingsItemPresentation({
+      id: subroute.sectionId,
+    });
+    return prefixRouteTitle("Workspace", display.title, "Workspace Settings");
+  }
+  if (subroute.view === "room-settings-section") {
+    return prefixRouteTitle(
+      "Room",
+      humanizeLabel(subroute.sectionId),
+      "Room Settings",
+    );
+  }
+  const titles = {
+    inbox: "Messages",
+    requests: "Message Requests",
+    compose: "New Message",
+    settings: "Messaging Privacy",
+    devices: "Messaging Devices",
+    "device-link": "Trusted Device Link",
+    recovery: "Message Recovery",
+    "recovery-restore": "Restore Messages",
+    security: "Messaging Security",
+    server: "Workspace Rooms",
+    "server-settings": "Workspace Settings",
+    "server-roles": "Access Groups",
+    "server-role": "Access Group",
+    "server-members": "Workspace Members",
+    "server-member": "Workspace Member",
+    "server-bans": "Blocked Access",
+    "server-moderation": "Safety Review",
+    "server-workflows": "Room Automations",
+    "server-room": "Room",
+    "room-settings": "Room Settings",
+    "room-settings-notifications": "Room Notifications",
+    "room-settings-pins": "Pinned Messages",
+    "room-settings-invites": "Invite Links",
+    "room-settings-integrations": "Room Integrations",
+    "room-permissions": "Room Access",
+    "room-permission-role": "Room Role Override",
+    "category-permissions": "Category Access",
+    "category-permission-role": "Category Role Override",
+    conversation: "Conversation",
+    "conversation-people": "Conversation People",
+    unsupported: "Messages",
+  };
+  return titles[subroute.view] || "Messages";
+}
+
+function getEventDocumentTitle(route = state.route) {
+  const routeKey = normalizeString(route?.routeKey);
+  const titles = {
+    [ROUTE_KEY_EVENTS]: "Events",
+    [ROUTE_KEY_EVENT_DETAIL]: "Event",
+    [ROUTE_KEY_EVENT_SIGNUP]: "Event Signup",
+    [ROUTE_KEY_EVENT_PAYMENT]: "Event Payment",
+    [ROUTE_KEY_MANAGE_EVENTS]: "Manage Events",
+    [ROUTE_KEY_MANAGE_EVENTS_NEW]: "Create Event",
+    [ROUTE_KEY_MANAGE_EVENTS_EDIT]: "Edit Event",
+  };
+  return titles[routeKey] || "Events";
+}
+
+function getProfileDocumentTitle(route = state.route) {
+  const routeKey = normalizeString(route?.routeKey);
+  const titles = {
+    [ROUTE_KEY_PROFILE_SELF]: "Profile",
+    [ROUTE_KEY_PROFILE_USER]: "Profile",
+    [ROUTE_KEY_PROFILE_EDIT]: "Edit Profile",
+    [ROUTE_KEY_PROFILE_CONNECTIONS]: "Profile Connections",
+    [ROUTE_KEY_PROFILE_NOTIFICATIONS]: "Profile Notifications",
+  };
+  return titles[routeKey] || "Profile";
+}
+
+function getAdminDocumentTitle(route = state.route) {
+  const adminPath = decodeRouteSegment(route?.routeParams?.adminPath)
+    .replace(/^\/+|\/+$/gu, "")
+    .toLowerCase();
+  const section = adminPath.split("/")[0];
+  if (!section) {
+    return "Admin";
+  }
+  return prefixRouteTitle("Admin", humanizeLabel(section), "Admin");
+}
+
 function getRouteDocumentTitle(route = state.route) {
   const routeKey = normalizeString(route?.routeKey);
   if (routeKey === ROUTE_KEY_PUBLIC_PETITION) {
     const petitionTitle = normalizeString(state.pages?.petitions?.public?.item?.title);
     return `${petitionTitle || "Petition"} | Polis`;
   }
+  if (routeKey === ROUTE_KEY_AUTH) {
+    return `${getAuthDocumentTitle()} | Polis`;
+  }
+  if (
+    routeKey === ROUTE_KEY_SETTINGS ||
+    routeKey === ROUTE_KEY_SETTINGS_SECTION
+  ) {
+    return `${getSettingsDocumentTitle(route)} | Polis`;
+  }
+  if (
+    routeKey === ROUTE_KEY_CANDIDATE_DASHBOARD ||
+    routeKey === ROUTE_KEY_CANDIDATE_DASHBOARD_DETAIL ||
+    routeKey === ROUTE_KEY_CANDIDATE_DASHBOARD_SECTION
+  ) {
+    return `${getCandidateDashboardDocumentTitle(route)} | Polis`;
+  }
+  if (
+    routeKey === ROUTE_KEY_CANDIDATE_VOTER_MAP ||
+    routeKey === ROUTE_KEY_CANDIDATE_VOTER_MAP_SECTION
+  ) {
+    return `${getCandidateVoterMapDocumentTitle(route)} | Polis`;
+  }
+  if (
+    routeKey === ROUTE_KEY_COALITIONS ||
+    routeKey === ROUTE_KEY_COALITION_START ||
+    routeKey === ROUTE_KEY_COALITION_JOIN ||
+    routeKey === ROUTE_KEY_COALITION_DETAIL ||
+    routeKey === ROUTE_KEY_COALITION_SECTION
+  ) {
+    return `${getCoalitionDocumentTitle(route)} | Polis`;
+  }
+  if (
+    routeKey === ROUTE_KEY_MESSAGES_ROOT ||
+    routeKey === ROUTE_KEY_MESSAGES_WILDCARD
+  ) {
+    return `${getMessagingDocumentTitle(route)} | Polis`;
+  }
+  if (
+    routeKey === ROUTE_KEY_EVENTS ||
+    routeKey === ROUTE_KEY_EVENT_DETAIL ||
+    routeKey === ROUTE_KEY_EVENT_SIGNUP ||
+    routeKey === ROUTE_KEY_EVENT_PAYMENT ||
+    routeKey === ROUTE_KEY_MANAGE_EVENTS ||
+    routeKey === ROUTE_KEY_MANAGE_EVENTS_NEW ||
+    routeKey === ROUTE_KEY_MANAGE_EVENTS_EDIT
+  ) {
+    return `${getEventDocumentTitle(route)} | Polis`;
+  }
+  if (
+    routeKey === ROUTE_KEY_PROFILE_SELF ||
+    routeKey === ROUTE_KEY_PROFILE_USER ||
+    routeKey === ROUTE_KEY_PROFILE_EDIT ||
+    routeKey === ROUTE_KEY_PROFILE_CONNECTIONS ||
+    routeKey === ROUTE_KEY_PROFILE_NOTIFICATIONS
+  ) {
+    return `${getProfileDocumentTitle(route)} | Polis`;
+  }
+  if (
+    routeKey === ROUTE_KEY_ADMIN ||
+    routeKey === ROUTE_KEY_ADMIN_SECTION
+  ) {
+    return `${getAdminDocumentTitle(route)} | Polis`;
+  }
   const exactTitles = {
-    [ROUTE_KEY_AUTH]: "Account",
     [ROUTE_KEY_FEED]: "Feed",
+    [ROUTE_KEY_POST_VIEW]: "Post Unavailable",
     [ROUTE_KEY_SHARE_POST]: "Post",
     [ROUTE_KEY_POST_ANALYTICS]: "Post Analytics",
     [ROUTE_KEY_CREATE]: "Create",
@@ -4061,11 +4800,7 @@ function getRouteDocumentTitle(route = state.route) {
     [ROUTE_KEY_OFFICIAL_DETAIL]: "Officials",
     [ROUTE_KEY_OFFICIAL_REPORT_CARD]: "Officials",
     [ROUTE_KEY_AUTO_CANDIDATE_DETAIL]: "Auto Candidate",
-    [ROUTE_KEY_CANDIDATE_VOTER_MAP]: "Candidate Voter Map",
-    [ROUTE_KEY_CANDIDATE_VOTER_MAP_SECTION]: "Candidate Voter Map",
-    [ROUTE_KEY_MANAGE_EVENTS]: "Manage Events",
-    [ROUTE_KEY_MANAGE_EVENTS_NEW]: "Manage Events",
-    [ROUTE_KEY_MANAGE_EVENTS_EDIT]: "Manage Events",
+    [ROUTE_KEY_CANDIDATE_EDIT]: "Edit Candidate Page",
     [ROUTE_KEY_TOPICS]: "Topics",
     [ROUTE_KEY_ONBOARDING_TOPICS]: "Topics",
     [ROUTE_KEY_ONBOARDING_PROFILE]: "Onboarding",
@@ -4074,8 +4809,7 @@ function getRouteDocumentTitle(route = state.route) {
     [ROUTE_KEY_ONBOARDING_ADDRESS]: "Onboarding",
     [ROUTE_KEY_POLICY_QUESTIONS]: "Policy Questions",
     [ROUTE_KEY_POLICY_QUESTION_DETAIL]: "Policy Questions",
-    [ROUTE_KEY_ADMIN]: "Admin",
-    [ROUTE_KEY_ADMIN_SECTION]: "Admin",
+    [ROUTE_KEY_PUBLIC_PETITION_RESULTS]: "Petition Results",
     [ROUTE_KEY_ACCOUNT_DELETION_REQUESTED]: "Account Deletion Requested",
   };
   if (exactTitles[routeKey]) {
@@ -4102,6 +4836,73 @@ function syncDocumentTitle() {
   const nextTitle = getRouteDocumentTitle();
   if (document.title !== nextTitle) {
     document.title = nextTitle;
+  }
+}
+
+function setDocumentMeta(selector, attributeName, attributeValue, content) {
+  if (!content) return;
+  let meta = document.head.querySelector(selector);
+  if (!meta) {
+    meta = document.createElement("meta");
+    meta.setAttribute(attributeName, attributeValue);
+    document.head.appendChild(meta);
+  }
+  meta.setAttribute("content", content);
+}
+
+function syncPublicPetitionSocialMeta(petition) {
+  if (!petition) return;
+  const title = normalizeString(petition.title) || "Petition";
+  const description =
+    normalizeString(petition.bodyText).slice(0, 240) ||
+    "Review and respond to this Polis petition.";
+  const coverImage = normalizeString(petition.coverImageUrl);
+  document.title = `${title} | Polis`;
+  setDocumentMeta('meta[property="og:title"]', "property", "og:title", title);
+  setDocumentMeta(
+    'meta[name="twitter:title"]',
+    "name",
+    "twitter:title",
+    title,
+  );
+  setDocumentMeta(
+    'meta[name="description"]',
+    "name",
+    "description",
+    description,
+  );
+  setDocumentMeta(
+    'meta[property="og:description"]',
+    "property",
+    "og:description",
+    description,
+  );
+  setDocumentMeta(
+    'meta[name="twitter:description"]',
+    "name",
+    "twitter:description",
+    description,
+  );
+  if (coverImage) {
+    const resolvedImage = resolveSharedAssetUrl(coverImage);
+    setDocumentMeta(
+      'meta[property="og:image"]',
+      "property",
+      "og:image",
+      resolvedImage,
+    );
+    setDocumentMeta(
+      'meta[name="twitter:image"]',
+      "name",
+      "twitter:image",
+      resolvedImage,
+    );
+    setDocumentMeta(
+      'meta[name="twitter:card"]',
+      "name",
+      "twitter:card",
+      "summary_large_image",
+    );
   }
 }
 
@@ -5861,12 +6662,48 @@ function normalizeComment(raw = {}) {
     replyTo: normalizeString(raw.replyTo) || null,
     text: normalizeString(raw.text),
     createdAt: Number(raw.createdAt) || null,
+    responseMode: normalizeCandidateEngagementResponseMode(
+      raw.responseMode || raw.response_mode,
+    ),
+    badgeLabel: normalizeString(raw.badgeLabel || raw.badge_label),
     displayName:
       normalizeString(raw.displayName || raw.userDisplayName) || "Polis user",
     username: normalizeString(raw.username),
     avatarUrl: normalizeUrl(raw.avatarUrl || raw.userAvatarUrl),
     likedByMe: raw.likedByMe === true,
     likeCount: Number(raw.likeCount) || 0,
+  };
+}
+
+function normalizeLiker(raw = {}) {
+  const profile = raw?.profile && typeof raw.profile === "object" ? raw.profile : {};
+  const createdAtRaw = raw.createdAt ?? raw.created_at ?? raw.likedAt;
+  const createdAt = Number.isFinite(Number(createdAtRaw))
+    ? Number(createdAtRaw)
+    : Date.parse(normalizeString(createdAtRaw));
+  const username = normalizeString(raw.username || profile.username).replace(/^@/u, "");
+  const displayName =
+    normalizeString(
+      raw.displayName ||
+        raw.userDisplayName ||
+        raw.name ||
+        profile.displayName ||
+        profile.name,
+    ) ||
+    (username ? `@${username}` : "Polis user");
+  return {
+    userId: normalizeString(raw.userId || raw.user_id || profile.userId || profile.id),
+    username,
+    displayName,
+    avatarUrl: normalizeUrl(
+      raw.avatarUrl ||
+        raw.userAvatarUrl ||
+        raw.profileImageUrl ||
+        profile.avatarUrl ||
+        profile.userAvatarUrl ||
+        profile.profileImageUrl,
+    ),
+    createdAt: Number.isFinite(createdAt) ? createdAt : null,
   };
 }
 
@@ -5979,6 +6816,40 @@ function normalizeCivicPromptDestinationPath(value) {
   return normalized.startsWith("/") ? normalized : "";
 }
 
+function civicPromptPolicyQuestionIdFromSources(...sources) {
+  for (const source of sources) {
+    const candidate = objectValue(source) || {};
+    const questionId = normalizeString(
+      candidate.policyQuestionId ||
+        candidate.policy_question_id ||
+        candidate.questionId ||
+        candidate.question_id,
+    );
+    if (questionId) {
+      return questionId;
+    }
+  }
+  return "";
+}
+
+function defaultCivicPromptDestinationPath(promptKind, { policyQuestionId = "" } = {}) {
+  const normalizedKind = normalizeString(promptKind).toLowerCase();
+  if (policyQuestionId && normalizedKind === "issue_stance") {
+    return `/questions/${encodeURIComponent(policyQuestionId)}`;
+  }
+  if (normalizedKind.includes("district") || normalizedKind.includes("location")) {
+    return "/settings/preferences/home-location";
+  }
+  if (
+    normalizedKind.includes("ballot") ||
+    normalizedKind.includes("rank") ||
+    normalizedKind.includes("election")
+  ) {
+    return "/settings/voter-intelligence";
+  }
+  return "";
+}
+
 function normalizeCivicPromptFeedItem(raw = {}, index = 0) {
   const payload = objectValue(raw.payload) || {};
   const civicPrompt =
@@ -6042,7 +6913,12 @@ function normalizeCivicPromptFeedItem(raw = {}, index = 0) {
         payload.body ||
         payload.message,
     ) || "Answer this prompt to improve your Polis civic recommendations.";
-  const destinationPath = normalizeCivicPromptDestinationPath(
+  const policyQuestionId = civicPromptPolicyQuestionIdFromSources(
+    raw,
+    civicPrompt,
+    payload,
+  );
+  const explicitDestinationPath = normalizeCivicPromptDestinationPath(
     raw.destinationPath ||
       raw.destination_path ||
       civicPrompt.destinationPath ||
@@ -6050,6 +6926,9 @@ function normalizeCivicPromptFeedItem(raw = {}, index = 0) {
       payload.destinationPath ||
       payload.destination_path,
   );
+  const destinationPath =
+    explicitDestinationPath ||
+    defaultCivicPromptDestinationPath(promptKind, { policyQuestionId });
   const choices = normalizeCivicPromptChoices(
     raw.choices || civicPrompt.choices || payload.choices,
   );
@@ -6063,6 +6942,7 @@ function normalizeCivicPromptFeedItem(raw = {}, index = 0) {
     title,
     body,
     destinationPath,
+    policyQuestionId,
     choices,
     payload,
     impressionToken,
@@ -6571,24 +7451,62 @@ async function loadMoreFeed(mode = state.mode) {
   }
 }
 
-async function openComments(postId, { autoHighlight = "" } = {}) {
+function commentsEngagementContext() {
+  const params = readCurrentSearchParams();
+  const candidateId =
+    normalizeString(state.ui.comments.candidateId) ||
+    normalizeString(params.get("engagementCandidateId"));
+  const responseMode = normalizeCandidateEngagementResponseMode(
+    state.ui.comments.responseMode ||
+      params.get("engagementResponseMode") ||
+      params.get("responseMode"),
+  );
+  return { candidateId, responseMode };
+}
+
+async function openComments(
+  postId,
+  { autoHighlight = "", candidateId = "", responseMode = "" } = {},
+) {
   const normalizedPostId = normalizeString(postId);
   if (!normalizedPostId) {
     return;
   }
+  const resolvedCandidateId =
+    normalizeString(candidateId) ||
+    normalizeString(initialEngagementCandidateId) ||
+    normalizeString(readCurrentSearchParams().get("engagementCandidateId"));
+  const resolvedResponseMode = normalizeCandidateEngagementResponseMode(
+    responseMode ||
+      initialEngagementResponseMode ||
+      readCurrentSearchParams().get("engagementResponseMode") ||
+      readCurrentSearchParams().get("responseMode"),
+  );
 
   state.ui.comments.open = true;
   state.ui.comments.loading = true;
   state.ui.comments.error = "";
   state.ui.comments.postId = normalizedPostId;
+  state.ui.comments.candidateId = resolvedCandidateId;
+  state.ui.comments.responseMode = resolvedResponseMode;
   state.ui.comments.replyTo = null;
   state.ui.comments.highlightedCommentId = normalizeString(autoHighlight);
   scheduleRender();
 
   try {
+    const query = new URLSearchParams({ limit: "100" });
+    if (normalizeString(autoHighlight)) {
+      query.set("aroundCommentId", normalizeString(autoHighlight));
+    }
+    if (state.auth.session && resolvedCandidateId) {
+      query.set("candidateId", resolvedCandidateId);
+    }
+    if (state.auth.session && resolvedResponseMode) {
+      query.set("responseMode", resolvedResponseMode);
+    }
     const path = state.auth.session
-      ? `/api/posts/${encodeURIComponent(normalizedPostId)}/comments?limit=100`
-      : `/api/public/posts/${encodeURIComponent(normalizedPostId)}/comments?limit=100`;
+      ? `/api/posts/${encodeURIComponent(normalizedPostId)}/comments?${query.toString()}`
+      : `/api/public/posts/${encodeURIComponent(normalizedPostId)}/comments?${query.toString()}`;
     const payload = await fetchJson(path, {
       auth: Boolean(state.auth.session),
     });
@@ -6606,6 +7524,90 @@ async function openComments(postId, { autoHighlight = "" } = {}) {
 function closeComments() {
   state.ui.comments.open = false;
   state.ui.comments.replyTo = null;
+  scheduleRender();
+}
+
+async function loadPostLikers({ append = false } = {}) {
+  const panel = state.ui.likers;
+  const postId = normalizeString(panel.postId);
+  if (!postId || panel.loading || panel.loadingMore) {
+    return;
+  }
+  if (append && !panel.cursor) {
+    return;
+  }
+  if (append) {
+    panel.loadingMore = true;
+  } else {
+    panel.loading = true;
+    panel.items = [];
+    panel.cursor = null;
+  }
+  panel.error = "";
+  scheduleRender();
+  try {
+    const query = new URLSearchParams({ limit: "50" });
+    if (append && panel.cursor) {
+      query.set("cursor", panel.cursor);
+    }
+    const payload = await fetchJson(
+      `/api/posts/${encodeURIComponent(postId)}/likes?${query.toString()}`,
+      { auth: true },
+    );
+    const items = readArrayPayload(payload, ["items", "likers", "likes"])
+      .map(normalizeLiker)
+      .filter((item) => item.userId || item.displayName);
+    panel.items = append ? panel.items.concat(items) : items;
+    panel.cursor =
+      normalizeString(payload?.nextCursor || payload?.cursor || payload?.next) ||
+      null;
+  } catch (error) {
+    panel.error = isLikelyAuthRequestFailure(error)
+      ? "Sign in again to see who liked this post."
+      : normalizeString(error?.message) || "Likes could not be loaded.";
+  } finally {
+    panel.loading = false;
+    panel.loadingMore = false;
+    scheduleRender();
+  }
+}
+
+async function openLikers(postId) {
+  const normalizedPostId = normalizeString(postId);
+  if (!normalizedPostId) {
+    return;
+  }
+  if (!state.auth.session) {
+    openAuthModal("view_likes", {
+      postId: normalizedPostId,
+      title: "Log in to see likes",
+      message:
+        "Create an account or sign in to see who liked this post and open their profiles.",
+    });
+    return;
+  }
+  Object.assign(state.ui.likers, {
+    open: true,
+    loading: false,
+    loadingMore: false,
+    postId: normalizedPostId,
+    items: [],
+    cursor: null,
+    error: "",
+  });
+  scheduleRender();
+  await loadPostLikers();
+}
+
+function closeLikers() {
+  Object.assign(state.ui.likers, {
+    open: false,
+    loading: false,
+    loadingMore: false,
+    postId: "",
+    cursor: null,
+    error: "",
+  });
   scheduleRender();
 }
 
@@ -6801,6 +7803,77 @@ function buildFeedCivicPromptEvent(item = {}, type, { choiceValue = "" } = {}) {
   };
 }
 
+function feedCivicPromptPolicyQuestionId(item = {}) {
+  return (
+    normalizeString(item.policyQuestionId) ||
+    civicPromptPolicyQuestionIdFromSources(item.payload, item.raw)
+  );
+}
+
+function updatePolicyQuestionAnswerCaches(questionId, optionId, payload = {}) {
+  const normalizedQuestionId = normalizeString(questionId);
+  const normalizedOptionId =
+    normalizeString(payload.answer?.optionId) || normalizeString(optionId);
+  if (!normalizedQuestionId || !normalizedOptionId) {
+    return;
+  }
+  const selectedAnswer = {
+    questionId: normalizedQuestionId,
+    optionId: normalizedOptionId,
+    answerText: normalizeString(payload.answer?.answerText),
+    updatedAtIso: normalizeString(payload.answer?.updatedAtIso),
+    updatedAt: Number(payload.answer?.updatedAt) || Date.now(),
+  };
+  const aggregate = payload.aggregate
+    ? normalizePolicyQuestionAggregate(payload.aggregate)
+    : null;
+
+  state.pages.policyQuestions.items = state.pages.policyQuestions.items.map(
+    (question) =>
+      question.questionId === normalizedQuestionId
+        ? {
+            ...question,
+            selectedAnswer,
+            aggregate: aggregate || question.aggregate,
+          }
+        : question,
+  );
+  const detail = state.pages.policyQuestions.detail;
+  if (detail.item?.questionId === normalizedQuestionId) {
+    detail.item = {
+      ...detail.item,
+      selectedAnswer,
+      aggregate: aggregate || detail.item.aggregate,
+    };
+  }
+
+  const voterIntelQuestions = state.pages.settings?.voterIntel?.questions;
+  if (Array.isArray(voterIntelQuestions?.items)) {
+    voterIntelQuestions.items = voterIntelQuestions.items.map((question) =>
+      question.questionId === normalizedQuestionId
+        ? {
+            ...question,
+            selectedAnswer,
+            aggregate: aggregate || question.aggregate,
+          }
+        : question,
+    );
+  }
+  if (payload.profile) {
+    const snapshot = state.pages.settings?.voterIntel?.snapshot;
+    if (snapshot) {
+      snapshot.item = normalizeVoterIntelSnapshot({
+        ...(snapshot.item || {}),
+        profile: payload.profile,
+        shares: snapshot.item?.shares || [],
+        identityLinks: snapshot.item?.identityLinks || [],
+        capability: snapshot.item?.capability || {},
+      });
+      snapshot.loaded = true;
+    }
+  }
+}
+
 async function postFeedCivicPromptEvent(item, type, options = {}) {
   await fetchJson("/api/voter-intel/events", {
     auth: true,
@@ -6847,16 +7920,31 @@ async function answerFeedCivicPrompt(promptKey, choiceValue) {
     scheduleRender();
     return;
   }
+  const policyQuestionId = feedCivicPromptPolicyQuestionId(item);
 
   setFeedPromptPending(normalizedPromptKey, "answer");
   clearFeedPromptFeedback(normalizedPromptKey);
   scheduleRender();
   try {
-    await postFeedCivicPromptEvent(item, "civic_prompt_answer", {
-      choiceValue: choice.value,
-    });
-    setFeedCivicPromptSaved(normalizedPromptKey, "Answer recorded");
-    showToast("Civic prompt answer recorded.");
+    if (policyQuestionId) {
+      const payload = await fetchJson(
+        `/api/policy-questions/${encodeURIComponent(policyQuestionId)}/answer`,
+        {
+          auth: true,
+          method: "PUT",
+          body: { optionId: choice.value },
+        },
+      );
+      updatePolicyQuestionAnswerCaches(policyQuestionId, choice.value, payload);
+      setFeedCivicPromptSaved(normalizedPromptKey, "Policy answer saved");
+      showToast("Policy answer saved.");
+    } else {
+      await postFeedCivicPromptEvent(item, "civic_prompt_answer", {
+        choiceValue: choice.value,
+      });
+      setFeedCivicPromptSaved(normalizedPromptKey, "Answer recorded");
+      showToast("Civic prompt answer recorded.");
+    }
   } catch (error) {
     prompts.errors[normalizedPromptKey] =
       normalizeString(error?.payload?.message || error?.message) ||
@@ -7189,16 +8277,24 @@ async function submitComment(text) {
   scheduleRender();
 
   try {
+    const engagement = commentsEngagementContext();
     await fetchJson(`/api/posts/${encodeURIComponent(postId)}/comments`, {
       auth: true,
       method: "POST",
       body: {
         text: normalizedText,
         replyTo: state.ui.comments.replyTo || null,
+        ...(engagement.candidateId ? { candidateId: engagement.candidateId } : {}),
+        ...(engagement.responseMode
+          ? { responseMode: engagement.responseMode }
+          : {}),
       },
     });
     state.ui.comments.replyTo = null;
-    await Promise.all([openComments(postId), refreshPostEngagement(postId)]);
+    await Promise.all([
+      openComments(postId, engagement),
+      refreshPostEngagement(postId),
+    ]);
   } catch {
     showToast("Comment failed. Try again.");
   } finally {
@@ -7423,7 +8519,8 @@ function resolveCandidateEditRouteCandidateId(route = getCurrentRoute()) {
 function isCandidateSettingsEditRoute(route = getCurrentRoute()) {
   return (
     normalizeString(route?.routeKey) === ROUTE_KEY_CANDIDATE_EDIT &&
-    normalizePathname(window.location.pathname) === "/settings/candidate-edit"
+    normalizePathname(window.location.pathname).replace(/\/$/u, "") ===
+      "/settings/candidate-edit"
   );
 }
 
@@ -7600,6 +8697,7 @@ function isLikelyAuthRequestFailure(error) {
 }
 
 function clearStaleAuthSession() {
+  clearProfileAvatarUpload({ abort: true });
   clearSharedFeedSession();
   state.auth.session = null;
   state.auth.user = null;
@@ -7862,6 +8960,48 @@ function buildElectionDayRoute({
     query.set("candidateId", normalizeString(candidateId));
   const queryString = query.toString();
   return queryString ? `/election-day?${queryString}` : "/election-day";
+}
+
+function normalizeElectionFeedCard(raw = null) {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const source = raw.payload && typeof raw.payload === "object" ? raw.payload : raw;
+  const destination =
+    source.destination && typeof source.destination === "object"
+      ? source.destination
+      : {};
+  const stateOutline =
+    source.stateOutline && typeof source.stateOutline === "object"
+      ? source.stateOutline
+      : {};
+  const stateId = normalizeString(source.stateId || source.state);
+  const districtId = normalizeString(source.districtId || source.district);
+  const electionId = normalizeString(source.electionId);
+  const scope = normalizeElectionScope(source.scope);
+  const destinationPath =
+    normalizeString(
+      source.destinationPath || source.path || destination.path,
+    ) ||
+    buildElectionDayRoute({
+      scope,
+      stateId,
+      districtId,
+      electionId,
+    });
+  return {
+    electionId,
+    stateId,
+    districtId,
+    scope,
+    destinationPath,
+    variant: normalizeString(source.variant) || "generic",
+    message:
+      normalizeString(source.message) ||
+      "Vote totals are now being reported.",
+    ctaLabel: normalizeString(source.ctaLabel) || "Follow results",
+    stateName: normalizeString(source.stateName || stateOutline.stateName),
+  };
 }
 
 function normalizeElectionPartyFilter(value) {
@@ -8590,10 +9730,24 @@ function normalizeEvent(raw = {}) {
     hostUserId: normalizeString(raw.hostUserId),
     hostDisplayName: normalizeString(raw.hostDisplayName) || "Host",
     hostUsername: normalizeString(raw.hostUsername),
-    attendeeCount: Number(raw.attendeeCount) || 0,
-    interestedCount: Number(raw.interestedCount) || 0,
-    isAttending: raw.isAttending === true,
-    isInterested: raw.isInterested === true,
+    attendeeCount:
+      Number(raw.attendeeCount || raw.goingCount || raw.rsvpCount) || 0,
+    interestedCount:
+      Number(
+        raw.interestedCount ||
+          raw.interestCount ||
+          raw.interestedTotal ||
+          raw.interested_total ||
+          raw.interested_count,
+      ) || 0,
+    isAttending: parseBoolean(
+      raw.isAttending ?? raw.attending ?? raw.going,
+      false,
+    ),
+    isInterested: parseBoolean(
+      raw.isInterested ?? raw.interested ?? raw.interestedFlag,
+      false,
+    ),
     isFree: raw.isFree !== false,
     costAmount: Number.isFinite(Number(raw.costAmount))
       ? Number(raw.costAmount)
@@ -8748,6 +9902,184 @@ function readArrayPayload(payload, keys = []) {
   return [];
 }
 
+function discoverModuleConfig(key) {
+  return DISCOVER_MODULE_CONFIG_BY_KEY.get(normalizeString(key)) || null;
+}
+
+function sanitizeDiscoverModuleOrder(rawOrder) {
+  const parsed = [];
+  if (Array.isArray(rawOrder)) {
+    rawOrder.forEach((value) => {
+      const key = normalizeString(value);
+      if (DISCOVER_MODULE_CONFIG_BY_KEY.has(key) && !parsed.includes(key)) {
+        parsed.push(key);
+      }
+    });
+  }
+  DISCOVER_DEFAULT_MODULE_ORDER.forEach((key) => {
+    if (!parsed.includes(key)) {
+      parsed.push(key);
+    }
+  });
+  return parsed;
+}
+
+function readStoredDiscoverModuleIds(rawOrder) {
+  if (!Array.isArray(rawOrder)) {
+    return new Set();
+  }
+  return new Set(
+    rawOrder
+      .map((value) => normalizeString(value))
+      .filter((key) => DISCOVER_MODULE_CONFIG_BY_KEY.has(key)),
+  );
+}
+
+function createDefaultDiscoverModulePreferences() {
+  const hidden = new Set(DISCOVER_DEFAULT_HIDDEN_MODULES);
+  DISCOVER_LOCKED_MODULES.forEach((key) => hidden.add(key));
+  return {
+    order: [...DISCOVER_DEFAULT_MODULE_ORDER],
+    hidden,
+  };
+}
+
+function normalizeDiscoverModulePreferences(seed = {}) {
+  const rawOrder = Array.isArray(seed.order) ? seed.order : [];
+  const order = sanitizeDiscoverModuleOrder(rawOrder);
+  const storedOrder = readStoredDiscoverModuleIds(rawOrder);
+  const hidden = new Set();
+  if (Array.isArray(seed.hidden)) {
+    seed.hidden.forEach((value) => {
+      const key = normalizeString(value);
+      if (DISCOVER_MODULE_CONFIG_BY_KEY.has(key)) {
+        hidden.add(key);
+      }
+    });
+    DISCOVER_DEFAULT_HIDDEN_MODULES.forEach((key) => {
+      if (!storedOrder.has(key)) {
+        hidden.add(key);
+      }
+    });
+  } else {
+    DISCOVER_DEFAULT_HIDDEN_MODULES.forEach((key) => hidden.add(key));
+  }
+  DISCOVER_LOCKED_MODULES.forEach((key) => hidden.add(key));
+  return { order, hidden };
+}
+
+function readDiscoverModulePreferences() {
+  try {
+    const raw = window.localStorage?.getItem(
+      DISCOVER_MODULE_PREFERENCES_STORAGE_KEY,
+    );
+    if (!normalizeString(raw)) {
+      return createDefaultDiscoverModulePreferences();
+    }
+    const decoded = JSON.parse(raw);
+    if (!decoded || typeof decoded !== "object" || Array.isArray(decoded)) {
+      return createDefaultDiscoverModulePreferences();
+    }
+    return normalizeDiscoverModulePreferences(decoded);
+  } catch {
+    return createDefaultDiscoverModulePreferences();
+  }
+}
+
+function currentDiscoverModulePreferences() {
+  const discover = state.pages.discover;
+  if (
+    !discover.preferences ||
+    !Array.isArray(discover.preferences.order) ||
+    !(discover.preferences.hidden instanceof Set)
+  ) {
+    discover.preferences = readDiscoverModulePreferences();
+  }
+  return discover.preferences;
+}
+
+function persistDiscoverModulePreferences() {
+  const preferences = currentDiscoverModulePreferences();
+  try {
+    window.localStorage?.setItem(
+      DISCOVER_MODULE_PREFERENCES_STORAGE_KEY,
+      JSON.stringify({
+        order: preferences.order,
+        hidden: [...preferences.hidden],
+      }),
+    );
+  } catch {
+    showToast("Discover module preferences could not be saved.");
+  }
+}
+
+function discoverVisibleModuleKeys(group = "") {
+  const preferences = currentDiscoverModulePreferences();
+  const normalizedGroup = normalizeString(group);
+  return preferences.order.filter((key) => {
+    const config = discoverModuleConfig(key);
+    if (!config || preferences.hidden.has(key) || config.locked) {
+      return false;
+    }
+    return normalizedGroup ? config.group === normalizedGroup : true;
+  });
+}
+
+function setDiscoverModuleVisibility(key, visible) {
+  const moduleKey = normalizeString(key);
+  const config = discoverModuleConfig(moduleKey);
+  if (!config) {
+    return;
+  }
+  const preferences = currentDiscoverModulePreferences();
+  if (config.locked) {
+    preferences.hidden.add(moduleKey);
+    persistDiscoverModulePreferences();
+    showToast("That Discover module is not available yet.");
+    scheduleRender();
+    return;
+  }
+  if (visible) {
+    preferences.hidden.delete(moduleKey);
+  } else {
+    preferences.hidden.add(moduleKey);
+  }
+  persistDiscoverModulePreferences();
+  showToast(
+    `${config.title.replace(/\s*\(coming soon\)\s*/iu, "")} ${visible ? "shown" : "hidden"}.`,
+  );
+  scheduleRender();
+}
+
+function moveDiscoverModule(key, direction) {
+  const moduleKey = normalizeString(key);
+  const preferences = currentDiscoverModulePreferences();
+  const index = preferences.order.indexOf(moduleKey);
+  if (index < 0) {
+    return;
+  }
+  const delta = normalizeString(direction) === "up" ? -1 : 1;
+  const nextIndex = index + delta;
+  if (nextIndex < 0 || nextIndex >= preferences.order.length) {
+    return;
+  }
+  const nextOrder = [...preferences.order];
+  [nextOrder[index], nextOrder[nextIndex]] = [
+    nextOrder[nextIndex],
+    nextOrder[index],
+  ];
+  preferences.order = nextOrder;
+  persistDiscoverModulePreferences();
+  scheduleRender();
+}
+
+function resetDiscoverModulePreferences() {
+  state.pages.discover.preferences = createDefaultDiscoverModulePreferences();
+  persistDiscoverModulePreferences();
+  showToast("Discover modules reset.");
+  scheduleRender();
+}
+
 function resetDiscoverSlice(slice) {
   slice.items = [];
   slice.nextCursor = null;
@@ -8761,6 +10093,174 @@ function setDiscoverSliceResult(slice, payload, items) {
     normalizeString(payload?.cursor || payload?.nextCursor) || null;
   slice.error = "";
   slice.loaded = true;
+}
+
+function readViewedDiscoverAchievements() {
+  try {
+    const raw = window.localStorage?.getItem(
+      DISCOVER_VIEWED_ACHIEVEMENTS_STORAGE_KEY,
+    );
+    const parsed = JSON.parse(raw || "[]");
+    return new Set(
+      (Array.isArray(parsed) ? parsed : [])
+        .map((value) => normalizeString(value))
+        .filter(Boolean),
+    );
+  } catch {
+    return new Set();
+  }
+}
+
+function persistViewedDiscoverAchievements(viewed) {
+  try {
+    window.localStorage?.setItem(
+      DISCOVER_VIEWED_ACHIEVEMENTS_STORAGE_KEY,
+      JSON.stringify([...viewed].filter(Boolean)),
+    );
+  } catch {
+    // Ignore storage errors; the badges still render without viewed-state persistence.
+  }
+}
+
+function markDiscoverAchievementsViewed(achievements = []) {
+  const viewed = readViewedDiscoverAchievements();
+  let changed = false;
+  achievements
+    .filter((achievement) => achievement.completed)
+    .forEach((achievement) => {
+      if (!viewed.has(achievement.id)) {
+        viewed.add(achievement.id);
+        changed = true;
+      }
+    });
+  if (changed) {
+    persistViewedDiscoverAchievements(viewed);
+  }
+}
+
+function countAnsweredPolicyQuestions(questions = []) {
+  return (Array.isArray(questions) ? questions : []).filter(
+    (question) => question?.selectedAnswer?.optionId,
+  ).length;
+}
+
+function achievementProfileWithQuestionFallback(
+  profile = normalizeVoterIntelProfile(),
+  answeredQuestionCount = 0,
+) {
+  const normalizedProfile = profile || normalizeVoterIntelProfile();
+  return {
+    ...normalizedProfile,
+    matrix: {
+      ...(normalizedProfile.matrix || {}),
+      answeredCount: Math.max(
+        Number(normalizedProfile.matrix?.answeredCount) || 0,
+        Number(answeredQuestionCount) || 0,
+      ),
+    },
+  };
+}
+
+function signalCountValue(value) {
+  if (Array.isArray(value)) {
+    return value.length;
+  }
+  if (Number.isFinite(Number(value))) {
+    return Math.floor(Number(value));
+  }
+  return 0;
+}
+
+function readNestedSignal(source, key) {
+  if (!source || typeof source !== "object" || Array.isArray(source)) {
+    return null;
+  }
+  if (Object.prototype.hasOwnProperty.call(source, key)) {
+    return source[key];
+  }
+  for (const value of Object.values(source)) {
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      const nested = readNestedSignal(value, key);
+      if (nested !== null && nested !== undefined) {
+        return nested;
+      }
+    }
+  }
+  return null;
+}
+
+function readSignalCount(source, keys = []) {
+  for (const key of keys) {
+    const parsed = signalCountValue(readNestedSignal(source, key));
+    if (parsed > 0) {
+      return parsed;
+    }
+  }
+  return 0;
+}
+
+function discoverActionStatsFromSignals({
+  questions = [],
+  signalBreakdown = {},
+  fallbackQuestionCount = 0,
+} = {}) {
+  const questionAnswers = countAnsweredPolicyQuestions(questions);
+  const questionsAnswered =
+    questionAnswers > 0 ? questionAnswers : Number(fallbackQuestionCount) || 0;
+  const billsAnswered = readSignalCount(signalBreakdown, [
+    "billOpinionCount",
+    "billOpinionsCount",
+    "billsAnswered",
+    "billAnswers",
+    "congressionalBillOpinions",
+  ]);
+  const officialRatings = readSignalCount(signalBreakdown, [
+    "officialRatingCount",
+    "officialRatingsCount",
+    "officialVoteOpinions",
+    "representativeRatings",
+    "ratingsGivenToOfficials",
+  ]);
+  return {
+    questionsAnswered,
+    billsAnswered,
+    officialRatings,
+    totalActions: questionsAnswered + billsAnswered + officialRatings,
+  };
+}
+
+async function loadDiscoverAchievementsSnapshot({
+  refresh = false,
+  render = true,
+} = {}) {
+  const resource = state.pages.discover.achievements;
+  if (resource.loading) {
+    return;
+  }
+  if (resource.loaded && !refresh) {
+    return;
+  }
+  resource.loading = true;
+  resource.error = "";
+  if (refresh) {
+    resource.loaded = false;
+  }
+  if (render) scheduleRender();
+  try {
+    const payload = await fetchJson("/api/voter-intel/me", { auth: true });
+    resource.snapshot = normalizeVoterIntelSnapshot(payload);
+    resource.loaded = true;
+  } catch (error) {
+    resource.snapshot = null;
+    resource.loaded = true;
+    resource.error = settingsErrorMessage(
+      error,
+      "Achievements could not be loaded.",
+    );
+  } finally {
+    resource.loading = false;
+    if (render) scheduleRender();
+  }
 }
 
 function discoverCalendarSectionConfig() {
@@ -8948,6 +10448,25 @@ function discoverCalendarItemLocationLabel(item = {}) {
   );
 }
 
+function discoverCalendarTodayParts(value = Date.now()) {
+  const timestamp = Number(value) || Date.now();
+  const date = new Date(timestamp);
+  return {
+    weekday: new Intl.DateTimeFormat(undefined, { weekday: "short" }).format(
+      date,
+    ),
+    month: new Intl.DateTimeFormat(undefined, { month: "short" })
+      .format(date)
+      .toUpperCase(),
+    day: new Intl.DateTimeFormat(undefined, { day: "numeric" }).format(date),
+    label: new Intl.DateTimeFormat(undefined, {
+      weekday: "long",
+      month: "short",
+      day: "numeric",
+    }).format(date),
+  };
+}
+
 async function loadDiscoverCalendarPreview({
   refresh = false,
   render = true,
@@ -9020,7 +10539,7 @@ async function loadDiscoverCalendarPreview({
 }
 
 function discoverRequestConfigs() {
-  return [
+  const configs = [
     {
       key: "feed",
       path: "/api/feed/for-you?limit=6",
@@ -9088,6 +10607,22 @@ function discoverRequestConfigs() {
           .slice(0, 6),
     },
     {
+      key: "issues",
+      path: "/api/issues",
+      label: "Topics could not be loaded.",
+      map: (payload) =>
+        readArrayPayload(payload, ["issues", "items"])
+          .map(normalizeIssue)
+          .filter(Boolean)
+          .slice(0, 24),
+    },
+    {
+      key: "followedIssues",
+      path: "/api/me/issues/following",
+      label: "Followed topics could not be loaded.",
+      map: (payload) => readIssueIdsPayload(payload),
+    },
+    {
       key: "campaigns",
       path: "/api/candidateDashboard/candidates",
       label: "Campaign access could not be loaded.",
@@ -9118,6 +10653,10 @@ function discoverRequestConfigs() {
           .slice(0, 6),
     },
   ];
+  if (!isDiscoverFriendActivitySharingEnabled()) {
+    return configs.filter((config) => config.key !== "friendActivity");
+  }
+  return configs;
 }
 
 async function loadDiscoverPage({ refresh = false } = {}) {
@@ -9129,6 +10668,7 @@ async function loadDiscoverPage({ refresh = false } = {}) {
     return;
   }
 
+  applyDiscoverFriendActivitySharingState();
   const configs = discoverRequestConfigs();
   const electionContextPromise = loadElectionContext({ refresh }).catch(
     () => null,
@@ -9174,6 +10714,8 @@ async function loadDiscoverPage({ refresh = false } = {}) {
     failedCount >= configs.length
       ? "Discover could not reach Polis services right now."
       : "";
+  await loadDiscoverAchievementsSnapshot({ refresh, render: false });
+  await loadDiscoverMissionPreviews({ refresh, render: false });
   discover.loaded = true;
   discover.loading = false;
   scheduleRender();
@@ -9952,7 +11494,9 @@ function normalizeCandidateEventConversion(raw = {}) {
   return {
     eventId: normalizeString(raw.eventId || raw.id) || "event",
     title: normalizeString(raw.title) || "Event",
-    startAt: normalizeCandidateCalendarTimestamp(raw.startAt ?? raw.startAtIso),
+    startAt: normalizeCandidateCalendarTimestamp(
+      raw.startAt ?? raw.startsAt ?? raw.startAtIso ?? raw.startsAtIso,
+    ),
     reach: Number(raw.reach) || 0,
     reachBreakdown: normalizeCandidateAnalyticsBreakdown(raw.reachBreakdown),
     interestAdds: Number(raw.interestAdds) || 0,
@@ -11142,9 +12686,11 @@ function normalizeCandidateDonationTransactionsPage(raw = {}) {
 
 function normalizeCandidateDashboardCalendarItem(raw = {}) {
   const startAt = normalizeCandidateCalendarTimestamp(
-    raw.startAt ?? raw.startAtIso,
+    raw.startAt ?? raw.startsAt ?? raw.startAtIso ?? raw.startsAtIso,
   );
-  const endAt = normalizeCandidateCalendarTimestamp(raw.endAt ?? raw.endAtIso);
+  const endAt = normalizeCandidateCalendarTimestamp(
+    raw.endAt ?? raw.endsAt ?? raw.endAtIso ?? raw.endsAtIso,
+  );
   return {
     calendarItemId:
       normalizeString(raw.calendarItemId || raw.id || raw.itemId) || "calendar",
@@ -11188,8 +12734,12 @@ function normalizeCandidateCalendarTimestamp(value) {
 
 function normalizeCandidateCalendarSlot(raw = {}) {
   return {
-    startAt: normalizeCandidateCalendarTimestamp(raw.startAt ?? raw.startAtIso),
-    endAt: normalizeCandidateCalendarTimestamp(raw.endAt ?? raw.endAtIso),
+    startAt: normalizeCandidateCalendarTimestamp(
+      raw.startAt ?? raw.startsAt ?? raw.startAtIso ?? raw.startsAtIso,
+    ),
+    endAt: normalizeCandidateCalendarTimestamp(
+      raw.endAt ?? raw.endsAt ?? raw.endAtIso ?? raw.endsAtIso,
+    ),
   };
 }
 
@@ -11339,7 +12889,7 @@ function createCandidateDashboardMissionsState() {
     items: [],
     templates: [],
     hiddenPresetKeys: [],
-    view: "attention",
+    view: "mine",
     filter: "attention",
     loading: false,
     templatesLoading: false,
@@ -11637,6 +13187,95 @@ function candidateMissionSortedJobs(jobs = []) {
   });
 }
 
+function candidateMissionStaffActionRank(job = {}) {
+  if (job.isClaimable) return 0;
+  if (job.isLate) return 1;
+  if (job.isDueSoon && job.isActive && !job.isBlocked && !job.isSubmitted) {
+    return 2;
+  }
+  if (job.isActive && !job.isBlocked && !job.isSubmitted) return 3;
+  if (job.isBlocked) return 4;
+  if (job.isSubmitted) return 5;
+  return 6;
+}
+
+function candidateMissionStaffActionItems(items = []) {
+  return items
+    .flatMap((mission) =>
+      candidateMissionSortedJobs(mission.jobs || [])
+        .filter((job) => !job.isQueued && !job.isClosed)
+        .map((job) => ({ mission, job })),
+    )
+    .sort((left, right) => {
+      const statusRank =
+        candidateMissionStaffActionRank(left.job) -
+        candidateMissionStaffActionRank(right.job);
+      if (statusRank) {
+        return statusRank;
+      }
+      const leftDue =
+        left.job.dueAt || candidateMissionEarliestDue(left.mission) || Number.MAX_SAFE_INTEGER;
+      const rightDue =
+        right.job.dueAt || candidateMissionEarliestDue(right.mission) || Number.MAX_SAFE_INTEGER;
+      if (leftDue !== rightDue) {
+        return leftDue - rightDue;
+      }
+      return (right.mission.attentionCount || 0) - (left.mission.attentionCount || 0);
+    });
+}
+
+function candidateMissionStaffCommandCopy(entry) {
+  if (!entry) {
+    return {
+      eyebrow: "My work",
+      title: "No active mission work",
+      copy:
+        "Assigned, claimable, and review-ready tasks will appear here when they are available.",
+    };
+  }
+  const { mission, job } = entry;
+  if (job.isClaimable) {
+    return {
+      eyebrow: "Ready to claim",
+      title: mission.title,
+      copy: `${job.title} is available for your role.`,
+    };
+  }
+  if (job.isLate) {
+    return {
+      eyebrow: "Late",
+      title: mission.title,
+      copy: `${job.title} needs action before the mission falls further behind.`,
+    };
+  }
+  if (job.isBlocked) {
+    return {
+      eyebrow: "Blocked",
+      title: mission.title,
+      copy: `${job.title} is blocked. Open the task to review context and notes.`,
+    };
+  }
+  if (job.isSubmitted) {
+    return {
+      eyebrow: "In review",
+      title: mission.title,
+      copy: `${job.title} is waiting on reviewer approval.`,
+    };
+  }
+  if (job.isDueSoon) {
+    return {
+      eyebrow: "Due soon",
+      title: mission.title,
+      copy: `${job.title} is the most time-sensitive open task.`,
+    };
+  }
+  return {
+    eyebrow: "Next task",
+    title: mission.title,
+    copy: job.title,
+  };
+}
+
 function candidateMissionWorkloads(items = []) {
   const workloads = new Map();
   const ensure = (label) => {
@@ -11826,6 +13465,7 @@ function candidateMissionCreateDraftFromDataset(target) {
     targetMode:
       normalizeString(target.getAttribute("data-target-mode")).toLowerCase() ||
       "user",
+    assignee: normalizeString(target.getAttribute("data-assignee")),
     deadlineMode:
       normalizeString(target.getAttribute("data-deadline-mode")).toLowerCase() ||
       "indefinite",
@@ -11838,9 +13478,28 @@ function candidateMissionCreateDraftFromDataset(target) {
 }
 
 function missionTemplateDefaultsFromConfig(config = {}) {
+  const target = config.target && typeof config.target === "object" ? config.target : {};
+  const targetModeRaw =
+    normalizeString(
+      config.targetMode || config.assignmentMode || config.mode || target.mode,
+    ).toLowerCase() || "user";
+  const targetMode = targetModeRaw === "direct" ? "user" : targetModeRaw;
   return {
     priority: normalizeString(config.priority).toLowerCase() || "normal",
-    targetMode: normalizeString(config.targetMode).toLowerCase() || "user",
+    targetMode: ["user", "role_claim", "role_fanout"].includes(targetMode)
+      ? targetMode
+      : "user",
+    assignee:
+      normalizeString(
+        config.assignee ||
+          config.assigneeUserId ||
+          config.leadUserId ||
+          config.roleKey ||
+          config.targetRoleKey ||
+          target.userId ||
+          target.roleKey ||
+          target.targetRoleKey,
+      ),
     deadlineMode:
       normalizeString(config.deadlineMode).toLowerCase() || "indefinite",
     dueHours: normalizeString(config.dueHours),
@@ -11855,6 +13514,7 @@ function missionTemplateDataAttributes(template = {}) {
   return [
     ["data-priority", defaults.priority],
     ["data-target-mode", defaults.targetMode],
+    ["data-assignee", defaults.assignee],
     ["data-deadline-mode", defaults.deadlineMode],
     ["data-due-hours", defaults.dueHours],
     ["data-timeout-policy", defaults.timeoutPolicy],
@@ -11865,6 +13525,20 @@ function missionTemplateDataAttributes(template = {}) {
         `${key}="${escapeHtml(value)}"`,
     )
     .join(" ");
+}
+
+function missionTemplateTargetSummary(template = {}) {
+  const defaults = missionTemplateDefaultsFromConfig(template.config);
+  if (!defaults.assignee) {
+    return "";
+  }
+  if (defaults.targetMode === "role_fanout") {
+    return `Fan out: ${humanizeLabel(defaults.assignee)}`;
+  }
+  if (defaults.targetMode === "role_claim") {
+    return `Claimable: ${humanizeLabel(defaults.assignee)}`;
+  }
+  return `Owner: ${defaults.assignee}`;
 }
 
 function missionTemplateDraftFromDataset(target) {
@@ -12085,6 +13759,9 @@ function missionTemplatePayloadFromForm(formData) {
   const scopeType = normalizeMissionScopeType(formData.get("scopeType"));
   const scopeId = normalizeString(formData.get("scopeId"));
   const title = normalizeString(formData.get("title"));
+  const assignee = normalizeString(formData.get("assignee"));
+  const targetMode =
+    normalizeString(formData.get("targetMode")).toLowerCase() || "user";
   if (!scopeType || !scopeId || !title) {
     return null;
   }
@@ -12098,8 +13775,11 @@ function missionTemplatePayloadFromForm(formData) {
     config: {
       priority:
         normalizeString(formData.get("priority")).toLowerCase() || "normal",
-      targetMode:
-        normalizeString(formData.get("targetMode")).toLowerCase() || "user",
+      targetMode,
+      ...(assignee ? { assignee } : {}),
+      ...(assignee
+        ? { target: candidateMissionTargetPayload(targetMode, assignee) }
+        : {}),
       deadlineMode:
         normalizeString(formData.get("deadlineMode")).toLowerCase() ||
         "indefinite",
@@ -13262,6 +14942,9 @@ function resetMissionDetail() {
   detail.loaded = false;
   detail.actionPendingKey = "";
   detail.actionDraft = null;
+  detail.artifactPendingKey = "";
+  detail.followUpPendingKey = "";
+  detail.followUpDrafts = {};
 }
 
 async function loadMissionsList({ refresh = false } = {}) {
@@ -13823,6 +15506,7 @@ async function createMissionFollowUpJob(formData) {
       method: "POST",
       body: payload,
     });
+    clearMissionFollowUpDraft(missionId, payload.parentJobId);
     showToast("Follow-up task added.");
     await loadMissionDetail(missionId, { refresh: true });
     const filters = readMissionListFilters();
@@ -13998,6 +15682,13 @@ function candidateVoterMapSectionForRoute(route = state.route) {
   if (section === "territories" || section === "territory-admin") {
     return "territories/admin";
   }
+  if (
+    section === "outreach" ||
+    section === "outreach-scripts" ||
+    section === "outreach-templates"
+  ) {
+    return "scripts";
+  }
   return (
     CANDIDATE_VOTER_MAP_SECTION_CONFIG.some((item) => item.key === section)
       ? section
@@ -14023,9 +15714,11 @@ function candidateVoterMapRouteCandidateId() {
 
 function candidateVoterMapPath(sectionKey = "", candidateId = "") {
   const normalizedSection = normalizeString(sectionKey).replace(/^\/+|\/+$/gu, "");
+  const routeSection =
+    normalizedSection === "scripts" ? "outreach-scripts" : normalizedSection;
   const normalizedCandidateId = normalizeString(candidateId);
-  const path = normalizedSection
-    ? `/candidate/voter-map/${encodeURI(normalizedSection)}`
+  const path = routeSection
+    ? `/candidate/voter-map/${encodeURI(routeSection)}`
     : "/candidate/voter-map";
   if (!normalizedCandidateId) {
     return path;
@@ -14164,14 +15857,237 @@ function normalizeProfile(raw = {}) {
   };
 }
 
-function normalizeNotification(raw = {}) {
+function normalizeTimestampMs(value) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && numeric > 0) {
+    return numeric;
+  }
+  const parsed = Date.parse(normalizeString(value));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function normalizeNotificationKind(raw = {}) {
+  const rawKind = normalizeString(raw.kind).toLowerCase();
+  const rawType = normalizeString(
+    raw.type || raw.notificationType || raw.notification_type,
+  ).toLowerCase();
+  const source = rawKind || rawType;
+  if (source === "post_comment" || source === "comment") {
+    return "post_comment";
+  }
+  if (source === "mention" || source === "post_mention") {
+    return "mention";
+  }
+  if (source === "follow" || source === "follower") {
+    return "follow";
+  }
+  if (source === "coalition_invite" || source === "coalition_invitation") {
+    return "coalition_invite";
+  }
+  if (
+    source === "campaign_staff_invite" ||
+    source === "candidate_staff_invite" ||
+    source === "staff_invite"
+  ) {
+    return "campaign_staff_invite";
+  }
+  if (source === "account_lifecycle" || source === "account") {
+    return "account_lifecycle";
+  }
+  if (source === "mission" || source.startsWith("mission_")) {
+    return "mission";
+  }
+  return "post_like";
+}
+
+function normalizeNotificationActor(raw = {}) {
   return {
-    notificationId:
-      normalizeString(raw.notificationId || raw.id || raw.eventId) || "",
-    title: normalizeString(raw.title || raw.headline) || "Notification",
+    userId: normalizeString(raw.userId || raw.user_id || raw.id),
+    username: normalizeString(raw.username || raw.handle),
+    displayName: normalizeString(raw.displayName || raw.display_name || raw.name),
+    avatarUrl: normalizeUrl(raw.avatarUrl || raw.avatar_url || raw.imageUrl),
+  };
+}
+
+function notificationActorLabel(actor = {}) {
+  if (actor.username) {
+    return `@${actor.username}`;
+  }
+  return actor.displayName || "Someone";
+}
+
+function notificationActorDisplayLabel(actor = {}) {
+  return actor.displayName || notificationActorLabel(actor);
+}
+
+function normalizeNotificationTarget(raw = {}) {
+  const target = raw && typeof raw === "object" ? raw : {};
+  return {
+    postId: normalizeString(target.postId || target.post_id),
+    commentId: normalizeString(target.commentId || target.comment_id),
+    conversationId: normalizeString(
+      target.conversationId || target.conversation_id,
+    ),
+    messageId: normalizeString(target.messageId || target.message_id),
+    surfaceType: normalizeString(target.surfaceType || target.surface_type),
+    profileUserId: normalizeString(
+      target.profileUserId || target.profile_user_id,
+    ),
+    candidateId: normalizeString(target.candidateId || target.candidate_id),
+    coalitionId: normalizeString(target.coalitionId || target.coalition_id),
+    missionId: normalizeString(target.missionId || target.mission_id),
+    jobId: normalizeString(target.jobId || target.job_id),
+    scopeType: normalizeString(target.scopeType || target.scope_type),
+    scopeId: normalizeString(target.scopeId || target.scope_id),
+  };
+}
+
+function normalizeNotificationPreview(raw = {}) {
+  const preview = raw && typeof raw === "object" ? raw : {};
+  return {
+    postThumbUrl: normalizeUrl(
+      preview.postThumbUrl ||
+        preview.post_thumb_url ||
+        preview.thumbUrl ||
+        preview.thumbnailUrl ||
+        preview.imageUrl,
+    ),
+    commentText: normalizeString(
+      preview.commentText || preview.comment_text || preview.comment,
+    ),
+    textSnippet: normalizeString(
+      preview.textSnippet ||
+        preview.text_snippet ||
+        preview.snippet ||
+        preview.body ||
+        preview.text,
+    ),
+  };
+}
+
+function normalizeCoalitionInviteNotification(raw = {}) {
+  const invite = raw && typeof raw === "object" ? raw : {};
+  return {
+    coalitionId: normalizeString(invite.coalitionId || invite.coalition_id),
+    coalitionName: normalizeString(
+      invite.coalitionName || invite.coalition_name || invite.name,
+    ),
+    status: normalizeString(invite.status) || "pending",
+    origin: normalizeString(invite.origin) || "admin_invite",
+    requestedAt: normalizeTimestampMs(
+      invite.requestedAt || invite.requested_at || invite.createdAt,
+    ),
+    updatedAt: normalizeTimestampMs(invite.updatedAt || invite.updated_at),
+    decisionReason: normalizeString(
+      invite.decisionReason || invite.decision_reason,
+    ),
+  };
+}
+
+function normalizeCampaignStaffInviteNotification(raw = {}) {
+  const invite = raw && typeof raw === "object" ? raw : {};
+  return {
+    candidateId: normalizeString(invite.candidateId || invite.candidate_id),
+    candidateName: normalizeString(
+      invite.candidateName || invite.campaignName || invite.name,
+    ),
+    status: normalizeString(invite.status) || "pending",
+    origin: normalizeString(invite.origin) || "campaign_invite",
+    requestedAt: normalizeTimestampMs(invite.requestedAt || invite.createdAt),
+    updatedAt: normalizeTimestampMs(invite.updatedAt),
+    decisionReason: normalizeString(
+      invite.decisionReason || invite.decision_reason,
+    ),
+  };
+}
+
+function normalizeAccountLifecycleNotification(raw = {}) {
+  const item = raw && typeof raw === "object" ? raw : {};
+  return {
+    title: normalizeString(item.title || item.headline),
+    body: normalizeString(item.body || item.message || item.description),
+    transitionType: normalizeString(item.transitionType || item.transition_type),
+    candidateId: normalizeString(item.candidateId || item.candidate_id),
+    officialId: normalizeString(item.officialId || item.official_id),
+    sourceElection:
+      item.sourceElection && typeof item.sourceElection === "object"
+        ? item.sourceElection
+        : {},
+  };
+}
+
+function normalizeNotification(raw = {}) {
+  const rawTarget =
+    raw.target && typeof raw.target === "object" ? raw.target : raw;
+  const rawPreview =
+    raw.preview && typeof raw.preview === "object" ? raw.preview : raw;
+  const kind = normalizeNotificationKind(raw);
+  const actors = Array.isArray(raw.actors)
+    ? raw.actors.map(normalizeNotificationActor).filter(
+        (actor) =>
+          actor.userId || actor.username || actor.displayName || actor.avatarUrl,
+      )
+    : [];
+  const rawCoalitionInvite =
+    raw.invite && kind === "coalition_invite"
+      ? raw.invite
+      : raw.coalitionInvite || raw.coalition_invite;
+  const rawCampaignStaffInvite =
+    raw.campaignStaffInvite ||
+    raw.campaign_staff_invite ||
+    raw.staffInvite ||
+    (raw.invite && kind === "campaign_staff_invite" ? raw.invite : null);
+  const createdAt =
+    normalizeTimestampMs(
+      raw.createdAt ||
+        raw.created_at ||
+        raw.lastEventTs ||
+        raw.timestamp ||
+        raw.updatedAt,
+    ) || null;
+  const lastEventTs =
+    normalizeTimestampMs(raw.lastEventTs || raw.last_event_ts) || createdAt || 0;
+  const children = Array.isArray(raw.children)
+    ? raw.children.map(normalizeNotification)
+    : [];
+  const notificationId =
+    normalizeString(raw.notificationId || raw.id || raw.eventId) ||
+    `${kind}:${lastEventTs || createdAt || Date.now()}:${children.length}`;
+  const target = normalizeNotificationTarget(rawTarget);
+  const coalitionInvite =
+    rawCoalitionInvite && typeof rawCoalitionInvite === "object"
+      ? normalizeCoalitionInviteNotification(rawCoalitionInvite)
+      : null;
+  const campaignStaffInvite =
+    rawCampaignStaffInvite && typeof rawCampaignStaffInvite === "object"
+      ? normalizeCampaignStaffInviteNotification(rawCampaignStaffInvite)
+      : null;
+  return {
+    notificationId,
+    kind,
+    aggregated: raw.aggregated === true || children.length > 0,
+    aggregationMode: normalizeString(raw.aggregationMode),
+    count: Math.max(1, Number(raw.count) || children.length || 1),
+    actors,
+    target,
+    preview: normalizeNotificationPreview(rawPreview),
+    invite: coalitionInvite,
+    campaignStaffInvite,
+    accountLifecycle:
+      kind === "account_lifecycle"
+        ? normalizeAccountLifecycleNotification(
+            raw.accountLifecycle || raw.account_lifecycle || raw,
+          )
+        : null,
+    children,
+    lastEventTs,
+    title: normalizeString(raw.title || raw.headline),
     body: normalizeString(raw.body || raw.message || raw.description),
-    createdAt: Number(raw.createdAt || raw.timestamp) || null,
-    readAt: Number(raw.readAt) || null,
+    createdAt,
+    readAt: normalizeTimestampMs(raw.readAt || raw.read_at),
     route: normalizeString(raw.route || raw.path),
     raw,
   };
@@ -15278,6 +17194,19 @@ function normalizePetitionItem(raw = {}) {
     publicSlug: normalizeString(source.publicSlug),
     sharePath: normalizeString(source.sharePath),
     shareUrl: normalizeString(source.shareUrl),
+    coverImageUrl: normalizeString(source.coverImageUrl),
+    coverImageUploadId: normalizeString(source.coverImageUploadId),
+    resultsShare:
+      source.resultsShare && typeof source.resultsShare === "object"
+        ? {
+            enabled: source.resultsShare.enabled === true,
+            token: normalizeString(source.resultsShare.token),
+            sharePath: normalizeString(source.resultsShare.sharePath),
+            shareUrl: normalizeString(source.resultsShare.shareUrl),
+            createdAt: normalizeString(source.resultsShare.createdAt),
+            revokedAt: normalizeString(source.resultsShare.revokedAt),
+          }
+        : null,
     publishedVersion: Number(source.publishedVersion) || 0,
     fieldSchema: fieldsSource.map((field, index) =>
       normalizePetitionField(field, index),
@@ -15368,6 +17297,16 @@ function petitionShareUrl(petition) {
   }
   const slug = normalizeString(petition?.publicSlug);
   const path = normalizeString(petition?.sharePath) || (slug ? `/petitions/${slug}` : "");
+  return path ? `${window.location.origin}${path}` : "";
+}
+
+function petitionResultsShareUrl(petition) {
+  const share = petition?.resultsShare || {};
+  const explicit = normalizeString(share.shareUrl);
+  if (explicit && explicit.startsWith("http")) {
+    return explicit;
+  }
+  const path = normalizeString(share.sharePath);
   return path ? `${window.location.origin}${path}` : "";
 }
 
@@ -15647,6 +17586,127 @@ async function downloadPetitionResponsesCsv(ownerType, ownerId, petitionId) {
   }
 }
 
+async function createPetitionResultsShare(ownerType, ownerId, petitionId) {
+  const workspace = petitionWorkspaceForOwner(ownerType);
+  workspace.actionPendingKey = "results-share";
+  scheduleRender();
+  try {
+    const payload = await fetchJson(
+      petitionOwnerDetailPath(ownerType, ownerId, petitionId, "/results-share"),
+      {
+        auth: true,
+        method: "POST",
+        body: {},
+      },
+    );
+    if (payload.petition) {
+      upsertPetitionWorkspaceItem(workspace, payload.petition);
+      workspace.selectedPetitionId = normalizeString(petitionId);
+    }
+    const shareUrl = petitionResultsShareUrl(
+      normalizePetitionItem(payload.petition || {}),
+    );
+    if (shareUrl && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(shareUrl);
+    }
+    showToast(shareUrl ? "Results link copied." : "Results link created.");
+  } catch (error) {
+    workspace.error =
+      normalizeString(error?.message) || "Results link could not be created.";
+    showToast(workspace.error);
+  } finally {
+    workspace.actionPendingKey = "";
+    scheduleRender();
+  }
+}
+
+async function revokePetitionResultsShare(ownerType, ownerId, petitionId) {
+  const workspace = petitionWorkspaceForOwner(ownerType);
+  workspace.actionPendingKey = "results-share";
+  scheduleRender();
+  try {
+    const response = await fetch(
+      `${getApiBaseUrl()}${petitionOwnerDetailPath(
+        ownerType,
+        ownerId,
+        petitionId,
+        "/results-share",
+      )}`,
+      {
+        method: "DELETE",
+        headers: buildAuthorizedHeaders(state.auth.session),
+      },
+    );
+    if (!response.ok) {
+      throw new Error("results_share_revoke_failed");
+    }
+    const payload = await response.json();
+    if (payload.petition) {
+      upsertPetitionWorkspaceItem(workspace, payload.petition);
+      workspace.selectedPetitionId = normalizeString(petitionId);
+    }
+    showToast("Results link revoked.");
+  } catch (error) {
+    workspace.error =
+      normalizeString(error?.message) || "Results link could not be revoked.";
+    showToast(workspace.error);
+  } finally {
+    workspace.actionPendingKey = "";
+    scheduleRender();
+  }
+}
+
+async function downloadPublicPetitionResultsCsv(shareToken) {
+  const page = state.pages.petitions.results;
+  const token = normalizeString(shareToken || page.shareToken);
+  if (!token || page.downloading) {
+    return;
+  }
+  page.downloading = true;
+  scheduleRender();
+  try {
+    const response = await fetch(
+      `${getApiBaseUrl()}/api/petitions/results/${encodeURIComponent(token)}/export.csv`,
+    );
+    if (!response.ok) {
+      throw new Error("csv_export_failed");
+    }
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const filename = publicPetitionCsvFilename(response, page.item);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+  } catch (error) {
+    page.error =
+      normalizeString(error?.message) || "CSV export could not be downloaded.";
+    showToast(page.error);
+  } finally {
+    page.downloading = false;
+    scheduleRender();
+  }
+}
+
+function publicPetitionCsvFilename(response, petition) {
+  const disposition = normalizeString(
+    response?.headers?.get?.("content-disposition"),
+  );
+  const match = disposition.match(/filename\*?=(?:UTF-8''|")?([^";]+)"?/i);
+  if (match?.[1]) {
+    return decodeURIComponent(match[1]).replace(/[\\/:*?"<>|]/gu, "-");
+  }
+  const base =
+    normalizeString(petition?.title)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/gu, "-")
+      .replace(/^-+|-+$/gu, "") || "petition";
+  return `${base}-responses.csv`;
+}
+
 async function loadPublicPetitionPage(publicSlug, { refresh = false } = {}) {
   const page = state.pages.petitions.public;
   const slug = decodeRouteSegment(publicSlug);
@@ -15669,10 +17729,54 @@ async function loadPublicPetitionPage(publicSlug, { refresh = false } = {}) {
       auth: false,
     });
     page.item = normalizePetitionItem(payload.petition || payload.item || payload);
+    syncPublicPetitionSocialMeta(page.item);
     page.loaded = true;
   } catch (error) {
     page.error =
       normalizeString(error?.message) || "Petition could not be loaded.";
+  } finally {
+    page.loading = false;
+    scheduleRender();
+  }
+}
+
+async function loadPublicPetitionResultsPage(shareToken, { refresh = false } = {}) {
+  const page = state.pages.petitions.results;
+  const token = decodeRouteSegment(shareToken);
+  if (!token || page.loading) {
+    return;
+  }
+  const tokenChanged = page.shareToken !== token;
+  if (tokenChanged || refresh) {
+    Object.assign(page, createPublicPetitionResultsState(), {
+      shareToken: token,
+    });
+  }
+  if (page.loaded && !refresh && !tokenChanged) {
+    scheduleRender();
+    return;
+  }
+  page.loading = true;
+  page.error = "";
+  scheduleRender();
+  try {
+    const payload = await fetchJson(
+      `/api/petitions/results/${encodeURIComponent(token)}`,
+      { auth: false },
+    );
+    page.item = normalizePetitionItem(payload.petition || payload.item || payload);
+    page.responses = readArrayPayload(payload, ["responses", "items"]).map(
+      normalizePetitionResponse,
+    );
+    page.duplicateGroups = readArrayPayload(payload, [
+      "duplicateGroups",
+      "duplicates",
+    ]).map(normalizePetitionDuplicateGroup);
+    syncPublicPetitionSocialMeta(page.item);
+    page.loaded = true;
+  } catch (error) {
+    page.error =
+      normalizeString(error?.message) || "Petition results could not be loaded.";
   } finally {
     page.loading = false;
     scheduleRender();
@@ -16040,8 +18144,10 @@ async function loadCandidateDashboardCampaigns({ refresh = false } = {}) {
     }
     campaigns.loaded = true;
   } catch (error) {
-    campaigns.error =
-      normalizeString(error?.message) || "Campaign access could not be loaded.";
+    campaigns.error = workspaceServiceErrorMessage(
+      error?.message,
+      "Campaign access could not be loaded.",
+    );
   } finally {
     campaigns.loading = false;
     scheduleRender();
@@ -20156,13 +22262,14 @@ function coalitionCtaTransportRouteEventId(route = state.route) {
     return queryValue;
   }
   const parts = coalitionRouteParts(route);
+  const keywords = parts.map(routeKeyword);
   if (
-    parts[0] === "voter-map" &&
-    parts[1] === "cta" &&
-    parts[2] === "transport" &&
+    keywords[0] === "voter-map" &&
+    keywords[1] === "cta" &&
+    keywords[2] === "transport" &&
     parts[3]
   ) {
-    return decodeRouteSegment(parts[3]);
+    return normalizeString(parts[3]);
   }
   return "";
 }
@@ -24609,6 +26716,7 @@ async function startCandidateDonationPayoutSession() {
       ),
     );
     donations.pendingPayoutSession = session;
+    donations.confirmingPayoutBankRemoval = false;
     if (session.url) {
       window.open(session.url, "_blank", "noopener,noreferrer");
       showToast("Payout bank link opened. Refresh status after completion.");
@@ -24662,6 +26770,7 @@ async function attachCandidateDonationPayoutSession() {
     donations.status = status;
     donations.financeStatus = status;
     donations.pendingPayoutSession = null;
+    donations.confirmingPayoutBankRemoval = false;
     showToast("Payout bank status updated.");
   } catch (error) {
     donations.error = settingsErrorMessage(
@@ -24671,6 +26780,53 @@ async function attachCandidateDonationPayoutSession() {
     showToast(donations.error);
   } finally {
     donations.actionPendingKey = "";
+    scheduleRender();
+  }
+}
+
+async function removeCandidateDonationPayoutBank() {
+  const candidateId = currentCandidateDashboardId();
+  const donations = state.pages.candidateDashboard.detail.donations;
+  if (!candidateId) {
+    return;
+  }
+  if (!candidateDonationHasLinkedPayoutBank(donations.status)) {
+    donations.confirmingPayoutBankRemoval = false;
+    showToast("No payout bank is linked.");
+    scheduleRender();
+    return;
+  }
+  donations.actionPendingKey = "payout-remove";
+  donations.error = "";
+  scheduleRender();
+  try {
+    const payload = await fetchJson(
+      "/api/candidate-dashboard/donations/finance/payout-bank/remove",
+      {
+        auth: true,
+        method: "POST",
+        body: { candidateId },
+      },
+    );
+    const status = normalizeCandidateDonationStatusPayload(payload, {
+      financeFlow: true,
+    });
+    donations.status = status;
+    donations.financeStatus = status;
+    donations.pendingPayoutSession = null;
+    donations.confirmingPayoutBankRemoval = false;
+    donations.loaded = true;
+    showToast("Linked payout bank removed.");
+  } catch (error) {
+    donations.error = settingsErrorMessage(
+      error,
+      "Payout bank could not be removed.",
+    );
+    showToast(donations.error);
+  } finally {
+    if (donations.actionPendingKey === "payout-remove") {
+      donations.actionPendingKey = "";
+    }
     scheduleRender();
   }
 }
@@ -27060,8 +29216,10 @@ async function loadCoalitionsList({ refresh = false } = {}) {
     ]).map(normalizeCoalitionDetail);
     list.loaded = true;
   } catch (error) {
-    list.error =
-      normalizeString(error?.message) || "Coalition access could not be loaded.";
+    list.error = workspaceServiceErrorMessage(
+      error?.message,
+      "Coalition access could not be loaded.",
+    );
   } finally {
     list.loading = false;
     scheduleRender();
@@ -27811,6 +29969,7 @@ function normalizeElectionContextPayload(payload = {}) {
       fallbackState: source.userStateId || "MT",
     }),
     defaultDestination: normalizeActiveElection(source.defaultDestination),
+    feedCard: normalizeElectionFeedCard(source.feedCard),
   };
 }
 
@@ -29603,6 +31762,8 @@ async function toggleEventInterested(eventId, currentlyInterested) {
     state.pages.events.list.items.map(applyUpdate);
   state.pages.events.manage.items =
     state.pages.events.manage.items.map(applyUpdate);
+  state.pages.discover.events.items =
+    state.pages.discover.events.items.map(applyUpdate);
   if (state.pages.events.detail.item?.eventId === normalizedEventId) {
     state.pages.events.detail.item = applyUpdate(
       state.pages.events.detail.item,
@@ -29690,9 +31851,11 @@ async function submitEventSignupForm(formData) {
     return false;
   }
   if (eventRequiresPayment(event)) {
+    detail.pendingPaymentReview = createEventPaymentReview(formData, event);
     navigateWithAuthGate(eventPaymentRoute(eventId));
     return false;
   }
+  detail.pendingPaymentReview = null;
   detail.signupSaving = true;
   detail.error = "";
   scheduleRender();
@@ -29799,6 +31962,17 @@ async function saveProfileFromForm(formData) {
         },
       ].filter((entry) => normalizeString(entry.url)),
     };
+    const avatarUploadId = normalizeString(formData.get("avatarUploadId"));
+    if (avatarUploadId) {
+      payload.avatarUploadId = avatarUploadId;
+      payload.previousAvatarUploadId = normalizeString(
+        formData.get("previousAvatarUploadId"),
+      );
+      payload.previousAvatarUrl = normalizeString(
+        formData.get("previousAvatarUrl"),
+      );
+      payload.requireAvatarHardDelete = true;
+    }
     const response = await fetchJson("/api/profile", {
       auth: true,
       method: "POST",
@@ -29806,6 +31980,7 @@ async function saveProfileFromForm(formData) {
     });
     profileState.me = normalizeProfile(response.profile || response);
     profileState.current = profileState.me;
+    profileState.avatarUpload = createProfileAvatarUploadState();
     navigateTo(redirectTo || "/profile", { replace: true });
   } catch (error) {
     profileState.error =
@@ -29850,50 +32025,237 @@ async function loadProfileConnections(kind = "followers") {
   }
 }
 
-async function loadProfileNotifications() {
+function mergeProfileNotifications(items = [], appendItems = []) {
+  const merged = [];
+  const seen = new Set();
+  [...items, ...appendItems].forEach((item) => {
+    const key =
+      normalizeString(item.notificationId) ||
+      `${normalizeString(item.kind)}:${Number(item.lastEventTs) || 0}`;
+    if (!key || seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    merged.push(item);
+  });
+  merged.sort(
+    (left, right) =>
+      Number(right.lastEventTs || right.createdAt || 0) -
+      Number(left.lastEventTs || left.createdAt || 0),
+  );
+  return merged;
+}
+
+function profileNotificationsSeenThroughTs(items = []) {
+  const latest = items.reduce((max, item) => {
+    const timestamp = Number(item.lastEventTs || item.createdAt || 0);
+    return timestamp > max ? timestamp : max;
+  }, 0);
+  return latest || Date.now();
+}
+
+async function loadProfileNotifications({ refresh = false, append = false } = {}) {
   const notifications = state.pages.profile.notifications;
-  notifications.loading = true;
+  if (append) {
+    if (notifications.loadingMore || !notifications.nextCursor) {
+      return;
+    }
+    notifications.loadingMore = true;
+  } else {
+    notifications.loading = true;
+    if (refresh) {
+      notifications.loaded = false;
+    }
+  }
   notifications.error = "";
   scheduleRender();
 
   try {
+    const cursor = append ? notifications.nextCursor : null;
+    const query = new URLSearchParams({ limit: "30" });
+    if (cursor) {
+      query.set("cursor", cursor);
+    }
     const [itemsPayload, unreadPayload] = await Promise.all([
-      fetchJson("/api/me/notifications?limit=30", { auth: true }),
+      fetchJson(`/api/me/notifications?${query.toString()}`, { auth: true }),
       fetchJson("/api/me/notifications/unread-count", { auth: true }).catch(
         () => ({
           unreadCount: 0,
         }),
       ),
     ]);
-    notifications.items = (
+    const nextItems = (
       itemsPayload.items ||
       itemsPayload.notifications ||
       []
     ).map(normalizeNotification);
+    notifications.items = append
+      ? mergeProfileNotifications(notifications.items, nextItems)
+      : mergeProfileNotifications(nextItems);
     notifications.unreadCount =
       Number(unreadPayload.unreadCount || unreadPayload.count) || 0;
+    notifications.lastSeenAt =
+      normalizeTimestampMs(itemsPayload.lastSeenAt) ||
+      normalizeTimestampMs(itemsPayload.last_seen_at) ||
+      notifications.lastSeenAt ||
+      0;
+    notifications.seenThroughTs =
+      normalizeTimestampMs(itemsPayload.seenThroughTs) ||
+      normalizeTimestampMs(itemsPayload.seen_through_ts) ||
+      notifications.seenThroughTs ||
+      0;
+    notifications.nextCursor =
+      normalizeString(
+        itemsPayload.cursor || itemsPayload.nextCursor || itemsPayload.next_cursor,
+      ) || null;
     notifications.loaded = true;
   } catch (error) {
     notifications.error =
       normalizeString(error?.message) || "Notifications could not be loaded.";
   } finally {
     notifications.loading = false;
+    notifications.loadingMore = false;
     scheduleRender();
   }
 }
 
 async function markNotificationsRead() {
-  await fetchJson("/api/me/notifications/read", {
-    auth: true,
-    method: "POST",
-    body: {},
-  });
-  state.pages.profile.notifications.items =
-    state.pages.profile.notifications.items.map((item) => ({
+  const notifications = state.pages.profile.notifications;
+  notifications.actionPendingKey = "mark-read";
+  notifications.error = "";
+  scheduleRender();
+  const seenThroughTs = profileNotificationsSeenThroughTs(notifications.items);
+  try {
+    await fetchJson("/api/me/notifications/read", {
+      auth: true,
+      method: "POST",
+      body: { seenThroughTs },
+    });
+    notifications.items = notifications.items.map((item) => ({
       ...item,
-      readAt: item.readAt || Date.now(),
+      readAt: item.readAt || seenThroughTs,
     }));
-  state.pages.profile.notifications.unreadCount = 0;
+    notifications.unreadCount = 0;
+    notifications.lastSeenAt = Math.max(
+      Number(notifications.lastSeenAt) || 0,
+      seenThroughTs,
+    );
+    notifications.seenThroughTs = seenThroughTs;
+  } finally {
+    notifications.actionPendingKey = "";
+    scheduleRender();
+  }
+}
+
+function updateProfileNotificationInviteStatus(item, action) {
+  const nextStatus = action === "accept" ? "approved" : "rejected";
+  if (item.kind === "coalition_invite" && item.invite) {
+    return {
+      ...item,
+      invite: {
+        ...item.invite,
+        status: nextStatus,
+        updatedAt: Date.now(),
+      },
+    };
+  }
+  if (item.kind === "campaign_staff_invite" && item.campaignStaffInvite) {
+    return {
+      ...item,
+      campaignStaffInvite: {
+        ...item.campaignStaffInvite,
+        status: nextStatus,
+        updatedAt: Date.now(),
+      },
+    };
+  }
+  return item;
+}
+
+async function respondProfileNotificationInvite(notificationId, action) {
+  const notifications = state.pages.profile.notifications;
+  const normalizedId = normalizeString(notificationId);
+  const normalizedAction = normalizeString(action).toLowerCase();
+  const item = notifications.items.find(
+    (entry) => normalizeString(entry.notificationId) === normalizedId,
+  );
+  if (!item || !["accept", "decline"].includes(normalizedAction)) {
+    return;
+  }
+  const coalitionId = normalizeString(item.invite?.coalitionId);
+  const candidateId = normalizeString(item.campaignStaffInvite?.candidateId);
+  notifications.actionPendingKey = `invite:${normalizedId}:${normalizedAction}`;
+  notifications.error = "";
+  notifications.notice = "";
+  scheduleRender();
+  try {
+    if (item.kind === "coalition_invite" && coalitionId) {
+      await fetchJson(
+        `/api/coalitions/${encodeURIComponent(coalitionId)}/invitations/respond`,
+        {
+          auth: true,
+          method: "POST",
+          body: { action: normalizedAction },
+        },
+      );
+    } else if (item.kind === "campaign_staff_invite" && candidateId) {
+      await fetchJson(
+        `/api/candidateDashboard/${encodeURIComponent(candidateId)}/staff/invitations/respond`,
+        {
+          auth: true,
+          method: "POST",
+          body: { action: normalizedAction },
+        },
+      );
+    } else {
+      throw new Error("Invitation target missing.");
+    }
+    notifications.items = notifications.items.map((entry) =>
+      normalizeString(entry.notificationId) === normalizedId
+        ? updateProfileNotificationInviteStatus(entry, normalizedAction)
+        : entry,
+    );
+    notifications.notice =
+      normalizedAction === "accept"
+        ? "Invitation accepted."
+        : "Invitation declined.";
+    loadProfileNotifications({ refresh: true }).catch(() => {});
+  } catch (error) {
+    notifications.error =
+      normalizeString(error?.message) || "Invitation response failed.";
+  } finally {
+    notifications.actionPendingKey = "";
+    scheduleRender();
+  }
+}
+
+function openProfileNotificationTarget(notificationId) {
+  const normalizedId = normalizeString(notificationId);
+  const item = state.pages.profile.notifications.items.find(
+    (entry) => normalizeString(entry.notificationId) === normalizedId,
+  );
+  const route = item ? profileNotificationTargetRoute(item) : "";
+  if (route) {
+    navigateWithAuthGate(route);
+    return;
+  }
+  showToast("Notification target is unavailable.");
+}
+
+function toggleProfileNotificationAggregate(notificationId) {
+  const notifications = state.pages.profile.notifications;
+  const normalizedId = normalizeString(notificationId);
+  const item = notifications.items.find(
+    (entry) => normalizeString(entry.notificationId) === normalizedId,
+  );
+  if (!item || !profileNotificationAggregateChildren(item).length) {
+    openProfileNotificationTarget(notificationId);
+    return;
+  }
+  notifications.expandedAggregateId =
+    normalizeString(notifications.expandedAggregateId) === normalizedId
+      ? ""
+      : normalizedId;
   scheduleRender();
 }
 
@@ -30264,8 +32626,10 @@ async function ensureMessagingInitialized({ force = false } = {}) {
     messaging.initialized = true;
     await ensureMessagingDeviceRegistered();
   } catch (error) {
-    messaging.error =
-      normalizeString(error?.message) || "Messaging could not be initialized.";
+    messaging.error = messagingServiceErrorMessage(
+      error?.message,
+      "Messaging could not be initialized.",
+    );
   } finally {
     messaging.loading = false;
     scheduleRender();
@@ -30866,6 +33230,7 @@ async function loadMessagingConversation(
     conversation.mention = createMessagingComposerMentionState();
     conversation.missionCommand = createMessagingMissionCommandState();
     conversation.missionDraft = createMessagingMissionDraftState();
+    conversation.openMessageActionId = "";
   }
   conversation.loading = true;
   conversation.error = "";
@@ -30912,8 +33277,10 @@ async function loadMessagingSettings() {
       payload.settings || payload,
     );
   } catch (error) {
-    messaging.error =
-      normalizeString(error?.message) || "Messaging settings unavailable.";
+    messaging.error = messagingServiceErrorMessage(
+      error?.message,
+      "Messaging settings unavailable.",
+    );
   } finally {
     scheduleRender();
   }
@@ -31067,8 +33434,59 @@ async function saveMessagingAccountSettings(formData) {
     );
     showToast("Messaging settings updated.");
   } catch (error) {
-    messaging.error =
-      normalizeString(error?.message) || "Messaging settings unavailable.";
+    messaging.error = messagingServiceErrorMessage(
+      error?.message,
+      "Messaging settings unavailable.",
+    );
+    showToast(messaging.error);
+  } finally {
+    messaging.settingsSaving = false;
+    scheduleRender();
+  }
+}
+
+async function saveMessagingQuietHoursSettings(formData) {
+  const messaging = state.pages.messaging;
+  const current = normalizeMessagingAccountSettings(messaging.settings);
+  const payload = {
+    dmPrivacy: current.dmPrivacy,
+    dmRequestsEnabled: current.dmRequestsEnabled,
+    presenceEnabled: current.presenceEnabled,
+    presenceVisibility: current.presenceVisibility,
+    presenceStatus: current.presenceStatus,
+    readReceiptsEnabled: current.readReceiptScope !== "none",
+    readReceiptScope: current.readReceiptScope,
+    typingIndicatorsEnabled: current.typingIndicatorsEnabled,
+    quietHoursEnabled: formCheckboxValue(formData, "quietHoursEnabled", false),
+    quietHoursStartMinutes: timeInputToMinutes(
+      formData.get("quietHoursStart"),
+      current.quietHoursStartMinutes,
+    ),
+    quietHoursEndMinutes: timeInputToMinutes(
+      formData.get("quietHoursEnd"),
+      current.quietHoursEndMinutes,
+    ),
+    dailyDigestEnabled: formCheckboxValue(formData, "dailyDigestEnabled", false),
+  };
+
+  messaging.settingsSaving = true;
+  messaging.error = "";
+  scheduleRender();
+  try {
+    const result = await fetchJson("/api/messaging/settings", {
+      auth: true,
+      method: "PUT",
+      body: payload,
+    });
+    messaging.settings = normalizeMessagingAccountSettings(
+      result.settings || result,
+    );
+    showToast("Message quiet hours saved.");
+  } catch (error) {
+    messaging.error = messagingServiceErrorMessage(
+      error?.message,
+      "Message quiet hours unavailable.",
+    );
     showToast(messaging.error);
   } finally {
     messaging.settingsSaving = false;
@@ -33400,71 +35818,108 @@ async function acceptMessagingRequest(requestId) {
   if (!normalizedRequestId) {
     return;
   }
-  const payload = await fetchJson(
-    `/api/messaging/requests/${encodeURIComponent(normalizedRequestId)}/accept`,
-    {
-      auth: true,
-      method: "POST",
-      body: {},
-    },
-  );
-  await Promise.all([
-    loadMessagingRequests(),
-    loadMessagingInbox({ refresh: true }),
-    loadMessagingServers(),
-  ]);
-  const conversationId = normalizeString(
-    payload.conversation?.conversationId || payload.channelId,
-  );
-  const scopeType = normalizeString(
-    payload.scopeType || payload.destination?.scopeType,
-  );
-  const scopeId = normalizeString(
-    payload.scopeId || payload.destination?.scopeId,
-  );
-  const channelId = normalizeString(
-    payload.channelId || payload.destination?.channelId,
-  );
-  if (conversationId && scopeType && scopeId) {
-    navigateTo(
-      `/messages/servers/${encodeURIComponent(scopeType)}/${encodeURIComponent(scopeId)}/rooms/${encodeURIComponent(conversationId)}`,
-    );
+  const requests = state.pages.messaging.requests;
+  const pendingKey = `accept:${normalizedRequestId}`;
+  if (requests.actionPendingKey) {
     return;
   }
-  if (conversationId) {
-    navigateTo(`/messages/conversations/${encodeURIComponent(conversationId)}`);
-    return;
-  }
-  if (scopeType && scopeId && channelId) {
-    navigateTo(
-      `/messages/servers/${encodeURIComponent(scopeType)}/${encodeURIComponent(scopeId)}/rooms/${encodeURIComponent(channelId)}`,
+  requests.actionPendingKey = pendingKey;
+  requests.error = "";
+  scheduleRender();
+  try {
+    const payload = await fetchJson(
+      `/api/messaging/requests/${encodeURIComponent(normalizedRequestId)}/accept`,
+      {
+        auth: true,
+        method: "POST",
+        body: {},
+      },
     );
-    return;
-  }
-  if (scopeType && scopeId) {
-    navigateTo(
-      `/messages/servers/${encodeURIComponent(scopeType)}/${encodeURIComponent(scopeId)}`,
+    await Promise.all([
+      loadMessagingRequests(),
+      loadMessagingInbox({ refresh: true }),
+      loadMessagingServers(),
+    ]);
+    const conversationId = normalizeString(
+      payload.conversation?.conversationId || payload.channelId,
     );
+    const scopeType = normalizeString(
+      payload.scopeType || payload.destination?.scopeType,
+    );
+    const scopeId = normalizeString(
+      payload.scopeId || payload.destination?.scopeId,
+    );
+    const channelId = normalizeString(
+      payload.channelId || payload.destination?.channelId,
+    );
+    if (conversationId && scopeType && scopeId) {
+      navigateTo(
+        `/messages/servers/${encodeURIComponent(scopeType)}/${encodeURIComponent(scopeId)}/rooms/${encodeURIComponent(conversationId)}`,
+      );
+      return;
+    }
+    if (conversationId) {
+      navigateTo(`/messages/conversations/${encodeURIComponent(conversationId)}`);
+      return;
+    }
+    if (scopeType && scopeId && channelId) {
+      navigateTo(
+        `/messages/servers/${encodeURIComponent(scopeType)}/${encodeURIComponent(scopeId)}/rooms/${encodeURIComponent(channelId)}`,
+      );
+      return;
+    }
+    if (scopeType && scopeId) {
+      navigateTo(
+        `/messages/servers/${encodeURIComponent(scopeType)}/${encodeURIComponent(scopeId)}`,
+      );
+    }
+  } catch (error) {
+    requests.error = normalizeString(error?.message) || "Request accept failed.";
+    throw error;
+  } finally {
+    if (requests.actionPendingKey === pendingKey) {
+      requests.actionPendingKey = "";
+    }
+    scheduleRender();
   }
 }
 
-async function refuseMessagingRequest(requestId) {
+async function refuseMessagingRequest(requestId, { blockUser = false } = {}) {
   const normalizedRequestId = normalizeString(requestId);
   if (!normalizedRequestId) {
     return;
   }
-  await fetchJson(
-    `/api/messaging/requests/${encodeURIComponent(normalizedRequestId)}/refuse`,
-    {
-      auth: true,
-      method: "POST",
-      body: {
-        blockUser: false,
+  const requests = state.pages.messaging.requests;
+  const pendingKey = `${blockUser ? "block" : "refuse"}:${normalizedRequestId}`;
+  if (requests.actionPendingKey) {
+    return;
+  }
+  requests.actionPendingKey = pendingKey;
+  requests.error = "";
+  scheduleRender();
+  try {
+    await fetchJson(
+      `/api/messaging/requests/${encodeURIComponent(normalizedRequestId)}/refuse`,
+      {
+        auth: true,
+        method: "POST",
+        body: {
+          blockUser: blockUser === true,
+        },
       },
-    },
-  );
-  await loadMessagingRequests();
-  showToast("Request dismissed.");
+    );
+    await loadMessagingRequests();
+    showToast(blockUser ? "Request refused and user blocked." : "Request dismissed.");
+  } catch (error) {
+    requests.error =
+      normalizeString(error?.message) || "Request could not be refused.";
+    throw error;
+  } finally {
+    if (requests.actionPendingKey === pendingKey) {
+      requests.actionPendingKey = "";
+    }
+    scheduleRender();
+  }
 }
 
 async function updateMessagingServerNotificationLevel(
@@ -36035,6 +38490,24 @@ function focusMessagingComposerSoon() {
   }, 0);
 }
 
+function toggleMessagingMessageActions(messageId) {
+  const normalizedMessageId = normalizeString(messageId);
+  const conversation = state.pages.messaging.conversation;
+  const message = conversation.messages.find(
+    (item) => item.messageId === normalizedMessageId,
+  );
+  if (!message || message.isDeleted) {
+    conversation.openMessageActionId = "";
+  } else {
+    conversation.openMessageActionId =
+      conversation.openMessageActionId === normalizedMessageId
+        ? ""
+        : normalizedMessageId;
+  }
+  conversation.error = "";
+  scheduleRender();
+}
+
 function startEditingMessagingMessage(messageId) {
   const normalizedMessageId = normalizeString(messageId);
   const conversation = state.pages.messaging.conversation;
@@ -36052,6 +38525,7 @@ function startEditingMessagingMessage(messageId) {
   conversation.editingOriginalText = normalizeString(message.text);
   conversation.pendingReply = null;
   conversation.draft = normalizeString(message.text);
+  conversation.openMessageActionId = "";
   conversation.mention = createMessagingComposerMentionState();
   conversation.mention.appliedMentions =
     messagingAppliedMentionsFromMessage(message);
@@ -36089,6 +38563,7 @@ function startReplyingToMessagingMessage(messageId) {
   conversation.editingMessageId = "";
   conversation.editingOriginalText = "";
   conversation.pendingReply = messagingReplyPreviewFromMessage(message);
+  conversation.openMessageActionId = "";
   conversation.mention = createMessagingComposerMentionState();
   conversation.missionCommand = createMessagingMissionCommandState();
   conversation.missionDraft = createMessagingMissionDraftState();
@@ -36155,6 +38630,7 @@ function openMessagingMessageReport(messageId) {
     return;
   }
   conversation.reportingMessageId = message.messageId;
+  conversation.openMessageActionId = "";
   conversation.error = "";
   scheduleRender();
   window.setTimeout(() => {
@@ -36321,6 +38797,7 @@ async function deleteMessagingMessage(conversationId, messageId) {
   }
   const pendingKey = `delete:${normalizedMessageId}`;
   conversation.messageActionPendingKey = pendingKey;
+  conversation.openMessageActionId = "";
   conversation.error = "";
   scheduleRender();
   try {
@@ -36449,6 +38926,7 @@ async function toggleMessagingMessageReaction({
   }
   const nextReacted = reactedByMe !== true;
   conversation.reactionPendingKey = pendingKey;
+  conversation.openMessageActionId = "";
   conversation.error = "";
   updateMessagingMessage(normalizedMessageId, (message) =>
     applyMessagingReactionState(message, normalizedEmoji, nextReacted),
@@ -36792,6 +39270,12 @@ function defaultNotificationPreferences() {
       endMinutes: 7 * 60,
       timezone: "UTC",
     },
+    notificationQuietHours: {
+      enabled: false,
+      startMinutes: 22 * 60,
+      endMinutes: 7 * 60,
+      timezone: "UTC",
+    },
     updatedAt: "",
   };
 }
@@ -36900,7 +39384,10 @@ function getSettingsSection(route = getCurrentRoute()) {
     return "my-districts";
   }
   if (firstSegment === "preferences" && secondSegment === "home-location") {
-    return "voter-profile";
+    return "home-location";
+  }
+  if (firstSegment === "voter-profile" && secondSegment === "home-location") {
+    return "home-location";
   }
   return firstSegment || "overview";
 }
@@ -37613,6 +40100,10 @@ function normalizeNotificationPreferences(raw = {}) {
   const quiet = source.quietHours && typeof source.quietHours === "object"
     ? source.quietHours
     : {};
+  const notificationQuiet =
+    source.notificationQuietHours && typeof source.notificationQuietHours === "object"
+      ? source.notificationQuietHours
+      : {};
   return {
     categories,
     quietHours: {
@@ -37626,6 +40117,18 @@ function normalizeNotificationPreferences(raw = {}) {
         defaults.quietHours.endMinutes,
       ),
       timezone: normalizeString(quiet.timezone) || "UTC",
+    },
+    notificationQuietHours: {
+      enabled: notificationQuiet.enabled === true,
+      startMinutes: normalizeMinuteValue(
+        notificationQuiet.startMinutes,
+        defaults.notificationQuietHours.startMinutes,
+      ),
+      endMinutes: normalizeMinuteValue(
+        notificationQuiet.endMinutes,
+        defaults.notificationQuietHours.endMinutes,
+      ),
+      timezone: normalizeString(notificationQuiet.timezone) || "UTC",
     },
     updatedAt: normalizeString(source.updatedAt),
   };
@@ -37977,6 +40480,46 @@ function normalizeMyDistricts(raw = {}) {
   };
 }
 
+function normalizeSettingsCongressionalDistrictOption(raw = {}) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  const stateId = normalizeString(source.stateId || source.state).toUpperCase();
+  const districtId = normalizeString(
+    source.congressionalDistrictId || source.districtId || source.id,
+  ).toUpperCase();
+  return {
+    stateId,
+    congressionalDistrictId: districtId,
+    congressionalDistrictName: normalizeString(
+      source.congressionalDistrictName || source.districtName || source.name,
+    ),
+    congressionalDistrictCode: Number(source.congressionalDistrictCode) || null,
+  };
+}
+
+function settingsStateNameForId(stateId) {
+  const normalized = normalizeString(stateId).toUpperCase();
+  if (!normalized) {
+    return "";
+  }
+  return (
+    SETTINGS_US_STATES.find(([code]) => code === normalized)?.[1] ||
+    electionStateNameForId(normalized) ||
+    normalized
+  );
+}
+
+function settingsManualDistrictLabel(district) {
+  const districtId = normalizeString(district?.congressionalDistrictId);
+  const name = normalizeString(district?.congressionalDistrictName);
+  if (!name) {
+    return districtId || "District";
+  }
+  if (!districtId || name.includes(districtId)) {
+    return name;
+  }
+  return `${districtId} - ${name}`;
+}
+
 function normalizeNumberMap(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return {};
@@ -38003,6 +40546,62 @@ function normalizeVoterIntelMatrix(raw = {}) {
   };
 }
 
+function normalizeVoterIntelOfficialMatrixPoint(raw = {}) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  const official =
+    source.official && typeof source.official === "object" ? source.official : {};
+  const rawMatrix =
+    source.matrix && typeof source.matrix === "object" && !Array.isArray(source.matrix)
+      ? source.matrix
+      : source;
+  const hasCoordinates =
+    rawMatrix.x !== undefined ||
+    rawMatrix.y !== undefined ||
+    source.x !== undefined ||
+    source.y !== undefined;
+  const matrix = normalizeVoterIntelMatrix({
+    ...rawMatrix,
+    available: rawMatrix.available === true || hasCoordinates,
+  });
+  const officialId = normalizeString(
+    source.officialId ||
+      source.id ||
+      source.entityId ||
+      official.officialId ||
+      official.id,
+  );
+  if (
+    !officialId ||
+    !matrix.available ||
+    (Math.abs(matrix.x) <= 0.0001 && Math.abs(matrix.y) <= 0.0001)
+  ) {
+    return null;
+  }
+  return {
+    officialId,
+    matrix,
+    displayName:
+      normalizeString(
+        source.displayName ||
+          source.name ||
+          source.title ||
+          official.displayName ||
+          official.name ||
+          official.title,
+      ) || "Official",
+    avatarUrl: normalizeUrl(
+      source.avatarUrl ||
+        source.photoUrl ||
+        source.profileImageUrl ||
+        source.imageUrl ||
+        official.avatarUrl ||
+        official.photoUrl ||
+        official.profileImageUrl ||
+        official.imageUrl,
+    ),
+  };
+}
+
 function normalizeVoterIntelProfile(raw = {}) {
   const ballotGame =
     raw.ballotGame && typeof raw.ballotGame === "object"
@@ -38012,13 +40611,27 @@ function normalizeVoterIntelProfile(raw = {}) {
     raw.questSummary && typeof raw.questSummary === "object"
       ? raw.questSummary
       : {};
+  const signalBreakdown =
+    raw.signalBreakdown &&
+    typeof raw.signalBreakdown === "object" &&
+    !Array.isArray(raw.signalBreakdown)
+      ? raw.signalBreakdown
+      : {};
   return {
     matrix: normalizeVoterIntelMatrix(raw.matrix || {}),
     scoreSummary: normalizeNumberMap(raw.scoreSummary),
     coverage: raw.coverage && typeof raw.coverage === "object" ? raw.coverage : {},
     topIssueIds: normalizeStringList(raw.topIssueIds),
     explanations: normalizeStringList(raw.explanations),
+    followedOfficials: readArrayPayload(raw, [
+      "followedOfficials",
+      "followedOfficialMatrix",
+      "followedOfficialMatrixPoints",
+    ])
+      .map(normalizeVoterIntelOfficialMatrixPoint)
+      .filter(Boolean),
     confidenceSummary: normalizeNumberMap(raw.confidenceSummary),
+    signalBreakdown,
     explicitIssueScores: normalizeNumberMap(raw.explicitIssueScores),
     passiveIssueScores: normalizeNumberMap(raw.passiveIssueScores),
     questSummary: {
@@ -38295,6 +40908,91 @@ function settingsErrorMessage(error, fallback) {
     return fallback;
   }
   return normalizeString(error?.message || error?.payload?.message) || fallback;
+}
+
+function isLocalBackendConfigError(value) {
+  const normalized = normalizeString(value).toLowerCase();
+  return (
+    normalized === "video_backend_base_url_missing" ||
+    normalized.includes("backend api base url") ||
+    normalized.includes("api base url")
+  );
+}
+
+function workspaceServiceErrorMessage(
+  value,
+  fallback = "Polis services could not be reached.",
+) {
+  const raw = normalizeString(value);
+  const normalized = raw.toLowerCase();
+  if (!normalized) {
+    return fallback;
+  }
+  if (normalized === "video_backend_base_url_missing") {
+    return "This local website is missing its backend API base URL.";
+  }
+  if (
+    normalized === "request_failed" ||
+    normalized === "failed to fetch" ||
+    normalized.includes("networkerror")
+  ) {
+    return "Polis services could not be reached from this browser session.";
+  }
+  if (/^[a-z0-9_]+$/u.test(normalized)) {
+    return fallback;
+  }
+  return raw;
+}
+
+function renderWorkspaceServiceAlert(errors = [], options = {}) {
+  const messages = Array.from(
+    new Set(
+      errors
+        .map((error) => workspaceServiceErrorMessage(error))
+        .map(normalizeString)
+        .filter(Boolean),
+    ),
+  );
+  if (!messages.length) {
+    return "";
+  }
+  const localConfigMissing = errors
+    .concat(messages)
+    .some(isLocalBackendConfigError);
+  const title = localConfigMissing
+    ? "Workspace services are not connected locally"
+    : normalizeString(options.title) || "Workspace services need attention";
+  const body = localConfigMissing
+    ? normalizeString(options.localBody) ||
+      "Campaign, coalition, and mission workspaces can still render, but live access cannot sync until this local website is started with backend API configuration."
+    : normalizeString(options.body) || messages[0];
+  const details = localConfigMissing ? messages : messages.slice(1);
+  const secondaryRoute = normalizeString(options.secondaryRoute);
+  const secondaryLabel = normalizeString(options.secondaryLabel);
+  return `<section class="shared-workspace-service-alert" aria-live="polite">
+    <span class="shared-workspace-service-alert__icon" aria-hidden="true">${renderIcon(localConfigMissing ? "settings" : "bell")}</span>
+    <div class="shared-workspace-service-alert__body">
+      <span>${escapeHtml(normalizeString(options.eyebrow) || "Service status")}</span>
+      <h2>${escapeHtml(title)}</h2>
+      <p>${escapeHtml(body)}</p>
+      ${
+        details.length
+          ? `<div class="shared-workspace-service-alert__details">${details
+              .map((message) => `<small>${escapeHtml(message)}</small>`)
+              .join("")}</div>`
+          : ""
+      }
+    </div>
+    <div class="shared-workspace-service-alert__actions">
+      <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="refresh-current-route">Refresh</button>
+      ${
+        secondaryRoute && secondaryLabel
+          ? `<button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(secondaryRoute)}">${escapeHtml(secondaryLabel)}</button>`
+          : ""
+      }
+      <button class="shared-feed-chip" type="button" data-action="open-app-shell">Open app</button>
+    </div>
+  </section>`;
 }
 
 function normalizeCandidateAccessApplication(raw = {}) {
@@ -38696,14 +41394,14 @@ async function loadSettingsPage({ refresh = false } = {}) {
   if (["overview", "publishing-social", "audience-groups"].includes(section)) {
     tasks.push(loadPublishingDefaults({ refresh }));
   }
-  if (["overview", "publishing-social"].includes(section)) {
-    tasks.push(loadCrosspostDefaults({ refresh }));
-  }
   if (["overview", "publishing-social", "audience-groups"].includes(section)) {
     tasks.push(loadSettingsAudienceGroups({ refresh }));
   }
-  if (["overview", "notifications"].includes(section)) {
+  if (["overview", "notifications", "quiet-hours"].includes(section)) {
     tasks.push(loadNotificationPreferences({ refresh }));
+  }
+  if (section === "quiet-hours") {
+    tasks.push(loadMessagingSettings());
   }
   if (["overview", "account-username"].includes(section)) {
     tasks.push(loadSettingsMyProfile({ refresh }));
@@ -38715,11 +41413,14 @@ async function loadSettingsPage({ refresh = false } = {}) {
   if (section === "candidate-access") {
     tasks.push(loadSettingsCandidateAccessApplication({ refresh }));
   }
-  if (section === "voter-profile" || section === "my-districts") {
+  if (["voter-profile", "home-location", "my-districts"].includes(section)) {
     tasks.push(loadSettingsMyProfile({ refresh }));
     tasks.push(loadSettingsMyDistricts({ refresh }));
-    if (section === "voter-profile" && getSettingsSubpath() === "home-location/request") {
+    if (section === "home-location" && getSettingsSubpath() === "home-location/request") {
       tasks.push(loadSettingsAddressChangeRequests({ refresh }));
+    }
+    if (section === "home-location") {
+      tasks.push(loadSettingsManualDistrictForCurrentProfile({ refresh }));
     }
   }
   if (section === "location") {
@@ -38728,8 +41429,11 @@ async function loadSettingsPage({ refresh = false } = {}) {
   }
   if (section === "voter-intelligence") {
     tasks.push(loadSettingsMyProfile({ refresh }));
-    tasks.push(loadSettingsMyDistricts({ refresh }));
-    tasks.push(loadVoterIntelSnapshot({ refresh }));
+    tasks.push(
+      loadSettingsMyDistricts({ refresh }).then(() =>
+        loadVoterIntelSnapshot({ refresh }),
+      ),
+    );
     tasks.push(loadVoterIntelBallotGuide({ refresh, silent: true }));
     tasks.push(loadVoterIntelPolicyQuestions({ refresh }));
   }
@@ -38921,7 +41625,7 @@ async function completeTopicsSelection({ skipped = false } = {}) {
     });
     topics.onboardingStatus = skipped ? "skipped" : "completed";
     showToast(skipped ? "Topics skipped." : "Topics saved.");
-    navigateTo(options.onboardingMode ? "/feed" : "/settings/preferences");
+    navigateTo(options.onboardingMode ? "/bootstrap" : "/settings/preferences");
   } catch (error) {
     topics.error = normalizeString(error?.message) || "Topics could not be saved.";
   } finally {
@@ -39325,9 +42029,29 @@ async function loadAchievementsPage({ refresh = false } = {}) {
   scheduleRender();
 
   try {
-    const payload = await fetchJson("/api/voter-intel/me", { auth: true });
+    const [payload, policyQuestionPayload] = await Promise.all([
+      fetchJson("/api/voter-intel/me", { auth: true }),
+      fetchJson("/api/policy-questions?limit=20", { auth: true }).catch(
+        () => null,
+      ),
+    ]);
     resource.snapshot = normalizeVoterIntelSnapshot(payload);
-    const achievements = buildDiscoverAchievements(resource.snapshot.profile);
+    const policyQuestions = policyQuestionPayload
+      ? readArrayPayload(policyQuestionPayload, ["items", "questions"])
+          .map(normalizePolicyQuestion)
+          .filter((question) => question.questionId)
+      : [];
+    resource.answeredQuestionCount = Math.max(
+      countAnsweredPolicyQuestions(policyQuestions),
+      countAnsweredPolicyQuestions(state.pages.discover.policyQuestions.items),
+    );
+    const achievements = buildDiscoverAchievements(
+      achievementProfileWithQuestionFallback(
+        resource.snapshot.profile,
+        resource.answeredQuestionCount,
+      ),
+    );
+    markDiscoverAchievementsViewed(achievements);
     if (
       !achievements.some(
         (achievement) => achievement.id === resource.selectedId,
@@ -39341,6 +42065,7 @@ async function loadAchievementsPage({ refresh = false } = {}) {
     resource.loaded = true;
   } catch (error) {
     resource.snapshot = null;
+    resource.answeredQuestionCount = 0;
     resource.loaded = false;
     resource.error = settingsErrorMessage(
       error,
@@ -39477,15 +42202,11 @@ function getAdminRoutePath(route = getCurrentRoute()) {
 }
 
 function getAdminPathSegments(route = getCurrentRoute()) {
-  return getAdminRoutePath(route)
-    .split("/")
-    .map(decodeSettingsPathSegment)
-    .map((segment) => normalizeString(segment).toLowerCase())
-    .filter(Boolean);
+  return splitDecodedRoutePath(getAdminRoutePath(route));
 }
 
 function getAdminSection(route = getCurrentRoute()) {
-  const [section] = getAdminPathSegments(route);
+  const section = routeKeyword(getAdminPathSegments(route)[0]);
   return ADMIN_LIST_SECTION_KEYS.has(section) ? section : "overview";
 }
 
@@ -41692,13 +44413,19 @@ async function importAdminLegacyCatalog(sectionKey = "tags") {
 }
 
 function revokePostComposerPreview(composer = state.pages.create) {
-  if (!composer?.previewUrl) {
-    return;
+  if (composer?.previewUrl) {
+    try {
+      window.URL?.revokeObjectURL(composer.previewUrl);
+    } catch {
+      // Object URL cleanup is best effort.
+    }
   }
-  try {
-    window.URL?.revokeObjectURL(composer.previewUrl);
-  } catch {
-    // Object URL cleanup is best effort.
+  if (composer?.cover?.imagePreviewUrl) {
+    try {
+      window.URL?.revokeObjectURL(composer.cover.imagePreviewUrl);
+    } catch {
+      // Object URL cleanup is best effort.
+    }
   }
 }
 
@@ -41799,6 +44526,222 @@ function postComposerSelectedMaxLabel(composer = state.pages.create) {
   return config.key === "photo"
     ? "Photo capture"
     : `${formatComposerDuration(config.maxMs)} limit`;
+}
+
+function normalizePostComposerCoverColor(value, fallback = "#FFFFFF") {
+  const normalized = normalizeString(value).toUpperCase();
+  if (/^#[0-9A-F]{6}(?:[0-9A-F]{2})?$/u.test(normalized)) {
+    return normalized.slice(0, 7);
+  }
+  return fallback;
+}
+
+function normalizePostComposerCover(composer = state.pages.create) {
+  const cover =
+    composer.cover && typeof composer.cover === "object"
+      ? composer.cover
+      : createPostComposerCoverState();
+  const normalized = createPostComposerCoverState(cover);
+  normalized.imageFile = cover.imageFile || null;
+  normalized.imagePreviewUrl = normalizeString(cover.imagePreviewUrl);
+  normalized.renderedUploadId = normalizeString(cover.renderedUploadId);
+  normalized.renderedUrl = normalizeString(cover.renderedUrl);
+  normalized.uploading = cover.uploading === true;
+  normalized.error = normalizeString(cover.error);
+  normalized.notice = normalizeString(cover.notice);
+  composer.cover = normalized;
+  return normalized;
+}
+
+function postComposerCoverMaxMs(composer = state.pages.create) {
+  if (composer.mediaType !== "video") {
+    return 0;
+  }
+  if (composer.durationKnown && Number(composer.durationMs) > 0) {
+    return Math.max(0, Number(composer.durationMs));
+  }
+  return postComposerTimelineDurationMs(composer);
+}
+
+function postComposerCoverFrameMs(composer = state.pages.create) {
+  const cover = normalizePostComposerCover(composer);
+  const maxMs = postComposerCoverMaxMs(composer);
+  if (!maxMs) {
+    return Math.max(0, Number(cover.frameMs) || 0);
+  }
+  return Math.max(0, Math.min(maxMs, Number(cover.frameMs) || 0));
+}
+
+function updatePostComposerCoverField(field, value) {
+  const composer = state.pages.create;
+  const cover = normalizePostComposerCover(composer);
+  const normalizedField = normalizeString(field);
+  if (!normalizedField || composer.pending) {
+    return;
+  }
+  if (normalizedField === "source") {
+    const nextSource = normalizeString(value).toLowerCase();
+    cover.source =
+      nextSource === "uploaded_image" ||
+      nextSource === "uploaded-image" ||
+      nextSource === "upload"
+        ? "uploaded_image"
+        : "frame";
+    cover.error = "";
+    return;
+  }
+  if (normalizedField === "frameMs") {
+    const maxMs = postComposerCoverMaxMs(composer);
+    cover.frameMs = Math.max(
+      0,
+      Math.min(maxMs || Number.MAX_SAFE_INTEGER, Number(value) || 0),
+    );
+    return;
+  }
+  if (normalizedField === "titleText") {
+    cover.titleText = normalizeString(value).slice(0, 80);
+    return;
+  }
+  if (normalizedField === "presetId") {
+    const presetId = normalizeString(value).toLowerCase();
+    cover.presetId = ["none", "outline", "fill"].includes(presetId)
+      ? presetId
+      : "none";
+    return;
+  }
+  if (normalizedField === "textColorHex") {
+    cover.textColorHex = normalizePostComposerCoverColor(value, cover.textColorHex);
+    return;
+  }
+  if (normalizedField === "backgroundColorHex") {
+    cover.backgroundColorHex = normalizePostComposerCoverColor(
+      value,
+      cover.backgroundColorHex,
+    );
+    return;
+  }
+  if (normalizedField === "x" || normalizedField === "y") {
+    const fallback = normalizedField === "x" ? 0.5 : 0.76;
+    cover[normalizedField] = Math.max(
+      normalizedField === "x" ? 0.05 : 0.08,
+      Math.min(normalizedField === "x" ? 0.95 : 0.92, Number(value) || fallback),
+    );
+    return;
+  }
+  if (normalizedField === "scale") {
+    cover.scale = Math.max(0.6, Math.min(1.8, Number(value) || 1));
+    return;
+  }
+  if (normalizedField === "textAlign") {
+    const textAlign = normalizeString(value).toLowerCase();
+    cover.textAlign = ["left", "center", "right"].includes(textAlign)
+      ? textAlign
+      : "center";
+  }
+}
+
+function postComposerCoverTextLayer(cover = normalizePostComposerCover()) {
+  const text = normalizeString(cover.titleText);
+  if (!text) {
+    return null;
+  }
+  return {
+    id: "web-cover-title",
+    text,
+    fontId: "headline",
+    colorHex:
+      cover.presetId === "fill" ? cover.backgroundColorHex : cover.textColorHex,
+    backdropStyle: cover.presetId === "fill" ? "fill" : cover.presetId,
+    x: cover.x,
+    y: cover.y,
+    fontSize: Math.round(34 * cover.scale),
+    rotationDeg: 0,
+    textAlign: cover.textAlign,
+  };
+}
+
+function postComposerCoverPayload(composer = state.pages.create) {
+  if (composer.mediaType !== "video" || !composer.file) {
+    return null;
+  }
+  const cover = normalizePostComposerCover(composer);
+  const frameMs = postComposerCoverFrameMs(composer);
+  const titleLayer = postComposerCoverTextLayer(cover);
+  const title = titleLayer
+    ? {
+        text: titleLayer.text,
+        presetId: cover.presetId,
+        textColorHex: cover.textColorHex,
+        backgroundColorHex:
+          cover.presetId === "fill" ? cover.backgroundColorHex : undefined,
+        x: cover.x,
+        y: cover.y,
+        scale: cover.scale,
+        textAlign: cover.textAlign,
+      }
+    : null;
+  return {
+    version: 1,
+    source: cover.source,
+    ...(cover.source === "frame" ? { frameMs } : {}),
+    ...(cover.source === "uploaded_image" && cover.renderedUploadId
+      ? { renderedUploadId: cover.renderedUploadId }
+      : {}),
+    ...(cover.source === "uploaded_image" && cover.renderedUrl
+      ? { renderedUrl: cover.renderedUrl }
+      : {}),
+    ...(title ? { title, textLayers: [titleLayer] } : {}),
+  };
+}
+
+async function uploadPostComposerCoverImageIfNeeded(composer = state.pages.create) {
+  const cover = normalizePostComposerCover(composer);
+  if (composer.mediaType !== "video" || cover.source !== "uploaded_image") {
+    return;
+  }
+  if (cover.renderedUrl || cover.renderedUploadId) {
+    return;
+  }
+  const file = cover.imageFile;
+  if (!file) {
+    cover.error = "Choose a cover image or switch back to a video frame.";
+    throw new Error(cover.error);
+  }
+  if (!normalizeString(file.type).startsWith("image/")) {
+    cover.error = "Choose an image file for the video cover.";
+    throw new Error(cover.error);
+  }
+  cover.uploading = true;
+  cover.error = "";
+  composer.stage = "Uploading cover";
+  scheduleRender();
+  try {
+    const uploadPayload = await fetchJson("/api/uploads/create", {
+      auth: true,
+      method: "POST",
+      body: {
+        type: "image",
+        fileName: normalizeString(file.name) || "video-cover.jpg",
+        fileSize: Number(file.size) || 0,
+        contentType: normalizeString(file.type) || "image/jpeg",
+      },
+    });
+    const upload = normalizeCreateUploadPayload(uploadPayload);
+    if (!upload.uid || !upload.uploadUrl) {
+      throw new Error("Cover upload session was incomplete.");
+    }
+    await uploadPostComposerFile(upload, file);
+    const currentCover = normalizePostComposerCover(composer);
+    currentCover.renderedUploadId = upload.uid;
+    currentCover.renderedUrl = upload.deliveryUrl || upload.publicUrl || "";
+    currentCover.notice = "Cover image ready.";
+  } catch (error) {
+    cover.error = postComposerErrorMessage(error);
+    throw error;
+  } finally {
+    cover.uploading = false;
+    scheduleRender();
+  }
 }
 
 function formatComposerDuration(durationMs) {
@@ -41973,6 +44916,7 @@ async function setPostComposerFile(
   composer.durationMs = null;
   composer.durationKnown = false;
   composer.clips = [];
+  composer.cover = createPostComposerCoverState();
   composer.error = "";
   composer.notice = "";
   composer.createdPostId = "";
@@ -42081,7 +45025,50 @@ function updatePostComposerField(field, value) {
     } else if (key === "delaySeconds") {
       teleprompter.delaySeconds = Math.max(0, Math.min(10, Number(value) || 0));
     }
+    return;
   }
+  if (normalizedField.startsWith("cover.")) {
+    updatePostComposerCoverField(normalizedField.slice("cover.".length), value);
+  }
+}
+
+function setPostComposerCoverImageFile(file) {
+  const composer = state.pages.create;
+  const cover = normalizePostComposerCover(composer);
+  if (composer.pending) {
+    return;
+  }
+  if (cover.imagePreviewUrl) {
+    try {
+      window.URL?.revokeObjectURL(cover.imagePreviewUrl);
+    } catch {
+      // Object URL cleanup is best effort.
+    }
+  }
+  cover.imageFile = null;
+  cover.imagePreviewUrl = "";
+  cover.renderedUploadId = "";
+  cover.renderedUrl = "";
+  cover.error = "";
+  cover.notice = "";
+  if (!file) {
+    scheduleRender();
+    return;
+  }
+  if (!normalizeString(file.type).startsWith("image/")) {
+    cover.error = "Choose an image file for the video cover.";
+    scheduleRender();
+    return;
+  }
+  if (Number(file.size) <= 0) {
+    cover.error = "Selected cover image is empty.";
+    scheduleRender();
+    return;
+  }
+  cover.source = "uploaded_image";
+  cover.imageFile = file;
+  cover.imagePreviewUrl = window.URL?.createObjectURL(file) || "";
+  scheduleRender();
 }
 
 function bestPostComposerRecordingMimeType() {
@@ -42168,6 +45155,39 @@ function bindPostComposerCameraPreview() {
   preview.muted = true;
   preview.playsInline = true;
   preview.play?.().catch(() => {});
+}
+
+function bindPostComposerCoverPreview() {
+  const composer = state.pages.create;
+  const coverVideo = root?.querySelector("[data-create-cover-video]");
+  if (!coverVideo || composer.mediaType !== "video") {
+    return;
+  }
+  const targetSeconds = postComposerCoverFrameMs(composer) / 1000;
+  const applyFrame = () => {
+    if (!Number.isFinite(targetSeconds)) {
+      return;
+    }
+    const duration = Number(coverVideo.duration);
+    const safeSeconds =
+      Number.isFinite(duration) && duration > 0
+        ? Math.max(0, Math.min(duration, targetSeconds))
+        : Math.max(0, targetSeconds);
+    if (Math.abs(Number(coverVideo.currentTime) - safeSeconds) > 0.12) {
+      try {
+        coverVideo.currentTime = safeSeconds;
+      } catch {
+        // Some browsers reject early frame seeks before metadata is ready.
+      }
+    }
+  };
+  coverVideo.muted = true;
+  coverVideo.playsInline = true;
+  if (coverVideo.readyState >= 1) {
+    applyFrame();
+  } else {
+    coverVideo.addEventListener("loadedmetadata", applyFrame, { once: true });
+  }
 }
 
 async function capturePostComposerPhoto() {
@@ -42416,7 +45436,29 @@ function candidateAvatarUploadErrorMessage(error) {
   return normalizeString(error?.message) || "Candidate photo could not be uploaded.";
 }
 
+function profileAvatarUploadErrorMessage(error) {
+  if (error?.status === 401) {
+    return "Please sign in to update your profile photo.";
+  }
+  if (error?.status === 413) {
+    return "That image is too large for upload.";
+  }
+  return normalizeString(error?.message) || "Profile photo could not be uploaded.";
+}
+
 async function abortCandidateAvatarUpload(uploadId) {
+  const normalizedUploadId = normalizeString(uploadId);
+  if (!normalizedUploadId) {
+    return;
+  }
+  await fetchJson("/api/uploads/abort", {
+    auth: true,
+    method: "POST",
+    body: { uploadId: normalizedUploadId },
+  }).catch(() => {});
+}
+
+async function abortProfileAvatarUpload(uploadId) {
   const normalizedUploadId = normalizeString(uploadId);
   if (!normalizedUploadId) {
     return;
@@ -42442,6 +45484,37 @@ function clearCandidateAvatarUpload({ abort = true } = {}) {
     };
   }
   detail.avatarUpload = createCandidateAvatarUploadState();
+  scheduleRender();
+}
+
+function clearProfileAvatarUpload({ abort = true } = {}) {
+  const profileState = state.pages.profile;
+  const upload = profileState.avatarUpload || createProfileAvatarUploadState();
+  if (abort && upload.uploadId) {
+    abortProfileAvatarUpload(upload.uploadId).catch(() => {});
+  }
+  if (upload.previewUrl) {
+    window.URL?.revokeObjectURL(upload.previewUrl);
+  }
+  if (upload.remoteUrl) {
+    const previousAvatarUrl = upload.previousAvatarUrl || "";
+    const previousAvatarUploadId = upload.previousAvatarUploadId || "";
+    if (profileState.me) {
+      profileState.me = {
+        ...profileState.me,
+        avatarUrl: previousAvatarUrl,
+        avatarUploadId: previousAvatarUploadId,
+      };
+    }
+    if (profileState.current) {
+      profileState.current = {
+        ...profileState.current,
+        avatarUrl: previousAvatarUrl,
+        avatarUploadId: previousAvatarUploadId,
+      };
+    }
+  }
+  profileState.avatarUpload = createProfileAvatarUploadState();
   scheduleRender();
 }
 
@@ -42526,6 +45599,117 @@ async function uploadCandidateAvatarFile(file) {
     detail.avatarUpload = {
       ...createCandidateAvatarUploadState(),
       error: candidateAvatarUploadErrorMessage(error),
+      previousAvatarUrl,
+      previousAvatarUploadId,
+    };
+  } finally {
+    scheduleRender();
+  }
+}
+
+async function uploadProfileAvatarFile(file) {
+  const profileState = state.pages.profile;
+  const profile = profileState.current || profileState.me || {};
+  if (!file) {
+    return;
+  }
+  if (!normalizeString(file.type).startsWith("image/")) {
+    profileState.avatarUpload = {
+      ...createProfileAvatarUploadState(),
+      error: "Choose an image file.",
+    };
+    scheduleRender();
+    return;
+  }
+  if (Number(file.size) <= 0) {
+    profileState.avatarUpload = {
+      ...createProfileAvatarUploadState(),
+      error: "Selected image is empty.",
+    };
+    scheduleRender();
+    return;
+  }
+
+  const previousUpload =
+    profileState.avatarUpload || createProfileAvatarUploadState();
+  if (previousUpload.uploadId) {
+    abortProfileAvatarUpload(previousUpload.uploadId).catch(() => {});
+  }
+  if (previousUpload.previewUrl) {
+    window.URL?.revokeObjectURL(previousUpload.previewUrl);
+  }
+  const previousAvatarUrl =
+    previousUpload.previousAvatarUrl || normalizeString(profile.avatarUrl);
+  const previousAvatarUploadId =
+    previousUpload.previousAvatarUploadId ||
+    normalizeString(profile.avatarUploadId);
+  const previewUrl = window.URL?.createObjectURL(file) || "";
+  const fileName = normalizeString(file.name) || "profile-avatar.jpg";
+  profileState.avatarUpload = {
+    ...createProfileAvatarUploadState(),
+    uploading: true,
+    fileName,
+    previewUrl,
+    previousAvatarUrl,
+    previousAvatarUploadId,
+  };
+  scheduleRender();
+
+  try {
+    const contentType = normalizeString(file.type) || "image/jpeg";
+    const uploadPayload = await fetchJson("/api/uploads/create", {
+      auth: true,
+      method: "POST",
+      body: {
+        type: "image",
+        fileName,
+        fileSize: Number(file.size) || 0,
+        contentType,
+      },
+    });
+    const upload = normalizeCreateUploadPayload(uploadPayload);
+    if (!upload.uid || !upload.uploadUrl) {
+      throw new Error("Upload session was incomplete.");
+    }
+    await uploadPostComposerFile(upload, file);
+    const remoteUrl = upload.deliveryUrl || upload.publicUrl;
+    if (!remoteUrl) {
+      throw new Error("Upload finished without a profile photo URL.");
+    }
+    if (previewUrl) {
+      window.URL?.revokeObjectURL(previewUrl);
+    }
+    profileState.avatarUpload = {
+      uploading: false,
+      error: "",
+      uploadId: upload.uid,
+      remoteUrl,
+      previewUrl: "",
+      fileName,
+      previousAvatarUrl,
+      previousAvatarUploadId,
+    };
+    if (profileState.me) {
+      profileState.me = {
+        ...profileState.me,
+        avatarUrl: remoteUrl,
+        avatarUploadId: upload.uid,
+      };
+    }
+    if (profileState.current) {
+      profileState.current = {
+        ...profileState.current,
+        avatarUrl: remoteUrl,
+        avatarUploadId: upload.uid,
+      };
+    }
+  } catch (error) {
+    if (previewUrl) {
+      window.URL?.revokeObjectURL(previewUrl);
+    }
+    profileState.avatarUpload = {
+      ...createProfileAvatarUploadState(),
+      error: profileAvatarUploadErrorMessage(error),
       previousAvatarUrl,
       previousAvatarUploadId,
     };
@@ -42746,6 +45930,13 @@ async function submitPostComposer(formData) {
         ? readPostComposerAudienceGroupIds(composer.audienceGroupIds)
         : [];
     const postId = upload.postId || upload.uid;
+    let coverPayload = null;
+    let coverFrameMs = null;
+    if (mediaType === "video") {
+      await uploadPostComposerCoverImageIfNeeded(composer);
+      coverPayload = postComposerCoverPayload(composer);
+      coverFrameMs = postComposerCoverFrameMs(composer);
+    }
     composer.stage = "Saving post details";
     scheduleRender();
     await fetchJson("/api/posts/metadata", {
@@ -42762,6 +45953,12 @@ async function submitPostComposer(formData) {
         allowComments: composer.allowComments,
         allowReuseContent: composer.allowReuseContent,
         aiGeneratedContent: composer.aiGeneratedContent,
+        ...(mediaType === "video"
+          ? {
+              coverFrameMs,
+              cover: coverPayload,
+            }
+          : {}),
       },
     });
 
@@ -42861,6 +46058,206 @@ async function loadSettingsMyDistricts({ refresh = false } = {}) {
     }
   } finally {
     districts.loading = false;
+    scheduleRender();
+  }
+}
+
+function settingsHomeLocationErrorMessage(error, fallback) {
+  const code = normalizeString(error?.payload?.error || error?.message).toLowerCase();
+  if (code === "address_change_review_required" || error?.status === 403) {
+    return "Verified accounts require review to change home location.";
+  }
+  if (code === "home_address_preferred" || error?.status === 409) {
+    return "A saved home address is already being used for your districts.";
+  }
+  if (code === "manual_district_update_rate_limited") {
+    const nextAllowedAt = Number(error?.payload?.nextAllowedAt) || 0;
+    return nextAllowedAt
+      ? `Manual district changes unlock ${formatSettingsDate(nextAllowedAt)}.`
+      : "Manual district changes are limited to once every 60 days.";
+  }
+  if (
+    code === "invalid_stateid" ||
+    code === "invalid_state" ||
+    code === "district_state_mismatch"
+  ) {
+    return "Choose a valid state for this district.";
+  }
+  if (code === "invalid_congressionaldistrictid") {
+    return "Choose a valid congressional district.";
+  }
+  return settingsErrorMessage(error, fallback);
+}
+
+async function loadSettingsManualDistrictOptions(stateId, { refresh = false } = {}) {
+  const resource = state.pages.settings.voterProfile.manualDistrict;
+  const normalizedStateId = normalizeString(stateId).toUpperCase();
+  if (!normalizedStateId) {
+    resource.items = [];
+    resource.loadedStateId = "";
+    resource.error = "";
+    scheduleRender();
+    return;
+  }
+  if (
+    resource.loadedStateId === normalizedStateId &&
+    resource.items.length &&
+    !refresh
+  ) {
+    return;
+  }
+  resource.stateId = normalizedStateId;
+  resource.loading = true;
+  resource.error = "";
+  scheduleRender();
+  try {
+    const query = new URLSearchParams({ stateId: normalizedStateId });
+    const payload = await fetchJson(
+      `/api/geo/congressional-districts?${query.toString()}`,
+      { auth: Boolean(state.auth.session) },
+    );
+    const items = readArrayPayload(payload, ["districts", "items"])
+      .map(normalizeSettingsCongressionalDistrictOption)
+      .filter((item) => item.stateId && item.congressionalDistrictId);
+    resource.items = items;
+    resource.loadedStateId = normalizedStateId;
+    if (
+      resource.selectedDistrictId &&
+      !items.some(
+        (item) => item.congressionalDistrictId === resource.selectedDistrictId,
+      )
+    ) {
+      resource.selectedDistrictId = "";
+    }
+  } catch (error) {
+    resource.items = [];
+    resource.loadedStateId = "";
+    resource.error = settingsHomeLocationErrorMessage(
+      error,
+      "Districts could not be loaded.",
+    );
+  } finally {
+    resource.loading = false;
+    scheduleRender();
+  }
+}
+
+async function saveSettingsManualDistrict(formData) {
+  const voterProfile = state.pages.settings.voterProfile;
+  const resource = voterProfile.manualDistrict;
+  const stateId = normalizeString(formData.get("stateId") || resource.stateId).toUpperCase();
+  const congressionalDistrictId = normalizeString(
+    formData.get("congressionalDistrictId") || resource.selectedDistrictId,
+  ).toUpperCase();
+  const acknowledgedRestrictions = formCheckboxValue(
+    formData,
+    "acknowledgedRestrictions",
+    resource.acknowledged === true,
+  );
+  if (!stateId || !congressionalDistrictId) {
+    resource.error = "Choose a state and congressional district.";
+    showToast(resource.error);
+    scheduleRender();
+    return false;
+  }
+  if (!acknowledgedRestrictions) {
+    resource.error = "Acknowledge the manual district restrictions before saving.";
+    showToast(resource.error);
+    scheduleRender();
+    return false;
+  }
+  resource.saving = true;
+  resource.error = "";
+  scheduleRender();
+  try {
+    const payload = await fetchJson("/api/me/home-location/manual-district", {
+      auth: true,
+      method: "PUT",
+      body: {
+        stateId,
+        congressionalDistrictId,
+        acknowledgedRestrictions: true,
+      },
+    });
+    const nextProfile = payload.profile ? normalizeMyProfile(payload) : null;
+    if (nextProfile?.userId) {
+      voterProfile.profile.item = nextProfile;
+      voterProfile.profile.loaded = true;
+    }
+    resource.stateId = stateId;
+    resource.selectedDistrictId = congressionalDistrictId;
+    resource.acknowledged = false;
+    showToast(payload.saved === false ? "Home district saved." : "Home district updated.");
+    await Promise.all([
+      loadSettingsMyProfile({ refresh: true }),
+      loadSettingsMyDistricts({ refresh: true }),
+    ]);
+    return true;
+  } catch (error) {
+    resource.error = settingsHomeLocationErrorMessage(
+      error,
+      "Home district could not be saved.",
+    );
+    showToast(resource.error);
+    return false;
+  } finally {
+    resource.saving = false;
+    scheduleRender();
+  }
+}
+
+async function loadSettingsManualDistrictForCurrentProfile({ refresh = false } = {}) {
+  await loadSettingsMyProfile({ refresh });
+  const voterProfile = state.pages.settings.voterProfile;
+  const profile = voterProfile.profile.item || normalizeMyProfile();
+  if (settingsProfileIsVerified(profile) || settingsProfileHasSavedAddress(profile)) {
+    return;
+  }
+  const resource = voterProfile.manualDistrict;
+  const stateId =
+    resource.stateId ||
+    profile.manualDistrictStateId ||
+    profile.locationStateId ||
+    "";
+  if (stateId) {
+    await loadSettingsManualDistrictOptions(stateId, { refresh });
+  }
+}
+
+async function clearSettingsHomeLocationAddress() {
+  const voterProfile = state.pages.settings.voterProfile;
+  if (voterProfile.homeLocationClearing) {
+    return false;
+  }
+  voterProfile.homeLocationClearing = true;
+  voterProfile.profile.error = "";
+  voterProfile.districts.error = "";
+  scheduleRender();
+  try {
+    const payload = await fetchJson("/api/me/home-location/address", {
+      auth: true,
+      method: "DELETE",
+    });
+    const nextProfile = payload.profile ? normalizeMyProfile(payload) : null;
+    if (nextProfile?.userId) {
+      voterProfile.profile.item = nextProfile;
+      voterProfile.profile.loaded = true;
+    }
+    showToast(payload.cleared === false ? "No saved address to clear." : "Home address cleared.");
+    await Promise.all([
+      loadSettingsMyProfile({ refresh: true }),
+      loadSettingsMyDistricts({ refresh: true }),
+    ]);
+    return true;
+  } catch (error) {
+    voterProfile.profile.error = settingsHomeLocationErrorMessage(
+      error,
+      "Home address could not be cleared.",
+    );
+    showToast(voterProfile.profile.error);
+    return false;
+  } finally {
+    voterProfile.homeLocationClearing = false;
     scheduleRender();
   }
 }
@@ -43370,6 +46767,98 @@ async function submitSettingsHomeLocationRequest(formData) {
   }
 }
 
+function voterIntelFederalDistrictLabel(stateId, district) {
+  const stateCode = normalizeString(stateId).toUpperCase();
+  const rawDistrict = normalizeString(district).toUpperCase();
+  if (!rawDistrict) {
+    return "";
+  }
+  const canonical = rawDistrict.match(/^([A-Z]{2})-(\d{1,2}|AL|AT-LARGE)$/u);
+  if (canonical) {
+    const suffix = canonical[2];
+    return suffix === "AL" || suffix === "AT-LARGE"
+      ? `${canonical[1]}-AL`
+      : `${canonical[1]}-${suffix.padStart(2, "0")}`;
+  }
+  if (!stateCode) {
+    return rawDistrict;
+  }
+  if (rawDistrict === "0" || rawDistrict === "00" || rawDistrict === "AT LARGE" || rawDistrict === "AT-LARGE") {
+    return `${stateCode}-AL`;
+  }
+  const numeric = rawDistrict.match(/^(\d{1,2})$/u);
+  if (numeric) {
+    return `${stateCode}-${numeric[1].padStart(2, "0")}`;
+  }
+  return rawDistrict;
+}
+
+function voterIntelDistrictSuffix(value) {
+  const text = normalizeString(value).toUpperCase();
+  if (!text) {
+    return "";
+  }
+  const canonical = text.match(/^[A-Z]{2}-(\d{1,2}|AL|AT-LARGE)$/u);
+  if (canonical) {
+    const suffix = canonical[1];
+    return suffix === "AL" || suffix === "AT-LARGE" ? "AL" : suffix.padStart(2, "0");
+  }
+  const numeric = text.match(/^(\d{1,2})$/u);
+  if (numeric) {
+    return numeric[1].padStart(2, "0");
+  }
+  if (text === "AT LARGE" || text === "AT-LARGE") {
+    return "AL";
+  }
+  return "";
+}
+
+function voterIntelJurisdictionContextFromDistricts(districts = null) {
+  const federal = districts?.jurisdictions?.federal || {};
+  const stateJurisdiction = districts?.jurisdictions?.state || {};
+  const manualDistrict = districts?.manualDistrict || {};
+  const stateId = normalizeString(
+    federal.stateId ||
+      stateJurisdiction.stateId ||
+      districts?.address?.stateId ||
+      manualDistrict.stateId,
+  ).toUpperCase();
+  if (!stateId) {
+    return { stateId: "", district: "", jurisdictionKey: "" };
+  }
+  const district =
+    voterIntelFederalDistrictLabel(
+      stateId,
+      federal.congressionalDistrictId ||
+        federal.congressionalDistrictCode ||
+        manualDistrict.congressionalDistrictId,
+    ) || "";
+  const districtSuffix = voterIntelDistrictSuffix(district);
+  return {
+    stateId,
+    district,
+    jurisdictionKey: districtSuffix ? `US#${stateId}#${districtSuffix}` : `US#${stateId}`,
+  };
+}
+
+function voterIntelSnapshotPath() {
+  const context = voterIntelJurisdictionContextFromDistricts(
+    state.pages.settings.voterProfile.districts.item,
+  );
+  const query = new URLSearchParams();
+  if (context.stateId) {
+    query.set("state", context.stateId);
+  }
+  if (context.district) {
+    query.set("district", context.district);
+  }
+  if (context.jurisdictionKey) {
+    query.set("jurisdictionKey", context.jurisdictionKey);
+  }
+  const suffix = query.toString();
+  return `/api/voter-intel/me${suffix ? `?${suffix}` : ""}`;
+}
+
 async function loadVoterIntelSnapshot({ refresh = false } = {}) {
   const snapshot = state.pages.settings.voterIntel.snapshot;
   if (snapshot.loaded && !refresh) {
@@ -43379,7 +46868,7 @@ async function loadVoterIntelSnapshot({ refresh = false } = {}) {
   snapshot.error = "";
   scheduleRender();
   try {
-    const payload = await fetchJson("/api/voter-intel/me", { auth: true });
+    const payload = await fetchJson(voterIntelSnapshotPath(), { auth: true });
     snapshot.item = normalizeVoterIntelSnapshot(payload);
     snapshot.loaded = true;
   } catch (error) {
@@ -43646,6 +47135,24 @@ function voterIntelRankableRacesFromDistricts(districts) {
   return SETTINGS_DISTRICT_LEVELS.flatMap((level) => grouped[level.key] || [])
     .map((entry) => voterIntelRankableRaceFromDistrictEntry(districts, entry))
     .filter((race) => voterIntelRaceContestId(race));
+}
+
+function voterIntelRaceStatusIsRankable(status) {
+  const normalized = normalizeString(status).toLowerCase();
+  return (
+    !normalized ||
+    normalized.includes("up_for") ||
+    normalized.includes("open")
+  );
+}
+
+function voterIntelRaceIsRankable(race = {}) {
+  return (
+    Boolean(voterIntelRaceContestId(race)) &&
+    Array.isArray(race.candidates) &&
+    race.candidates.length > 0 &&
+    voterIntelRaceStatusIsRankable(race.status)
+  );
 }
 
 function findVoterIntelRankableRace(contestId) {
@@ -44270,6 +47777,12 @@ function setSettingsActivitySharing(enabled) {
     );
   } catch {
     // Browser-local privacy preference remains in memory for this session.
+  }
+  if (next) {
+    resetDiscoverSlice(state.pages.discover.friendActivity);
+    state.pages.discover.loaded = false;
+  } else {
+    applyDiscoverFriendActivitySharingState();
   }
   showToast(next ? "Friend activity sharing is on." : "Friend activity sharing is off.");
   scheduleRender();
@@ -44995,40 +48508,6 @@ async function saveSettingsPublishingDefaults(formData) {
   }
 }
 
-async function saveSettingsCrosspostDefaults(formData) {
-  const crosspost = state.pages.settings.crosspost;
-  const body = {
-    crosspostDefaults: {
-      selectedTargetKeys: normalizeStringList(formData.get("selectedTargetKeys")),
-      youtubePrivacy:
-        normalizeString(formData.get("youtubePrivacy")).toLowerCase() ||
-        "private",
-      youtubeTitle: normalizeString(formData.get("youtubeTitle")) || null,
-      youtubeDescription:
-        normalizeString(formData.get("youtubeDescription")) || null,
-    },
-  };
-  crosspost.saving = true;
-  crosspost.error = "";
-  scheduleRender();
-  try {
-    const payload = await fetchJson("/api/me/settings/crosspost-defaults", {
-      auth: true,
-      method: "PUT",
-      body,
-    });
-    crosspost.item = normalizeCrosspostDefaults(payload);
-    crosspost.loaded = true;
-    showToast("Crosspost defaults saved.");
-  } catch (error) {
-    crosspost.error = settingsErrorMessage(error, "Crosspost save failed.");
-    showToast(crosspost.error);
-  } finally {
-    crosspost.saving = false;
-    scheduleRender();
-  }
-}
-
 async function saveSettingsNotificationPreferences(formData) {
   const notifications = state.pages.settings.notifications;
   const categoryKeys = Object.keys(defaultNotificationPreferences().categories);
@@ -45052,6 +48531,25 @@ async function saveSettingsNotificationPreferences(formData) {
         ),
         timezone: normalizeString(formData.get("timezone")) || "UTC",
       },
+      notificationQuietHours: {
+        enabled: formCheckboxValue(
+          formData,
+          "notificationQuietHoursEnabled",
+          fallback.notificationQuietHours.enabled,
+        ),
+        startMinutes: timeInputToMinutes(
+          formData.get("notificationQuietStart"),
+          fallback.notificationQuietHours.startMinutes,
+        ),
+        endMinutes: timeInputToMinutes(
+          formData.get("notificationQuietEnd"),
+          fallback.notificationQuietHours.endMinutes,
+        ),
+        timezone:
+          normalizeString(formData.get("notificationTimezone")) ||
+          fallback.notificationQuietHours.timezone ||
+          "UTC",
+      },
     },
   };
   notifications.saving = true;
@@ -45070,6 +48568,72 @@ async function saveSettingsNotificationPreferences(formData) {
     notifications.error = settingsErrorMessage(
       error,
       "Notification save failed.",
+    );
+    showToast(notifications.error);
+  } finally {
+    notifications.saving = false;
+    scheduleRender();
+  }
+}
+
+async function saveSettingsQuietHoursPreferences(formData) {
+  const notifications = state.pages.settings.notifications;
+  const fallback = notifications.item || defaultNotificationPreferences();
+  const body = {
+    notificationPreferences: {
+      categories: { ...fallback.categories },
+      quietHours: {
+        enabled: formCheckboxValue(formData, "quietHoursEnabled", false),
+        startMinutes: timeInputToMinutes(
+          formData.get("quietStart"),
+          fallback.quietHours.startMinutes,
+        ),
+        endMinutes: timeInputToMinutes(
+          formData.get("quietEnd"),
+          fallback.quietHours.endMinutes,
+        ),
+        timezone:
+          normalizeString(formData.get("timezone")) ||
+          fallback.quietHours.timezone ||
+          "UTC",
+      },
+      notificationQuietHours: {
+        enabled: formCheckboxValue(
+          formData,
+          "notificationQuietHoursEnabled",
+          false,
+        ),
+        startMinutes: timeInputToMinutes(
+          formData.get("notificationQuietStart"),
+          fallback.notificationQuietHours.startMinutes,
+        ),
+        endMinutes: timeInputToMinutes(
+          formData.get("notificationQuietEnd"),
+          fallback.notificationQuietHours.endMinutes,
+        ),
+        timezone:
+          normalizeString(formData.get("notificationTimezone")) ||
+          fallback.notificationQuietHours.timezone ||
+          "UTC",
+      },
+    },
+  };
+  notifications.saving = true;
+  notifications.error = "";
+  scheduleRender();
+  try {
+    const payload = await fetchJson("/api/me/settings/notifications", {
+      auth: true,
+      method: "PUT",
+      body,
+    });
+    notifications.item = normalizeNotificationPreferences(payload);
+    notifications.loaded = true;
+    showToast("Quiet hours saved.");
+  } catch (error) {
+    notifications.error = settingsErrorMessage(
+      error,
+      "Quiet hours could not be saved.",
     );
     showToast(notifications.error);
   } finally {
@@ -45329,6 +48893,10 @@ async function loadCurrentRoute({ refresh = false } = {}) {
     scheduleRender();
     return;
   }
+  if (routeKey === ROUTE_KEY_POST_VIEW) {
+    scheduleRender();
+    return;
+  }
   if (routeKey === ROUTE_KEY_CREATE) {
     await loadPostComposerPage({ refresh });
     return;
@@ -45351,6 +48919,10 @@ async function loadCurrentRoute({ refresh = false } = {}) {
   }
   if (routeKey === ROUTE_KEY_PUBLIC_PETITION) {
     await loadPublicPetitionPage(route.routeParams.publicSlug, { refresh });
+    return;
+  }
+  if (routeKey === ROUTE_KEY_PUBLIC_PETITION_RESULTS) {
+    await loadPublicPetitionResultsPage(route.routeParams.shareToken, { refresh });
     return;
   }
   if (routeKey === ROUTE_KEY_SEARCH) {
@@ -45506,7 +49078,7 @@ async function loadCurrentRoute({ refresh = false } = {}) {
   }
   if (routeKey === ROUTE_KEY_PROFILE_NOTIFICATIONS) {
     await loadProfilePage("", { refresh });
-    await loadProfileNotifications();
+    await loadProfileNotifications({ refresh });
     return;
   }
   if (
@@ -45913,7 +49485,199 @@ async function loadCurrentRoute({ refresh = false } = {}) {
   }
 }
 
-async function handleShare(postId) {
+function findPostShareFeedItem(postId) {
+  const normalizedPostId = normalizeString(postId);
+  if (!normalizedPostId) {
+    return null;
+  }
+  return (
+    getCurrentItems().find(
+      (item) => item.kind === "post" && item.postId === normalizedPostId,
+    ) || null
+  );
+}
+
+function postShareTitleFromCaption(caption = "") {
+  const normalized = normalizeString(caption).replace(/\s+/gu, " ");
+  if (!normalized) {
+    return "";
+  }
+  return normalized.length > 88 ? `${normalized.slice(0, 85)}...` : normalized;
+}
+
+function buildPostSharePreviewFromPost(postId) {
+  const normalizedPostId = normalizeString(postId);
+  const item = findPostShareFeedItem(normalizedPostId);
+  const caption = normalizeString(item?.caption);
+  const mediaType = normalizeString(item?.mediaType).toLowerCase();
+  return {
+    postId: normalizedPostId,
+    brandName: "Polis",
+    authorDisplayName: normalizeString(item?.authorDisplayName) || "Polis",
+    authorUsername: normalizeString(item?.authorUsername),
+    canonicalUrl:
+      normalizeUrl(item?.canonicalUrl) ||
+      (normalizedPostId ? getShareUrl(normalizedPostId) : ""),
+    previewTitle:
+      normalizeString(item?.previewTitle) ||
+      postShareTitleFromCaption(caption) ||
+      "Shared Polis post",
+    previewText: caption,
+    mediaType: mediaType === "image" ? "image" : "video",
+    previewVideoUrl:
+      mediaType === "video"
+        ? normalizeUrl(item?.videoUrl || item?.mp4Url || item?.raw?.mediaUrl)
+        : "",
+    previewMediaThumbnail: normalizeUrl(item?.posterUrl || item?.imageUrl),
+    postTimestamp: Number(item?.createdAt) || null,
+  };
+}
+
+function normalizePostSharePreviewPayload(payload = {}, postId = "") {
+  const source =
+    payload?.preview && typeof payload.preview === "object"
+      ? payload.preview
+      : payload?.snapshot && typeof payload.snapshot === "object"
+        ? payload.snapshot
+        : payload && typeof payload === "object"
+          ? payload
+          : {};
+  const fallback = buildPostSharePreviewFromPost(postId);
+  return {
+    ...source,
+    postId:
+      normalizeString(source.postId || source.id || postId) ||
+      fallback.postId,
+    brandName: normalizeString(source.brandName) || fallback.brandName,
+    authorDisplayName:
+      normalizeString(source.authorDisplayName || source.displayName) ||
+      fallback.authorDisplayName,
+    authorUsername:
+      normalizeString(source.authorUsername || source.username) ||
+      fallback.authorUsername,
+    canonicalUrl:
+      normalizeUrl(source.canonicalUrl || source.url) || fallback.canonicalUrl,
+    previewTitle:
+      normalizeString(source.previewTitle || source.title) ||
+      fallback.previewTitle,
+    previewText:
+      normalizeString(source.previewText || source.text || source.description) ||
+      fallback.previewText,
+    mediaType:
+      normalizeString(source.mediaType || source.type).toLowerCase() ||
+      fallback.mediaType,
+    previewVideoUrl:
+      normalizeUrl(
+        source.previewVideoUrl ||
+          source.playbackUrl ||
+          source.videoUrl ||
+          source.mediaUrl,
+      ) || fallback.previewVideoUrl,
+    previewMediaThumbnail:
+      normalizeUrl(
+        source.previewMediaThumbnail ||
+          source.thumbnailUrl ||
+          source.imageUrl ||
+          source.mediaThumbnailUrl,
+      ) || fallback.previewMediaThumbnail,
+    postTimestamp:
+      Number(source.postTimestamp || source.createdAt || source.timestamp) ||
+      fallback.postTimestamp,
+  };
+}
+
+async function fetchPostSharePreview(postId) {
+  const normalizedPostId = normalizeString(postId);
+  if (!normalizedPostId) {
+    return null;
+  }
+  const payload = await fetchJson("/api/messaging/share-preview", {
+    auth: true,
+    method: "POST",
+    body: { postId: normalizedPostId },
+  });
+  return normalizePostSharePreviewPayload(payload, normalizedPostId);
+}
+
+function closePostShare() {
+  state.ui.postShare = createPostShareState();
+  scheduleRender();
+}
+
+async function loadPostShareSheetData(postId, { refreshConversations = false } = {}) {
+  const normalizedPostId = normalizeString(postId);
+  if (!normalizedPostId) {
+    return;
+  }
+  const currentShare = state.ui.postShare;
+  if (!currentShare.open || currentShare.postId !== normalizedPostId) {
+    return;
+  }
+  state.ui.postShare = createPostShareState({
+    ...currentShare,
+    loading: true,
+    error: "",
+    notice: "",
+  });
+  scheduleRender();
+
+  const previewTask = fetchPostSharePreview(normalizedPostId);
+  const inboxTask = (async () => {
+    await ensureMessagingInitialized();
+    await loadMessagingInbox({
+      refresh: refreshConversations || !state.pages.messaging.inbox.loaded,
+    });
+  })();
+  const [previewResult] = await Promise.allSettled([previewTask, inboxTask]);
+  if (
+    !state.ui.postShare.open ||
+    state.ui.postShare.postId !== normalizedPostId
+  ) {
+    return;
+  }
+
+  const preview =
+    previewResult.status === "fulfilled" && previewResult.value
+      ? previewResult.value
+      : buildPostSharePreviewFromPost(normalizedPostId);
+  const inboxError = normalizeString(state.pages.messaging.inbox.error);
+  const messagingError = normalizeString(state.pages.messaging.error);
+  const hasConversations = Boolean(state.pages.messaging.inbox.items?.length);
+  state.ui.postShare = createPostShareState({
+    ...state.ui.postShare,
+    preview,
+    loading: false,
+    error:
+      inboxError && !hasConversations
+        ? inboxError
+        : messagingError && !hasConversations
+          ? messagingError
+          : "",
+  });
+  scheduleRender();
+}
+
+async function openPostShare(postId) {
+  const normalizedPostId = normalizeString(postId);
+  if (!normalizedPostId) {
+    showToast("Post unavailable.");
+    return;
+  }
+  if (!state.auth.session) {
+    await sharePostExternally(normalizedPostId);
+    return;
+  }
+  state.ui.postShare = createPostShareState({
+    open: true,
+    postId: normalizedPostId,
+    preview: buildPostSharePreviewFromPost(normalizedPostId),
+    loading: true,
+  });
+  scheduleRender();
+  await loadPostShareSheetData(normalizedPostId);
+}
+
+async function sharePostExternally(postId) {
   const shareUrl = getShareUrl(postId);
   try {
     if (navigator.share) {
@@ -45929,6 +49693,122 @@ async function handleShare(postId) {
   } catch {
     showToast("Sharing unavailable on this device.");
   }
+}
+
+async function copyPostShareLink() {
+  const postId = normalizeString(state.ui.postShare.postId);
+  if (!postId) {
+    showToast("Post link unavailable.");
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(getShareUrl(postId));
+    state.ui.postShare = createPostShareState({
+      ...state.ui.postShare,
+      notice: "Link copied.",
+      error: "",
+    });
+    showToast("Link copied.");
+    scheduleRender();
+  } catch {
+    state.ui.postShare = createPostShareState({
+      ...state.ui.postShare,
+      error: "Copy is unavailable in this browser.",
+    });
+    showToast("Copy unavailable.");
+    scheduleRender();
+  }
+}
+
+function appendPostShareMessageToActiveConversation(conversationId, rawMessage) {
+  const normalizedConversationId = normalizeString(conversationId);
+  const conversation = state.pages.messaging.conversation;
+  if (
+    !normalizedConversationId ||
+    normalizeString(conversation.item?.conversationId) !== normalizedConversationId
+  ) {
+    return;
+  }
+  const message = normalizeMessagingMessage(rawMessage);
+  if (!message.messageId) {
+    return;
+  }
+  const existingIndex = conversation.messages.findIndex(
+    (item) => item.messageId === message.messageId,
+  );
+  if (existingIndex >= 0) {
+    conversation.messages = conversation.messages.map((item, index) =>
+      index === existingIndex ? message : item,
+    );
+  } else {
+    conversation.messages = [...conversation.messages, message];
+  }
+}
+
+async function sendPostShareToConversation(conversationId) {
+  const normalizedConversationId = normalizeString(conversationId);
+  const share = state.ui.postShare;
+  const postId = normalizeString(share.postId);
+  if (!normalizedConversationId || !postId) {
+    showToast("Choose a conversation first.");
+    return;
+  }
+  if (!state.auth.session) {
+    openAuthModal("share-post", {
+      postId,
+      title: "Log in to share in Polis",
+      message: "Sign in to send this post through Polis messages.",
+    });
+    return;
+  }
+  state.ui.postShare = createPostShareState({
+    ...share,
+    sendingConversationId: normalizedConversationId,
+    error: "",
+    notice: "",
+  });
+  scheduleRender();
+  try {
+    const preview =
+      share.preview || normalizePostSharePreviewPayload({}, postId);
+    const payload = await fetchJson(
+      `/api/messaging/conversations/${encodeURIComponent(normalizedConversationId)}/messages`,
+      {
+        auth: true,
+        method: "POST",
+        body: {
+          clientMessageId: buildMessagingClientMessageId(),
+          type: "post_share",
+          postId,
+          snapshot: preview,
+        },
+      },
+    );
+    appendPostShareMessageToActiveConversation(
+      normalizedConversationId,
+      payload.message || payload,
+    );
+    closePostShare();
+    showToast("Post sent in messages.");
+    loadMessagingInbox({ refresh: true }).catch(() => {});
+  } catch (error) {
+    if (
+      state.ui.postShare.open &&
+      state.ui.postShare.postId === postId &&
+      state.ui.postShare.sendingConversationId === normalizedConversationId
+    ) {
+      state.ui.postShare = createPostShareState({
+        ...state.ui.postShare,
+        sendingConversationId: "",
+        error: normalizeString(error?.message) || "Post could not be sent.",
+      });
+      scheduleRender();
+    }
+  }
+}
+
+async function handleShare(postId) {
+  await openPostShare(postId);
 }
 
 function requestAppOpen(postId, commentId = "") {
@@ -46042,6 +49922,8 @@ function renderIcon(name) {
       '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a4 4 0 1 1 0 8 4 4 0 0 1 0-8Zm0 10c4.418 0 8 2.239 8 5v3H4v-3c0-2.761 3.582-5 8-5Z"></path></svg>',
     election:
       '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h14v18H5V3Zm2 2v14h10V5H7Zm2 2h6v2H9V7Zm0 4h6v2H9v-2Zm0 4h4v2H9v-2Z"></path></svg>',
+    ballot:
+      '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h14v18H5V3Zm2 2v14h10V5H7Zm2.3 4.8 1.4-1.4 1.8 1.8 3.8-3.8 1.4 1.4-5.2 5.2-3.2-3.2ZM9 15h6v2H9v-2Z"></path></svg>',
     dashboard:
       '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h7v9H4V4Zm9 0h7v5h-7V4ZM4 15h7v5H4v-5Zm9-4h7v9h-7v-9Z"></path></svg>',
     chart:
@@ -46070,6 +49952,8 @@ function renderIcon(name) {
     tag: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.59 13.41 12 22l-9-9V4h9l8.59 8.59a1 1 0 0 1 0 1.41ZM5 12.17l7 7 6.46-6.46L11.17 5H5v7.17ZM8 7a2 2 0 1 1 0 4 2 2 0 0 1 0-4Z"></path></svg>',
     messages:
       '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H8l-4 4V5Zm2 2v8.172L7.172 14H18V7H6Z"></path></svg>',
+    more:
+      '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 10a2 2 0 1 1 0 4 2 2 0 0 1 0-4Zm7 0a2 2 0 1 1 0 4 2 2 0 0 1 0-4Zm7 0a2 2 0 1 1 0 4 2 2 0 0 1 0-4Z"></path></svg>',
     reply:
       '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 6V2l-8 7 8 7v-4h5.5c2.1 0 3.65.59 4.65 1.76.82.96 1.28 2.27 1.38 3.92l.02.32h2l-.02-.36c-.16-2.22-.84-4.02-2.05-5.4C20.08 10.62 18.08 10 15.5 10H10V6Z"></path></svg>',
     flag: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h12.5l.5 4 3 1.5-3 1.5-.5 4H7v7H5V3Zm2 2v7h8.75l.35-2.82L16.45 8l-.35-1.18L15.75 5H7Z"></path></svg>',
@@ -46095,6 +49979,8 @@ function renderIcon(name) {
     bell: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a5 5 0 0 0-5 5v2.764c0 .69-.223 1.36-.636 1.912L4 15h16l-2.364-3.324A3.3 3.3 0 0 1 17 9.764V7a5 5 0 0 0-5-5Zm0 20a3 3 0 0 1-2.816-2h5.632A3 3 0 0 1 12 22Z"></path></svg>',
     check:
       '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9.2 16.2-3.9-3.9-1.4 1.4 5.3 5.3L20.5 7.7l-1.4-1.4-9.9 9.9Z"></path></svg>',
+    bolt:
+      '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m13 2-9 12h6l-1 8 11-14h-7l0-6Z"></path></svg>',
     heart:
       '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21.35 10.55 20C5.4 15.24 2 12.09 2 8.24A4.74 4.74 0 0 1 6.76 3.5c2 0 3.92.93 5.24 2.39A7.06 7.06 0 0 1 17.24 3.5 4.74 4.74 0 0 1 22 8.24c0 3.85-3.4 7-8.55 11.77L12 21.35Z"></path></svg>',
     heartOutline:
@@ -46110,6 +49996,8 @@ function renderIcon(name) {
       '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 7 7 7-1.41 1.41L12 9.83l-5.59 5.58L5 14l7-7Z"></path></svg>',
     chevronDown:
       '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 17-7-7 1.41-1.41L12 14.17l5.59-5.58L19 10l-7 7Z"></path></svg>',
+    arrowRight:
+      '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m13 5 7 7-7 7-1.41-1.41L16.17 13H4v-2h12.17l-4.58-4.59L13 5Z"></path></svg>',
     play: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"></path></svg>',
     pause:
       '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h4v14H7zm6 0h4v14h-4z"></path></svg>',
@@ -46169,6 +50057,7 @@ function getTopChromeTitle(route = state.route) {
   const routeKey = normalizeString(route?.routeKey);
   const exactTitles = {
     [ROUTE_KEY_AUTH]: "Account",
+    [ROUTE_KEY_POST_VIEW]: "Post",
     [ROUTE_KEY_CREATE]: "Create",
     [ROUTE_KEY_ACHIEVEMENTS]: "Achievements",
     [ROUTE_KEY_SEARCH]: "Search",
@@ -46185,6 +50074,7 @@ function getTopChromeTitle(route = state.route) {
     [ROUTE_KEY_ADMIN]: "Admin",
     [ROUTE_KEY_ADMIN_SECTION]: "Admin",
     [ROUTE_KEY_PUBLIC_PETITION]: "Petition",
+    [ROUTE_KEY_PUBLIC_PETITION_RESULTS]: "Petition Results",
   };
   if (exactTitles[routeKey]) {
     return exactTitles[routeKey];
@@ -46335,10 +50225,17 @@ function renderPostItem(item, index) {
               </button>
               ${followBadge}
             </div>
-            <button class="shared-feed-action shared-feed-action--counted${item.likedByMe ? " is-active" : ""}" data-action="toggle-like" data-post-id="${escapeHtml(item.postId)}">
-              <span class="shared-feed-action__icon">${renderIcon(item.likedByMe ? "heart" : "heartOutline")}</span>
-              <span class="shared-feed-action__label">${escapeHtml(formatCount(item.likesCount))}</span>
-            </button>
+            <div class="shared-feed-action-group">
+              <button class="shared-feed-action shared-feed-action--counted${item.likedByMe ? " is-active" : ""}" data-action="toggle-like" data-post-id="${escapeHtml(item.postId)}" aria-label="${item.likedByMe ? "Unlike post" : "Like post"}">
+                <span class="shared-feed-action__icon">${renderIcon(item.likedByMe ? "heart" : "heartOutline")}</span>
+                <span class="shared-feed-action__label">${escapeHtml(formatCount(item.likesCount))}</span>
+              </button>
+              ${
+                Number(item.likesCount) > 0
+                  ? `<button class="shared-feed-action-detail" data-action="open-likers" data-post-id="${escapeHtml(item.postId)}">View</button>`
+                  : ""
+              }
+            </div>
             <button class="shared-feed-action shared-feed-action--counted" data-action="open-comments" data-post-id="${escapeHtml(item.postId)}">
               <span class="shared-feed-action__icon">${renderIcon("comment")}</span>
               <span class="shared-feed-action__label">${escapeHtml(formatCount(item.commentsCount))}</span>
@@ -46670,6 +50567,32 @@ function renderDiscoverAuthGate() {
       icon: "chart",
     },
   ];
+  const moduleHighlights = [
+    {
+      icon: "check",
+      eyebrow: "Challenge",
+      title: "Civic challenge",
+      detail: "A focused next action keeps policy, ballot, and local tasks moving.",
+    },
+    {
+      icon: "calendar",
+      eyebrow: "Calendar",
+      title: "Today + schedule",
+      detail: "Optional calendar and schedule modules can route into exact items.",
+    },
+    {
+      icon: "mission",
+      eyebrow: "Volunteer",
+      title: "Mission previews",
+      detail: "Campaign and coalition mission work stays reachable from Discover.",
+    },
+  ];
+  const moduleQueue = [
+    ["Now", "Policy questions and civic challenge", "Answer"],
+    ["Today", "Calendar cards and next 7 days", "Open"],
+    ["Local", "Events, candidates, coalitions, and pulse", "Browse"],
+    ["Social", "Friend activity and community rooms", "Follow"],
+  ];
   return `<section class="shared-page shared-discover-page shared-discover-page--auth">
     ${renderTopChrome()}
     <div class="shared-page__content">
@@ -46698,6 +50621,41 @@ function renderDiscoverAuthGate() {
       <div class="shared-discover-paths" aria-hidden="true">
         ${quickPaths.map(renderDiscoverQuickPath).join("")}
       </div>
+      <section class="shared-discover-module-command" aria-label="Discover module preview">
+        <header>
+          <span aria-hidden="true">${renderIcon("dashboard")}</span>
+          <div>
+            <small>Discover command center</small>
+            <strong>Configurable civic modules</strong>
+          </div>
+        </header>
+        <div class="shared-discover-module-command__metrics" role="list" aria-label="Discover priority modules">
+          ${moduleHighlights
+            .map(
+              (item) => `<article role="listitem">
+                <span aria-hidden="true">${renderIcon(item.icon)}</span>
+                <div>
+                  <small>${escapeHtml(item.eyebrow)}</small>
+                  <strong>${escapeHtml(item.title)}</strong>
+                  <p>${escapeHtml(item.detail)}</p>
+                </div>
+              </article>`,
+            )
+            .join("")}
+        </div>
+        <div class="shared-discover-module-command__queue" aria-label="Discover quick work queue">
+          ${moduleQueue
+            .map(
+              ([scope, title, status]) => `<article>
+                <span>${escapeHtml(scope)}</span>
+                <strong>${escapeHtml(title)}</strong>
+                <em>${escapeHtml(status)}</em>
+              </article>`,
+            )
+            .join("")}
+        </div>
+        <footer><span aria-hidden="true">${renderIcon("settings")}</span><span>Calendar, schedule, friend activity, and mission modules can stay optional while core discovery remains visible.</span></footer>
+      </section>
       <div class="shared-discover-layout" aria-hidden="true">
         <section class="shared-discover-section shared-discover-section--wide shared-discover-section--feed">
           <div class="shared-discover-section__header">
@@ -47032,6 +50990,134 @@ function renderCandidatesAuthGate() {
   </section>`;
 }
 
+function renderCandidateEditAuthGate() {
+  const profileFields = [
+    ["Display name", "Maya Johnson"],
+    ["Office level", "State Senate"],
+    ["District", "District 12"],
+    ["Priority tags", "Housing, Transit, Climate"],
+  ];
+  const contactFields = [
+    ["Website", "maya.example/campaign"],
+    ["Email", "team@maya.example"],
+    ["Instagram", "@maya_votes"],
+    ["Phone", "(555) 014-2026"],
+  ];
+  const workspaceItems = [
+    {
+      icon: "candidate",
+      title: "Public profile",
+      copy: "Update the name, office, district, image, biography, and tags voters see.",
+      value: "Profile",
+    },
+    {
+      icon: "messages",
+      title: "Campaign contact",
+      copy: "Keep phone, email, website, and social links aligned with campaign rooms and discovery.",
+      value: "Links",
+    },
+    {
+      icon: "calendar",
+      title: "Events and donations",
+      copy: "Candidate details carry into public event hosts and contribution context.",
+      value: "Shared",
+    },
+    {
+      icon: "save",
+      title: "Save controls",
+      copy: "Use the same top and bottom save affordances available in the Polis app editor.",
+      value: "Ready",
+    },
+  ];
+  return `<section class="shared-page shared-candidates-page shared-candidates-page--auth">
+    ${renderTopChrome()}
+    <div class="shared-page__content">
+      <section class="shared-candidates-auth">
+        <div class="shared-candidates-auth__copy">
+          <span class="shared-discover-eyebrow">Candidate editor</span>
+          <h1>Edit your candidate page from the web.</h1>
+          <p>Sign in to update the candidate profile connected to your Polis account, including display details, bio, campaign image, tags, contact links, and social channels.</p>
+          <div class="shared-auth-modal__actions">
+            <button class="shared-feed-chip shared-feed-chip--primary" data-action="auth-login-inline">Sign in</button>
+            <button class="shared-feed-chip" data-action="auth-signup-inline">Create account</button>
+            <button class="shared-feed-chip" data-action="open-app-shell">Open app</button>
+          </div>
+          <div class="shared-candidates-auth__metrics" aria-label="Candidate editor web surfaces">
+            <span><strong>2</strong><small>Save points</small></span>
+            <span><strong>9</strong><small>Contact fields</small></span>
+            <span><strong>5</strong><small>Profile tags</small></span>
+            <span><strong>Web</strong><small>Photo upload</small></span>
+          </div>
+        </div>
+        <div class="shared-candidates-auth__browser" aria-label="Candidate editor preview">
+          <div class="shared-candidates-auth__toolbar">
+            <div class="shared-candidates-auth__segments">
+              <span class="is-active">Edit page</span>
+              <span>Preview profile</span>
+            </div>
+            <div class="shared-candidates-auth__tools">
+              <span title="Upload image">${renderIcon("camera")}</span>
+              <span title="Save changes">${renderIcon("save")}</span>
+            </div>
+          </div>
+          <article class="shared-candidates-auth-card is-teal">
+            <div class="shared-candidates-auth-card__header">
+              <div class="shared-candidates-auth-card__avatar">M</div>
+              <div>
+                <span>Candidate profile</span>
+                <h2>Maya Johnson <em>IND</em></h2>
+                <p>State Senate - District 12</p>
+              </div>
+            </div>
+            <p>Focused on housing, transit, climate resilience, and local jobs.</p>
+            <div class="shared-candidates-auth-card__meta">
+              <span>${renderIcon("team")} 1.8K followers</span>
+              <span>Housing</span>
+              <span>Transit</span>
+              <span>Events</span>
+            </div>
+            <div class="shared-candidates-auth-card__actions">
+              <span class="is-primary">Save changes</span>
+              <span>Upload image</span>
+              <span>Cancel</span>
+            </div>
+          </article>
+          <div class="shared-candidates-auth__filters">
+            ${profileFields
+              .map(
+                ([label, value]) =>
+                  `<span title="${escapeHtml(label)}">${escapeHtml(value)}</span>`,
+              )
+              .join("")}
+          </div>
+          <div class="shared-candidates-auth__filters">
+            ${contactFields
+              .map(
+                ([label, value]) =>
+                  `<span title="${escapeHtml(label)}">${escapeHtml(value)}</span>`,
+              )
+              .join("")}
+          </div>
+        </div>
+      </section>
+      <section class="shared-candidates-auth-workspace" aria-label="Candidate editor capabilities">
+        ${workspaceItems
+          .map(
+            (item) => `<article>
+              <span>${renderIcon(item.icon)}</span>
+              <div>
+                <strong>${escapeHtml(item.title)}</strong>
+                <p>${escapeHtml(item.copy)}</p>
+              </div>
+              <em>${escapeHtml(item.value)}</em>
+            </article>`,
+          )
+          .join("")}
+      </section>
+    </div>
+  </section>`;
+}
+
 function renderEventsAuthGate() {
   const surfaces = [
     ["Cards", "Post-style discovery feed"],
@@ -47302,15 +51388,35 @@ function renderProfileAuthGate() {
 }
 
 function renderMessagesAuthGate() {
+  const servicePillars = [
+    {
+      icon: "messages",
+      title: "Private inbox",
+      copy: "Direct messages, group threads, message requests, and compose flow stay in one secure inbox.",
+      items: ["DMs", "Groups", "Requests", "Compose"],
+    },
+    {
+      icon: "dashboard",
+      title: "Campaign and coalition rooms",
+      copy: "Room directories, categories, member roles, notification settings, pins, invite links, and integrations are tied to each workspace.",
+      items: ["Rooms", "Categories", "Pins", "Invites"],
+    },
+    {
+      icon: "shield",
+      title: "Trust, recovery, and safety",
+      copy: "App lock, trusted devices, recovery keys, moderation, reports, bans, and access review stay reachable from web.",
+      items: ["App lock", "Recovery", "Reports", "Bans"],
+    },
+  ];
   const routeSurfaces = [
     ["Inbox", "Direct and group threads", "messages"],
-    ["Requests", "DM requests and workspace invites", "bell"],
-    ["Compose", "New conversations", "send"],
-    ["Campaign rooms", "Candidate operations channels", "candidate"],
-    ["Coalition channels", "Member and mission rooms", "team"],
-    ["Room access", "Access groups, room access, and invites", "lock"],
-    ["Security", "Trusted devices and recovery", "shield"],
-    ["Safety review", "Reports and held messages", "flag"],
+    ["Requests", "Message requests and invites", "bell"],
+    ["Compose", "New DMs and groups", "send"],
+    ["Room directories", "Campaign and coalition rooms", "dashboard"],
+    ["Room settings", "Notifications, pins, invites", "settings"],
+    ["Access groups", "Roles and permissions", "lock"],
+    ["Security center", "Trusted devices and recovery", "shield"],
+    ["Safety review", "Reports, bans, moderation", "flag"],
   ];
   const previewThreads = [
     {
@@ -47322,7 +51428,7 @@ function renderMessagesAuthGate() {
     },
     {
       title: "Coalition organizers",
-      scope: "Coalition channel",
+      scope: "Coalition room",
       preview: "Mission approvals and volunteer coverage updates are in.",
       unread: "1",
       tone: "red",
@@ -47346,12 +51452,26 @@ function renderMessagesAuthGate() {
       <section class="shared-messaging-auth">
         <div class="shared-messaging-auth__copy">
           <span class="shared-discover-eyebrow">Messages</span>
-          <h1>Open secure conversations and campaign rooms from the web.</h1>
-          <p>Sign in to continue with direct messages, requests, campaign and coalition room directories, trusted devices, recovery, moderation, and room access controls.</p>
+          <h1>Open the full Polis messaging workspace from the web.</h1>
+          <p>Sign in to continue with the same messaging system the app uses: private inbox, requests, campaign and coalition rooms, room settings, trusted devices, recovery, moderation, and access controls.</p>
           <div class="shared-auth-modal__actions">
             <button class="shared-feed-chip shared-feed-chip--primary" data-action="auth-login-inline">Sign in</button>
             <button class="shared-feed-chip" data-action="auth-signup-inline">Create account</button>
             <button class="shared-feed-chip" data-action="open-app-shell">Open app</button>
+          </div>
+          <div class="shared-messaging-auth__service-map" role="list" aria-label="Messaging workspace groups">
+            ${servicePillars
+              .map(
+                (pillar) => `<article role="listitem">
+                  <span aria-hidden="true">${renderIcon(pillar.icon)}</span>
+                  <div>
+                    <strong>${escapeHtml(pillar.title)}</strong>
+                    <p>${escapeHtml(pillar.copy)}</p>
+                  </div>
+                  <small>${pillar.items.map((item) => `<b>${escapeHtml(item)}</b>`).join("")}</small>
+                </article>`,
+              )
+              .join("")}
           </div>
           <div class="shared-messaging-auth__routes" role="list" aria-label="Messaging web surfaces">
             ${routeSurfaces
@@ -47407,7 +51527,10 @@ function renderMessagesAuthGate() {
                 .join("")}
             </div>
             <footer>
-              <span>${renderIcon("lock")} Sign in to send, react, pin, report, and manage access.</span>
+              <div class="shared-messaging-auth__composer-preview" aria-label="Sign in to send, react, pin, report, and manage access.">
+                <span>${renderIcon("lock")} Sign in to message #announcements</span>
+                <i>${renderIcon("send")}</i>
+              </div>
             </footer>
           </article>
         </div>
@@ -48103,6 +52226,32 @@ function renderSearchResultsPage() {
   </section>`;
 }
 
+function renderPostViewFallbackPage() {
+  return `<section class="shared-page shared-post-view-fallback-page">
+    ${renderTopChrome()}
+    <div class="shared-page__content shared-auth-route-content">
+      <section class="shared-auth-route-hero">
+        <span class="shared-settings-eyebrow">Post viewer</span>
+        <h1>Post unavailable</h1>
+        <p>This app route opens an in-memory post player after you tap a post in a feed, profile, candidate page, or search result. To open a post from the web, use a direct post link with its post ID.</p>
+      </section>
+      <section class="shared-auth-route-panel">
+        <div class="shared-bootstrap-grid">
+          <a class="shared-settings-resource-card" href="/feed">
+            <div><h3>Open Feed</h3><p>Browse current Polis posts and open a real post from the web player.</p></div><span>Open</span>
+          </a>
+          <a class="shared-settings-resource-card" href="/search">
+            <div><h3>Search Posts</h3><p>Find posts, people, tags, events, and civic results from one place.</p></div><span>Search</span>
+          </a>
+          <button class="shared-settings-resource-card" type="button" data-action="open-app-shell">
+            <div><h3>Open App</h3><p>Continue with the native post player if this route came from an app-only context.</p></div><span>Open</span>
+          </button>
+        </div>
+      </section>
+    </div>
+  </section>`;
+}
+
 function policyQuestionPalette(index) {
   const palette = ["#26f4ee", "#ff335f", "#38d29d", "#f59e0b", "#a78bfa", "#60a5fa"];
   return palette[Math.abs(index) % palette.length];
@@ -48362,6 +52511,118 @@ function renderPostComposerMediaPreview(composer) {
     return `<video class="shared-create-preview-video" src="${escapeHtml(composer.previewUrl)}" controls muted playsinline preload="metadata" aria-label="${escapeHtml(fileName || "Selected video")}"></video>`;
   }
   return `<img src="${escapeHtml(composer.previewUrl)}" alt="${escapeHtml(fileName || "Selected image")}" />`;
+}
+
+function renderPostComposerCoverOverlay(cover) {
+  const text = normalizeString(cover.titleText);
+  if (!text) {
+    return "";
+  }
+  const fill = cover.presetId === "fill";
+  const className = `shared-create-cover-overlay is-${escapeHtml(cover.presetId)} is-${escapeHtml(cover.textAlign)}`;
+  const style = [
+    `--cover-x:${escapeHtml((cover.x * 100).toFixed(1))}%`,
+    `--cover-y:${escapeHtml((cover.y * 100).toFixed(1))}%`,
+    `--cover-scale:${escapeHtml(cover.scale.toFixed(2))}`,
+    `--cover-color:${escapeHtml(fill ? "#FFFFFF" : cover.textColorHex)}`,
+    `--cover-bg:${escapeHtml(cover.backgroundColorHex)}`,
+  ].join(";");
+  return `<span class="${className}" style="${style}">${escapeHtml(text)}</span>`;
+}
+
+function renderPostComposerCoverPanel(composer, pending) {
+  if (composer.mediaType !== "video" || !composer.file) {
+    return "";
+  }
+  const cover = normalizePostComposerCover(composer);
+  const maxMs = postComposerCoverMaxMs(composer);
+  const frameMs = postComposerCoverFrameMs(composer);
+  const frameLabel = maxMs
+    ? `${formatComposerDuration(frameMs)} / ${formatComposerDuration(maxMs)}`
+    : "Waiting for video length";
+  const sourceIsUpload = cover.source === "uploaded_image";
+  const uploadedCoverUrl = cover.imagePreviewUrl || cover.renderedUrl;
+  const coverMedia = sourceIsUpload && uploadedCoverUrl
+    ? `<img src="${escapeHtml(uploadedCoverUrl)}" alt="Selected cover image" />`
+    : `<video data-create-cover-video src="${escapeHtml(composer.previewUrl)}" muted playsinline preload="metadata" aria-label="Selected cover frame"></video>`;
+  return `<section class="shared-create-cover">
+    <div class="shared-create-cover__header">
+      <div>
+        <span>${renderIcon("camera")}</span>
+        <div>
+          <strong>Video cover</strong>
+          <small>${escapeHtml(sourceIsUpload ? "Uploaded still image" : `Frame at ${frameLabel}`)}</small>
+        </div>
+      </div>
+      <div class="shared-create-cover-source" role="radiogroup" aria-label="Cover source">
+        <label>
+          <input type="radio" name="coverSource" value="frame" data-create-field="cover.source"${checkedAttr(!sourceIsUpload)}${disabledAttr(pending)} />
+          <span>Frame</span>
+        </label>
+        <label>
+          <input type="radio" name="coverSource" value="uploaded_image" data-create-field="cover.source"${checkedAttr(sourceIsUpload)}${disabledAttr(pending)} />
+          <span>Image</span>
+        </label>
+      </div>
+    </div>
+    <div class="shared-create-cover-grid">
+      <div class="shared-create-cover-preview">
+        ${coverMedia}
+        ${renderPostComposerCoverOverlay(cover)}
+      </div>
+      <div class="shared-create-cover-controls">
+        <label>
+          <span>Frame</span>
+          <input type="range" min="0" max="${escapeHtml(String(Math.max(0, Math.round(maxMs))))}" step="100" value="${escapeHtml(String(Math.round(frameMs)))}" data-create-field="cover.frameMs"${disabledAttr(pending || sourceIsUpload || !maxMs)} />
+          <small>${escapeHtml(frameLabel)}</small>
+        </label>
+        <label class="shared-create-cover-upload">
+          <span>Cover image</span>
+          <input type="file" accept="${escapeHtml(POST_COMPOSER_IMAGE_ACCEPT)}" data-create-cover-file${disabledAttr(pending)} />
+          <em>${escapeHtml(cover.imageFile?.name || cover.renderedUrl || "Optional still cover")}</em>
+        </label>
+        <label class="is-wide">
+          <span>Cover text</span>
+          <input value="${escapeHtml(cover.titleText)}" maxlength="80" data-create-field="cover.titleText" placeholder="Optional cover headline"${disabledAttr(pending)} />
+        </label>
+        <div class="shared-create-cover-control-row">
+          <label>
+            <span>Style</span>
+            <select data-create-field="cover.presetId"${disabledAttr(pending)}>
+              <option value="none"${selectedAttr(cover.presetId === "none")}>Plain</option>
+              <option value="outline"${selectedAttr(cover.presetId === "outline")}>Outline</option>
+              <option value="fill"${selectedAttr(cover.presetId === "fill")}>Fill</option>
+            </select>
+          </label>
+          <label>
+            <span>Align</span>
+            <select data-create-field="cover.textAlign"${disabledAttr(pending)}>
+              <option value="left"${selectedAttr(cover.textAlign === "left")}>Left</option>
+              <option value="center"${selectedAttr(cover.textAlign === "center")}>Center</option>
+              <option value="right"${selectedAttr(cover.textAlign === "right")}>Right</option>
+            </select>
+          </label>
+        </div>
+        <div class="shared-create-cover-control-row">
+          <label>
+            <span>Text color</span>
+            <input type="color" value="${escapeHtml(cover.textColorHex)}" data-create-field="cover.textColorHex"${disabledAttr(pending)} />
+          </label>
+          <label>
+            <span>Fill color</span>
+            <input type="color" value="${escapeHtml(cover.backgroundColorHex)}" data-create-field="cover.backgroundColorHex"${disabledAttr(pending || cover.presetId !== "fill")} />
+          </label>
+        </div>
+        <div class="shared-create-cover-sliders">
+          <label><span>Horizontal <b>${escapeHtml(`${Math.round(cover.x * 100)}%`)}</b></span><input type="range" min="0.05" max="0.95" step="0.01" value="${escapeHtml(String(cover.x))}" data-create-field="cover.x"${disabledAttr(pending)} /></label>
+          <label><span>Vertical <b>${escapeHtml(`${Math.round(cover.y * 100)}%`)}</b></span><input type="range" min="0.08" max="0.92" step="0.01" value="${escapeHtml(String(cover.y))}" data-create-field="cover.y"${disabledAttr(pending)} /></label>
+          <label><span>Size <b>${escapeHtml(`${Math.round(cover.scale * 100)}%`)}</b></span><input type="range" min="0.6" max="1.8" step="0.01" value="${escapeHtml(String(cover.scale))}" data-create-field="cover.scale"${disabledAttr(pending)} /></label>
+        </div>
+        ${cover.error ? `<div class="shared-create-inline-status is-error">${escapeHtml(cover.error)}</div>` : ""}
+        ${cover.notice ? `<div class="shared-create-inline-status">${escapeHtml(cover.notice)}</div>` : ""}
+      </div>
+    </div>
+  </section>`;
 }
 
 function postComposerVisibilityCopy(visibility) {
@@ -48715,6 +52976,7 @@ function renderPostComposerPage() {
             }
           </div>
           ${renderPostComposerTimeline(composer)}
+          ${renderPostComposerCoverPanel(composer, pending)}
           <div class="shared-create-upload-note">
             <span>${renderIcon("shield")}</span>
             <p>Media publishes through the same upload and post pipeline as the mobile app.</p>
@@ -48777,7 +53039,10 @@ function renderAchievementCard(achievement, selectedId) {
 
 function renderAchievementsPage() {
   const resource = state.pages.achievements;
-  const profile = resource.snapshot?.profile || normalizeVoterIntelProfile();
+  const profile = achievementProfileWithQuestionFallback(
+    resource.snapshot?.profile || normalizeVoterIntelProfile(),
+    resource.answeredQuestionCount,
+  );
   const achievements = buildDiscoverAchievements(profile);
   const selected =
     achievements.find((achievement) => achievement.id === resource.selectedId) ||
@@ -49667,26 +53932,212 @@ function renderDiscoverCandidateCard(candidate) {
   </article>`;
 }
 
+function discoverFriendActivityIsFollow(item = {}) {
+  const kind = normalizeString(item.kind).toLowerCase();
+  return kind === "follow" || kind === "follows" || kind === "followed";
+}
+
+function discoverFriendProfileSuggestions(limit = 3) {
+  if (!isDiscoverFriendActivitySharingEnabled()) {
+    return [];
+  }
+  return (state.pages.discover.friendActivity.items || [])
+    .filter(discoverFriendActivityIsFollow)
+    .slice(0, limit);
+}
+
+function discoverFriendProfileRoute(item = {}) {
+  return resolveDiscoverTargetPath(item.targetPath) || "/candidates";
+}
+
+function renderDiscoverFriendProfileCard(item) {
+  const route = discoverFriendProfileRoute(item);
+  const firstActor = item.actors?.[0] || {};
+  const mediaUrl = item.thumbnailUrl || firstActor.avatarUrl;
+  const title = normalizeString(item.title) || "Profile followed by friends";
+  const actionLabel = normalizeString(item.verb) || "Follow activity";
+  const copy =
+    normalizeString(item.subtitle) ||
+    "People connected to your Polis account surfaced this profile.";
+  const friendCount = Number(item.friendCount) || item.actors?.length || 0;
+  return `<article class="shared-discover-card shared-discover-card--person shared-discover-card--friend-profile">
+    ${renderDiscoverImage(mediaUrl, title)}
+    <div class="shared-discover-card__body">
+      <div class="shared-card__meta">
+        <span>${escapeHtml(humanizeLabel(actionLabel))}</span>
+        ${item.createdAt ? `<span>${escapeHtml(formatRelativeTime(item.createdAt))}</span>` : ""}
+      </div>
+      <h3>${escapeHtml(title)}</h3>
+      <p>${escapeHtml(copy)}</p>
+      <div class="shared-discover-card__footer">
+        <span>${escapeHtml(friendCount ? `${formatCount(friendCount)} friend${friendCount === 1 ? "" : "s"}` : "Friend activity")}</span>
+        <button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(route)}">Open</button>
+      </div>
+    </div>
+  </article>`;
+}
+
+function discoverPeopleSuggestionEntries(limit = 4) {
+  const friendEntries = discoverFriendProfileSuggestions(3).map((item) => ({
+    type: "friend-profile",
+    item,
+  }));
+  const candidateEntries = (state.pages.discover.candidates.items || []).map(
+    (item) => ({
+      type: "candidate",
+      item,
+    }),
+  );
+  return [...friendEntries, ...candidateEntries].slice(0, limit);
+}
+
+function renderDiscoverPeopleSuggestionCard(entry) {
+  if (entry?.type === "friend-profile") {
+    return renderDiscoverFriendProfileCard(entry.item);
+  }
+  return renderDiscoverCandidateCard(entry?.item || {});
+}
+
+function renderDiscoverPeopleSection() {
+  const candidateSlice = state.pages.discover.candidates;
+  const friendSlice = state.pages.discover.friendActivity;
+  const sharingEnabled = isDiscoverFriendActivitySharingEnabled();
+  const items = discoverPeopleSuggestionEntries(4);
+  const composedSlice = {
+    ...candidateSlice,
+    items,
+    loading:
+      (candidateSlice.loading || (sharingEnabled && friendSlice.loading)) &&
+      !items.length,
+    loaded:
+      candidateSlice.loaded ||
+      items.length > 0 ||
+      (sharingEnabled && friendSlice.loaded),
+    error: candidateSlice.error,
+  };
+  return renderDiscoverSection({
+    title: "People to follow",
+    copy: sharingEnabled
+      ? "Friend-followed profiles, candidates, and officials worth checking next."
+      : "Candidate and official profiles worth checking next.",
+    actionLabel: "Browse",
+    actionRoute: "/candidates",
+    slice: composedSlice,
+    renderItem: renderDiscoverPeopleSuggestionCard,
+    emptyTitle: "No people matched.",
+    emptyCopy: sharingEnabled
+      ? "Try the candidate directory or follow a few people to tune suggestions."
+      : "Try the candidate directory or turn activity sharing back on for friend-followed profiles.",
+    className: "shared-discover-section--people",
+    listClassName: "shared-discover-list--compact shared-discover-list--people",
+  });
+}
+
+function formatDiscoverEventDateRange(event = {}) {
+  const startAt = Number(event.startAt);
+  if (!Number.isFinite(startAt) || startAt <= 0) {
+    return "Date pending";
+  }
+  const endAt = Number(event.endAt) || startAt + 60 * 60 * 1000;
+  const start = new Date(startAt);
+  const end = new Date(endAt);
+  const sameDay =
+    start.getFullYear() === end.getFullYear() &&
+    start.getMonth() === end.getMonth() &&
+    start.getDate() === end.getDate();
+  const dateFormatter = new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+  });
+  const timeFormatter = new Intl.DateTimeFormat(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  if (sameDay) {
+    return `${dateFormatter.format(start)}, ${timeFormatter.format(start)}-${timeFormatter.format(end)}`;
+  }
+  return `${dateFormatter.format(start)}, ${timeFormatter.format(start)} - ${dateFormatter.format(end)}, ${timeFormatter.format(end)}`;
+}
+
+function discoverEventPlaceLabel(event = {}) {
+  return (
+    normalizeString(event.locationTown || event.locationName || event.address) ||
+    "TBD"
+  );
+}
+
+function discoverEventDateBadge(event = {}) {
+  const startAt = Number(event.startAt);
+  if (!Number.isFinite(startAt) || startAt <= 0) {
+    return {
+      month: "TBD",
+      day: "",
+      time: "Date pending",
+    };
+  }
+  const start = new Date(startAt);
+  return {
+    month: new Intl.DateTimeFormat(undefined, { month: "short" }).format(start),
+    day: new Intl.DateTimeFormat(undefined, { day: "numeric" }).format(start),
+    time: new Intl.DateTimeFormat(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(start),
+  };
+}
+
+function renderDiscoverEventVisual(event = {}, place = "") {
+  if (event.imageUrl) {
+    return renderDiscoverImage(
+      event.imageUrl,
+      event.title,
+      "shared-discover-image--wide",
+    );
+  }
+  const badge = discoverEventDateBadge(event);
+  return `<div class="shared-discover-image shared-discover-image--wide shared-discover-event-visual" role="img" aria-label="${escapeHtml(event.title || "Event")}">
+    <span class="shared-discover-event-visual__date">
+      <small>${escapeHtml(badge.month)}</small>
+      <strong>${escapeHtml(badge.day || "TBD")}</strong>
+    </span>
+    <span class="shared-discover-event-visual__copy">
+      <strong>${escapeHtml(place || "Location pending")}</strong>
+      <small>${escapeHtml(badge.time)}</small>
+    </span>
+  </div>`;
+}
+
 function renderDiscoverEventCard(event, index = 0) {
   const route = event.eventId
     ? `/events/${encodeURIComponent(event.eventId)}`
     : "/events";
-  const place =
-    normalizeString(event.locationName || event.locationTown || event.address) ||
-    "Location pending";
+  const place = discoverEventPlaceLabel(event);
   const featuredClass = index === 0 ? " is-featured" : "";
+  const interested = event.isInterested === true;
+  const interestLabel = interested ? "Interested" : "Interested?";
   return `<article class="shared-discover-card shared-discover-card--event${featuredClass}">
-    ${renderDiscoverImage(event.imageUrl, event.title, "shared-discover-image--wide")}
+    ${renderDiscoverEventVisual(event, place)}
     <div class="shared-discover-card__body">
       <div class="shared-card__meta">
-        <span>${escapeHtml(event.startAt ? formatAbsoluteDateTime(event.startAt) : "Date pending")}</span>
-        <span>${escapeHtml(formatCount(event.attendeeCount))} going</span>
+        <span>${escapeHtml(formatDiscoverEventDateRange(event))}</span>
+        <span>${escapeHtml(place)}</span>
       </div>
       <h3>${escapeHtml(event.title)}</h3>
-      <p>${escapeHtml(place)}</p>
+      <p>${escapeHtml(event.description || event.hostDisplayName || "Open event details, RSVP, and local context.")}</p>
+      <div class="shared-discover-event-metrics" aria-label="Event interest and attendance">
+        <span><strong>${escapeHtml(formatCount(event.attendeeCount))}</strong><small>Going</small></span>
+        <span><strong>${escapeHtml(formatCount(event.interestedCount))}</strong><small>Interested</small></span>
+      </div>
       <div class="shared-discover-card__footer">
         <span>${escapeHtml(event.hostDisplayName || "Host")}</span>
-        <button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(route)}">Open</button>
+        <div class="shared-discover-event-actions">
+          ${
+            event.eventId
+              ? `<button class="shared-discover-event-interest${interested ? " is-active" : ""}" type="button" data-action="event-interest" data-event-id="${escapeHtml(event.eventId)}" aria-pressed="${interested ? "true" : "false"}" aria-label="${escapeHtml(interestLabel)}">${renderIcon(interested ? "saveFilled" : "save")}<span>${escapeHtml(interestLabel)}</span></button>`
+              : ""
+          }
+          <button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(route)}">Open</button>
+        </div>
       </div>
     </div>
   </article>`;
@@ -49839,19 +54290,40 @@ function renderDiscoverCalendarCard() {
     if (preview.error) {
       meta.push("Refresh available");
     }
-    return renderDiscoverActionCard({
-      icon: "calendar",
-      eyebrow: "Calendar",
-      title,
-      body: preview.error || body,
-      route,
-      actionLabel: "Open calendar",
-      meta,
-      stateClass: preview.error ? "is-warning" : hasUnopenedToday ? "has-alert" : "",
-    }).replace(
-      'data-action="navigate"',
-      'data-action="discover-calendar-open"',
-    );
+    const todayParts = discoverCalendarTodayParts();
+    const cardState = preview.error
+      ? " is-warning"
+      : hasUnopenedToday
+        ? " has-alert"
+        : "";
+    return `<article class="shared-discover-action-card shared-discover-action-card--calendar${cardState}">
+      <div class="shared-discover-calendar-head">
+        <div class="shared-discover-calendar-icon" aria-hidden="true">
+          ${renderIcon(hasUnopenedToday ? "bell" : "calendar")}
+          ${hasUnopenedToday ? "<span></span>" : ""}
+        </div>
+        <div>
+          <span class="shared-discover-action-card__eyebrow">Calendar</span>
+          <h3>${escapeHtml(title)}</h3>
+          <p>${escapeHtml(preview.error || body)}</p>
+        </div>
+      </div>
+      <button class="shared-discover-calendar-today" type="button" data-action="discover-calendar-open" data-route="${escapeHtml(route)}" aria-label="${escapeHtml(`Open ${campaignName} calendar for ${todayParts.label}`)}">
+        <span class="shared-discover-calendar-date">
+          <small>${escapeHtml(todayParts.month)}</small>
+          <strong>${escapeHtml(todayParts.day)}</strong>
+        </span>
+        <span class="shared-discover-calendar-copy">
+          <small>${escapeHtml(todayParts.weekday)}</small>
+          <strong>${escapeHtml(firstToday ? discoverCalendarItemTitle(firstToday) : "Today")}</strong>
+          <em>${escapeHtml(firstToday ? discoverCalendarItemTimeLabel(firstToday) : "No calendar item needs attention")}</em>
+        </span>
+      </button>
+      <div class="shared-discover-action-card__meta">
+        ${meta.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}
+      </div>
+      <button class="shared-feed-chip shared-feed-chip--primary" data-action="discover-calendar-open" data-route="${escapeHtml(route)}">Open calendar</button>
+    </article>`;
   }
 
   const campaign = discoverPrimaryCampaign();
@@ -49967,44 +54439,91 @@ function renderDiscoverScheduleCard() {
 }
 
 function renderDiscoverCivicChallengeCard() {
+  const discover = state.pages.discover;
   const questions = state.pages.discover.policyQuestions.items || [];
   const unanswered =
     questions.find((question) => !question.selectedAnswer?.optionId) || null;
-  const answeredCount = questions.filter(
-    (question) => question.selectedAnswer?.optionId,
-  ).length;
+  const profile = discoverAchievementsProfile();
+  const quest = profile.questSummary || {};
+  const stats = discoverActionStatsFromSignals({
+    questions,
+    signalBreakdown: profile.signalBreakdown,
+    fallbackQuestionCount: profile.matrix?.answeredCount,
+  });
+  const answeredCount = stats.questionsAnswered;
+  const openCount = Math.max(questions.length - countAnsweredPolicyQuestions(questions), 0);
+  const streakDays = Number(quest.streakDays) || 0;
+  const complete = quest.todayComplete === true;
   const loading =
-    state.pages.discover.policyQuestions.loading && !questions.length;
-  const error = state.pages.discover.policyQuestions.error;
+    (discover.policyQuestions.loading && !questions.length) ||
+    (discover.achievements.loading && !discover.achievements.snapshot);
+  const error = discover.policyQuestions.error || discover.achievements.error;
   const route = unanswered?.questionId
     ? `/questions/${encodeURIComponent(unanswered.questionId)}`
-    : "/questions";
+    : "/events";
   const title = loading
     ? "Loading civic challenge"
-    : unanswered
-      ? unanswered.title
-      : "Keep your voter signal current";
-  const body = error
-    ? "Question recommendations could not load, but the question page is available."
-    : loading
-      ? "Fetching the next policy question for your voter-intelligence profile."
+    : complete
+      ? "Today's challenge complete"
       : unanswered
-        ? normalizeString(unanswered.shortBackground || unanswered.categoryLabel) ||
-          "Answer one question to improve Polis candidate and ballot guidance."
-        : "Review policy questions or answer another issue prompt from the browser.";
-  return renderDiscoverActionCard({
-    icon: unanswered ? "search" : "check",
-    eyebrow: "Civic challenge",
-    title,
-    body,
-    route,
-    actionLabel: unanswered ? "Answer" : "Open questions",
-    meta: [
-      `${formatCount(answeredCount)} answered`,
-      `${formatCount(Math.max(questions.length - answeredCount, 0))} open`,
-    ],
-    stateClass: error ? "is-warning" : "",
-  });
+        ? unanswered.title
+        : "Find your next civic action";
+  const body = error
+    ? "Civic challenge signals could not load, but questions are still available."
+    : loading
+      ? "Finding the next action for your voter-intelligence profile."
+      : complete
+        ? quest.todayGoal ||
+          "You finished today's civic action. Keep the streak alive with an event or another prompt."
+        : unanswered
+          ? normalizeString(unanswered.shortBackground || unanswered.categoryLabel) ||
+            "Answer one question to improve Polis candidate and ballot guidance."
+          : quest.todayGoal ||
+            "Open questions or events to keep your voter signal moving.";
+  const actionLabel = loading
+    ? "Open questions"
+    : unanswered
+      ? "Answer prompt"
+      : "Find event";
+  const scoreItems = [
+    ["Total actions", stats.totalActions],
+    ["Daily streak", streakDays],
+    [unanswered ? "Open prompts" : "Questions", unanswered ? openCount : answeredCount],
+  ];
+  const detailLabel = error
+    ? "Retry from questions"
+    : unanswered
+      ? unanswered.categoryLabel || "Policy question"
+      : complete
+        ? "Complete today"
+        : "No prompt selected";
+  return `<article class="shared-discover-action-card shared-discover-action-card--civic-challenge${complete ? " is-complete" : ""}${error ? " is-warning" : ""}">
+    <div class="shared-discover-civic-head">
+      <span class="shared-discover-civic-icon" aria-hidden="true">${renderIcon(complete ? "check" : "bolt")}</span>
+      <div>
+        <span class="shared-discover-action-card__eyebrow">Civic challenge</span>
+        <h3>${escapeHtml(title)}</h3>
+      </div>
+    </div>
+    <div class="shared-discover-action-card__body">
+      <p>${escapeHtml(body)}</p>
+      <div class="shared-discover-civic-scoreboard" aria-label="Civic challenge stats">
+        ${scoreItems
+          .map(
+            ([label, value]) => `<span aria-label="${escapeHtml(`${label}: ${formatCount(value)}`)}"><small>${escapeHtml(label)}</small><strong>${escapeHtml(formatCount(value))}</strong></span>`,
+          )
+          .join("")}
+      </div>
+      <button class="shared-discover-civic-target" type="button" data-action="navigate" data-route="${escapeHtml(route)}">
+        <span>
+          <small>${escapeHtml(detailLabel)}</small>
+          <strong>${escapeHtml(unanswered?.questionText || actionLabel)}</strong>
+        </span>
+        ${renderIcon("arrowRight")}
+      </button>
+    </div>
+    <button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="${escapeHtml(route)}">${escapeHtml(actionLabel)}</button>
+  </article>`;
 }
 
 function renderDiscoverDeadlineCard() {
@@ -50044,83 +54563,556 @@ function renderDiscoverDeadlineCard() {
   });
 }
 
+function discoverCoalitionMissionSectionConfig() {
+  return COALITION_SECTION_CONFIG.find((section) => section.key === "missions");
+}
+
+function discoverMissionAdminPermissions() {
+  return new Set([
+    "missions_assign",
+    "missions_delegate",
+    "missions_approve",
+    "mission_templates_manage",
+    "missions_manage",
+  ]);
+}
+
+function discoverCandidateMissionScope(access) {
+  if (
+    !access?.candidateId ||
+    access.candidateId === "unknown" ||
+    !candidateDashboardCanOpenSectionKey("missions", access)
+  ) {
+    return null;
+  }
+  const permissions = new Set(access.permissions || []);
+  const adminPermissions = discoverMissionAdminPermissions();
+  const admin =
+    access.isOwner ||
+    Array.from(permissions).some((permission) => adminPermissions.has(permission));
+  return {
+    scopeType: "candidate",
+    scopeId: access.candidateId,
+    title:
+      normalizeString(access.profile?.displayName || access.profile?.username) ||
+      "Campaign",
+    destinationPath: candidateDashboardSectionPath(access.candidateId, "missions"),
+    admin,
+  };
+}
+
+function discoverCoalitionMissionScope(item) {
+  const coalition = item?.coalition || null;
+  const membership = item?.membership || null;
+  const coalitionId = normalizeString(coalition?.coalitionId);
+  if (
+    !coalitionId ||
+    !canOpenCoalitionSection(
+      discoverCoalitionMissionSectionConfig(),
+      coalition,
+      membership,
+    )
+  ) {
+    return null;
+  }
+  const permissions = new Set(membership?.permissions || []);
+  const adminPermissions = discoverMissionAdminPermissions();
+  const admin =
+    membership?.isAdmin ||
+    Array.from(permissions).some((permission) => adminPermissions.has(permission));
+  return {
+    scopeType: "coalition",
+    scopeId: coalitionId,
+    title: normalizeString(coalition.name) || "Coalition",
+    destinationPath: coalitionSectionPath(coalitionId, "missions"),
+    admin,
+  };
+}
+
+function buildDiscoverMissionScopes() {
+  const discover = state.pages.discover;
+  const scopes = [
+    ...(discover.campaigns.items || []).map(discoverCandidateMissionScope),
+    ...(discover.coalitions.items || []).map(discoverCoalitionMissionScope),
+  ].filter(Boolean);
+  const seen = new Set();
+  return scopes
+    .filter((scope) => {
+      const key = `${scope.scopeType}:${scope.scopeId}`;
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 8);
+}
+
+function discoverMissionScopeKey(scopes = []) {
+  return scopes
+    .map((scope) => `${scope.scopeType}:${scope.scopeId}:${scope.admin ? "admin" : "mine"}`)
+    .join("|");
+}
+
+function discoverMissionPreviewJob(mission) {
+  return missionNextJob(mission);
+}
+
+function discoverMissionPreviewStatus(preview) {
+  const job = preview.job;
+  if (job?.isLate) return "Late";
+  if (job?.isDueSoon) return "Due soon";
+  if (job?.dueAt) return formatAbsoluteDateTime(job.dueAt);
+  if (job?.isHighPriority || missionHasHighPriority(preview.mission)) {
+    return "High priority";
+  }
+  if (job?.isClaimable) return "Claimable";
+  return "Open";
+}
+
+function discoverMissionPreviewWeight(preview) {
+  const job = preview.job;
+  if (job?.isLate) return 0;
+  if (job?.isDueSoon) return 1;
+  if (job?.isHighPriority || missionHasHighPriority(preview.mission)) return 2;
+  if (job?.isClaimable) return 3;
+  if (job?.isActive) return 4;
+  return 5;
+}
+
+function compareDiscoverMissionPreviews(left, right) {
+  const weight = discoverMissionPreviewWeight(left) - discoverMissionPreviewWeight(right);
+  if (weight) return weight;
+  const leftDue =
+    left.job?.dueAt || left.mission?.dueAt || Number.MAX_SAFE_INTEGER;
+  const rightDue =
+    right.job?.dueAt || right.mission?.dueAt || Number.MAX_SAFE_INTEGER;
+  if (leftDue !== rightDue) return leftDue - rightDue;
+  return left.title.localeCompare(right.title);
+}
+
+async function loadDiscoverMissionPreviews({ refresh = false, render = true } = {}) {
+  const discover = state.pages.discover;
+  const scopes = buildDiscoverMissionScopes();
+  const scopesKey = discoverMissionScopeKey(scopes);
+  const scopeSlice = discover.missionScopes;
+  const previewSlice = discover.missionPreviews;
+
+  scopeSlice.items = scopes;
+  scopeSlice.loaded = true;
+  scopeSlice.error = "";
+  if (!refresh && previewSlice.loaded && previewSlice.scopeKey === scopesKey) {
+    return;
+  }
+
+  previewSlice.scopeKey = scopesKey;
+  previewSlice.items = [];
+  previewSlice.nextCursor = null;
+  previewSlice.error = "";
+  previewSlice.loaded = false;
+  if (!scopes.length) {
+    previewSlice.loading = false;
+    previewSlice.loaded = true;
+    if (render) scheduleRender();
+    return;
+  }
+
+  previewSlice.loading = true;
+  if (render) scheduleRender();
+
+  const results = await Promise.allSettled(
+    scopes.slice(0, 4).map(async (scope) => {
+      const query = new URLSearchParams({
+        scopeType: scope.scopeType,
+        scopeId: scope.scopeId,
+        view: scope.admin ? "admin" : "mine",
+        limit: "6",
+      });
+      const payload = await fetchJson(`/api/missions?${query.toString()}`, {
+        auth: true,
+      });
+      return readArrayPayload(payload, ["items", "missions"])
+        .map(normalizeMission)
+        .filter(
+          (mission) =>
+            !["approved", "canceled", "completed", "failed"].includes(
+              mission.status,
+            ),
+        )
+        .map((mission) => {
+          const job = discoverMissionPreviewJob(mission);
+          return {
+            scope,
+            mission,
+            job,
+            title: job?.title || mission.title,
+            description: job?.description || mission.description || "",
+          };
+        });
+    }),
+  );
+
+  const previews = results
+    .filter((result) => result.status === "fulfilled")
+    .flatMap((result) => result.value)
+    .sort(compareDiscoverMissionPreviews)
+    .slice(0, 6);
+  const failedCount = results.filter((result) => result.status === "rejected").length;
+  previewSlice.items = previews;
+  previewSlice.error =
+    failedCount >= results.length && !previews.length
+      ? "Mission previews could not be loaded."
+      : "";
+  previewSlice.loaded = true;
+  previewSlice.loading = false;
+  if (render) scheduleRender();
+}
+
+function renderDiscoverMissionPreviewCard(preview) {
+  const mission = preview.mission;
+  const status = discoverMissionPreviewStatus(preview);
+  const description = normalizeString(preview.description) || preview.scope.title;
+  const route = `/missions/${encodeURIComponent(mission.missionId)}?returnTo=${encodeURIComponent("/discover")}`;
+  return `<button class="shared-discover-mission-preview${preview.job?.isLate ? " is-late" : ""}${preview.job?.isHighPriority || missionHasHighPriority(mission) ? " is-priority" : ""}" type="button" data-action="navigate" data-route="${escapeHtml(route)}">
+    <span class="shared-discover-mission-preview__status">${renderIcon(preview.job?.isLate ? "flag" : "mission")}</span>
+    <span class="shared-discover-mission-preview__body">
+      <small>${escapeHtml(status)}</small>
+      <strong>${escapeHtml(preview.title)}</strong>
+      <span>${escapeHtml(description)}</span>
+      <em>${escapeHtml(preview.scope.title)}</em>
+    </span>
+    <span class="shared-discover-mission-preview__arrow" aria-hidden="true">${renderIcon("arrowRight")}</span>
+  </button>`;
+}
+
 function renderDiscoverVolunteerCard() {
   const discover = state.pages.discover;
+  const scopes = discover.missionScopes.items || buildDiscoverMissionScopes();
+  const previews = discover.missionPreviews.items || [];
+  const primaryScope = scopes[0] || null;
+  const loading =
+    (discover.campaigns.loading && !discover.campaigns.items.length) ||
+    (discover.coalitions.loading && !discover.coalitions.items.length) ||
+    discover.missionPreviews.loading;
+  const meta = [
+    `${formatCount(scopes.length)} workspace${scopes.length === 1 ? "" : "s"}`,
+    `${formatCount(previews.length)} preview${previews.length === 1 ? "" : "s"}`,
+  ];
+  if (loading) {
+    meta.push("Loading mission work");
+  }
+  if (!scopes.length || !previews.length) {
+    const route = primaryScope?.destinationPath || "/coalitions";
+    return renderDiscoverActionCard({
+      icon: "mission",
+      eyebrow: "Mission work",
+      title: !scopes.length
+        ? "Join a workspace to unlock missions"
+        : "No open mission previews yet",
+      body: !scopes.length
+        ? "Join a coalition or campaign to unlock claimable mission work."
+        : `Open ${primaryScope.title} to check the mission hub.`,
+      route,
+      actionLabel: !scopes.length ? "Open coalitions" : "Open hub",
+      meta,
+      stateClass: discover.missionPreviews.error ? "is-warning" : "",
+    });
+  }
+  const top = previews[0];
+  return `<article class="shared-discover-action-card shared-discover-action-card--mission-work">
+    <div class="shared-discover-action-card__icon" aria-hidden="true">${renderIcon("mission")}</div>
+    <div class="shared-discover-action-card__body">
+      <span class="shared-discover-action-card__eyebrow">Mission work</span>
+      <h3>${escapeHtml(top.title)}</h3>
+      <p>${escapeHtml(normalizeString(top.description) || `Open ${top.scope.title} to keep this work moving.`)}</p>
+      <div class="shared-discover-action-card__meta">
+        ${meta.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}
+      </div>
+      <div class="shared-discover-mission-list">
+        ${previews.slice(0, 3).map(renderDiscoverMissionPreviewCard).join("")}
+      </div>
+    </div>
+    <button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="${escapeHtml(primaryScope?.destinationPath || "/missions")}">Open mission hub</button>
+  </article>`;
+}
+
+function discoverPetitionsRoute() {
+  const campaignCandidates = [
+    ...(state.pages.discover.campaigns.items || []),
+    ...(state.pages.candidateDashboard.campaigns.items || []),
+  ].filter((access) => access?.candidateId);
+  const petitionCampaign =
+    campaignCandidates.find((access) =>
+      candidateDashboardCanOpenSectionKey("petitions", access),
+    ) || campaignCandidates[0] || null;
+  if (
+    petitionCampaign?.candidateId &&
+    candidateDashboardCanOpenSectionKey("petitions", petitionCampaign)
+  ) {
+    return candidateDashboardSectionPath(
+      petitionCampaign.candidateId,
+      "petitions",
+    );
+  }
+
+  const coalitionSection = COALITION_SECTION_CONFIG.find(
+    (section) => section.key === "petitions",
+  );
+  const coalitionCandidates = [
+    ...(state.pages.discover.coalitions.items || []),
+    ...(state.pages.coalitions.list.items || []),
+  ];
+  const petitionCoalition =
+    coalitionCandidates.find((detail) =>
+      canOpenCoalitionSection(
+        coalitionSection,
+        detail?.coalition,
+        detail?.membership,
+      ),
+    ) ||
+    coalitionCandidates.find((detail) => detail?.coalition?.coalitionId) ||
+    null;
+  if (
+    petitionCoalition?.coalition?.coalitionId &&
+    canOpenCoalitionSection(
+      coalitionSection,
+      petitionCoalition.coalition,
+      petitionCoalition.membership,
+    )
+  ) {
+    return coalitionSectionPath(
+      petitionCoalition.coalition.coalitionId,
+      "petitions",
+    );
+  }
+
+  if (petitionCampaign?.candidateId) {
+    return candidateDashboardSectionPath(petitionCampaign.candidateId);
+  }
+  if (petitionCoalition?.coalition?.coalitionId) {
+    return coalitionSectionPath(petitionCoalition.coalition.coalitionId);
+  }
+  return "/candidate-dashboard";
+}
+
+function renderDiscoverPetitionsCard() {
+  const discover = state.pages.discover;
+  const route = discoverPetitionsRoute();
   const campaign = discoverPrimaryCampaign();
   const coalitionDetail = discoverPrimaryCoalition();
   const coalition = coalitionDetail?.coalition || null;
-  const route = campaign?.candidateId
-    ? candidateDashboardSectionPath(campaign.candidateId, "missions")
-    : coalition?.coalitionId
-      ? `/coalitions/${encodeURIComponent(coalition.coalitionId)}/missions`
-      : "/missions";
-  const title = "Volunteer opportunities";
-  const body = campaign?.candidateId
-    ? `${normalizeString(campaign.displayName || campaign.candidateName) || "This campaign"} mission work is ready to review.`
-    : coalition?.coalitionId
-      ? `${coalition.name} mission work is ready to review.`
-      : "Join a campaign or coalition to unlock claimable mission work.";
-  const loading =
-    (discover.campaigns.loading && !discover.campaigns.items.length) ||
-    (discover.coalitions.loading && !discover.coalitions.items.length);
-  const meta = [
-    `${formatCount(discover.campaigns.items.length)} campaign${discover.campaigns.items.length === 1 ? "" : "s"}`,
-    `${formatCount(discover.coalitions.items.length)} coalition${discover.coalitions.items.length === 1 ? "" : "s"}`,
-  ];
-  if (loading) {
-    meta.push("Loading access");
-  }
+  const campaignName =
+    normalizeString(campaign?.displayName || campaign?.candidateName) ||
+    normalizeString(campaign?.profile?.displayName);
+  const coalitionName = normalizeString(coalition?.name);
+  const campaignCanOpen =
+    campaign?.candidateId &&
+    candidateDashboardCanOpenSectionKey("petitions", campaign);
+  const coalitionCanOpen =
+    coalition?.coalitionId &&
+    canOpenCoalitionSection(
+      COALITION_SECTION_CONFIG.find((section) => section.key === "petitions"),
+      coalition,
+      coalitionDetail?.membership,
+    );
+  const title = campaignCanOpen
+    ? `${campaignName || "Campaign"} petitions`
+    : coalitionCanOpen
+      ? `${coalitionName || "Coalition"} petitions`
+      : "Petitions and pledges";
+  const body = campaignCanOpen
+    ? "Create, publish, and review campaign petitions from the same web workspace as missions, events, and voter tools."
+    : coalitionCanOpen
+      ? "Coordinate coalition petitions and pledge drives alongside members, missions, voting, and amplification."
+      : "Open a campaign or coalition workspace to manage petition access and launch pledge drives.";
   return renderDiscoverActionCard({
-    icon: "mission",
-    eyebrow: "Mission work",
+    icon: "file",
+    eyebrow: "Petitions",
     title,
     body,
     route,
     actionLabel:
-      campaign?.candidateId || coalition?.coalitionId
-        ? "Open missions"
-        : "Find work",
-    meta,
+      campaignCanOpen || coalitionCanOpen ? "Open petitions" : "Find workspace",
+    meta: [
+      `${formatCount(discover.campaigns.items.length)} campaign${discover.campaigns.items.length === 1 ? "" : "s"}`,
+      `${formatCount(discover.coalitions.items.length)} coalition${discover.coalitions.items.length === 1 ? "" : "s"}`,
+    ],
   });
 }
 
+function discoverAchievementsProfile() {
+  const discover = state.pages.discover;
+  const snapshot =
+    discover.achievements.snapshot ||
+    state.pages.achievements.snapshot ||
+    normalizeVoterIntelSnapshot({});
+  const profile = snapshot.profile || normalizeVoterIntelProfile();
+  return achievementProfileWithQuestionFallback(
+    profile,
+    countAnsweredPolicyQuestions(discover.policyQuestions.items),
+  );
+}
+
+function renderDiscoverAchievementPreview(achievement, isNew = false) {
+  const progress = clampAchievementProgress(
+    achievement.progress,
+    achievement.target,
+  );
+  const percent = achievementProgressPercent(achievement);
+  const status = achievement.completed
+    ? isNew
+      ? "New"
+      : "Earned"
+    : `${progress}/${achievement.target}`;
+  return `<button class="shared-discover-achievement-item${achievement.completed ? " is-complete" : ""}${isNew ? " is-new" : ""}" type="button" data-action="navigate" data-route="${escapeHtml(achievement.route)}">
+    <span class="shared-discover-achievement-item__icon">${renderIcon(achievement.icon)}</span>
+    <span class="shared-discover-achievement-item__body">
+      <small>${escapeHtml(status)}</small>
+      <strong>${escapeHtml(achievement.title)}</strong>
+      <i aria-hidden="true"><b style="--achievement-progress:${escapeHtml(percent.toFixed(2))}%"></b></i>
+    </span>
+  </button>`;
+}
+
 function renderDiscoverAchievementsCard() {
-  return renderDiscoverActionCard({
-    icon: "chart",
-    eyebrow: "Achievements",
-    title: "Civic milestones",
-    body:
-      "Track first answers, ballot progress, and daily action streaks from the web.",
-    route: "/achievements",
-    actionLabel: "View progress",
-    meta: ["Badges", "Streaks"],
-  });
+  const resource = state.pages.discover.achievements;
+  const profile = discoverAchievementsProfile();
+  const achievements = buildDiscoverAchievements(profile);
+  const viewed = readViewedDiscoverAchievements();
+  const newAchievements = achievements.filter(
+    (achievement) => achievement.completed && !viewed.has(achievement.id),
+  );
+  const completedCount = achievements.filter(
+    (achievement) => achievement.completed,
+  ).length;
+  const focus =
+    newAchievements[0] ||
+    achievements.find((achievement) => !achievement.completed) ||
+    achievements[0];
+  const previewAchievements = [
+    ...newAchievements,
+    ...achievements.filter(
+      (achievement) =>
+        !newAchievements.some((item) => item.id === achievement.id),
+    ),
+  ].slice(0, 3);
+  const title = newAchievements.length
+    ? `${formatCount(newAchievements.length)} new achievement${newAchievements.length === 1 ? "" : "s"}`
+    : `${formatCount(completedCount)} of ${formatCount(achievements.length)} earned`;
+  const body = focus
+    ? focus.completed
+      ? focus.earnedDescription
+      : focus.description
+    : "Track first answers, ballot progress, and daily action streaks from the web.";
+  const meta = [
+    `${formatCount(completedCount)} earned`,
+    `${formatCount(profile.questSummary?.streakDays || 0)} day streak`,
+  ];
+  if (resource.loading && !resource.snapshot) {
+    meta.push("Loading badges");
+  }
+  return `<article class="shared-discover-action-card shared-discover-action-card--achievements${newAchievements.length ? " has-alert" : ""}${resource.error ? " is-warning" : ""}">
+    <div class="shared-discover-achievement-badge" aria-hidden="true">
+      ${renderIcon("chart")}
+      <span>${escapeHtml(formatCount(completedCount))}</span>
+    </div>
+    <div class="shared-discover-action-card__body">
+      <span class="shared-discover-action-card__eyebrow">Achievements</span>
+      <h3>${escapeHtml(title)}</h3>
+      <p>${escapeHtml(resource.error || body)}</p>
+      <div class="shared-discover-action-card__meta">
+        ${meta.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}
+      </div>
+      <div class="shared-discover-achievement-list">
+        ${previewAchievements
+          .map((achievement) =>
+            renderDiscoverAchievementPreview(
+              achievement,
+              newAchievements.some((item) => item.id === achievement.id),
+            ),
+          )
+          .join("")}
+      </div>
+    </div>
+    <button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="/achievements">View badges</button>
+  </article>`;
 }
 
 function renderDiscoverVoterGuideCard() {
   const context = state.pages.elections.context;
+  const feedCard = context?.feedCard || null;
   const nextElection = discoverNextElection(context);
-  const route = nextElection
-    ? buildElectionDayRoute({
-        scope: nextElection.scope,
-        stateId: nextElection.stateId,
-        electionId: nextElection.electionId,
-      })
-    : "/settings/voter-intelligence";
-  return renderDiscoverActionCard({
-    icon: "election",
-    eyebrow: "Your ballot",
-    title: nextElection ? "Election guide ready" : "Build your voter signal",
-    body: nextElection
-      ? "Open races, candidate context, and ballot guidance for your area."
-      : "Answer issue prompts and keep your candidate guidance current.",
-    route,
-    actionLabel: nextElection ? "Open guide" : "Start guide",
-    meta: [
-      state.pages.elections.contextLoading ? "Checking area" : "District aware",
-      nextElection?.stateName || "Voter tools",
-    ],
-  });
+  const profile = discoverAchievementsProfile();
+  const ballot = profile.ballotGame || {};
+  const completedContestCount = Number(ballot.completedContestCount) || 0;
+  const guideReady = ballot.ready === true || completedContestCount > 0;
+  const route =
+    normalizeString(feedCard?.destinationPath) ||
+    "/settings/voter-intelligence?tab=elections&game=ballot";
+  const actionLabel = normalizeString(feedCard?.ctaLabel) || "Open guide";
+  const areaLabel =
+    normalizeString(
+      feedCard?.stateName ||
+        nextElection?.stateName ||
+        context?.userStateId ||
+        feedCard?.stateId ||
+        nextElection?.stateId,
+    ) || "Your area";
+  const electionLabel = [nextElection?.electionName, formatElectionDate(nextElection?.electionDate)]
+    .map(normalizeString)
+    .filter(Boolean)
+    .join(" - ");
+  const nextAction = normalizeString(ballot.nextAction);
+  const previewText =
+    normalizeString(feedCard?.message) ||
+    nextAction ||
+    electionLabel ||
+    "Open races, compare candidates, and save the choices you want to revisit.";
+  const previewLabel =
+    normalizeString(feedCard?.variant)
+      ? humanizeLabel(feedCard.variant)
+      : guideReady
+        ? "Guide in progress"
+        : "Next step";
+  const statItems = [
+    ["Contests", formatCount(completedContestCount)],
+    ["Guide", guideReady ? "Started" : "Ready"],
+    ["Area", areaLabel],
+  ];
+  return `<article class="shared-discover-action-card shared-discover-action-card--voter-guide${guideReady ? " is-started" : ""}">
+    <div class="shared-discover-voter-guide-head">
+      <span class="shared-discover-voter-guide-icon" aria-hidden="true">
+        ${renderIcon("ballot")}
+        <b>${escapeHtml(formatCount(completedContestCount))}</b>
+      </span>
+      <div>
+        <span class="shared-discover-action-card__eyebrow">Your ballot</span>
+        <h3>Make your ballot</h3>
+      </div>
+    </div>
+    <div class="shared-discover-action-card__body">
+      <p>${escapeHtml(
+        completedContestCount > 0
+          ? `${formatCount(completedContestCount)} contests started. Keep your guide current.`
+          : "Compare races and save the choices you want to revisit.",
+      )}</p>
+      <div class="shared-discover-voter-guide-stats" aria-label="Voter guide status">
+        ${statItems
+          .map(
+            ([label, value]) => `<span aria-label="${escapeHtml(`${label}: ${value}`)}"><small>${escapeHtml(label)}</small><strong>${escapeHtml(value)}</strong></span>`,
+          )
+          .join("")}
+      </div>
+      <button class="shared-discover-voter-guide-preview" type="button" data-action="navigate" data-route="${escapeHtml(route)}">
+        <span>
+          <small>${escapeHtml(previewLabel)}</small>
+          <strong>${escapeHtml(previewText)}</strong>
+        </span>
+        ${renderIcon("arrowRight")}
+      </button>
+    </div>
+    <button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="${escapeHtml(route)}">${escapeHtml(actionLabel)}</button>
+  </article>`;
 }
 
 function renderDiscoverCreatorPromptCard() {
@@ -50136,53 +55128,303 @@ function renderDiscoverCreatorPromptCard() {
   });
 }
 
-function renderDiscoverLocalPulseCard() {
-  const discover = state.pages.discover;
-  const signalCount =
-    discover.feed.items.length +
-    discover.events.items.length +
-    discover.candidates.items.length;
-  return renderDiscoverActionCard({
-    icon: "map",
-    eyebrow: "Local pulse",
-    title: "What is active nearby",
-    body:
-      "Scan the newest posts, events, and public profiles connected to your civic graph.",
-    route: "/search/results?q=local",
-    actionLabel: "Explore local",
-    meta: [
-      `${formatCount(signalCount)} signals`,
-      `${formatCount(discover.events.items.length)} events`,
-    ],
-  });
+function discoverPulseTokens(value) {
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => {
+      if (entry && typeof entry === "object") {
+        return [
+          entry.issueId,
+          entry.issue_id,
+          entry.id,
+          entry.label,
+          entry.name,
+          entry.title,
+        ].map(normalizeString);
+      }
+      return [normalizeString(entry)];
+    }).filter(Boolean);
+  }
+  const normalized = normalizeString(value);
+  if (!normalized) {
+    return [];
+  }
+  return normalized
+    .split(/[,\n]/u)
+    .map((entry) => normalizeString(entry).replace(/^#+/u, ""))
+    .filter(Boolean);
 }
 
-function renderDiscoverPolicyQuestionCard(question, index = 0) {
-  const route = question.questionId
-    ? `/questions/${encodeURIComponent(question.questionId)}`
-    : "/questions";
-  const answered = Boolean(question.selectedAnswer?.optionId);
-  const copy =
-    normalizeString(question.shortBackground || question.categoryLabel) ||
-    "Answer to improve your voter guide and candidate recommendations.";
-  return `<article class="shared-discover-card shared-discover-card--question${index === 0 ? " is-featured" : ""}">
-    <div class="shared-discover-card__icon" aria-hidden="true">${renderIcon(answered ? "check" : "search")}</div>
-    <div class="shared-discover-card__body">
-      <div class="shared-card__meta">
-        <span>${escapeHtml(answered ? "Answered" : "Open question")}</span>
-        ${question.categoryLabel ? `<span>${escapeHtml(question.categoryLabel)}</span>` : ""}
+function discoverPulseIssueKeysFromSource(source = {}) {
+  const raw = source?.raw && typeof source.raw === "object" ? source.raw : {};
+  return [
+    ...discoverPulseTokens(source.issueId),
+    ...discoverPulseTokens(source.issueIds),
+    ...discoverPulseTokens(source.issues),
+    ...discoverPulseTokens(source.tags),
+    ...discoverPulseTokens(raw.issueId || raw.issue_id),
+    ...discoverPulseTokens(raw.issueIds || raw.issue_ids),
+    ...discoverPulseTokens(raw.issues),
+    ...discoverPulseTokens(raw.tags),
+    ...discoverPulseTokens(raw.hashtags || raw.hashTags),
+  ]
+    .map((value) => value.toLowerCase())
+    .filter(Boolean);
+}
+
+function discoverPulseIssueIndex(issues = []) {
+  const index = new Map();
+  issues.forEach((issue) => {
+    [
+      issue.issueId,
+      issue.label,
+      issue.categoryLabel,
+    ].forEach((value) => {
+      const key = normalizeString(value).toLowerCase();
+      if (key && !index.has(key)) {
+        index.set(key, issue);
+      }
+    });
+  });
+  return index;
+}
+
+function discoverPulseMatches(source = {}, issueIndex) {
+  const matches = new Map();
+  discoverPulseIssueKeysFromSource(source).forEach((key) => {
+    const issue = issueIndex.get(key);
+    if (issue?.issueId) {
+      matches.set(issue.issueId, issue);
+    }
+  });
+  return Array.from(matches.values());
+}
+
+function discoverPulsePostLocalHit(post = {}) {
+  const context = state.pages.elections.context || {};
+  const userStateId = normalizeString(context.userStateId).toLowerCase();
+  const userDistrictId = normalizeString(
+    context.userDistrictId || context.districtId,
+  ).toLowerCase();
+  const raw = post.raw && typeof post.raw === "object" ? post.raw : {};
+  const postStateId = normalizeString(
+    post.locationStateId || raw.locationStateId || raw.stateId,
+  ).toLowerCase();
+  const postDistrictId = normalizeString(
+    post.locationDistrictId || raw.locationDistrictId || raw.districtId,
+  ).toLowerCase();
+  return Boolean(
+    (userStateId && postStateId === userStateId) ||
+      (userDistrictId && postDistrictId === userDistrictId),
+  );
+}
+
+function buildDiscoverLocalPulseItems(limit = 6) {
+  const discover = state.pages.discover;
+  const issues = discover.issues.items || [];
+  const issueIndex = discoverPulseIssueIndex(issues);
+  const followed = new Set(
+    (discover.followedIssues.items || []).map((issueId) =>
+      normalizeString(issueId).toLowerCase(),
+    ),
+  );
+  const builders = new Map();
+  const builderFor = (issue) => {
+    if (!builders.has(issue.issueId)) {
+      builders.set(issue.issueId, {
+        issueId: issue.issueId,
+        label: issue.label,
+        score: 0,
+        postCount: 0,
+        eventCount: 0,
+        localHitCount: 0,
+        reason: "",
+      });
+    }
+    return builders.get(issue.issueId);
+  };
+
+  issues.forEach((issue) => {
+    if (followed.has(normalizeString(issue.issueId).toLowerCase())) {
+      const builder = builderFor(issue);
+      builder.score += 6;
+      builder.reason = "followed";
+    }
+  });
+
+  (discover.feed.items || []).forEach((post, index) => {
+    if (post.kind !== "post") {
+      return;
+    }
+    discoverPulseMatches(post, issueIndex).forEach((issue) => {
+      const builder = builderFor(issue);
+      const local = discoverPulsePostLocalHit(post);
+      builder.postCount += 1;
+      builder.score +=
+        3 +
+        Math.log((Number(post.likesCount) || 0) + 1) * 1.6 +
+        Math.log((Number(post.commentsCount) || 0) + 1) * 2 +
+        Math.max(0, 8 - index) * 0.25;
+      if (local) {
+        builder.localHitCount += 1;
+        builder.score += 7;
+      }
+      if (!builder.reason) {
+        builder.reason = local ? "local posts" : "active posts";
+      }
+    });
+  });
+
+  (discover.events.items || []).forEach((event) => {
+    discoverPulseMatches(event, issueIndex).forEach((issue) => {
+      const builder = builderFor(issue);
+      builder.eventCount += 1;
+      builder.score +=
+        2.5 + Math.log((Number(event.interestedCount || event.attendeeCount) || 0) + 1) * 2;
+      if (!builder.reason) {
+        builder.reason = "nearby events";
+      }
+    });
+  });
+
+  return Array.from(builders.values())
+    .filter((item) => item.score > 0)
+    .sort((left, right) => right.score - left.score || left.label.localeCompare(right.label))
+    .slice(0, limit);
+}
+
+function renderDiscoverLocalPulseItem(item) {
+  const route = `/topics?query=${encodeURIComponent(item.label)}`;
+  const metrics = [
+    `${formatCount(item.postCount)} posts`,
+    `${formatCount(item.eventCount)} events`,
+    item.localHitCount > 0 ? `${formatCount(item.localHitCount)} local` : "",
+  ].filter(Boolean);
+  return `<button class="shared-discover-pulse-item" type="button" data-action="navigate" data-route="${escapeHtml(route)}">
+    <span class="shared-discover-pulse-item__icon" aria-hidden="true">${renderIcon("map")}</span>
+    <span class="shared-discover-pulse-item__body">
+      <small>${escapeHtml(item.reason || "activity")}</small>
+      <strong>${escapeHtml(item.label)}</strong>
+      <span>${metrics.map((metric) => `<em>${escapeHtml(metric)}</em>`).join("")}</span>
+    </span>
+  </button>`;
+}
+
+function renderDiscoverLocalPulseCard() {
+  const discover = state.pages.discover;
+  const items = buildDiscoverLocalPulseItems(4);
+  const loading =
+    (discover.issues.loading || discover.feed.loading || discover.events.loading) &&
+    !items.length;
+  if (!items.length) {
+    return renderDiscoverActionCard({
+      icon: "map",
+      eyebrow: "Local pulse",
+      title: loading ? "Checking local pulse" : "Choose topics to tune pulse",
+      body: loading
+        ? "Ranking active topics from posts, events, and your followed issues."
+        : "Follow topics so Discover can rank local posts, events, and issue momentum.",
+      route: "/topics",
+      actionLabel: "Choose topics",
+      meta: [
+        `${formatCount(discover.issues.items.length)} topics`,
+        `${formatCount(discover.events.items.length)} events`,
+      ],
+      stateClass: discover.issues.error ? "is-warning" : "",
+    });
+  }
+  const top = items[0];
+  return `<article class="shared-discover-action-card shared-discover-action-card--local-pulse">
+    <div class="shared-discover-action-card__icon" aria-hidden="true">${renderIcon("map")}</div>
+    <div class="shared-discover-action-card__body">
+      <span class="shared-discover-action-card__eyebrow">Local pulse</span>
+      <h3>${escapeHtml(top.label)}</h3>
+      <p>${escapeHtml(`Leading from ${top.reason || "activity"} with ${formatCount(top.postCount)} post${top.postCount === 1 ? "" : "s"} and ${formatCount(top.eventCount)} event${top.eventCount === 1 ? "" : "s"}.`)}</p>
+      <div class="shared-discover-action-card__meta">
+        <span>${escapeHtml(`${formatCount(items.length)} topics`)}</span>
+        <span>${escapeHtml(`${formatCount(items.reduce((sum, item) => sum + item.localHitCount, 0))} local`)}</span>
       </div>
-      <h3>${escapeHtml(question.title || "Policy question")}</h3>
-      <p>${escapeHtml(copy)}</p>
-      <div class="shared-discover-card__footer">
-        <span>${escapeHtml(answered ? "Update anytime" : "Improves your guide")}</span>
-        <button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(route)}">${escapeHtml(answered ? "Review" : "Answer")}</button>
+      <div class="shared-discover-pulse-list">
+        ${items.slice(0, 3).map(renderDiscoverLocalPulseItem).join("")}
       </div>
     </div>
+    <button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="/topics">Manage topics</button>
   </article>`;
 }
 
+function policyQuestionOptionLabel(option = {}) {
+  return (
+    normalizeString(option.stanceLabel || option.text || option.optionId) ||
+    "Option"
+  );
+}
+
+function policyQuestionResponseLabel(question = {}) {
+  const total = Number(question.aggregate?.total) || 0;
+  if (total <= 0) {
+    return "";
+  }
+  return `${formatCount(total)} response${total === 1 ? "" : "s"}`;
+}
+
+function renderDiscoverPolicyQuestionCard(question, index = 0, questions = []) {
+  const route = question.questionId
+    ? `/questions/${encodeURIComponent(question.questionId)}`
+    : "/questions";
+  const answeredOptionId = normalizeString(question.selectedAnswer?.optionId);
+  const answered = Boolean(answeredOptionId);
+  const total = Array.isArray(questions) ? questions.length : 0;
+  const positionLabel = answered
+    ? "Answered"
+    : total > 1
+      ? `Question ${index + 1} of ${total}`
+      : "Open question";
+  const title =
+    normalizeString(question.title || question.questionText) ||
+    "Policy question";
+  const copy =
+    normalizeString(question.shortBackground || question.categoryLabel) ||
+    "Answer to improve your voter guide and candidate recommendations.";
+  const options = (question.options || []).slice(0, 3);
+  const responseLabel = policyQuestionResponseLabel(question);
+  return `<button class="shared-discover-card shared-discover-card--question${index === 0 ? " is-featured" : ""}${answered ? " is-answered" : ""}" type="button" data-action="navigate" data-route="${escapeHtml(route)}">
+    <div class="shared-discover-question-top">
+      <span class="shared-discover-card__icon" aria-hidden="true">${renderIcon(answered ? "check" : "search")}</span>
+      <span>
+        <small>${escapeHtml(positionLabel)}</small>
+        ${question.categoryLabel ? `<em>${escapeHtml(question.categoryLabel)}</em>` : ""}
+      </span>
+      ${renderIcon("arrowRight")}
+    </div>
+    <div class="shared-discover-card__body">
+      <h3>${escapeHtml(title)}</h3>
+      <p>${escapeHtml(copy)}</p>
+      ${
+        options.length
+          ? `<div class="shared-discover-question-options">
+              ${options
+                .map((option) => {
+                  const selected =
+                    answered &&
+                    normalizeString(option.optionId) === answeredOptionId;
+                  return `<span class="${selected ? "is-selected" : ""}">${escapeHtml(policyQuestionOptionLabel(option))}</span>`;
+                })
+                .join("")}
+            </div>`
+          : ""
+      }
+      <div class="shared-discover-card__footer">
+        <span>${escapeHtml(responseLabel || (answered ? "Update anytime" : "Improves your guide"))}</span>
+        <strong class="shared-feed-chip">${escapeHtml(answered ? "Review" : "Answer")}</strong>
+      </div>
+    </div>
+  </button>`;
+}
+
 function renderDiscoverDestinationRail() {
+  const calendarAccess = discoverCalendarAccessCandidate();
+  const calendarRoute = calendarAccess?.candidateId
+    ? candidateDashboardSectionPath(calendarAccess.candidateId, "calendar")
+    : "";
   const destinations = [
     {
       label: "Feed",
@@ -50202,11 +55444,33 @@ function renderDiscoverDestinationRail() {
       route: "/events",
       icon: "calendar",
     },
+    ...(calendarRoute
+      ? [
+          {
+            label: "Calendar",
+            copy: "Open campaign events, shifts, and reminders.",
+            route: calendarRoute,
+            icon: "calendar",
+          },
+          {
+            label: "Schedule",
+            copy: "Jump to the next calendar item.",
+            route: calendarRoute,
+            icon: "calendar",
+          },
+        ]
+      : []),
     {
       label: "Questions",
       copy: "Answer issue prompts for better guidance.",
       route: "/questions",
       icon: "search",
+    },
+    {
+      label: "Petitions",
+      copy: "Open campaign or coalition petition work.",
+      route: discoverPetitionsRoute(),
+      icon: "file",
     },
     {
       label: "Ballot",
@@ -50252,17 +55516,236 @@ function renderDiscoverDestinationRail() {
   </section>`;
 }
 
+function renderDiscoverFriendActivityPrivacyState() {
+  return `<section class="shared-discover-section shared-discover-section--activity shared-discover-section--privacy">
+    <div class="shared-discover-section__header">
+      <div>
+        <h2>Friend activity</h2>
+        <p>Activity sharing is off for this browser profile.</p>
+      </div>
+      <button class="shared-feed-chip" data-action="navigate" data-route="/settings/privacy-safety">Privacy settings</button>
+    </div>
+    <div class="shared-discover-privacy-state">
+      <span aria-hidden="true">${renderIcon("shield")}</span>
+      <div>
+        <strong>Friend activity is private</strong>
+        <p>Turn sharing back on when you want Discover to show civic actions from people connected to your Polis account.</p>
+      </div>
+    </div>
+  </section>`;
+}
+
+function renderDiscoverActionModule(moduleKey) {
+  switch (moduleKey) {
+    case "civic_challenges":
+      return renderDiscoverCivicChallengeCard();
+    case "achievements":
+      return renderDiscoverAchievementsCard();
+    case "calendar":
+      return renderDiscoverCalendarCard();
+    case "schedule":
+      return renderDiscoverScheduleCard();
+    case "voter_guide":
+      return renderDiscoverVoterGuideCard();
+    case "creator_prompts":
+      return renderDiscoverCreatorPromptCard();
+    case "local_pulse":
+      return renderDiscoverLocalPulseCard();
+    case "voter_registration_deadlines":
+      return renderDiscoverDeadlineCard();
+    case "volunteer_opportunities":
+      return renderDiscoverVolunteerCard();
+    case "petitions_pledges":
+      return renderDiscoverPetitionsCard();
+    default:
+      return "";
+  }
+}
+
 function renderDiscoverActionDeck() {
+  const cards = discoverVisibleModuleKeys("action")
+    .map(renderDiscoverActionModule)
+    .filter(Boolean);
+  if (!cards.length) {
+    return `<section class="shared-discover-module-empty">
+      <div>
+        <span class="shared-discover-eyebrow">Modules</span>
+        <h2>No action modules are visible.</h2>
+        <p>Open Manage modules and show the cards you want back on Discover.</p>
+      </div>
+      <button class="shared-feed-chip shared-feed-chip--primary" data-action="discover-manage-toggle">Manage modules</button>
+    </section>`;
+  }
   return `<section class="shared-discover-action-deck" aria-label="Discover app modules">
-    ${renderDiscoverCivicChallengeCard()}
-    ${renderDiscoverAchievementsCard()}
-    ${renderDiscoverVoterGuideCard()}
-    ${renderDiscoverCalendarCard()}
-    ${renderDiscoverScheduleCard()}
-    ${renderDiscoverDeadlineCard()}
-    ${renderDiscoverLocalPulseCard()}
-    ${renderDiscoverCreatorPromptCard()}
-    ${renderDiscoverVolunteerCard()}
+    ${cards.join("")}
+  </section>`;
+}
+
+function renderDiscoverSectionModule(moduleKey, { serverSlice }) {
+  switch (moduleKey) {
+    case "trending_civic_feed":
+      return renderDiscoverSection({
+        title: "Trending civic feed",
+        copy: "Recent posts and conversations sized for browsing, not crammed into a tiny feed.",
+        actionLabel: "Open feed",
+        actionRoute: "/feed",
+        slice: state.pages.discover.feed,
+        renderItem: renderDiscoverPostCard,
+        emptyTitle: "No feed items yet.",
+        emptyCopy: "Open the feed or follow a few people to tune recommendations.",
+        className: "shared-discover-section--wide shared-discover-section--feed",
+        listClassName: "shared-discover-list--featured",
+        limit: 5,
+      });
+    case "policy_questions":
+      return renderDiscoverSection({
+        title: "Policy questions",
+        copy: "Issue prompts that improve your ballot and candidate guidance.",
+        actionLabel: "Open questions",
+        actionRoute: "/questions",
+        slice: state.pages.discover.policyQuestions,
+        renderItem: renderDiscoverPolicyQuestionCard,
+        emptyTitle: "No questions ready.",
+        emptyCopy: "Check back after your topics and district are set.",
+        className: "shared-discover-section--questions",
+        listClassName: "shared-discover-list--questions",
+        limit: 6,
+      });
+    case "events_near_you":
+      return renderDiscoverSection({
+        title: "Events near you",
+        copy: "Upcoming civic events with direct paths to details and RSVP.",
+        actionLabel: "All events",
+        actionRoute: "/events",
+        slice: state.pages.discover.events,
+        renderItem: renderDiscoverEventCard,
+        emptyTitle: "No events available.",
+        emptyCopy: "Follow campaigns and coalitions to see more events here.",
+        className: "shared-discover-section--events",
+        listClassName: "shared-discover-list--featured",
+        limit: 4,
+      });
+    case "people_organizations":
+      return renderDiscoverPeopleSection();
+    case "community_conversations":
+      return renderDiscoverSection({
+        title: "Community conversations",
+        copy: "Campaign, coalition, and public rooms you can open from web messaging.",
+        actionLabel: "Messages",
+        actionRoute: "/messages",
+        slice: serverSlice,
+        renderItem: renderDiscoverServerCard,
+        emptyTitle: "No community rooms surfaced.",
+        emptyCopy: "Join rooms from campaigns, coalitions, or message invites.",
+        className: "shared-discover-section--rooms",
+        listClassName: "shared-discover-list--compact",
+        limit: 4,
+      });
+    case "friend_activity":
+      if (!isDiscoverFriendActivitySharingEnabled()) {
+        return renderDiscoverFriendActivityPrivacyState();
+      }
+      return renderDiscoverSection({
+        title: "Friend activity",
+        copy: "Civic actions from people connected to your Polis account.",
+        actionLabel: "Find people",
+        actionRoute: "/candidates",
+        slice: state.pages.discover.friendActivity,
+        renderItem: renderDiscoverActivityCard,
+        emptyTitle: "No friend activity yet.",
+        emptyCopy: "Follow people and campaigns to populate this activity stream.",
+        className: "shared-discover-section--activity",
+        listClassName: "shared-discover-list--compact",
+        limit: 4,
+      });
+    default:
+      return "";
+  }
+}
+
+function renderDiscoverModuleSections({ serverSlice }) {
+  const sections = discoverVisibleModuleKeys("section")
+    .map((moduleKey) => renderDiscoverSectionModule(moduleKey, { serverSlice }))
+    .filter(Boolean);
+  if (!sections.length) {
+    return `<section class="shared-discover-module-empty">
+      <div>
+        <span class="shared-discover-eyebrow">Discover feed</span>
+        <h2>No browse modules are visible.</h2>
+        <p>Show feed, people, events, rooms, or friend activity from Manage modules.</p>
+      </div>
+      <button class="shared-feed-chip shared-feed-chip--primary" data-action="discover-manage-toggle">Manage modules</button>
+    </section>`;
+  }
+  return `<div class="shared-discover-layout shared-discover-layout--curated">
+    ${sections.join("")}
+  </div>`;
+}
+
+function renderDiscoverModuleManagerRow(moduleKey, index, preferences) {
+  const config = discoverModuleConfig(moduleKey);
+  if (!config) {
+    return "";
+  }
+  const locked = Boolean(config.locked);
+  const visible = !locked && !preferences.hidden.has(moduleKey);
+  const hidden = !visible;
+  const statusLabel = locked ? "Coming soon" : visible ? "Visible" : "Hidden";
+  const rowClass = [
+    "shared-discover-module-manager__row",
+    visible ? "is-visible" : "is-hidden",
+    locked ? "is-locked" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return `<article class="${rowClass}">
+    <span class="shared-discover-module-manager__icon" aria-hidden="true">${renderIcon(config.icon)}</span>
+    <div class="shared-discover-module-manager__copy">
+      <strong>${escapeHtml(config.title)}</strong>
+      <small>${escapeHtml(config.description)}</small>
+      <em>${escapeHtml(statusLabel)}</em>
+    </div>
+    <div class="shared-discover-module-manager__actions">
+      <button class="shared-feed-chip" data-action="discover-module-move" data-module-key="${escapeHtml(moduleKey)}" data-direction="up" ${index === 0 ? "disabled" : ""}>Up</button>
+      <button class="shared-feed-chip" data-action="discover-module-move" data-module-key="${escapeHtml(moduleKey)}" data-direction="down" ${index === preferences.order.length - 1 ? "disabled" : ""}>Down</button>
+      <button class="shared-feed-chip${hidden && !locked ? " shared-feed-chip--primary" : ""}" data-action="discover-module-toggle" data-module-key="${escapeHtml(moduleKey)}" data-visible="${visible ? "false" : "true"}" aria-pressed="${visible ? "true" : "false"}" ${locked ? "disabled" : ""}>${escapeHtml(locked ? "Locked" : visible ? "Hide" : "Show")}</button>
+    </div>
+  </article>`;
+}
+
+function renderDiscoverModuleManager() {
+  const discover = state.pages.discover;
+  if (!discover.manageOpen) {
+    return "";
+  }
+  const preferences = currentDiscoverModulePreferences();
+  const visibleCount = preferences.order.filter((moduleKey) => {
+    const config = discoverModuleConfig(moduleKey);
+    return config && !config.locked && !preferences.hidden.has(moduleKey);
+  }).length;
+  const optionalCount = preferences.order.filter((moduleKey) => {
+    const config = discoverModuleConfig(moduleKey);
+    return config && !config.locked;
+  }).length;
+  return `<section class="shared-discover-module-manager" aria-label="Manage Discover modules">
+    <header class="shared-discover-module-manager__header">
+      <div>
+        <span class="shared-discover-eyebrow">Manage Discover</span>
+        <h2>${escapeHtml(formatCount(visibleCount))} of ${escapeHtml(formatCount(optionalCount))} modules visible</h2>
+        <p>Match the app controls by choosing which modules appear and moving high-priority cards up.</p>
+      </div>
+      <div class="shared-discover-module-manager__header-actions">
+        <button class="shared-feed-chip" data-action="discover-modules-reset">Reset defaults</button>
+        <button class="shared-feed-chip" data-action="discover-manage-toggle">Close</button>
+      </div>
+    </header>
+    <div class="shared-discover-module-manager__list">
+      ${preferences.order
+        .map((moduleKey, index) =>
+          renderDiscoverModuleManagerRow(moduleKey, index, preferences),
+        )
+        .join("")}
+    </div>
   </section>`;
 }
 
@@ -50295,6 +55778,7 @@ function renderDiscoverPage() {
           <p>Search once, then move between posts, people, events, questions, ballot guidance, missions, rooms, and calendar items without losing your place.</p>
           <div class="shared-discover-hero__actions">
             <button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="/feed">Open feed</button>
+            <button class="shared-feed-chip" data-action="discover-manage-toggle" aria-expanded="${discover.manageOpen ? "true" : "false"}">${escapeHtml(discover.manageOpen ? "Close modules" : "Manage modules")}</button>
             <button class="shared-feed-chip" data-action="discover-refresh">Refresh</button>
           </div>
         </div>
@@ -50316,90 +55800,13 @@ function renderDiscoverPage() {
           : ""
       }
 
+      ${renderDiscoverModuleManager()}
+
       ${renderDiscoverActionDeck()}
 
       ${renderDiscoverDestinationRail()}
 
-      <div class="shared-discover-layout shared-discover-layout--curated">
-        ${renderDiscoverSection({
-          title: "Trending civic feed",
-          copy: "Recent posts and conversations sized for browsing, not crammed into a tiny feed.",
-          actionLabel: "Open feed",
-          actionRoute: "/feed",
-          slice: discover.feed,
-          renderItem: renderDiscoverPostCard,
-          emptyTitle: "No feed items yet.",
-          emptyCopy: "Open the feed or follow a few people to tune recommendations.",
-          className: "shared-discover-section--wide shared-discover-section--feed",
-          listClassName: "shared-discover-list--featured",
-          limit: 5,
-        })}
-        ${renderDiscoverSection({
-          title: "Policy questions",
-          copy: "Issue prompts that improve your ballot and candidate guidance.",
-          actionLabel: "Open questions",
-          actionRoute: "/questions",
-          slice: discover.policyQuestions,
-          renderItem: renderDiscoverPolicyQuestionCard,
-          emptyTitle: "No questions ready.",
-          emptyCopy: "Check back after your topics and district are set.",
-          className: "shared-discover-section--questions",
-          listClassName: "shared-discover-list--compact",
-          limit: 4,
-        })}
-        ${renderDiscoverSection({
-          title: "People to follow",
-          copy: "Candidate and official profiles worth checking next.",
-          actionLabel: "Browse",
-          actionRoute: "/candidates",
-          slice: discover.candidates,
-          renderItem: renderDiscoverCandidateCard,
-          emptyTitle: "No people matched.",
-          emptyCopy: "Try the candidate directory or search a race.",
-          className: "shared-discover-section--people",
-          listClassName: "shared-discover-list--compact",
-          limit: 4,
-        })}
-        ${renderDiscoverSection({
-          title: "Events near you",
-          copy: "Upcoming civic events with direct paths to details and RSVP.",
-          actionLabel: "All events",
-          actionRoute: "/events",
-          slice: discover.events,
-          renderItem: renderDiscoverEventCard,
-          emptyTitle: "No events available.",
-          emptyCopy: "Follow campaigns and coalitions to see more events here.",
-          className: "shared-discover-section--events",
-          listClassName: "shared-discover-list--featured",
-          limit: 4,
-        })}
-        ${renderDiscoverSection({
-          title: "Community conversations",
-          copy: "Campaign, coalition, and public rooms you can open from web messaging.",
-          actionLabel: "Messages",
-          actionRoute: "/messages",
-          slice: serverSlice,
-          renderItem: renderDiscoverServerCard,
-          emptyTitle: "No community rooms surfaced.",
-          emptyCopy: "Join rooms from campaigns, coalitions, or message invites.",
-          className: "shared-discover-section--rooms",
-          listClassName: "shared-discover-list--compact",
-          limit: 4,
-        })}
-        ${renderDiscoverSection({
-          title: "Friend activity",
-          copy: "Civic actions from people connected to your Polis account.",
-          actionLabel: "Find people",
-          actionRoute: "/candidates",
-          slice: discover.friendActivity,
-          renderItem: renderDiscoverActivityCard,
-          emptyTitle: "No friend activity yet.",
-          emptyCopy: "Follow people and campaigns to populate this activity stream.",
-          className: "shared-discover-section--activity",
-          listClassName: "shared-discover-list--compact",
-          limit: 4,
-        })}
-      </div>
+      ${renderDiscoverModuleSections({ serverSlice })}
 
       <div class="shared-discover-footer-actions">
         <button class="shared-feed-chip" data-action="discover-refresh">Refresh Discover</button>
@@ -50458,6 +55865,9 @@ function renderMediaThumbnailGrid(
     getAltText,
     getOverlayText,
     getPlaceholderLabel,
+    getDetailAction,
+    getCornerAction,
+    getEngagementActions,
     overlayBare = false,
     isOverlayBare,
   } = {},
@@ -50476,6 +55886,52 @@ function renderMediaThumbnailGrid(
       const altText = normalizeString(getAltText?.(item)) || "Media item";
       const overlayIsBare =
         typeof isOverlayBare === "function" ? isOverlayBare(item) : overlayBare;
+      const detailAction =
+        typeof getDetailAction === "function" ? getDetailAction(item) : null;
+      const cornerAction =
+        typeof getCornerAction === "function" ? getCornerAction(item) : null;
+      const engagementActions =
+        typeof getEngagementActions === "function"
+          ? (getEngagementActions(item) || []).filter(Boolean)
+          : [];
+      const detailActionLabel = normalizeString(detailAction?.label);
+      const detailActionName = normalizeString(detailAction?.action);
+      const detailPostId = normalizeString(detailAction?.postId);
+      const detailActionHtml =
+        detailActionLabel && detailActionName
+          ? `<button class="shared-media-tile__detail" type="button" data-action="${escapeHtml(detailActionName)}"${detailPostId ? ` data-post-id="${escapeHtml(detailPostId)}"` : ""}>${escapeHtml(detailActionLabel)}</button>`
+          : "";
+      const cornerActionLabel = normalizeString(cornerAction?.label);
+      const cornerActionName = normalizeString(cornerAction?.action);
+      const cornerPostId = normalizeString(cornerAction?.postId);
+      const cornerIcon = normalizeString(cornerAction?.icon) || "share";
+      const cornerActionHtml =
+        cornerActionLabel && cornerActionName
+          ? `<button class="shared-media-tile__corner-action" type="button" data-action="${escapeHtml(cornerActionName)}"${cornerPostId ? ` data-post-id="${escapeHtml(cornerPostId)}"` : ""} aria-label="${escapeHtml(cornerActionLabel)}" title="${escapeHtml(cornerActionLabel)}">${renderIcon(cornerIcon)}<span class="shared-sr-only">${escapeHtml(cornerActionLabel)}</span></button>`
+          : "";
+      const engagementActionHtml = engagementActions.length
+        ? `<div class="shared-media-tile__engagement" aria-label="Post actions">
+            ${engagementActions
+              .map((actionItem) => {
+                const actionName = normalizeString(actionItem.action);
+                const label = normalizeString(actionItem.label);
+                const icon = normalizeString(actionItem.icon);
+                const postId = normalizeString(actionItem.postId);
+                const count =
+                  actionItem.count === undefined || actionItem.count === null
+                    ? ""
+                    : formatCount(Number(actionItem.count) || 0);
+                const activeClass = actionItem.active
+                  ? " is-active"
+                  : "";
+                if (!actionName || !label || !icon) {
+                  return "";
+                }
+                return `<button class="shared-media-tile__engagement-button${activeClass}" type="button" data-action="${escapeHtml(actionName)}"${postId ? ` data-post-id="${escapeHtml(postId)}"` : ""} aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}">${renderIcon(icon)}${count ? `<span>${escapeHtml(count)}</span>` : `<span class="shared-sr-only">${escapeHtml(label)}</span>`}</button>`;
+              })
+              .join("")}
+          </div>`
+        : "";
       const placeholderLabel =
         normalizeString(getPlaceholderLabel?.(item))
           .slice(0, 1)
@@ -50483,7 +55939,7 @@ function renderMediaThumbnailGrid(
         altText.slice(0, 1).toUpperCase() ||
         "M";
 
-      return `<button class="shared-media-tile" type="button" data-action="navigate" data-route="${escapeHtml(route)}" aria-label="${escapeHtml(altText)}">
+      const tile = `<button class="shared-media-tile" type="button" data-action="navigate" data-route="${escapeHtml(route)}" aria-label="${escapeHtml(altText)}">
         ${
           mediaUrl
             ? `<img class="shared-media-tile__image" src="${escapeHtml(mediaUrl)}" alt="${escapeHtml(altText)}" loading="lazy" />`
@@ -50491,10 +55947,13 @@ function renderMediaThumbnailGrid(
         }
         ${
           overlayText
-            ? `<span class="shared-media-tile__overlay${overlayIsBare ? " shared-media-tile__overlay--bare" : ""}">${escapeHtml(overlayText)}</span>`
+            ? `<span class="shared-media-tile__overlay${overlayIsBare ? " shared-media-tile__overlay--bare" : ""}${detailActionHtml ? " shared-media-tile__overlay--has-action" : ""}${engagementActionHtml ? " shared-media-tile__overlay--has-engagement" : ""}">${escapeHtml(overlayText)}</span>`
             : ""
         }
       </button>`;
+      return detailActionHtml || cornerActionHtml || engagementActionHtml
+        ? `<article class="shared-media-tile-shell">${tile}${cornerActionHtml}<div class="shared-media-tile__actions">${detailActionHtml}</div>${engagementActionHtml}</article>`
+        : tile;
     })
     .join("")}</div>`;
 }
@@ -50607,7 +56066,7 @@ function renderFeedCandidatePromptMissingActions(missing = {}) {
   const actions = [];
   if (missing.address) {
     actions.push(
-      `<button class="shared-feed-chip" type="button" data-action="navigate" data-route="/settings/voter-profile/home-location">Add address</button>`,
+      `<button class="shared-feed-chip" type="button" data-action="navigate" data-route="/settings/preferences/home-location">Add address</button>`,
     );
   }
   if (missing.phone || missing.email) {
@@ -50660,6 +56119,9 @@ function feedCivicPromptIcon(item = {}) {
 function feedCivicPromptActionLabel(item = {}) {
   const kind = normalizeString(item.promptKind).toLowerCase();
   const destination = normalizeString(item.destinationPath).toLowerCase();
+  if (feedCivicPromptPolicyQuestionId(item) || destination.startsWith("/questions")) {
+    return "Open question";
+  }
   if (kind.includes("district") || destination.includes("home-location")) {
     return "Set voting area";
   }
@@ -50673,6 +56135,25 @@ function feedCivicPromptActionLabel(item = {}) {
   return "Start";
 }
 
+function feedCivicPromptDestinationDescription(item = {}) {
+  const kind = normalizeString(item.promptKind).toLowerCase();
+  const destination = normalizeString(item.destinationPath);
+  if (feedCivicPromptPolicyQuestionId(item) || destination.startsWith("/questions")) {
+    return "Read the background, sources, and aggregate answers.";
+  }
+  if (kind.includes("district") || destination.includes("home-location")) {
+    return "Add home location so Polis can show local offices and races.";
+  }
+  if (
+    kind.includes("ballot") ||
+    kind.includes("rank") ||
+    destination.includes("voter-intel")
+  ) {
+    return "Continue ballot ranking and voter-intelligence setup.";
+  }
+  return destination || "Continue this civic prompt in Polis web.";
+}
+
 function renderFeedCivicPromptCompactState(item, promptKey, status) {
   const prompts = currentFeedPromptState();
   const saved = status === "saved";
@@ -50680,7 +56161,9 @@ function renderFeedCivicPromptCompactState(item, promptKey, status) {
     ? normalizeString(prompts.savedMessages[promptKey]) || "Civic prompt recorded"
     : "Prompt dismissed";
   const detail = saved
-    ? "Your action was recorded for voter intelligence."
+    ? feedCivicPromptPolicyQuestionId(item)
+      ? "Your policy answer was saved and applied to your voter profile."
+      : "Your action was recorded for voter intelligence."
     : "This prompt is hidden for this visit.";
   return `<article class="shared-card shared-civic-prompt-card shared-civic-prompt-card--compact">
     <div class="shared-civic-prompt-card__compact-icon" aria-hidden="true">${renderIcon(saved ? "check" : "close")}</div>
@@ -50708,23 +56191,31 @@ function renderFeedCivicPromptChoices(item, promptKey, pending) {
   </div>`;
 }
 
-function renderFeedCivicPromptDestination(item, promptKey, pending) {
+function renderFeedCivicPromptDestination(
+  item,
+  promptKey,
+  pending,
+  { secondary = false } = {},
+) {
   if (!item.destinationPath) {
+    if (secondary) {
+      return "";
+    }
     return `<div class="shared-civic-prompt-card__destination is-disabled">
       <span>${renderIcon("lock")}</span>
-      <strong>This prompt needs a web destination.</strong>
+      <strong>This prompt can be answered here.</strong>
     </div>`;
   }
   const pendingOpen =
     currentFeedPromptState().actionPendingKey === `open:${promptKey}`;
-  return `<div class="shared-civic-prompt-card__destination">
+  return `<div class="shared-civic-prompt-card__destination${secondary ? " shared-civic-prompt-card__destination--secondary" : ""}">
     <span>${renderIcon(feedCivicPromptIcon(item))}</span>
     <div>
       <strong>${escapeHtml(feedCivicPromptActionLabel(item))}</strong>
-      <em>${escapeHtml(item.destinationPath)}</em>
+      <em>${escapeHtml(feedCivicPromptDestinationDescription(item))}</em>
     </div>
     <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="feed-civic-prompt-open" data-prompt-key="${escapeHtml(promptKey)}"${disabledAttr(pending)}>
-      <span>${escapeHtml(pendingOpen ? "Opening..." : feedCivicPromptActionLabel(item))}</span>
+      <span>${escapeHtml(pendingOpen ? "Opening..." : secondary ? "Open" : feedCivicPromptActionLabel(item))}</span>
     </button>
   </div>`;
 }
@@ -50761,7 +56252,10 @@ function renderFeedCivicPromptCard(item = {}) {
     <div class="shared-civic-prompt-card__body">
       ${
         choices.length
-          ? renderFeedCivicPromptChoices(item, promptKey, pending)
+          ? `${renderFeedCivicPromptChoices(item, promptKey, pending)}
+             ${renderFeedCivicPromptDestination(item, promptKey, pending, {
+               secondary: true,
+             })}`
           : renderFeedCivicPromptDestination(item, promptKey, pending)
       }
       ${
@@ -50984,8 +56478,44 @@ function renderFeedOverviewPage() {
               ? formatAbsoluteDateTime(item.startAt)
               : item.hostDisplayName || "Event";
           }
-          return `${formatCount(item.likesCount)} like${Number(item.likesCount) === 1 ? "" : "s"}`;
+          return item.authorDisplayName || item.previewTitle || "Post";
         },
+        getCornerAction: (item) =>
+          item.kind === "post" && item.postId
+            ? {
+                action: "share",
+                label: "Share post",
+                icon: "share",
+                postId: item.postId,
+              }
+            : null,
+        getEngagementActions: (item) =>
+          item.kind === "post" && item.postId
+            ? [
+                {
+                  action: "toggle-like",
+                  label: item.likedByMe ? "Unlike post" : "Like post",
+                  icon: item.likedByMe ? "heart" : "heartOutline",
+                  postId: item.postId,
+                  count: item.likesCount,
+                  active: item.likedByMe,
+                },
+                {
+                  action: "open-comments",
+                  label: "Open comments",
+                  icon: "comment",
+                  postId: item.postId,
+                  count: item.commentsCount,
+                },
+                {
+                  action: "toggle-save",
+                  label: item.savedByMe ? "Unsave post" : "Save post",
+                  icon: item.savedByMe ? "saveFilled" : "save",
+                  postId: item.postId,
+                  active: item.savedByMe,
+                },
+              ]
+            : [],
         getPlaceholderLabel: (item) => (item.kind === "event" ? "E" : "P"),
         isOverlayBare: (item) => item.kind === "post",
       })}
@@ -52250,11 +57780,23 @@ function renderCandidateEditForm(candidate, detail, socials = {}) {
   const avatarUpload = detail.avatarUpload || createCandidateAvatarUploadState();
   const avatarUrl = avatarUpload.remoteUrl || candidate.avatarUrl;
   const avatarBusy = avatarUpload.uploading === true;
-  return `<form class="shared-form shared-candidate-editor" data-route-form="candidate-edit">
+  const saving = detail.saving === true;
+  return `<form class="shared-form shared-candidate-editor" data-route-form="candidate-edit" aria-busy="${saving ? "true" : "false"}">
     <input type="hidden" name="candidateId" value="${escapeHtml(candidate.candidateId)}" />
     <input type="hidden" name="avatarUploadId" value="${escapeHtml(avatarUpload.uploadId)}" />
     <input type="hidden" name="previousAvatarUploadId" value="${escapeHtml(avatarUpload.uploadId ? avatarUpload.previousAvatarUploadId : "")}" />
     <input type="hidden" name="previousAvatarUrl" value="${escapeHtml(avatarUpload.uploadId ? avatarUpload.previousAvatarUrl : "")}" />
+    <div class="shared-candidate-editor__bar">
+      <div>
+        <span>Edit candidate page</span>
+        <h2>Profile details</h2>
+        <p>Keep the public campaign profile current across Polis, candidate search, events, donations, and messaging.</p>
+      </div>
+      <div class="shared-candidate-editor__bar-actions">
+        <span class="shared-candidate-editor__status${saving ? " is-saving" : ""}">${saving ? "Saving" : "Ready"}</span>
+        <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(saving || avatarBusy)}>${saving ? "Saving..." : "Save changes"}</button>
+      </div>
+    </div>
     <section class="shared-candidate-editor__section shared-candidate-editor__section--profile">
       <div class="shared-candidate-editor__preview">
         ${
@@ -52269,10 +57811,10 @@ function renderCandidateEditForm(candidate, detail, socials = {}) {
         </div>
         <input class="shared-candidate-editor__file-input" type="file" accept="${POST_COMPOSER_IMAGE_ACCEPT}" data-candidate-avatar-file />
         <div class="shared-candidate-editor__avatar-actions">
-          <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="candidate-avatar-pick"${avatarBusy ? " disabled" : ""}>${avatarBusy ? "Uploading..." : "Upload image"}</button>
+          <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="candidate-avatar-pick"${disabledAttr(saving || avatarBusy)}>${avatarBusy ? "Uploading..." : "Upload image"}</button>
           ${
             avatarUpload.uploadId
-              ? `<button class="shared-feed-chip" type="button" data-action="candidate-avatar-clear"${avatarBusy ? " disabled" : ""}>Clear staged</button>`
+              ? `<button class="shared-feed-chip" type="button" data-action="candidate-avatar-clear"${disabledAttr(saving || avatarBusy)}>Clear staged</button>`
               : ""
           }
         </div>
@@ -52288,33 +57830,34 @@ function renderCandidateEditForm(candidate, detail, socials = {}) {
         }
       </div>
       <div class="shared-candidate-editor__grid">
-        <label><span>Display name</span><input name="displayName" value="${escapeHtml(candidate.displayName)}" autocomplete="name" /></label>
-        <label><span>Office level</span><input name="levelOfOffice" value="${escapeHtml(candidate.levelOfOffice)}" /></label>
-        <label><span>District</span><input name="district" value="${escapeHtml(candidate.district)}" /></label>
-        <label><span>Avatar URL</span><input name="avatarUrl" value="${escapeHtml(avatarUrl)}" inputmode="url" /></label>
-        <label class="shared-candidate-editor__wide"><span>Priority tags</span><input name="priorityTags" value="${escapeHtml(candidate.tags.join(", "))}" /></label>
+        <label><span>Display name</span><input name="displayName" value="${escapeHtml(candidate.displayName)}" autocomplete="name" required${disabledAttr(saving)} /></label>
+        <label><span>Office level</span><input name="levelOfOffice" value="${escapeHtml(candidate.levelOfOffice)}"${disabledAttr(saving)} /></label>
+        <label><span>District</span><input name="district" value="${escapeHtml(candidate.district)}"${disabledAttr(saving)} /></label>
+        <label><span>Avatar URL</span><input name="avatarUrl" value="${escapeHtml(avatarUrl)}" inputmode="url"${disabledAttr(saving)} /></label>
+        <label class="shared-candidate-editor__wide"><span>Priority tags</span><input name="priorityTags" value="${escapeHtml(candidate.tags.join(", "))}"${disabledAttr(saving)} /></label>
       </div>
     </section>
     <section class="shared-candidate-editor__section">
       <h2>Biography</h2>
-      <label><span>Bio</span><textarea name="bio" rows="6">${escapeHtml(candidate.bio)}</textarea></label>
+      <label><span>Bio</span><textarea name="bio" rows="6"${disabledAttr(saving)}>${escapeHtml(candidate.bio)}</textarea></label>
     </section>
     <section class="shared-candidate-editor__section">
       <h2>Connect</h2>
       <div class="shared-candidate-editor__grid">
-        <label><span>Phone</span><input name="phone" value="${escapeHtml(socials.phone || "")}" autocomplete="tel" inputmode="tel" /></label>
-        <label><span>Email</span><input name="email" value="${escapeHtml(socials.email || "")}" autocomplete="email" inputmode="email" /></label>
-        <label><span>Website</span><input name="website" value="${escapeHtml(socials.website || "")}" inputmode="url" /></label>
-        <label><span>X</span><input name="x" value="${escapeHtml(socials.x || "")}" /></label>
-        <label><span>Instagram</span><input name="instagram" value="${escapeHtml(socials.instagram || "")}" /></label>
-        <label><span>Facebook</span><input name="facebook" value="${escapeHtml(socials.facebook || "")}" /></label>
-        <label><span>Threads</span><input name="threads" value="${escapeHtml(socials.threads || "")}" /></label>
-        <label><span>Bluesky</span><input name="bluesky" value="${escapeHtml(socials.bluesky || "")}" /></label>
-        <label><span>TikTok</span><input name="tiktok" value="${escapeHtml(socials.tiktok || "")}" /></label>
+        <label><span>Phone</span><input name="phone" value="${escapeHtml(socials.phone || "")}" autocomplete="tel" inputmode="tel"${disabledAttr(saving)} /></label>
+        <label><span>Email</span><input name="email" value="${escapeHtml(socials.email || "")}" autocomplete="email" inputmode="email"${disabledAttr(saving)} /></label>
+        <label><span>Website</span><input name="website" value="${escapeHtml(socials.website || "")}" inputmode="url"${disabledAttr(saving)} /></label>
+        <label><span>X</span><input name="x" value="${escapeHtml(socials.x || "")}"${disabledAttr(saving)} /></label>
+        <label><span>Instagram</span><input name="instagram" value="${escapeHtml(socials.instagram || "")}"${disabledAttr(saving)} /></label>
+        <label><span>Facebook</span><input name="facebook" value="${escapeHtml(socials.facebook || "")}"${disabledAttr(saving)} /></label>
+        <label><span>Threads</span><input name="threads" value="${escapeHtml(socials.threads || "")}"${disabledAttr(saving)} /></label>
+        <label><span>Bluesky</span><input name="bluesky" value="${escapeHtml(socials.bluesky || "")}"${disabledAttr(saving)} /></label>
+        <label><span>TikTok</span><input name="tiktok" value="${escapeHtml(socials.tiktok || "")}"${disabledAttr(saving)} /></label>
       </div>
     </section>
     <div class="shared-candidate-editor__actions">
-      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(resolveCandidateOpenRoute(candidate))}">Cancel</button>
+      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(resolveCandidateOpenRoute(candidate))}"${disabledAttr(saving)}>Cancel</button>
+      <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(saving || avatarBusy)}>${saving ? "Saving..." : "Save changes"}</button>
     </div>
   </form>`;
 }
@@ -52825,18 +58368,81 @@ function renderCandidateDashboardAuthGate() {
   };
   const questIndex = featureItems.findIndex((item) => item.key === "campaign-quest");
   featureItems.splice(questIndex >= 0 ? questIndex : featureItems.length, 0, voterMapPreview);
-  const features = featureItems
-    .map((item) => {
-      const copy = item.copy;
-      return `<article class="shared-campaign-auth__tile shared-campaign-auth__tile--feature" role="listitem">
-        <span class="shared-campaign-auth__tile-icon" aria-hidden="true">${renderIcon(item.icon)}</span>
-        <span class="shared-campaign-auth__tile-copy">
-          <span class="shared-card__meta"><span>${escapeHtml(copy.eyebrow)}</span></span>
-          <strong>${escapeHtml(item.label)}</strong>
-          <small>${escapeHtml(copy.description)}</small>
-        </span>
-      </article>`;
-    })
+  const featureByKey = new Map(featureItems.map((item) => [item.key, item]));
+  const moduleGroups = [
+    {
+      label: "Campaign operations",
+      icon: "mission",
+      copy: "Daily work, event planning, schedules, and approvals.",
+      keys: ["overview", "missions", "calendar", "events"],
+    },
+    {
+      label: "People and conversations",
+      icon: "messages",
+      copy: "Staff access, engagement triage, rooms, and volunteer coordination.",
+      keys: ["messaging", "staff", "engagement"],
+    },
+    {
+      label: "Voter field work",
+      icon: "map",
+      copy: "Registry, turf, field routes, outreach scripts, and prompt controls.",
+      keys: ["voter-map", "voter-registry", "campaign-quest", "voter-contact-prompt"],
+    },
+    {
+      label: "Publishing and finance",
+      icon: "chart",
+      copy: "Performance reporting, petitions, donations, and compliance exports.",
+      keys: ["analytics", "petitions", "donations"],
+    },
+  ].map((group) => ({
+    ...group,
+    items: group.keys.map((key) => featureByKey.get(key)).filter(Boolean),
+  })).filter((group) => group.items.length);
+  const commandStats = [
+    {
+      icon: "calendar",
+      label: "Calendar",
+      value: "Events + bookings",
+      detail: "Office hours, shifts, travel, and public promotion.",
+    },
+    {
+      icon: "messages",
+      label: "Messaging",
+      value: "Rooms + requests",
+      detail: "Campaign rooms, direct requests, and safety review.",
+    },
+    {
+      icon: "mission",
+      label: "Missions",
+      value: "Claimable work",
+      detail: "Assignments, approvals, files, and deadlines.",
+    },
+  ];
+  const commandQueue = [
+    ["Today", "Review town hall RSVPs", "Calendar"],
+    ["Inbox", "Volunteer route reply", "Messaging"],
+    ["Staff", "Confirm field organizer access", "Permissions"],
+    ["Missions", "Approve canvass brief", "Due soon"],
+  ];
+  const moduleMap = moduleGroups
+    .map(
+      (group) => `<article class="shared-campaign-auth__module" role="listitem">
+        <div class="shared-campaign-auth__module-top">
+          <span aria-hidden="true">${renderIcon(group.icon)}</span>
+          <div>
+            <strong>${escapeHtml(group.label)}</strong>
+            <small>${escapeHtml(group.copy)}</small>
+          </div>
+        </div>
+        <div class="shared-campaign-auth__module-items">
+          ${group.items
+            .map(
+              (item) => `<span>${renderIcon(item.icon)}${escapeHtml(item.label)}</span>`,
+            )
+            .join("")}
+        </div>
+      </article>`,
+    )
     .join("");
   return `<section class="shared-page shared-campaign-dashboard">
     ${renderTopChrome()}
@@ -52844,16 +58450,55 @@ function renderCandidateDashboardAuthGate() {
       <section class="shared-campaign-auth shared-campaign-auth--dashboard">
         <div class="shared-campaign-auth__copy">
           <span class="shared-card__meta"><span>Candidate dashboard</span><span>${escapeHtml(formatCount(featureItems.length))} feature areas</span></span>
-          <h1>Run the campaign from the web.</h1>
-          <p>Sign in to open the same dashboard surfaces used in the Polis app: reporting, events, calendar, engagement, voter prompts, registry tools, Voter Map, Campaign Quest, donations, staff, missions, and messaging.</p>
+          <h1>Open every campaign workspace from the web.</h1>
+          <p>Sign in to reach the same Polis campaign tools the app uses for operations, staff, voter field work, messaging, donations, petitions, and reporting. Polis will route you to the campaign picker or the exact candidate workspace your role can open.</p>
           <div class="shared-card__actions">
             <button class="shared-feed-chip shared-feed-chip--primary" data-action="auth-login-inline">Sign in</button>
             <button class="shared-feed-chip" data-action="auth-signup-inline">Create account</button>
             <button class="shared-feed-chip" data-action="open-app-shell">Open app</button>
           </div>
         </div>
-        <div class="shared-campaign-auth__grid shared-campaign-auth__grid--dashboard" role="list" aria-label="Candidate dashboard feature areas">
-          ${features}
+        <div class="shared-campaign-auth__workspace">
+          <aside class="shared-campaign-dashboard-preview" aria-label="Candidate dashboard workspace preview">
+            <header>
+              <span>${renderIcon("candidate")}</span>
+              <div>
+                <small>Campaign command center</small>
+                <strong>Today in Polis</strong>
+              </div>
+            </header>
+            <div class="shared-campaign-dashboard-preview__metrics" role="list" aria-label="Candidate dashboard priority surfaces">
+              ${commandStats
+                .map(
+                  (item) => `<article role="listitem">
+                    <span>${renderIcon(item.icon)}</span>
+                    <div>
+                      <small>${escapeHtml(item.label)}</small>
+                      <strong>${escapeHtml(item.value)}</strong>
+                      <p>${escapeHtml(item.detail)}</p>
+                    </div>
+                  </article>`,
+                )
+                .join("")}
+            </div>
+            <div class="shared-campaign-dashboard-preview__queue" aria-label="Campaign work queue">
+              ${commandQueue
+                .map(
+                  ([scope, title, status]) => `<article>
+                    <span>${escapeHtml(scope)}</span>
+                    <strong>${escapeHtml(title)}</strong>
+                    <em>${escapeHtml(status)}</em>
+                  </article>`,
+                )
+                .join("")}
+            </div>
+            <footer>
+              <span>${renderIcon("team")} Owner and staff routes stay permission-aware.</span>
+            </footer>
+          </aside>
+          <div class="shared-campaign-auth__module-map" role="list" aria-label="Candidate dashboard workspace groups">
+            ${moduleMap}
+          </div>
         </div>
       </section>
     </div>
@@ -52861,33 +58506,146 @@ function renderCandidateDashboardAuthGate() {
 }
 
 function renderCandidateVoterMapAuthGate() {
+  const mapStats = [
+    {
+      icon: "map",
+      label: "District build",
+      value: "Units + territories",
+      detail: "Generate geography, rebalance turf, and keep assignments current.",
+    },
+    {
+      icon: "registry",
+      label: "Voter registry",
+      value: "Imports + records",
+      detail: "Add voters, review CSV imports, and preserve contact preferences.",
+    },
+    {
+      icon: "phone",
+      label: "Outreach",
+      value: "Scripts + notes",
+      detail: "Respect opt-outs while staff log calls, texts, visits, and follow-ups.",
+    },
+  ];
+  const mapQueue = [
+    ["Build", "Generate precinct and district unit sets", "Admin"],
+    ["Turf", "Review territories, splits, merges, and assignment drift", "Map"],
+    ["Records", "Import voter rows and resolve duplicate contact data", "Registry"],
+    ["Quest", "Send high-priority targets into CampaignQuest", "Field"],
+  ];
+  const featureTiles = [
+    {
+      icon: "map",
+      eyebrow: "Map",
+      label: "District and precinct geography",
+      description: "View voter segments, boundaries, support levels, and campaign coverage from the browser.",
+    },
+    {
+      icon: "team",
+      eyebrow: "Territories",
+      label: "Turf assignment",
+      description: "Split, merge, publish, and rebalance staff territories without losing ownership context.",
+    },
+    {
+      icon: "upload",
+      eyebrow: "Registry",
+      label: "Voter imports",
+      description: "Preview uploads, detect invalid rows, and connect records to contact preferences.",
+    },
+    {
+      icon: "phone",
+      eyebrow: "Outreach",
+      label: "Scripts and outcomes",
+      description: "Give staff the right call, text, or canvass script and record what happened next.",
+    },
+    {
+      icon: "file",
+      eyebrow: "Notes",
+      label: "Field notes",
+      description: "Attach local context to voter records while keeping permission-aware audit trails.",
+    },
+    {
+      icon: "mission",
+      eyebrow: "Quest",
+      label: "CampaignQuest handoff",
+      description: "Move priority voters into route-style field work, XP, sign drops, and completion queues.",
+    },
+  ];
   return `<section class="shared-page shared-campaign-dashboard">
     ${renderTopChrome()}
     <div class="shared-page__content">
-      <section class="shared-campaign-auth">
-        <div>
-          <h1>Open the campaign voter map from the browser.</h1>
-          <p>Sign in with campaign access to review district geography, voter segments, precinct context, and outreach paths from the Polis web app.</p>
+      <section class="shared-campaign-auth shared-campaign-auth--dashboard shared-campaign-auth--voter-map">
+        <div class="shared-campaign-auth__copy">
+          <span class="shared-card__meta"><span>Candidate voter map</span><span>Field operations</span></span>
+          <h1>Open the campaign voter map.</h1>
+          <p>Sign in with campaign access to review district geography, voter segments, precinct context, outreach scripts, voter imports, territories, contact preferences, and CampaignQuest field handoffs from the Polis web app.</p>
           <div class="shared-card__actions">
             <button class="shared-feed-chip shared-feed-chip--primary" data-action="auth-login-inline">Sign in</button>
             <button class="shared-feed-chip" data-action="auth-signup-inline">Create account</button>
             <button class="shared-feed-chip" data-action="open-app-shell">Open app</button>
           </div>
         </div>
-        <div class="shared-campaign-auth__grid" aria-hidden="true">
-          ${[
-            "District map",
-            "Voter segments",
-            "Precinct context",
-            "Support levels",
-            "Outreach routes",
-            "Turnout targets",
-          ]
-            .map(
-              (label) =>
-                `<span class="shared-campaign-auth__tile">${escapeHtml(label)}</span>`,
-            )
-            .join("")}
+        <div class="shared-campaign-auth__workspace">
+          <aside class="shared-campaign-dashboard-preview shared-voter-map-preview" aria-label="Candidate voter map workspace preview">
+            <header>
+              <span aria-hidden="true">${renderIcon("map")}</span>
+              <div>
+                <small>Voter map command center</small>
+                <strong>District field view</strong>
+              </div>
+            </header>
+            <div class="shared-voter-map-preview__canvas" aria-hidden="true">
+              <span class="shared-voter-map-preview__district is-primary"></span>
+              <span class="shared-voter-map-preview__district is-secondary"></span>
+              <span class="shared-voter-map-preview__district is-tertiary"></span>
+              <span class="shared-voter-map-preview__district is-route"></span>
+              <span class="shared-voter-map-preview__pin is-one"></span>
+              <span class="shared-voter-map-preview__pin is-two"></span>
+              <span class="shared-voter-map-preview__pin is-three"></span>
+              <span class="shared-voter-map-preview__legend">4 turf lanes ready</span>
+            </div>
+            <div class="shared-campaign-dashboard-preview__metrics" role="list" aria-label="Candidate voter map priority surfaces">
+              ${mapStats
+                .map(
+                  (item) => `<article role="listitem">
+                    <span aria-hidden="true">${renderIcon(item.icon)}</span>
+                    <div>
+                      <small>${escapeHtml(item.label)}</small>
+                      <strong>${escapeHtml(item.value)}</strong>
+                      <p>${escapeHtml(item.detail)}</p>
+                    </div>
+                  </article>`,
+                )
+                .join("")}
+            </div>
+            <div class="shared-campaign-dashboard-preview__queue" aria-label="Candidate voter map work queue">
+              ${mapQueue
+                .map(
+                  ([scope, title, status]) => `<article>
+                    <span>${escapeHtml(scope)}</span>
+                    <strong>${escapeHtml(title)}</strong>
+                    <em>${escapeHtml(status)}</em>
+                  </article>`,
+                )
+                .join("")}
+            </div>
+            <footer>
+              <span>${renderIcon("shield")} Contact work stays permission-aware and opt-out aware.</span>
+            </footer>
+          </aside>
+          <div class="shared-campaign-auth__grid shared-campaign-auth__grid--dashboard" role="list" aria-label="Candidate voter map feature areas">
+            ${featureTiles
+              .map(
+                (item) => `<article class="shared-campaign-auth__tile shared-campaign-auth__tile--feature" role="listitem">
+                  <span class="shared-campaign-auth__tile-icon" aria-hidden="true">${renderIcon(item.icon)}</span>
+                  <span class="shared-campaign-auth__tile-copy">
+                    <span class="shared-card__meta"><span>${escapeHtml(item.eyebrow)}</span></span>
+                    <strong>${escapeHtml(item.label)}</strong>
+                    <small>${escapeHtml(item.description)}</small>
+                  </span>
+                </article>`,
+              )
+              .join("")}
+          </div>
         </div>
       </section>
     </div>
@@ -53287,7 +59045,146 @@ function renderCandidateDashboardCoverageGroup(group, campaigns = []) {
         })
         .join("")}
     </div>
-  </article>`;
+      </article>`;
+}
+
+function renderWorkspaceFallbackAction(action) {
+  const route = normalizeString(action.route);
+  const actionName = normalizeString(action.action) || "navigate";
+  const actionAttrs = route
+    ? `data-action="${escapeHtml(actionName)}" data-route="${escapeHtml(route)}"`
+    : `data-action="${escapeHtml(actionName)}"`;
+  return `<button class="shared-feed-chip${action.primary ? " shared-feed-chip--primary" : ""}" type="button" ${actionAttrs}>${escapeHtml(action.label)}</button>`;
+}
+
+function renderWorkspaceFallbackMap({
+  eyebrow = "Workspace map",
+  title = "Workspace routes are ready.",
+  copy = "",
+  metrics = [],
+  groups = [],
+  actions = [],
+} = {}) {
+  const metricMarkup = metrics
+    .map(
+      (metric) => `<span>
+        <strong>${escapeHtml(metric.value)}</strong>
+        <small>${escapeHtml(metric.label)}</small>
+      </span>`,
+    )
+    .join("");
+  const groupMarkup = groups
+    .map(
+      (group) => `<article class="shared-workspace-fallback__group">
+        <div class="shared-workspace-fallback__group-top">
+          <span aria-hidden="true">${renderIcon(group.icon)}</span>
+          <div>
+            <strong>${escapeHtml(group.label)}</strong>
+            <small>${escapeHtml(group.copy)}</small>
+          </div>
+        </div>
+        <div class="shared-workspace-fallback__items">
+          ${(group.items || [])
+            .map(
+              (item) => `<span>
+                ${renderIcon(item.icon)}
+                <strong>${escapeHtml(item.label)}</strong>
+                <small>${escapeHtml(item.caption || "")}</small>
+              </span>`,
+            )
+            .join("")}
+        </div>
+      </article>`,
+    )
+    .join("");
+  return `<section class="shared-workspace-fallback">
+    <div class="shared-workspace-fallback__intro">
+      <span class="shared-settings-eyebrow">${escapeHtml(eyebrow)}</span>
+      <h2>${escapeHtml(title)}</h2>
+      ${copy ? `<p>${escapeHtml(copy)}</p>` : ""}
+      ${
+        actions.length
+          ? `<div class="shared-workspace-fallback__actions">${actions.map(renderWorkspaceFallbackAction).join("")}</div>`
+          : ""
+      }
+    </div>
+    ${metricMarkup ? `<div class="shared-workspace-fallback__metrics">${metricMarkup}</div>` : ""}
+    <div class="shared-workspace-fallback__grid">${groupMarkup}</div>
+  </section>`;
+}
+
+function candidateDashboardFallbackItem(key, fallback = {}) {
+  const section = candidateDashboardSectionConfig(key);
+  const copy = candidateDashboardFeatureCopy(section);
+  return {
+    icon: fallback.icon || section?.icon || "dashboard",
+    label: fallback.label || section?.label || humanizeLabel(key),
+    caption: fallback.caption || copy.eyebrow,
+  };
+}
+
+function renderCandidateDashboardRootFallback() {
+  const featureSections = candidateDashboardFeatureSections();
+  return renderWorkspaceFallbackMap({
+    eyebrow: "Campaign command",
+    title: "Campaign workspaces stay mapped while access sync is offline.",
+    copy:
+      "Open candidate access, messages, or the directory now. Once a campaign loads, these same areas become direct dashboard routes.",
+    metrics: [
+      {
+        value: formatCount(featureSections.length + 1),
+        label: "work areas",
+      },
+      { value: "Owner + staff", label: "access model" },
+      { value: "Live routes", label: "web surface" },
+    ],
+    actions: [
+      {
+        label: "Candidate access",
+        route: "/settings/candidate-access",
+        primary: true,
+      },
+      { label: "Candidate directory", route: "/candidates" },
+      { label: "Messages", route: "/messages" },
+    ],
+    groups: [
+      {
+        label: "Campaign operations",
+        icon: "mission",
+        copy: "Reporting, events, calendars, staff, missions, and donations.",
+        items: [
+          candidateDashboardFallbackItem("overview"),
+          candidateDashboardFallbackItem("analytics"),
+          candidateDashboardFallbackItem("events"),
+          candidateDashboardFallbackItem("calendar"),
+          candidateDashboardFallbackItem("staff"),
+          candidateDashboardFallbackItem("missions"),
+          candidateDashboardFallbackItem("donations"),
+        ],
+      },
+      {
+        label: "Voter field work",
+        icon: "map",
+        copy: "Registry, map work, Campaign Quest, and contact prompts.",
+        items: [
+          { icon: "map", label: "Voter Map", caption: "Map tools" },
+          candidateDashboardFallbackItem("voter-registry"),
+          candidateDashboardFallbackItem("campaign-quest"),
+          candidateDashboardFallbackItem("voter-contact-prompt"),
+        ],
+      },
+      {
+        label: "Publishing and response",
+        icon: "messages",
+        copy: "Messaging, engagement triage, petitions, and public follow-up.",
+        items: [
+          candidateDashboardFallbackItem("messaging"),
+          candidateDashboardFallbackItem("engagement"),
+          candidateDashboardFallbackItem("petitions"),
+        ],
+      },
+    ],
+  });
 }
 
 function renderCandidateDashboardRootSummary(campaigns = []) {
@@ -53441,8 +59338,18 @@ function renderCandidateDashboardRoot() {
         </div>
       </div>
       ${campaigns.loading && !campaigns.items.length ? '<div class="shared-page__loading">Loading campaigns...</div>' : ""}
-      ${campaigns.error ? `<div class="shared-page__error">${escapeHtml(campaigns.error)}</div>` : ""}
+      ${renderWorkspaceServiceAlert([campaigns.error], {
+        title: "Campaign access could not be loaded",
+        body: "Campaign dashboards could not sync from Polis services right now.",
+        secondaryRoute: "/settings/candidate-access",
+        secondaryLabel: "Candidate access",
+      })}
       ${campaigns.items.length ? renderCandidateDashboardRootSummary(campaigns.items) : ""}
+      ${
+        campaigns.error && !campaigns.items.length && !campaigns.loading
+          ? renderCandidateDashboardRootFallback()
+          : ""
+      }
       ${
         campaigns.items.length
           ? `<div class="shared-campaign-grid">${campaigns.items.map(renderCandidateDashboardCampaignCard).join("")}</div>`
@@ -54106,6 +60013,44 @@ function eventTransportLabel(event = {}) {
     return "Full";
   }
   return `${formatCount(remainingSeats)} seat${remainingSeats === 1 ? "" : "s"} available`;
+}
+
+function createEventPaymentReview(formData, event = {}) {
+  return {
+    eventId: normalizeString(formData.get("eventId")),
+    firstName: normalizeString(formData.get("firstName")),
+    lastName: normalizeString(formData.get("lastName")),
+    address: normalizeString(formData.get("address")),
+    isCitizen: formData.get("isCitizen") === "on",
+    isOwnFunds: formData.get("isOwnFunds") === "on",
+    transportOptIn:
+      event.transportEnabled === true
+        ? formData.get("transportOptIn") === "on"
+        : null,
+    createdAt: Date.now(),
+  };
+}
+
+function eventPaymentReviewFor(event = {}) {
+  const review = state.pages.events.detail.pendingPaymentReview;
+  if (!review || review.eventId !== normalizeString(event.eventId)) {
+    return null;
+  }
+  return review;
+}
+
+function eventPaymentReviewName(review = {}) {
+  return [review.firstName, review.lastName].map(normalizeString).filter(Boolean).join(" ");
+}
+
+function eventContactOptions(event = {}) {
+  const raw = readObjectPayload(event.raw);
+  const socials = readObjectPayload(raw.socials);
+  return {
+    email: normalizeString(socials.email || raw.email || raw.contactEmail),
+    website: normalizeUrl(socials.website || raw.website || raw.url),
+    link: normalizeUrl(socials.link || socials.other || raw.link),
+  };
 }
 
 function renderCandidateDashboardEventCard(event, resource, { map = false } = {}) {
@@ -55335,6 +61280,67 @@ function renderMissionWorkspaceClaimButton(
   return `<button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="${escapeHtml(actionName)}" data-mission-id="${escapeHtml(missionId)}" data-job-id="${escapeHtml(job.jobId)}"${disabledAttr(pending)}>${pending ? "Claiming..." : "Claim"}</button>`;
 }
 
+function renderCandidateMissionStaffCommandAction(entry, resource, options = {}) {
+  if (!entry) {
+    return "";
+  }
+  const { mission, job } = entry;
+  const jobAction = normalizeString(options.jobAction);
+  const route = `/missions/${encodeURIComponent(mission.missionId)}?returnTo=${encodeURIComponent(getCurrentPathWithQuery())}`;
+  const detailsButton = (primary = false, label = "Open details") =>
+    `<button class="shared-feed-chip${primary ? " shared-feed-chip--primary" : ""}" type="button" data-action="navigate" data-route="${escapeHtml(route)}">${escapeHtml(label)}</button>`;
+  if (!jobAction) {
+    return detailsButton(true, "Open task");
+  }
+  const isMine = missionJobIsMine(job);
+  const isUnclaimedRoleClaim =
+    job.targetMode === "role_claim" && !job.assigneeUserId;
+  const canWorkJob =
+    !job.isQueued &&
+    !isUnclaimedRoleClaim &&
+    !job.isClosed &&
+    job.status !== "submitted" &&
+    !job.isBlocked &&
+    isMine;
+  const completionBlocker = missionJobCompletionBlocker(job);
+  const requiresNote = missionJobHasRequiredNote(job);
+  if (job.isClaimable) {
+    return `${renderMissionWorkspaceJobActionButton({
+      mission,
+      job,
+      action: "claim",
+      actionName: jobAction,
+      resource,
+      primary: true,
+    })}${detailsButton(false)}`;
+  }
+  if (
+    canWorkJob &&
+    ["active", "late", "needs_changes"].includes(job.status) &&
+    !job.lastStartedAt
+  ) {
+    return `${renderMissionWorkspaceJobActionButton({
+      mission,
+      job,
+      action: "start",
+      actionName: jobAction,
+      resource,
+      primary: true,
+    })}${detailsButton(false)}`;
+  }
+  if (canWorkJob && !completionBlocker && !requiresNote) {
+    return `${renderMissionWorkspaceJobActionButton({
+      mission,
+      job,
+      action: missionJobRequiresApproval(job) ? "submit" : "complete",
+      actionName: jobAction,
+      resource,
+      primary: true,
+    })}${detailsButton(false)}`;
+  }
+  return detailsButton(true, job.isSubmitted ? "View review" : "Open task");
+}
+
 function renderMissionWorkspaceJobActionButton({
   mission,
   job,
@@ -55566,12 +61572,241 @@ function renderCandidateMissionSection(
   </article>`;
 }
 
+function missionCreateAssigneePeople(scopeType, scopeId) {
+  const normalizedScopeType = normalizeMissionScopeType(scopeType);
+  const normalizedScopeId = normalizeString(scopeId);
+  const seen = new Set();
+  const people = [];
+  const addPerson = (source = {}, fallbackRole = "") => {
+    const userId = normalizeString(source.userId || source.id);
+    if (!userId || seen.has(userId)) {
+      return;
+    }
+    seen.add(userId);
+    people.push({
+      value: userId,
+      label:
+        normalizeString(source.displayName || source.name || source.username) ||
+        "Team member",
+      meta:
+        normalizeString(source.roleLabel || source.role || fallbackRole) ||
+        (source.username
+          ? `@${normalizeString(source.username).replace(/^@/u, "")}`
+          : "Person"),
+    });
+  };
+  if (normalizedScopeType === "candidate") {
+    const detail = state.pages.candidateDashboard.detail;
+    if (
+      normalizedScopeId &&
+      normalizeString(state.auth.user?.userId) === normalizedScopeId
+    ) {
+      const authDisplayName = normalizeString(state.auth.user?.displayName);
+      const authEmail = normalizeString(state.auth.user?.email);
+      const authUsername = normalizeString(state.auth.user?.username).replace(
+        /^@/u,
+        "",
+      );
+      addPerson(
+        {
+          userId: normalizedScopeId,
+          displayName:
+            normalizeString(detail.candidate?.displayName) ||
+            (authDisplayName && authDisplayName !== authEmail
+              ? authDisplayName
+              : "") ||
+            (authUsername ? `@${authUsername}` : "") ||
+            "Candidate owner",
+          username: state.auth.user?.username || detail.candidate?.username,
+        },
+        "Owner",
+      );
+    }
+    detail.staff.slice(0, 10).forEach((member) => addPerson(member, "Staff"));
+    (detail.volunteers?.items || [])
+      .slice(0, 8)
+      .forEach((volunteer) => addPerson(volunteer, "Volunteer"));
+  } else if (normalizedScopeType === "coalition") {
+    state.pages.coalitions.detail.members
+      .slice(0, 14)
+      .forEach((member) => addPerson(member, "Member"));
+  }
+  return people.slice(0, 14);
+}
+
+function missionCreateAssigneeRoles(scopeType) {
+  const normalizedScopeType = normalizeMissionScopeType(scopeType);
+  const seen = new Set();
+  const roles = [];
+  const addRole = (role = {}, fallbackCategory = "") => {
+    const roleKey = normalizeString(
+      role.roleKey || role.key || role.role || role.label,
+    );
+    if (!roleKey || seen.has(roleKey)) {
+      return;
+    }
+    seen.add(roleKey);
+    roles.push({
+      value: roleKey,
+      label:
+        normalizeString(role.label || role.roleLabel || role.name) ||
+        humanizeLabel(roleKey),
+      meta: normalizeString(role.category || role.roleCategory || fallbackCategory),
+    });
+  };
+  if (normalizedScopeType === "candidate") {
+    const detail = state.pages.candidateDashboard.detail;
+    const catalog =
+      detail.staffAdmin?.catalog || normalizeCandidateStaffAccessCatalog({});
+    candidateStaffAssignableRoles(catalog)
+      .slice(0, 8)
+      .forEach((role) => addRole(role, "Campaign role"));
+    const volunteerTags = Array.from(
+      new Set(
+        (detail.volunteers?.items || [])
+          .flatMap((volunteer) => volunteer.roleTags || [])
+          .map(normalizeCandidateStaffRoleKey)
+          .filter(Boolean),
+      ),
+    );
+    volunteerTags
+      .slice(0, 6)
+      .forEach((tag) =>
+        addRole({ roleKey: tag, label: humanizeLabel(tag) }, "Volunteer group"),
+      );
+  } else if (normalizedScopeType === "coalition") {
+    const detail = state.pages.coalitions.detail;
+    const catalog =
+      detail.accessWorkspace?.catalog || normalizeCoalitionAccessCatalog({});
+    (catalog.roles?.length
+      ? catalog.roles
+      : COALITION_ROLE_FALLBACKS.map(normalizeCoalitionAccessRole)
+    )
+      .slice(0, 10)
+      .forEach((role) => addRole(role, "Coalition role"));
+  }
+  if (!roles.length) {
+    if (normalizedScopeType === "coalition") {
+      COALITION_ROLE_FALLBACKS.slice(0, 4).forEach((role) =>
+        addRole(normalizeCoalitionAccessRole(role), "Coalition role"),
+      );
+    } else {
+      CANDIDATE_STAFF_FALLBACK_ROLES.slice(0, 4).forEach((role) =>
+        addRole(normalizeCandidateStaffRole(role), "Campaign role"),
+      );
+    }
+  }
+  return roles.slice(0, 12);
+}
+
+function renderMissionCreateAssigneeOption(option, mode, targetModeKey, assignee) {
+  const resolvedMode =
+    mode === "role"
+      ? targetModeKey === "role_fanout"
+        ? "role_fanout"
+        : "role_claim"
+      : mode;
+  const selected =
+    normalizeString(option.value) === assignee &&
+    (mode === "role" ? targetModeKey !== "user" : targetModeKey === mode);
+  return `<button class="shared-campaign-mission-target-option${selected ? " is-active" : ""}" type="button" data-action="mission-create-target-select" data-target-mode="${escapeHtml(mode)}" data-resolved-target-mode="${escapeHtml(resolvedMode)}" data-assignee="${escapeHtml(option.value)}" data-label="${escapeHtml(option.label)}" data-meta="${escapeHtml(option.meta || (resolvedMode === "user" ? "Person" : "Role"))}" aria-pressed="${selected ? "true" : "false"}">
+    <span>${renderIcon(resolvedMode === "user" ? "candidate" : "team")}</span>
+    <strong>${escapeHtml(option.label)}</strong>
+    <small>${escapeHtml(option.meta || (resolvedMode === "user" ? "Person" : "Role"))}</small>
+  </button>`;
+}
+
+function renderMissionCreateAssigneePicker({
+  scopeType,
+  scopeId,
+  targetModeKey,
+  assignee,
+  heading = "Lead owner",
+}) {
+  const people = missionCreateAssigneePeople(scopeType, scopeId);
+  const roles = missionCreateAssigneeRoles(scopeType, scopeId);
+  const selectedPerson = people.find(
+    (person) => targetModeKey === "user" && person.value === assignee,
+  );
+  const selectedRole = roles.find(
+    (role) => targetModeKey !== "user" && role.value === assignee,
+  );
+  const selectedLabel =
+    selectedPerson?.label ||
+    selectedRole?.label ||
+    (assignee
+      ? targetModeKey === "user"
+        ? "Manual person"
+        : "Manual role"
+      : "No target selected");
+  const selectedMeta =
+    selectedPerson?.meta ||
+    selectedRole?.meta ||
+    (assignee
+      ? targetModeKey === "user"
+        ? "The backend will verify this user id or username."
+        : "The backend will verify this role key."
+      : "Choose a person or role before publishing.");
+  const roleModeLabel =
+    targetModeKey === "role_fanout" ? "Fan-out role" : "Claimable role";
+  return `<section class="shared-campaign-mission-target-picker">
+    <div class="shared-campaign-mission-target-picker__header">
+      <div>
+        <strong>${escapeHtml(heading)}</strong>
+        <span data-mission-target-summary>${escapeHtml(`${selectedLabel} - ${selectedMeta}`)}</span>
+      </div>
+      <button class="shared-feed-chip shared-campaign-mission-target-fanout${targetModeKey === "role_fanout" ? " is-active" : ""}" type="button" data-action="mission-create-target-select" data-target-mode="role_fanout" data-resolved-target-mode="role_fanout" data-assignee="${escapeHtml(roles[0]?.value || "all")}" data-label="${escapeHtml(roles[0]?.label || "All eligible members")}" data-meta="Each eligible person gets a task" aria-pressed="${targetModeKey === "role_fanout" ? "true" : "false"}">Fan out role</button>
+    </div>
+    <div class="shared-campaign-mission-target-columns">
+      <div class="shared-campaign-mission-target-column">
+        <div class="shared-card__meta"><span>People</span><span>${escapeHtml(formatCount(people.length))}</span></div>
+        <div class="shared-campaign-mission-target-options">
+          ${
+            people.length
+              ? people
+                  .map((person) =>
+                    renderMissionCreateAssigneeOption(
+                      person,
+                      "user",
+                      targetModeKey,
+                      assignee,
+                    ),
+                  )
+                  .join("")
+              : '<div class="shared-page__empty">No roster people are loaded yet.</div>'
+          }
+        </div>
+      </div>
+      <div class="shared-campaign-mission-target-column">
+        <div class="shared-card__meta"><span>${escapeHtml(roleModeLabel)}</span><span>${escapeHtml(formatCount(roles.length))}</span></div>
+        <div class="shared-campaign-mission-target-options">
+          ${
+            roles.length
+              ? roles
+                  .map((role) =>
+                    renderMissionCreateAssigneeOption(
+                      role,
+                      "role",
+                      targetModeKey,
+                      assignee,
+                    ),
+                  )
+                  .join("")
+              : '<div class="shared-page__empty">No roles are loaded yet.</div>'
+          }
+        </div>
+      </div>
+    </div>
+  </section>`;
+}
+
 function renderCandidateMissionCreateForm(resource, options = {}) {
   const draft = resource.createDraft || {};
   const presetKey = normalizeString(draft.presetKey) || "general";
   const priorityKey = normalizeString(draft.priority).toLowerCase() || "normal";
   const targetModeKey =
     normalizeString(draft.targetMode).toLowerCase() || "user";
+  const assignee = normalizeString(draft.assignee);
   const deadlineModeKey =
     normalizeString(draft.deadlineMode).toLowerCase() || "indefinite";
   const timeoutPolicyKey =
@@ -55620,7 +61855,7 @@ function renderCandidateMissionCreateForm(resource, options = {}) {
       </label>
       <label>
         <span>Lead owner</span>
-        <input name="assignee" placeholder="@username, user id, or role key"${disabledAttr(pending)} required />
+        <input name="assignee" value="${escapeHtml(assignee)}" placeholder="@username, user id, or role key"${disabledAttr(pending)} required />
       </label>
       <label>
         <span>Target mode</span>
@@ -55660,6 +61895,12 @@ function renderCandidateMissionCreateForm(resource, options = {}) {
         <textarea name="description" rows="4" placeholder="What should the assignee know before starting?"${disabledAttr(pending)}>${escapeHtml(draft.description || "")}</textarea>
       </label>
     </div>
+    ${renderMissionCreateAssigneePicker({
+      scopeType,
+      scopeId,
+      targetModeKey,
+      assignee,
+    })}
     <div class="shared-campaign-mission-create__preset">
       <strong>${escapeHtml(missionPresetForKey(presetKey).label)}</strong>
       <span>${escapeHtml(missionPresetForKey(presetKey).description)}</span>
@@ -55668,6 +61909,120 @@ function renderCandidateMissionCreateForm(resource, options = {}) {
       <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(pending)}>${pending ? "Publishing..." : "Publish mission"}</button>
     </div>
   </form>`;
+}
+
+function missionCreateResourceForFormKind(formKind) {
+  const normalizedFormKind = normalizeString(formKind);
+  if (normalizedFormKind === "missions-create") {
+    return state.pages.missions.list;
+  }
+  if (normalizedFormKind === "coalition-missions-create") {
+    return state.pages.coalitions.detail.missionsWorkspace;
+  }
+  if (normalizedFormKind === "candidate-missions-create") {
+    return state.pages.candidateDashboard.detail.missionsWorkspace;
+  }
+  return null;
+}
+
+function syncMissionCreateDraftFromForm(form) {
+  const resource = missionCreateResourceForFormKind(
+    form?.getAttribute("data-route-form"),
+  );
+  if (!resource || !form) {
+    return null;
+  }
+  const formData = new FormData(form);
+  resource.createDraft = {
+    ...(resource.createDraft || {}),
+    templateId: normalizeString(formData.get("templateId")),
+    templateVersion: normalizeString(formData.get("templateVersion")),
+    title: normalizeString(formData.get("title")),
+    presetKey: normalizeString(formData.get("presetKey")),
+    priority: normalizeString(formData.get("priority")),
+    assignee: normalizeString(formData.get("assignee")),
+    targetMode: normalizeString(formData.get("targetMode")),
+    deadlineMode: normalizeString(formData.get("deadlineMode")),
+    dueHours: normalizeString(formData.get("dueHours")),
+    timeoutPolicy: normalizeString(formData.get("timeoutPolicy")),
+    timeoutHours: normalizeString(formData.get("timeoutHours")),
+    description: normalizeString(formData.get("description")),
+  };
+  return resource.createDraft;
+}
+
+function missionTemplateResourceForFormKind(formKind) {
+  const normalizedFormKind = normalizeString(formKind);
+  if (normalizedFormKind === "coalition-missions-template-save") {
+    return state.pages.coalitions.detail.missionsWorkspace;
+  }
+  if (normalizedFormKind === "candidate-missions-template-save") {
+    return state.pages.candidateDashboard.detail.missionsWorkspace;
+  }
+  return null;
+}
+
+function syncMissionTemplateDraftFromForm(form) {
+  const resource = missionTemplateResourceForFormKind(
+    form?.getAttribute("data-route-form"),
+  );
+  if (!resource || !form) {
+    return null;
+  }
+  const formData = new FormData(form);
+  const templateId = normalizeString(formData.get("templateId"));
+  const targetMode =
+    normalizeString(formData.get("targetMode")).toLowerCase() || "user";
+  const assignee = normalizeString(formData.get("assignee"));
+  const existingConfig =
+    resource.templateDraft?.config &&
+    typeof resource.templateDraft.config === "object"
+      ? resource.templateDraft.config
+      : {};
+  const remainingConfig = { ...existingConfig };
+  delete remainingConfig.assignee;
+  delete remainingConfig.target;
+  resource.templateDraft = {
+    ...(resource.templateDraft || {}),
+    templateId,
+    title: normalizeString(formData.get("title")),
+    description: normalizeString(formData.get("description")),
+    presetKey:
+      normalizeString(formData.get("presetKey")).toLowerCase() || "general",
+    priority:
+      normalizeString(formData.get("priority")).toLowerCase() || "normal",
+    targetMode,
+    assignee,
+    deadlineMode:
+      normalizeString(formData.get("deadlineMode")).toLowerCase() ||
+      "indefinite",
+    dueHours: normalizeString(formData.get("dueHours")),
+    timeoutPolicy:
+      normalizeString(formData.get("timeoutPolicy")).toLowerCase() ||
+      "escalate",
+    timeoutHours: normalizeString(formData.get("timeoutHours")),
+    config: {
+      ...remainingConfig,
+      presetKey:
+        normalizeString(formData.get("presetKey")).toLowerCase() || "general",
+      priority:
+        normalizeString(formData.get("priority")).toLowerCase() || "normal",
+      targetMode,
+      ...(assignee ? { assignee } : {}),
+      ...(assignee
+        ? { target: candidateMissionTargetPayload(targetMode, assignee) }
+        : {}),
+      deadlineMode:
+        normalizeString(formData.get("deadlineMode")).toLowerCase() ||
+        "indefinite",
+      dueHours: normalizeString(formData.get("dueHours")),
+      timeoutPolicy:
+        normalizeString(formData.get("timeoutPolicy")).toLowerCase() ||
+        "escalate",
+      timeoutHours: normalizeString(formData.get("timeoutHours")),
+    },
+  };
+  return resource.templateDraft;
 }
 
 function renderCandidateMissionTabs(resource, canManage, options = {}) {
@@ -55832,6 +62187,8 @@ function renderMissionTemplateEditor(resource, options = {}) {
   const scopeType = normalizeMissionScopeType(options.scopeType);
   const scopeId = normalizeString(options.scopeId);
   const templateId = normalizeString(draft.templateId);
+  const targetModeKey = normalizeString(defaults.targetMode).toLowerCase() || "user";
+  const assignee = normalizeString(defaults.assignee);
   return `<form class="shared-campaign-mission-template-editor" data-route-form="${escapeHtml(formKind)}">
     <input type="hidden" name="scopeType" value="${escapeHtml(scopeType)}" />
     <input type="hidden" name="scopeId" value="${escapeHtml(scopeId)}" />
@@ -55871,10 +62228,14 @@ function renderMissionTemplateEditor(resource, options = {}) {
       <label>
         <span>Target mode</span>
         <select name="targetMode"${disabledAttr(pending)}>
-          <option value="user"${selectedAttr(defaults.targetMode === "user")}>Specific user</option>
-          <option value="role_claim"${selectedAttr(defaults.targetMode === "role_claim")}>Role can claim</option>
-          <option value="role_fanout"${selectedAttr(defaults.targetMode === "role_fanout")}>Fan out to role</option>
+          <option value="user"${selectedAttr(targetModeKey === "user")}>Specific user</option>
+          <option value="role_claim"${selectedAttr(targetModeKey === "role_claim")}>Role can claim</option>
+          <option value="role_fanout"${selectedAttr(targetModeKey === "role_fanout")}>Fan out to role</option>
         </select>
+      </label>
+      <label>
+        <span>Default owner</span>
+        <input name="assignee" value="${escapeHtml(assignee)}" placeholder="@username, user id, or role key"${disabledAttr(pending)} />
       </label>
       <label>
         <span>Deadline</span>
@@ -55906,6 +62267,13 @@ function renderMissionTemplateEditor(resource, options = {}) {
         <textarea name="description" rows="4" placeholder="What should the assignee know before starting?"${disabledAttr(pending)}>${escapeHtml(draft.description || "")}</textarea>
       </label>
     </div>
+    ${renderMissionCreateAssigneePicker({
+      scopeType,
+      scopeId,
+      targetModeKey,
+      assignee,
+      heading: "Default lead owner",
+    })}
     <div class="shared-campaign-mission-template-editor__footer">
       <div>
         <strong>${escapeHtml(missionPresetForKey(presetKey).label)}</strong>
@@ -55942,13 +62310,16 @@ function renderCandidateMissionTemplatesView(resource, options = {}) {
           resource.templates.length
             ? resource.templates
                 .map(
-                  (template) => `<article class="shared-campaign-mission-template">
+                  (template) => {
+                    const targetSummary = missionTemplateTargetSummary(template);
+                    return `<article class="shared-campaign-mission-template">
                     <div>
                       <strong>${escapeHtml(template.title)}</strong>
                       <span>${escapeHtml(template.description || missionPresetForKey(template.presetKey).description)}</span>
                     </div>
                     <div class="shared-campaign-mission-template__meta">
                       <span>${escapeHtml(missionPresetForKey(template.presetKey).label)}</span>
+                      ${targetSummary ? `<span>${escapeHtml(targetSummary)}</span>` : ""}
                       ${template.version ? `<span>v${escapeHtml(String(template.version))}</span>` : ""}
                       ${template.versions?.length ? `<span>${escapeHtml(formatCount(template.versions.length))} saved</span>` : ""}
                     </div>
@@ -55956,7 +62327,8 @@ function renderCandidateMissionTemplatesView(resource, options = {}) {
                       <button class="shared-feed-chip" type="button" data-action="${escapeHtml(templateEditAction)}" data-title="${escapeHtml(template.title)}" data-description="${escapeHtml(template.description)}" data-preset-key="${escapeHtml(template.presetKey)}" data-template-id="${escapeHtml(template.templateId)}" data-template-version="${escapeHtml(template.version || "")}" ${missionTemplateDataAttributes(template)}>Edit</button>
                       <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="${escapeHtml(usePresetAction)}" data-title="${escapeHtml(template.title)}" data-description="${escapeHtml(template.description)}" data-preset-key="${escapeHtml(template.presetKey)}" data-template-id="${escapeHtml(template.templateId)}" data-template-version="${escapeHtml(template.version || "")}" ${missionTemplateDataAttributes(template)}>Use</button>
                     </div>
-                  </article>`,
+                  </article>`;
+                  },
                 )
                 .join("")
             : '<div class="shared-page__empty">No saved templates yet.</div>'
@@ -56105,12 +62477,46 @@ function renderCandidateMissionAuditView(items) {
   </article>`;
 }
 
+function renderCandidateMissionStaffCommand(resource, options = {}) {
+  const items = resource.items || [];
+  const actionItems = candidateMissionStaffActionItems(items);
+  const priority = actionItems[0] || null;
+  const command = candidateMissionStaffCommandCopy(priority);
+  const openCount = items.reduce((sum, mission) => sum + mission.openCount, 0);
+  const claimableCount = actionItems.filter(({ job }) => job.isClaimable).length;
+  const dueSoonCount = actionItems.filter(({ job }) => job.isDueSoon).length;
+  const submittedCount = actionItems.filter(({ job }) => job.isSubmitted).length;
+  return `<section class="shared-campaign-mission-staff-command">
+    <div class="shared-campaign-mission-staff-command__main">
+      <div class="shared-campaign-mission-staff-command__next">
+        <span>${renderIcon(priority?.job?.isClaimable ? "team" : "mission")}</span>
+        <div>
+          <small>${escapeHtml(command.eyebrow)}</small>
+          <h3>${escapeHtml(command.title)}</h3>
+          <p>${escapeHtml(command.copy)}</p>
+        </div>
+      </div>
+      <div class="shared-campaign-mission-staff-command__actions">
+        ${renderCandidateMissionStaffCommandAction(priority, resource, options)}
+      </div>
+    </div>
+    <div class="shared-campaign-mission-staff-command__metrics">
+      <div><span>Visible missions</span><strong>${escapeHtml(formatCount(items.length))}</strong></div>
+      <div><span>Open tasks</span><strong>${escapeHtml(formatCount(openCount))}</strong></div>
+      <div><span>Claimable</span><strong>${escapeHtml(formatCount(claimableCount))}</strong></div>
+      <div><span>Due soon</span><strong>${escapeHtml(formatCount(dueSoonCount))}</strong></div>
+      <div><span>In review</span><strong>${escapeHtml(formatCount(submittedCount))}</strong></div>
+    </div>
+  </section>`;
+}
+
 function renderCandidateMissionActiveView(resource, canManage, options = {}) {
   if (!canManage) {
     const groups = candidateMissionStaffGroups(resource.items).filter(
       (group) => group.items.length || group.key !== "other",
     );
     return `<div class="shared-campaign-mission-workspace">
+      ${renderCandidateMissionStaffCommand(resource, options)}
       ${
         groups.length
           ? groups
@@ -56180,6 +62586,9 @@ function renderMissionWorkspaceShell({
     0,
   );
   resource.view = normalizeCandidateMissionHubView(resource.view, canManage);
+  const resolvedDescription = canManage
+    ? description
+    : `Review assigned and claimable ${noun} missions, open the next task, and keep blockers or submitted work visible from this web hub.`;
   const templateActionPrefix =
     scopeType === "coalition"
       ? "coalition-missions-template"
@@ -56212,7 +62621,7 @@ function renderMissionWorkspaceShell({
           <span>${escapeHtml(canManage ? "Admin" : "My work")}</span>
         </div>
         <h2>${escapeHtml(title)}</h2>
-        <p>${escapeHtml(description)}</p>
+        <p>${escapeHtml(resolvedDescription)}</p>
       </div>
       <div class="shared-campaign-missions-hero__actions">
         <button class="shared-feed-chip" type="button" data-action="${escapeHtml(refreshAction)}"${disabledAttr(resource.loading)}>Refresh</button>
@@ -56429,6 +62838,30 @@ function renderCandidateMessagingFocusRoom(candidateId, channel) {
     channel.conversationId,
     "/settings",
   );
+  const membersRoute = buildMessagingRoomRoute(
+    "campaign",
+    candidateId,
+    channel.conversationId,
+    "/settings/permissions",
+  );
+  const pinsRoute = buildMessagingRoomRoute(
+    "campaign",
+    candidateId,
+    channel.conversationId,
+    "/settings/pinned-messages",
+  );
+  const invitesRoute = buildMessagingRoomRoute(
+    "campaign",
+    candidateId,
+    channel.conversationId,
+    "/settings/invites",
+  );
+  const notificationsRoute = buildMessagingRoomRoute(
+    "campaign",
+    candidateId,
+    channel.conversationId,
+    "/settings/notifications",
+  );
   const kind = normalizeString(channel.kind).toLowerCase();
   return `<article class="shared-campaign-messaging-focus">
     <div class="shared-campaign-messaging-focus__room">
@@ -56449,6 +62882,12 @@ function renderCandidateMessagingFocusRoom(candidateId, channel) {
     <div class="shared-campaign-room-card__actions">
       <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="${escapeHtml(roomRoute)}">Open conversation</button>
       <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(settingsRoute)}">Details</button>
+    </div>
+    <div class="shared-campaign-messaging-room-links" aria-label="Focused room tools">
+      <button type="button" data-action="navigate" data-route="${escapeHtml(membersRoute)}">${renderIcon("team")} <span>Access</span></button>
+      <button type="button" data-action="navigate" data-route="${escapeHtml(pinsRoute)}">${renderIcon("saveFilled")} <span>Pins</span></button>
+      <button type="button" data-action="navigate" data-route="${escapeHtml(invitesRoute)}">${renderIcon("share")} <span>Invites</span></button>
+      <button type="button" data-action="navigate" data-route="${escapeHtml(notificationsRoute)}">${renderIcon("bell")} <span>Alerts</span></button>
     </div>
   </article>`;
 }
@@ -56472,13 +62911,23 @@ function renderCandidateMessagingCommandCenter({
 }) {
   const roomsPath = candidateMessagingServerPath(candidateId);
   const focusRoom = candidateMessagingFocusRoom(channels);
+  const composePath = "/messages/compose";
+  const inboxPath = "/messages";
+  const securityPath = "/messages/security-activity";
+  const recoveryPath = "/messages/recovery";
   const actions = [
     {
-      title: "Open conversations",
-      copy: "Jump into all campaign rooms and direct threads.",
+      title: "Compose",
+      copy: "Start a direct message or group chat.",
+      route: composePath,
+      icon: "create",
+      tone: "primary",
+    },
+    {
+      title: "Inbox and rooms",
+      copy: "Review DMs, requests, and campaign rooms.",
       route: roomsPath,
       icon: "messages",
-      tone: "primary",
     },
     {
       title: "Safety review",
@@ -56495,7 +62944,7 @@ function renderCandidateMessagingCommandCenter({
     },
     {
       title: "Room defaults",
-      copy: "Set conversation names, visibility, and defaults.",
+      copy: "Set names, visibility, notifications, and access.",
       route: `${roomsPath}/settings`,
       icon: "settings",
     },
@@ -56505,16 +62954,23 @@ function renderCandidateMessagingCommandCenter({
       route: `${roomsPath}/workflows`,
       icon: "dashboard",
     },
+    {
+      title: "Security",
+      copy: "Check trusted devices and recovery status.",
+      route: securityPath,
+      icon: "lock",
+    },
   ];
   return `<article class="shared-campaign-panel shared-campaign-panel--accent shared-campaign-messaging-command">
     <div class="shared-campaign-panel__header shared-campaign-messaging-command__header">
       <div>
         <span class="shared-card__meta"><span>Campaign messaging</span><span>${escapeHtml(canManage ? "Manager access" : "Staff access")}</span></span>
         <h2>Campaign messaging workspace</h2>
-        <p>Open conversations, coordinate volunteers, answer questions, and keep campaign rooms moving from one dashboard.</p>
+        <p>Open conversations, compose direct outreach, manage room access, review safety, and keep trusted-device recovery close to the campaign workflow.</p>
       </div>
       <div class="shared-card__actions">
-        <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="${escapeHtml(roomsPath)}">Open conversations</button>
+        <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="${escapeHtml(composePath)}">Compose</button>
+        <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(inboxPath)}">Inbox</button>
         <button class="shared-feed-chip" type="button" data-action="candidate-messaging-refresh"${disabledAttr(workspace.loading)}>${workspace.loading ? "Refreshing..." : "Refresh"}</button>
       </div>
     </div>
@@ -56530,6 +62986,14 @@ function renderCandidateMessagingCommandCenter({
         ${actions.map(renderCandidateMessagingActionCard).join("")}
       </div>
     </div>
+    <div class="shared-campaign-messaging-recovery-strip">
+      <span>${renderIcon("shield")}</span>
+      <div>
+        <strong>Messaging security travels with the campaign workspace.</strong>
+        <small>Use trusted devices, recovery codes, and safety activity from web before handing off campaign conversations.</small>
+      </div>
+      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(recoveryPath)}">Recovery</button>
+    </div>
   </article>`;
 }
 
@@ -56540,8 +63004,10 @@ function renderCandidateMessagingAdminPanel(candidateId, directory, access) {
     ["Preferences", "Room defaults", `${serverRoute}/settings`, "settings"],
     ["Team access", "Room groups", `${serverRoute}/roles`, "shield"],
     ["Members", "People and rooms", `${serverRoute}/members`, "team"],
+    ["Invite links", "Access handoffs", `${serverRoute}/settings/invites`, "share"],
     ["Safety review", "Reports and restrictions", `${serverRoute}/moderation`, "flag"],
     ["Automations", "Saved replies and routing", `${serverRoute}/workflows`, "dashboard"],
+    ["Security", "Devices and recovery", "/messages/security-activity", "lock"],
   ];
   return `<aside class="shared-campaign-room-admin">
     <div>
@@ -59612,7 +66078,11 @@ function renderCandidateDonationPayoutPanel(status, resource) {
   const pending =
     pendingKey === "payout" ||
     pendingKey === "payout-collect" ||
-    pendingKey === "payout-attach";
+    pendingKey === "payout-attach" ||
+    pendingKey === "payout-remove";
+  const removePending = pendingKey === "payout-remove";
+  const confirmingRemoval =
+    linked && resource.confirmingPayoutBankRemoval === true;
   const canStart =
     candidateFinanceSectionComplete(status, "committee") &&
     candidateFinanceSectionComplete(status, "representative");
@@ -59655,7 +66125,22 @@ function renderCandidateDonationPayoutPanel(status, resource) {
       <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="candidate-donation-payout-start"${disabledAttr(pending || !canStart)}>${escapeHtml(primaryLabel)}</button>
       <button class="shared-feed-chip" type="button" data-action="candidate-donations-refresh"${disabledAttr(resource.loading)}>Refresh status</button>
       <button class="shared-feed-chip" type="button" data-action="open-app-shell">Use app instead</button>
+      ${linked && !confirmingRemoval ? `<button class="shared-feed-chip is-danger" type="button" data-action="candidate-donation-payout-remove-confirm"${disabledAttr(pending)}>${removePending ? "Removing..." : "Remove linked bank"}</button>` : ""}
     </div>
+    ${
+      confirmingRemoval
+        ? `<div class="shared-campaign-donations-bank-remove" role="group" aria-label="Confirm payout bank removal">
+            <div>
+              <strong>Remove linked payout bank?</strong>
+              <span>This removes the current payout destination from Stripe. You can link a different bank afterward.</span>
+            </div>
+            <div class="shared-card__actions">
+              <button class="shared-feed-chip is-danger" type="button" data-action="candidate-donation-payout-remove"${disabledAttr(removePending)}>${removePending ? "Removing..." : "Remove bank"}</button>
+              <button class="shared-feed-chip" type="button" data-action="candidate-donation-payout-remove-cancel"${disabledAttr(removePending)}>Cancel</button>
+            </div>
+          </div>`
+        : ""
+    }
     ${!canStart ? `<p class="shared-campaign-donations-note">Save committee and representative details before payout linking.</p>` : ""}
     ${canStart && !stripeBrowserConfigured ? `<p class="shared-campaign-donations-note shared-campaign-donations-note--warning">Hosted Stripe links can still open. Embedded bank collection needs the website publishable key.</p>` : ""}
     ${pendingSession ? renderCandidateDonationPayoutSession(status, resource) : ""}
@@ -60187,15 +66672,124 @@ function petitionResponseValueLabel(value) {
   return "";
 }
 
+function petitionResponseFieldByKind(fields, kind) {
+  const normalizedKind = normalizeString(kind).toLowerCase();
+  return (
+    (fields || []).find((field) => normalizeString(field.type) === normalizedKind) ||
+    (fields || []).find((field) =>
+      normalizeString(field.label).toLowerCase().includes(normalizedKind),
+    ) ||
+    null
+  );
+}
+
+function petitionResponseNameFromValue(value) {
+  if (value === undefined || value === null) return "";
+  if (typeof value === "string" || typeof value === "number") {
+    return normalizeString(value);
+  }
+  if (typeof value === "object") {
+    const explicit = normalizeString(
+      value.fullName ||
+        value.full_name ||
+        value.name ||
+        value.typedName ||
+        value.typed_name,
+    );
+    if (explicit) return explicit;
+    return [
+      value.firstName || value.first_name,
+      value.middleName || value.middle_name,
+      value.lastName || value.last_name,
+    ]
+      .map(normalizeString)
+      .filter(Boolean)
+      .join(" ");
+  }
+  return "";
+}
+
+function petitionResponseNameLabel(response, fields) {
+  const nameField = petitionResponseFieldByKind(fields, "name");
+  const fromField = nameField
+    ? petitionResponseNameFromValue(response.values?.[nameField.id])
+    : "";
+  if (fromField) return fromField;
+  for (const field of fields || []) {
+    if (!normalizeString(field.label).toLowerCase().includes("name")) continue;
+    const value = petitionResponseNameFromValue(response.values?.[field.id]);
+    if (value) return value;
+  }
+  return "";
+}
+
+function petitionResponseAddressLabel(response, fields) {
+  const addressField = petitionResponseFieldByKind(fields, "address");
+  const fromField = addressField
+    ? petitionResponseValueLabel(response.values?.[addressField.id])
+    : "";
+  if (fromField) return fromField;
+  for (const field of fields || []) {
+    if (!normalizeString(field.label).toLowerCase().includes("address")) continue;
+    const value = petitionResponseValueLabel(response.values?.[field.id]);
+    if (value) return value;
+  }
+  return "";
+}
+
+function petitionResponseMatchesFilters(response, fields, nameQuery, addressQuery) {
+  const normalizedNameQuery = normalizeString(nameQuery).toLowerCase();
+  const normalizedAddressQuery = normalizeString(addressQuery).toLowerCase();
+  const name = petitionResponseNameLabel(response, fields).toLowerCase();
+  const address = petitionResponseAddressLabel(response, fields).toLowerCase();
+  return (
+    (!normalizedNameQuery || name.includes(normalizedNameQuery)) &&
+    (!normalizedAddressQuery || address.includes(normalizedAddressQuery))
+  );
+}
+
+function applyPetitionResponseFiltersDom(ownerType) {
+  const workspace = petitionWorkspaceForOwner(ownerType);
+  const nameQuery = normalizeString(workspace.responseNameSearch).toLowerCase();
+  const addressQuery = normalizeString(workspace.responseAddressSearch).toLowerCase();
+  const rows = Array.from(root?.querySelectorAll("[data-petition-response-row]") || []);
+  let visible = 0;
+  rows.forEach((row) => {
+    const name = normalizeString(row.getAttribute("data-response-name")).toLowerCase();
+    const address = normalizeString(row.getAttribute("data-response-address")).toLowerCase();
+    const matches =
+      (!nameQuery || name.includes(nameQuery)) &&
+      (!addressQuery || address.includes(addressQuery));
+    row.hidden = !matches;
+    row.classList.toggle("is-hidden", !matches);
+    if (matches) visible += 1;
+  });
+  const count = root?.querySelector("[data-petition-response-count]");
+  if (count) {
+    count.textContent = `${visible} of ${rows.length} responses`;
+  }
+}
+
 function renderPetitionResponses(ownerType, ownerId, workspace) {
   const petition = currentPetitionWorkspaceItem(workspace);
   if (!petition) {
     return '<div class="shared-page__empty">Select a petition to review responses.</div>';
   }
   const fields = petition.fieldSchema || [];
-  const writtenFields = fields.filter((field) => field.type !== "cta_video");
   const responses = workspace.responses || [];
+  const responseNameSearch = normalizeString(workspace.responseNameSearch);
+  const responseAddressSearch = normalizeString(workspace.responseAddressSearch);
+  const visibleResponses = responses.filter((response) =>
+    petitionResponseMatchesFilters(
+      response,
+      fields,
+      responseNameSearch,
+      responseAddressSearch,
+    ),
+  );
   const groups = workspace.duplicateGroups || [];
+  const resultsShareUrl = petitionResultsShareUrl(petition);
+  const resultsShareActive = Boolean(petition.resultsShare?.enabled && resultsShareUrl);
   return `<section class="shared-coalition-panel shared-petition-responses">
     <div class="shared-coalition-panel__header">
       <div>
@@ -60205,7 +66799,24 @@ function renderPetitionResponses(ownerType, ownerId, workspace) {
       <div class="shared-card__actions">
         <button class="shared-feed-chip" type="button" data-action="petition-responses-load" data-owner-type="${escapeHtml(ownerType)}" data-owner-id="${escapeHtml(ownerId)}" data-petition-id="${escapeHtml(petition.petitionId)}"${disabledAttr(workspace.responsesLoading)}>${workspace.responsesLoading ? "Refreshing..." : "Refresh"}</button>
         <button class="shared-feed-chip" type="button" data-action="petition-export-csv" data-owner-type="${escapeHtml(ownerType)}" data-owner-id="${escapeHtml(ownerId)}" data-petition-id="${escapeHtml(petition.petitionId)}"${disabledAttr(workspace.actionPendingKey === "csv")}>CSV</button>
+        ${
+          resultsShareActive
+            ? `<button class="shared-feed-chip" type="button" data-action="petition-results-share-copy" data-share-url="${escapeHtml(resultsShareUrl)}">Copy results link</button>
+              <button class="shared-feed-chip is-danger" type="button" data-action="petition-results-share-revoke" data-owner-type="${escapeHtml(ownerType)}" data-owner-id="${escapeHtml(ownerId)}" data-petition-id="${escapeHtml(petition.petitionId)}"${disabledAttr(workspace.actionPendingKey === "results-share")}>Revoke results link</button>`
+            : `<button class="shared-feed-chip" type="button" data-action="petition-results-share-create" data-owner-type="${escapeHtml(ownerType)}" data-owner-id="${escapeHtml(ownerId)}" data-petition-id="${escapeHtml(petition.petitionId)}"${disabledAttr(workspace.actionPendingKey === "results-share")}>Share results link</button>`
+        }
       </div>
+    </div>
+    <div class="shared-petition-response-filters" aria-label="Search petition responses">
+      <label>
+        <span>Name</span>
+        <input type="search" value="${escapeHtml(responseNameSearch)}" placeholder="Search names" data-petition-response-search="name" data-owner-type="${escapeHtml(ownerType)}" />
+      </label>
+      <label>
+        <span>Address</span>
+        <input type="search" value="${escapeHtml(responseAddressSearch)}" placeholder="Search addresses" data-petition-response-search="address" data-owner-type="${escapeHtml(ownerType)}" />
+      </label>
+      <small data-petition-response-count>${escapeHtml(formatCount(visibleResponses.length))} of ${escapeHtml(formatCount(responses.length))} responses</small>
     </div>
     ${
       groups.length
@@ -60220,36 +66831,40 @@ function renderPetitionResponses(ownerType, ownerId, workspace) {
               )
               .join("")}
           </div>`
-        : ""
+            : ""
     }
-    <div class="shared-petition-response-table" role="table" aria-label="Petition responses" style="--petition-column-count: ${escapeHtml(String(Math.max(1, writtenFields.length)))};">
+    <div class="shared-petition-response-table" role="table" aria-label="Petition responses">
       <div class="shared-petition-response-table__row is-header" role="row">
-        <span>Status</span>
+        <span>Review</span>
+        <span>Name</span>
+        <span>Address</span>
+        <span>Video</span>
         <span>Submitted</span>
-        ${writtenFields.map((field) => `<span>${escapeHtml(field.label)}</span>`).join("")}
-        <span>CTA video</span>
         <span>Actions</span>
       </div>
       ${
         workspace.responsesLoading && !responses.length
           ? '<div class="shared-page__loading">Loading responses...</div>'
-          : responses.length
-            ? responses
+          : visibleResponses.length
+            ? visibleResponses
                 .map((response) => {
                   const hasVideo = response.ctaVideos.length > 0;
                   const duplicate = response.duplicateFlags.length > 0;
-                  return `<div class="shared-petition-response-table__row${duplicate ? " is-flagged" : ""}" role="row">
-                    <span>${renderPetitionStatusPill(response.reviewStatus || response.status)}</span>
+                  const name = petitionResponseNameLabel(response, fields);
+                  const address = petitionResponseAddressLabel(response, fields);
+                  return `<div class="shared-petition-response-table__row${duplicate ? " is-flagged" : ""}" role="row" data-petition-response-row data-response-name="${escapeHtml(name)}" data-response-address="${escapeHtml(address)}">
+                    <span class="shared-petition-response-table__review">${duplicate ? "!" : ""}</span>
+                    <span>${escapeHtml(name || "No name")}</span>
+                    <span>${escapeHtml(address || "No address")}</span>
+                    <span class="shared-petition-response-table__video">${hasVideo ? "✓" : ""}</span>
                     <span>${escapeHtml(response.createdAt ? new Date(response.createdAt).toLocaleString() : "")}</span>
-                    ${writtenFields
-                      .map((field) => `<span>${escapeHtml(petitionResponseValueLabel(response.values[field.id]))}</span>`)
-                      .join("")}
-                    <span>${hasVideo ? response.ctaVideos.map((video) => escapeHtml(video.uploadId || video.uid || video.videoId || "video")).join("<br>") : "No"}</span>
                     <span><button class="shared-feed-chip is-danger" type="button" data-action="petition-delete-response" data-owner-type="${escapeHtml(ownerType)}" data-owner-id="${escapeHtml(ownerId)}" data-petition-id="${escapeHtml(petition.petitionId)}" data-response-id="${escapeHtml(response.responseId)}"${disabledAttr(workspace.actionPendingKey === `delete:${response.responseId}`)}>Delete</button></span>
                   </div>`;
                 })
                 .join("")
-            : '<div class="shared-page__empty">No responses yet.</div>'
+            : responses.length
+              ? '<div class="shared-page__empty">No matching responses.</div>'
+              : '<div class="shared-page__empty">No responses yet.</div>'
       }
     </div>
   </section>`;
@@ -60333,8 +66948,20 @@ function renderPublicPetitionBrandHeader() {
         <small>Public petition</small>
       </span>
     </button>
-    <button class="shared-feed-chip shared-petition-public-brand__app" type="button" data-action="open-app-shell">Open app</button>
   </header>`;
+}
+
+function renderPublicPetitionCover(petition) {
+  const coverImageUrl = normalizeString(petition?.coverImageUrl);
+  if (!coverImageUrl) {
+    return "";
+  }
+  return `<figure class="shared-petition-public-cover">
+    <img class="shared-petition-public-cover__image" src="${escapeHtml(resolveSharedAssetUrl(coverImageUrl))}" alt="" loading="eager" />
+    <span class="shared-petition-public-cover__logo" aria-hidden="true">
+      <img src="${escapeHtml(resolveSharedAssetUrl(polisLogoUrl))}" alt="" />
+    </span>
+  </figure>`;
 }
 
 function renderPublicPetitionState(message, kind = "loading") {
@@ -60417,9 +67044,9 @@ function renderPublicPetitionPage() {
   return `<section class="shared-page shared-petition-public-page">
     <div class="shared-page__content shared-petition-public-page__content">
       ${renderPublicPetitionBrandHeader()}
+      ${renderPublicPetitionCover(petition)}
       <section class="shared-petition-public-shell">
         <div class="shared-petition-public-copy">
-          <div class="shared-petition-public-meta"><span>Petition</span><span>Guest response</span></div>
           <h1>${escapeHtml(petition.title || "Petition")}</h1>
           ${petition.bodyText ? `<p class="shared-petition-public-copy__body">${escapeHtml(petition.bodyText)}</p>` : ""}
         </div>
@@ -60434,6 +67061,85 @@ function renderPublicPetitionPage() {
             <button class="shared-feed-chip shared-feed-chip--primary shared-petition-public-submit" type="submit"${disabledAttr(pending)}>${pending ? "Submitting..." : "Submit"}</button>
           </div>
         </form>
+      </section>
+    </div>
+  </section>`;
+}
+
+function petitionResponseVideoLinks(response, field) {
+  const links = [];
+  for (const video of response.ctaVideos || []) {
+    if (field?.id && normalizeString(video.fieldId) !== field.id) continue;
+    const url =
+      normalizeString(
+        video.playbackUrl ||
+          video.playbackURL ||
+          video.downloadUrl ||
+          video.downloadURL ||
+          video.deliveryUrl ||
+          video.url,
+      ) || "";
+    if (url) links.push(url);
+  }
+  return links;
+}
+
+function renderPublicPetitionResultsPage() {
+  const page = state.pages.petitions.results;
+  if (page.loading && !page.item) {
+    return renderPublicPetitionState("Loading petition results...");
+  }
+  if (page.error && !page.item) {
+    return renderPublicPetitionState(page.error, "error");
+  }
+  const petition = page.item;
+  if (!petition) {
+    return renderPublicPetitionState("Petition results unavailable.", "error");
+  }
+  const fields = petition.fieldSchema || [];
+  const responses = page.responses || [];
+  return `<section class="shared-page shared-petition-public-page shared-petition-results-page">
+    <div class="shared-page__content shared-petition-public-page__content">
+      ${renderPublicPetitionBrandHeader()}
+      ${renderPublicPetitionCover(petition)}
+      <section class="shared-petition-results-shell">
+        <div class="shared-petition-results-header">
+          <div>
+            <h1>${escapeHtml(petition.title || "Petition results")}</h1>
+            <p>${escapeHtml(formatCount(responses.length))} responses${(page.duplicateGroups || []).length ? ` - ${escapeHtml(formatCount((page.duplicateGroups || []).length))} duplicate groups flagged` : ""}</p>
+          </div>
+          <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="petition-public-results-csv" data-share-token="${escapeHtml(page.shareToken)}"${disabledAttr(page.downloading)}>${page.downloading ? "Downloading..." : "Download CSV"}</button>
+        </div>
+        ${page.error ? `<div class="shared-page__error">${escapeHtml(page.error)}</div>` : ""}
+        <div class="shared-petition-results-table" role="table" aria-label="Petition results" style="--petition-results-column-count: ${escapeHtml(String(Math.max(1, fields.length)))};">
+          <div class="shared-petition-results-table__row is-header" role="row">
+            <span>Review</span>
+            <span>Submitted</span>
+            ${fields.map((field) => `<span>${escapeHtml(field.label)}</span>`).join("")}
+          </div>
+          ${
+            responses.length
+              ? responses
+                  .map((response) => {
+                    const flagged = (response.duplicateFlags || []).length > 0;
+                    return `<div class="shared-petition-results-table__row${flagged ? " is-flagged" : ""}" role="row">
+                      <span>${flagged ? "!" : ""}</span>
+                      <span>${escapeHtml(response.createdAt ? new Date(response.createdAt).toLocaleString() : "")}</span>
+                      ${fields
+                        .map((field) => {
+                          if (field.type === "cta_video") {
+                            const links = petitionResponseVideoLinks(response, field);
+                            return `<span>${links.length ? links.map((link) => `<a href="${escapeHtml(link)}" target="_blank" rel="noreferrer">Video</a>`).join("<br>") : ""}</span>`;
+                          }
+                          return `<span>${escapeHtml(petitionResponseValueLabel(response.values[field.id]))}</span>`;
+                        })
+                        .join("")}
+                    </div>`;
+                  })
+                  .join("")
+              : '<div class="shared-page__empty">No responses yet.</div>'
+          }
+        </div>
       </section>
     </div>
   </section>`;
@@ -60531,18 +67237,142 @@ function renderCandidateDashboardPage() {
 
 function renderCoalitionsAuthGate() {
   const featureSections = coalitionFeatureSections();
-  const features = featureSections
-    .map((section) => {
-      const copy = coalitionFeatureCopy(section);
-      return `<article class="shared-coalition-auth__tile shared-coalition-auth__tile--feature" role="listitem">
-        <span class="shared-coalition-auth__tile-icon" aria-hidden="true">${renderIcon(section.icon)}</span>
-        <span class="shared-coalition-auth__tile-copy">
-          <span class="shared-card__meta"><span>${escapeHtml(copy.eyebrow)}</span></span>
-          <strong>${escapeHtml(section.label)}</strong>
-          <small>${escapeHtml(copy.description)}</small>
-        </span>
-      </article>`;
-    })
+  const featureByKey = new Map(
+    featureSections.map((section) => [section.key, {
+      label: section.label,
+      icon: section.icon,
+      copy: coalitionFeatureCopy(section),
+    }]),
+  );
+  const moduleGroups = [
+    {
+      label: "Membership and access",
+      icon: "team",
+      copy: "Start, join, invite, approve, and tune coalition roles.",
+      items: [
+        { key: "start", label: "Start Coalition", icon: "candidate" },
+        { key: "join", label: "Join Requests", icon: "team" },
+        featureByKey.get("members"),
+      ],
+    },
+    {
+      label: "Operations and messaging",
+      icon: "messages",
+      copy: "Rooms, missions, files, deadlines, shared events, and calendar work.",
+      items: [
+        featureByKey.get("rooms"),
+        featureByKey.get("missions"),
+        featureByKey.get("calendar"),
+      ],
+    },
+    {
+      label: "Voter field and CTAs",
+      icon: "map",
+      copy: "District search, voter tools, scripts, CTA events, and field notes.",
+      items: [
+        featureByKey.get("voter-map"),
+        { key: "districts", label: "District Search", icon: "search" },
+        { key: "scripts", label: "Outreach Scripts", icon: "file" },
+        { key: "ctas", label: "CTA Tools", icon: "calendar" },
+      ],
+    },
+    {
+      label: "Governance and publishing",
+      icon: "election",
+      copy: "Constitution, voting, speaker console, petitions, and amplify requests.",
+      items: [
+        featureByKey.get("governance"),
+        { key: "speaker", label: "Speaker Console", icon: "messages" },
+        featureByKey.get("petitions"),
+        featureByKey.get("amplify"),
+      ],
+    },
+  ].map((group) => ({
+    ...group,
+    items: group.items.filter(Boolean),
+  })).filter((group) => group.items.length);
+  const workspaceStats = [
+    {
+      icon: "team",
+      label: "Start or join",
+      kicker: "Access",
+      detail: "Create coalitions, request access, and route into the right workspace.",
+    },
+    {
+      icon: "messages",
+      label: "Rooms + missions",
+      kicker: "Operations",
+      detail: "Messaging, tasks, files, approvals, and shared calendar work stay together.",
+    },
+    {
+      icon: "election",
+      label: "Governance",
+      kicker: "Decisions",
+      detail: "Constitution, proposals, voting, and speaker flow stay permission-aware.",
+    },
+  ];
+  const workspaceQueue = [
+    {
+      label: "Access",
+      title: "Start or join a coalition",
+      status: "Workspace",
+    },
+    {
+      label: "Field",
+      title: "District search, CTAs, and outreach scripts",
+      status: "Voter map",
+    },
+    {
+      label: "Schedule",
+      title: "Shared calendar and promotion windows",
+      status: "Calendar",
+    },
+    {
+      label: "Vote",
+      title: "Proposal and speaker console flow",
+      status: "Governance",
+    },
+  ];
+  const moduleMap = moduleGroups
+    .map(
+      (group) => `<article class="shared-coalition-auth__module" role="listitem">
+        <div class="shared-coalition-auth__module-top">
+          <span aria-hidden="true">${renderIcon(group.icon)}</span>
+          <div>
+            <strong>${escapeHtml(group.label)}</strong>
+            <small>${escapeHtml(group.copy)}</small>
+          </div>
+        </div>
+        <div class="shared-coalition-auth__module-items">
+          ${group.items
+            .map(
+              (item) => `<span>${renderIcon(item.icon)}${escapeHtml(item.label)}</span>`,
+            )
+            .join("")}
+        </div>
+      </article>`,
+    )
+    .join("");
+  const stats = workspaceStats
+    .map(
+      (item) => `<article>
+        <span aria-hidden="true">${renderIcon(item.icon)}</span>
+        <div>
+          <small>${escapeHtml(item.kicker)}</small>
+          <strong>${escapeHtml(item.label)}</strong>
+          <p>${escapeHtml(item.detail)}</p>
+        </div>
+      </article>`,
+    )
+    .join("");
+  const queue = workspaceQueue
+    .map(
+      (item) => `<article>
+        <span>${escapeHtml(item.label)}</span>
+        <strong>${escapeHtml(item.title)}</strong>
+        <em>${escapeHtml(item.status)}</em>
+      </article>`,
+    )
     .join("");
   return `<section class="shared-page shared-coalition-workspace">
     ${renderTopChrome()}
@@ -60550,16 +67380,34 @@ function renderCoalitionsAuthGate() {
       <section class="shared-coalition-auth shared-coalition-auth--workspace">
         <div class="shared-coalition-auth__copy">
           <span class="shared-card__meta"><span>Coalition workspace</span><span>${escapeHtml(formatCount(featureSections.length))} feature areas</span></span>
-          <h1>Coordinate coalition work from the web.</h1>
-          <p>Sign in to open the same coalition surfaces used in the Polis app: members, rooms, missions, voter map tools, calendar, governance, and amplify requests.</p>
+          <h1>Open every coalition workspace from the web.</h1>
+          <p>Sign in to start a coalition, request access, or open the exact workspace your role can use for members, rooms, missions, voter field tools, CTA events, calendar work, governance, petitions, and amplify requests.</p>
           <div class="shared-card__actions">
             <button class="shared-feed-chip shared-feed-chip--primary" data-action="auth-login-inline">Sign in</button>
             <button class="shared-feed-chip" data-action="auth-signup-inline">Create account</button>
             <button class="shared-feed-chip" data-action="open-app-shell">Open app</button>
           </div>
         </div>
-        <div class="shared-coalition-auth__grid shared-coalition-auth__grid--workspace" role="list" aria-label="Coalition workspace feature areas">
-          ${features}
+        <div class="shared-coalition-auth__workspace">
+          <aside class="shared-coalition-command-preview" aria-label="Coalition workspace preview">
+            <header>
+              <span aria-hidden="true">${renderIcon("dashboard")}</span>
+              <div>
+                <small>Coalition command center</small>
+                <strong>Shared work in Polis</strong>
+              </div>
+            </header>
+            <div class="shared-coalition-command-preview__metrics">
+              ${stats}
+            </div>
+            <div class="shared-coalition-command-preview__queue" aria-label="Coalition work queue">
+              ${queue}
+            </div>
+            <footer><span aria-hidden="true">${renderIcon("shield")}</span><span>Member, staff, and leader routes stay permission-aware.</span></footer>
+          </aside>
+          <div class="shared-coalition-auth__module-map" role="list" aria-label="Coalition workspace groups">
+            ${moduleMap}
+          </div>
         </div>
       </section>
     </div>
@@ -60567,7 +67415,7 @@ function renderCoalitionsAuthGate() {
 }
 
 function coalitionSectionForRoute(route = state.route) {
-  const section = coalitionRouteSectionPath(route).split("/")[0] || "";
+  const section = routeKeyword(coalitionRouteParts(route)[0]);
   if (section === "admin") {
     return "members";
   }
@@ -60615,24 +67463,29 @@ function coalitionEntryLabel(membership) {
   return membership?.isLeader ? "Admin view" : "Open coalition";
 }
 
-function coalitionRouteSectionPath(route = state.route) {
-  return decodeRouteSegment(route?.routeParams?.section)
-    .replace(/^\/+|\/+$/gu, "")
-    .toLowerCase();
+function coalitionRouteParts(route = state.route) {
+  return splitDecodedRoutePath(route?.routeParams?.section);
 }
 
-function coalitionRouteParts(route = state.route) {
-  return coalitionRouteSectionPath(route).split("/").filter(Boolean);
+function coalitionRouteKeywordParts(route = state.route) {
+  return coalitionRouteParts(route).map(routeKeyword);
 }
 
 function coalitionVoterMapSectionForRoute(route = state.route) {
-  const parts = coalitionRouteParts(route);
+  const parts = coalitionRouteKeywordParts(route);
   if (parts[0] !== "voter-map") {
     return "menu";
   }
   const section = parts.slice(1).join("/") || "menu";
   if (section === "territories" || section === "territory-admin") {
     return "territories/admin";
+  }
+  if (
+    section === "outreach" ||
+    section === "outreach-scripts" ||
+    section === "outreach-templates"
+  ) {
+    return "scripts";
   }
   return (
     COALITION_VOTER_MAP_SECTION_CONFIG.some((item) => item.key === section)
@@ -60643,34 +67496,35 @@ function coalitionVoterMapSectionForRoute(route = state.route) {
 
 function coalitionGovernanceRouteForRoute(route = state.route) {
   const parts = coalitionRouteParts(route);
-  if (parts[0] === "constitution") {
+  const keywords = parts.map(routeKeyword);
+  if (keywords[0] === "constitution") {
     return { key: "constitution", voteId: "" };
   }
-  if (parts[0] !== "voting") {
+  if (keywords[0] !== "voting") {
     return { key: "governance", voteId: "" };
   }
-  if (parts[1] === "speaker") {
+  if (keywords[1] === "speaker") {
     return { key: "speaker", voteId: "" };
   }
-  if (parts[1] === "proposals" && parts[2] === "new") {
+  if (keywords[1] === "proposals" && keywords[2] === "new") {
     return { key: "proposal-create", voteId: "" };
   }
-  if (parts[1] === "votes" && parts[2]) {
+  if (keywords[1] === "votes" && parts[2]) {
     return {
-      key: parts[3] === "results" ? "vote-results" : "vote-detail",
-      voteId: decodeRouteSegment(parts[2]),
+      key: keywords[3] === "results" ? "vote-results" : "vote-detail",
+      voteId: normalizeString(parts[2]),
     };
   }
   return { key: "voting", voteId: "" };
 }
 
 function isCoalitionAmplifyCreateRoute(route = state.route) {
-  const parts = coalitionRouteParts(route);
+  const parts = coalitionRouteKeywordParts(route);
   return parts[0] === "amplify" && parts[1] === "create";
 }
 
 function isCoalitionAdminEditRoute(route = state.route) {
-  const parts = coalitionRouteParts(route);
+  const parts = coalitionRouteKeywordParts(route);
   return parts[0] === "admin" && parts[1] === "edit";
 }
 
@@ -61513,7 +68367,10 @@ function coalitionsRootCoverageGroups() {
           sectionKey: "voter-map",
           predicate: (item) => item.membership.isAdmin,
           route: (item) =>
-            coalitionSectionPath(item.coalition.coalitionId, "voter-map/scripts"),
+            coalitionSectionPath(
+              item.coalition.coalitionId,
+              "voter-map/outreach-scripts",
+            ),
         },
       ],
     },
@@ -61670,6 +68527,84 @@ function renderCoalitionsRootSummary(items = []) {
   </section>`;
 }
 
+function coalitionFallbackItem(key, fallback = {}) {
+  const section =
+    COALITION_SECTION_CONFIG.find((item) => item.key === key) || null;
+  const copy = coalitionFeatureCopy(section);
+  return {
+    icon: fallback.icon || section?.icon || "team",
+    label: fallback.label || section?.label || humanizeLabel(key),
+    caption: fallback.caption || copy.eyebrow,
+  };
+}
+
+function renderCoalitionsRootFallback() {
+  const featureSections = coalitionFeatureSections();
+  return renderWorkspaceFallbackMap({
+    eyebrow: "Coalition command",
+    title: "Coalition workspaces stay mapped while access sync is offline.",
+    copy:
+      "Start or join a coalition now. Once membership loads, these same areas become direct workspace routes.",
+    metrics: [
+      {
+        value: formatCount(featureSections.length),
+        label: "work areas",
+      },
+      { value: "Member + leader", label: "access model" },
+      { value: "Rooms + votes", label: "web surface" },
+    ],
+    actions: [
+      { label: "Start coalition", route: "/coalitions/start", primary: true },
+      { label: "Join coalition", route: "/coalitions/join" },
+      { label: "Messages", route: "/messages" },
+    ],
+    groups: [
+      {
+        label: "Membership and access",
+        icon: "team",
+        copy: "Start, join, approve, invite, and tune member roles.",
+        items: [
+          { icon: "candidate", label: "Start Coalition", caption: "Access" },
+          { icon: "team", label: "Join Requests", caption: "Access" },
+          coalitionFallbackItem("members"),
+        ],
+      },
+      {
+        label: "Operations and rooms",
+        icon: "messages",
+        copy: "Rooms, missions, calendars, files, and shared work queues.",
+        items: [
+          coalitionFallbackItem("rooms"),
+          coalitionFallbackItem("missions"),
+          coalitionFallbackItem("calendar"),
+        ],
+      },
+      {
+        label: "Field and voter tools",
+        icon: "map",
+        copy: "Voter map, districts, outreach scripts, and CTA events.",
+        items: [
+          coalitionFallbackItem("voter-map"),
+          { icon: "search", label: "District Search", caption: "Map tools" },
+          { icon: "file", label: "Outreach Scripts", caption: "Field" },
+          { icon: "calendar", label: "CTA Events", caption: "Field" },
+        ],
+      },
+      {
+        label: "Governance and publishing",
+        icon: "election",
+        copy: "Constitution, voting, petitions, speaker flow, and amplification.",
+        items: [
+          coalitionFallbackItem("governance"),
+          { icon: "messages", label: "Speaker Console", caption: "Votes" },
+          coalitionFallbackItem("petitions"),
+          coalitionFallbackItem("amplify"),
+        ],
+      },
+    ],
+  });
+}
+
 function renderCoalitionsRootEmpty() {
   return `<section class="shared-coalition-empty-state">
     <span>${renderIcon("team")}</span>
@@ -61702,7 +68637,17 @@ function renderCoalitionsRootPage() {
         </div>
       </div>
       ${list.loading && !list.items.length ? '<div class="shared-page__loading">Loading coalitions...</div>' : ""}
-      ${list.error ? `<div class="shared-page__error">${escapeHtml(list.error)}</div>` : ""}
+      ${renderWorkspaceServiceAlert([list.error], {
+        title: "Coalition access could not be loaded",
+        body: "Coalition workspaces could not sync from Polis services right now.",
+        secondaryRoute: "/coalitions/join",
+        secondaryLabel: "Join coalition",
+      })}
+      ${
+        list.error && !list.items.length && !list.loading
+          ? renderCoalitionsRootFallback()
+          : ""
+      }
       ${
         list.items.length
           ? `${renderCoalitionsRootSummary(list.items)}
@@ -66767,7 +73712,7 @@ function renderCoalitionSection(detail, coalition, membership, activeSection) {
     return renderCoalitionOverview(detail, coalition, membership);
   }
   if (section.key === "members") {
-    if (coalitionRouteParts()[0] === "admin") {
+    if (coalitionRouteKeywordParts()[0] === "admin") {
       return renderCoalitionAdminSection(detail, coalition, membership);
     }
     return renderCoalitionMembers(detail, coalition, membership);
@@ -66837,11 +73782,45 @@ function renderCoalitionDetailPage() {
 }
 
 function renderMissionsAuthGate() {
+  const missionStats = [
+    {
+      icon: "mission",
+      eyebrow: "Staff",
+      title: "Claimable work",
+      detail: "Eligible members can claim role tasks and keep their mine view focused.",
+    },
+    {
+      icon: "chart",
+      eyebrow: "Admin",
+      title: "Attention queue",
+      detail: "Blocked, late, submitted, and review-ready work stays surfaced.",
+    },
+    {
+      icon: "file",
+      eyebrow: "Templates",
+      title: "Repeatable missions",
+      detail: "Draft tasks, fan-out roles, deadlines, and follow-up conditions.",
+    },
+  ];
+  const missionQueue = [
+    ["Mine", "Canvass launch brief", "Claim"],
+    ["Review", "Content asset submitted", "Approve"],
+    ["Blocked", "Venue packet waiting", "Unblock"],
+    ["Timeline", "Parent task approved", "Next step"],
+  ];
+  const missionFeatures = [
+    ["Claimable role tasks", "Eligible people see shared work and the first claimant becomes owner."],
+    ["Due dates and blockers", "Late, blocked, queued, and review states stay visible."],
+    ["Review and approval", "Submitted work can be approved, rejected, or sent back with notes."],
+    ["Templates and fan-out", "Admins can reuse mission patterns across roles and teams."],
+    ["Campaign mission hubs", "Campaign staff enter from the candidate dashboard."],
+    ["Coalition mission hubs", "Coalition members enter from coalition workspaces."],
+  ];
   return `<section class="shared-page shared-missions-page">
     ${renderTopChrome()}
     <div class="shared-page__content">
       <section class="shared-missions-auth">
-        <div>
+        <div class="shared-missions-auth__copy">
           <div class="shared-card__meta"><span>Mission operations</span><span>Campaigns and coalitions</span></div>
           <h1>Open your Polis mission hub from the browser.</h1>
           <p>Sign in to review active campaign and coalition tasks, claim eligible role-based work, and track mission progress without leaving the web app.</p>
@@ -66851,11 +73830,52 @@ function renderMissionsAuthGate() {
             <button class="shared-feed-chip" data-action="open-app-shell">Open app</button>
           </div>
         </div>
-        <div class="shared-missions-auth__grid">
-          <div class="shared-missions-auth__tile">Claimable role tasks</div>
-          <div class="shared-missions-auth__tile">Due dates and blockers</div>
-          <div class="shared-missions-auth__tile">Campaign mission hubs</div>
-          <div class="shared-missions-auth__tile">Coalition mission hubs</div>
+        <div class="shared-missions-auth__workspace">
+          <aside class="shared-missions-command-preview" aria-label="Mission hub preview">
+            <header>
+              <span aria-hidden="true">${renderIcon("mission")}</span>
+              <div>
+                <small>Mission command center</small>
+                <strong>Work that moves</strong>
+              </div>
+            </header>
+            <div class="shared-missions-command-preview__metrics" role="list" aria-label="Mission hub priority surfaces">
+              ${missionStats
+                .map(
+                  (item) => `<article role="listitem">
+                    <span aria-hidden="true">${renderIcon(item.icon)}</span>
+                    <div>
+                      <small>${escapeHtml(item.eyebrow)}</small>
+                      <strong>${escapeHtml(item.title)}</strong>
+                      <p>${escapeHtml(item.detail)}</p>
+                    </div>
+                  </article>`,
+                )
+                .join("")}
+            </div>
+            <div class="shared-missions-command-preview__queue" aria-label="Mission work queue">
+              ${missionQueue
+                .map(
+                  ([scope, title, status]) => `<article>
+                    <span>${escapeHtml(scope)}</span>
+                    <strong>${escapeHtml(title)}</strong>
+                    <em>${escapeHtml(status)}</em>
+                  </article>`,
+                )
+                .join("")}
+            </div>
+            <footer><span aria-hidden="true">${renderIcon("team")}</span><span>Staff, admin, campaign, and coalition routes stay scoped to access.</span></footer>
+          </aside>
+          <div class="shared-missions-auth__grid" role="list" aria-label="Mission hub feature areas">
+            ${missionFeatures
+              .map(
+                ([title, detail]) => `<article class="shared-missions-auth__tile" role="listitem">
+                  <strong>${escapeHtml(title)}</strong>
+                  <small>${escapeHtml(detail)}</small>
+                </article>`,
+              )
+              .join("")}
+          </div>
         </div>
       </section>
     </div>
@@ -66943,6 +73963,69 @@ function renderMissionScopeCard({ scopeType, scopeId, title, subtitle, meta }) {
   </button>`;
 }
 
+function renderMissionsRootFallback() {
+  return renderWorkspaceFallbackMap({
+    eyebrow: "Mission command",
+    title: "Mission hubs stay mapped while workspace access is offline.",
+    copy:
+      "Campaign and coalition missions use the same web work queue: claimable role tasks, admin review, deadlines, blockers, files, and staff coordination.",
+    metrics: [
+      { value: "Campaign + coalition", label: "entry points" },
+      { value: "Claim + review", label: "task flow" },
+      { value: "Templates + files", label: "mission tools" },
+    ],
+    actions: [
+      { label: "Campaign hubs", route: "/candidate-dashboard", primary: true },
+      { label: "Coalition hubs", route: "/coalitions" },
+      { label: "Messages", route: "/messages" },
+    ],
+    groups: [
+      {
+        label: "Staff entry points",
+        icon: "mission",
+        copy: "Missions open from campaign dashboards and coalition workspaces.",
+        items: [
+          { icon: "dashboard", label: "Campaign hubs", caption: "Candidate dashboard" },
+          { icon: "team", label: "Coalition hubs", caption: "Workspace" },
+          { icon: "mission", label: "Mission detail", caption: "Scoped route" },
+        ],
+      },
+      {
+        label: "Mission workflow",
+        icon: "check",
+        copy: "Move work from assigned or claimable tasks into review and completion.",
+        items: [
+          { icon: "mission", label: "Claim jobs", caption: "Role tasks" },
+          { icon: "team", label: "Assign staff", caption: "Ownership" },
+          { icon: "check", label: "Approve work", caption: "Review" },
+          { icon: "reply", label: "Follow-ups", caption: "Dependencies" },
+        ],
+      },
+      {
+        label: "Builder and evidence",
+        icon: "file",
+        copy: "Admins can create repeatable work, attach context, and track deadlines.",
+        items: [
+          { icon: "file", label: "Mission templates", caption: "Repeatable" },
+          { icon: "upload", label: "Files", caption: "Evidence" },
+          { icon: "calendar", label: "Deadlines", caption: "Timeline" },
+          { icon: "flag", label: "Review labels", caption: "Status" },
+        ],
+      },
+      {
+        label: "Coordination",
+        icon: "messages",
+        copy: "Mission work ties back to messages, calendars, and permissioned staff access.",
+        items: [
+          { icon: "messages", label: "Workspace rooms", caption: "Discussion" },
+          { icon: "calendar", label: "Calendar handoff", caption: "Schedule" },
+          { icon: "shield", label: "Staff permissions", caption: "Access" },
+        ],
+      },
+    ],
+  });
+}
+
 function renderMissionScopeChooser() {
   const campaigns = state.pages.candidateDashboard.campaigns;
   const coalitions = state.pages.coalitions.list;
@@ -66971,6 +74054,8 @@ function renderMissionScopeChooser() {
     )
     .join("");
   const loading = campaigns.loading || coalitions.loading;
+  const hasScopeCards = Boolean(campaignCards || coalitionCards);
+  const showFallback = Boolean(campaigns.error || coalitions.error) && !hasScopeCards && !loading;
   return `<section class="shared-page shared-missions-page">
     ${renderTopChrome()}
     <div class="shared-page__content">
@@ -66986,22 +74071,30 @@ function renderMissionScopeChooser() {
         </div>
       </div>
       ${loading ? '<div class="shared-page__loading">Loading mission workspaces...</div>' : ""}
-      ${campaigns.error ? `<div class="shared-page__error">${escapeHtml(campaigns.error)}</div>` : ""}
-      ${coalitions.error ? `<div class="shared-page__error">${escapeHtml(coalitions.error)}</div>` : ""}
-      <div class="shared-missions-scope-grid">
-        <article class="shared-missions-panel">
-          <div class="shared-missions-panel__header"><h2>Campaign mission hubs</h2></div>
-          <div class="shared-missions-scope-list">
-            ${campaignCards || '<div class="shared-page__empty">No campaign mission access loaded.</div>'}
-          </div>
-        </article>
-        <article class="shared-missions-panel">
-          <div class="shared-missions-panel__header"><h2>Coalition mission hubs</h2></div>
-          <div class="shared-missions-scope-list">
-            ${coalitionCards || '<div class="shared-page__empty">No coalition mission access loaded.</div>'}
-          </div>
-        </article>
-      </div>
+      ${renderWorkspaceServiceAlert([campaigns.error, coalitions.error], {
+        title: "Mission workspaces could not be loaded",
+        body: "Campaign and coalition mission hubs could not sync from Polis services right now.",
+        secondaryRoute: "/messages",
+        secondaryLabel: "Messages",
+      })}
+      ${
+        showFallback
+          ? renderMissionsRootFallback()
+          : `<div class="shared-missions-scope-grid">
+              <article class="shared-missions-panel">
+                <div class="shared-missions-panel__header"><h2>Campaign mission hubs</h2></div>
+                <div class="shared-missions-scope-list">
+                  ${campaignCards || '<div class="shared-page__empty">No campaign mission access loaded.</div>'}
+                </div>
+              </article>
+              <article class="shared-missions-panel">
+                <div class="shared-missions-panel__header"><h2>Coalition mission hubs</h2></div>
+                <div class="shared-missions-scope-list">
+                  ${coalitionCards || '<div class="shared-page__empty">No coalition mission access loaded.</div>'}
+                </div>
+              </article>
+            </div>`
+      }
     </div>
   </section>`;
 }
@@ -67708,6 +74801,93 @@ function renderMissionArtifactControls(mission, job, flags) {
   </div>`;
 }
 
+function missionFollowUpDraftKey(missionId, parentJobId) {
+  const normalizedMissionId = normalizeString(missionId);
+  const normalizedParentJobId = normalizeString(parentJobId);
+  return normalizedMissionId && normalizedParentJobId
+    ? `${normalizedMissionId}:${normalizedParentJobId}`
+    : "";
+}
+
+function missionFollowUpDefaultDraft(job = {}) {
+  return {
+    title: `${normalizeString(job.title) || "Task"} follow-up`,
+    targetMode: "user",
+    assignee: "",
+    priority: normalizeString(job.priority).toLowerCase() || "normal",
+    startWhen: "parent_completed",
+    startDelayHours: "6",
+    presetKey: "general",
+    deadlineMode: "indefinite",
+    dueHours: "",
+    timeoutPolicy: "escalate",
+    timeoutHours: "",
+    description: "",
+  };
+}
+
+function missionFollowUpDraftFor(mission, job) {
+  const key = missionFollowUpDraftKey(mission?.missionId, job?.jobId);
+  const saved =
+    key && state.pages.missions.detail.followUpDrafts[key]
+      ? state.pages.missions.detail.followUpDrafts[key]
+      : {};
+  return {
+    ...missionFollowUpDefaultDraft(job),
+    ...saved,
+  };
+}
+
+function syncMissionFollowUpDraftFromForm(form) {
+  if (!form || form.getAttribute("data-route-form") !== "mission-follow-up-create") {
+    return null;
+  }
+  const formData = new FormData(form);
+  const missionId = normalizeString(formData.get("missionId"));
+  const parentJobId = normalizeString(formData.get("parentJobId"));
+  const key = missionFollowUpDraftKey(missionId, parentJobId);
+  if (!key) {
+    return null;
+  }
+  state.pages.missions.detail.followUpDrafts = {
+    ...state.pages.missions.detail.followUpDrafts,
+    [key]: {
+      title: normalizeString(formData.get("title")),
+      targetMode:
+        normalizeString(formData.get("targetMode")).toLowerCase() || "user",
+      assignee: normalizeString(formData.get("assignee")),
+      priority:
+        normalizeString(formData.get("priority")).toLowerCase() || "normal",
+      startWhen:
+        normalizeString(formData.get("startWhen")).toLowerCase() ||
+        "parent_completed",
+      startDelayHours: normalizeString(formData.get("startDelayHours")),
+      presetKey:
+        normalizeString(formData.get("presetKey")).toLowerCase() || "general",
+      deadlineMode:
+        normalizeString(formData.get("deadlineMode")).toLowerCase() ||
+        "indefinite",
+      dueHours: normalizeString(formData.get("dueHours")),
+      timeoutPolicy:
+        normalizeString(formData.get("timeoutPolicy")).toLowerCase() ||
+        "escalate",
+      timeoutHours: normalizeString(formData.get("timeoutHours")),
+      description: normalizeString(formData.get("description")),
+    },
+  };
+  return state.pages.missions.detail.followUpDrafts[key];
+}
+
+function clearMissionFollowUpDraft(missionId, parentJobId) {
+  const key = missionFollowUpDraftKey(missionId, parentJobId);
+  if (!key || !state.pages.missions.detail.followUpDrafts[key]) {
+    return;
+  }
+  const next = { ...state.pages.missions.detail.followUpDrafts };
+  delete next[key];
+  state.pages.missions.detail.followUpDrafts = next;
+}
+
 function renderMissionFollowUpForm(mission, job, flags) {
   if (!flags.canAddFollowUp) {
     return "";
@@ -67715,87 +74895,99 @@ function renderMissionFollowUpForm(mission, job, flags) {
   const detail = state.pages.missions.detail;
   const pendingKey = `${mission.missionId}:${job.jobId}:follow-up`;
   const pending = detail.followUpPendingKey === pendingKey;
-  const defaultTitle = `${job.title} follow-up`;
-  return `<details class="shared-mission-follow-up">
+  const draftKey = missionFollowUpDraftKey(mission.missionId, job.jobId);
+  const hasSavedDraft = Boolean(draftKey && detail.followUpDrafts[draftKey]);
+  const draft = missionFollowUpDraftFor(mission, job);
+  const targetModeKey =
+    normalizeString(draft.targetMode).toLowerCase() || "user";
+  const assignee = normalizeString(draft.assignee);
+  return `<details class="shared-mission-follow-up"${hasSavedDraft || pending ? " open" : ""}>
     <summary>${renderIcon("create")} <span>Add follow-up</span></summary>
     <form class="shared-mission-follow-up-form" data-route-form="mission-follow-up-create">
       <input type="hidden" name="missionId" value="${escapeHtml(mission.missionId)}" />
       <input type="hidden" name="parentJobId" value="${escapeHtml(job.jobId)}" />
       <label class="is-wide">
         <span>Title</span>
-        <input name="title" value="${escapeHtml(defaultTitle)}" maxlength="140"${disabledAttr(pending)} required />
+        <input name="title" value="${escapeHtml(draft.title)}" maxlength="140"${disabledAttr(pending)} required />
       </label>
       <label>
         <span>Owner mode</span>
         <select name="targetMode"${disabledAttr(pending)}>
-          <option value="user">User</option>
-          <option value="role_claim">Claim</option>
-          <option value="role_fanout">Fan-out</option>
+          <option value="user"${selectedAttr(targetModeKey === "user")}>User</option>
+          <option value="role_claim"${selectedAttr(targetModeKey === "role_claim")}>Claim</option>
+          <option value="role_fanout"${selectedAttr(targetModeKey === "role_fanout")}>Fan-out</option>
         </select>
       </label>
       <label>
         <span>Owner</span>
-        <input name="assignee" placeholder="@username or role key"${disabledAttr(pending)} required />
+        <input name="assignee" value="${escapeHtml(assignee)}" placeholder="@username or role key"${disabledAttr(pending)} required />
       </label>
+      ${renderMissionCreateAssigneePicker({
+        scopeType: mission.scopeType,
+        scopeId: mission.scopeId,
+        targetModeKey,
+        assignee,
+        heading: "Follow-up owner",
+      })}
       <label>
         <span>Priority</span>
         <select name="priority"${disabledAttr(pending)}>
-          <option value="normal"${selectedAttr(job.priority === "normal")}>Normal</option>
-          <option value="high"${selectedAttr(job.priority === "high")}>High</option>
-          <option value="urgent"${selectedAttr(job.priority === "urgent")}>Urgent</option>
-          <option value="low"${selectedAttr(job.priority === "low")}>Low</option>
+          <option value="normal"${selectedAttr(draft.priority === "normal")}>Normal</option>
+          <option value="high"${selectedAttr(draft.priority === "high")}>High</option>
+          <option value="urgent"${selectedAttr(draft.priority === "urgent")}>Urgent</option>
+          <option value="low"${selectedAttr(draft.priority === "low")}>Low</option>
         </select>
       </label>
       <label>
         <span>Starts when</span>
         <select name="startWhen"${disabledAttr(pending)}>
-          <option value="parent_completed">Parent completed</option>
-          <option value="parent_approved">Parent approved</option>
-          <option value="artifact_uploaded">Parent file uploaded</option>
-          <option value="time_reached">Scheduled time</option>
+          <option value="parent_completed"${selectedAttr(draft.startWhen === "parent_completed")}>Parent completed</option>
+          <option value="parent_approved"${selectedAttr(draft.startWhen === "parent_approved")}>Parent approved</option>
+          <option value="artifact_uploaded"${selectedAttr(draft.startWhen === "artifact_uploaded")}>Parent file uploaded</option>
+          <option value="time_reached"${selectedAttr(draft.startWhen === "time_reached")}>Scheduled time</option>
         </select>
       </label>
       <label>
         <span>Start delay hours</span>
-        <input name="startDelayHours" type="number" min="1" step="1" value="6"${disabledAttr(pending)} />
+        <input name="startDelayHours" type="number" min="1" step="1" value="${escapeHtml(draft.startDelayHours)}"${disabledAttr(pending)} />
       </label>
       <label>
         <span>Done when</span>
         <select name="presetKey"${disabledAttr(pending)}>
           ${MISSION_PRESETS.map(
             (preset) =>
-              `<option value="${escapeHtml(preset.key)}"${selectedAttr(preset.key === "general")}>${escapeHtml(preset.label)}</option>`,
+              `<option value="${escapeHtml(preset.key)}"${selectedAttr(preset.key === draft.presetKey)}>${escapeHtml(preset.label)}</option>`,
           ).join("")}
         </select>
       </label>
       <label>
         <span>Deadline</span>
         <select name="deadlineMode"${disabledAttr(pending)}>
-          <option value="indefinite">No deadline</option>
-          <option value="duration_after_activation">After activation</option>
-          <option value="due_at">Fixed from now</option>
+          <option value="indefinite"${selectedAttr(draft.deadlineMode === "indefinite")}>No deadline</option>
+          <option value="duration_after_activation"${selectedAttr(draft.deadlineMode === "duration_after_activation")}>After activation</option>
+          <option value="due_at"${selectedAttr(draft.deadlineMode === "due_at")}>Fixed from now</option>
         </select>
       </label>
       <label>
         <span>Hours</span>
-        <input name="dueHours" type="number" min="0" step="1" placeholder="48"${disabledAttr(pending)} />
+        <input name="dueHours" type="number" min="0" step="1" value="${escapeHtml(draft.dueHours)}" placeholder="48"${disabledAttr(pending)} />
       </label>
       <label>
         <span>Timeout</span>
         <select name="timeoutPolicy"${disabledAttr(pending)}>
-          <option value="escalate">Escalate</option>
-          <option value="auto_unassign">Auto-unassign</option>
-          <option value="auto_fail">Auto-fail</option>
-          <option value="none">None</option>
+          <option value="escalate"${selectedAttr(draft.timeoutPolicy === "escalate")}>Escalate</option>
+          <option value="auto_unassign"${selectedAttr(draft.timeoutPolicy === "auto_unassign")}>Auto-unassign</option>
+          <option value="auto_fail"${selectedAttr(draft.timeoutPolicy === "auto_fail")}>Auto-fail</option>
+          <option value="none"${selectedAttr(draft.timeoutPolicy === "none")}>None</option>
         </select>
       </label>
       <label>
         <span>Grace hours</span>
-        <input name="timeoutHours" type="number" min="0" step="1" placeholder="24"${disabledAttr(pending)} />
+        <input name="timeoutHours" type="number" min="0" step="1" value="${escapeHtml(draft.timeoutHours)}" placeholder="24"${disabledAttr(pending)} />
       </label>
       <label class="is-full">
         <span>Description</span>
-        <textarea name="description" rows="3"${disabledAttr(pending)}></textarea>
+        <textarea name="description" rows="3"${disabledAttr(pending)}>${escapeHtml(draft.description)}</textarea>
       </label>
       <div class="shared-mission-follow-up-form__actions">
         <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(pending)}>${escapeHtml(pending ? "Adding..." : "Add follow-up task")}</button>
@@ -69283,7 +76475,7 @@ function renderEventStats(event) {
   </div>`;
 }
 
-function renderEventTransportSignupControl(event, pending) {
+function renderEventTransportSignupControl(event, pending, review = null) {
   if (event.transportEnabled !== true) {
     return "";
   }
@@ -69295,7 +76487,7 @@ function renderEventTransportSignupControl(event, pending) {
       ? "Pickup details may change as signups are grouped."
       : "Transportation reservations are currently closed.");
   return `<label class="shared-event-check is-wide">
-    <input type="checkbox" name="transportOptIn"${disabledAttr(pending || !available)} />
+    <input type="checkbox" name="transportOptIn"${checkedAttr(review?.transportOptIn === true)}${disabledAttr(pending || !available)} />
     <span>
       <strong>Reserve provided transportation</strong>
       <small>${escapeHtml(label)}. ${escapeHtml(note)}</small>
@@ -69335,6 +76527,7 @@ function renderEventSignupPanel(event) {
   const detail = state.pages.events.detail;
   const pending = detail.signupSaving === true;
   const paid = eventRequiresPayment(event);
+  const paymentReview = paid ? eventPaymentReviewFor(event) : null;
   if (event.isAttending) {
     return `<article class="shared-event-panel shared-event-signup-panel">
       <div class="shared-event-panel__header">
@@ -69362,22 +76555,22 @@ function renderEventSignupPanel(event) {
     </div>
     <form class="shared-event-signup-form" data-route-form="event-signup">
       <input type="hidden" name="eventId" value="${escapeHtml(event.eventId)}" />
-      <label><span>First name</span><input name="firstName" autocomplete="given-name" required${disabledAttr(pending)} /></label>
-      <label><span>Last name</span><input name="lastName" autocomplete="family-name" required${disabledAttr(pending)} /></label>
+      <label><span>First name</span><input name="firstName" autocomplete="given-name" value="${escapeHtml(paymentReview?.firstName || "")}" required${disabledAttr(pending)} /></label>
+      <label><span>Last name</span><input name="lastName" autocomplete="family-name" value="${escapeHtml(paymentReview?.lastName || "")}" required${disabledAttr(pending)} /></label>
       ${
         paid
-          ? `<label class="is-wide"><span>Full address</span><textarea name="address" rows="3" autocomplete="street-address" required${disabledAttr(pending)}></textarea></label>
+          ? `<label class="is-wide"><span>Full address</span><textarea name="address" rows="3" autocomplete="street-address" required${disabledAttr(pending)}>${escapeHtml(paymentReview?.address || "")}</textarea></label>
             <label class="shared-event-check is-wide">
-              <input type="checkbox" name="isCitizen" required${disabledAttr(pending)} />
+              <input type="checkbox" name="isCitizen"${checkedAttr(paymentReview?.isCitizen === true)} required${disabledAttr(pending)} />
               <span>I am a U.S. citizen or lawful permanent resident.</span>
             </label>
             <label class="shared-event-check is-wide">
-              <input type="checkbox" name="isOwnFunds" required${disabledAttr(pending)} />
+              <input type="checkbox" name="isOwnFunds"${checkedAttr(paymentReview?.isOwnFunds === true)} required${disabledAttr(pending)} />
               <span>This contribution is from my own funds and is not from a corporation, labor organization, or foreign national.</span>
             </label>`
           : `<label><span>ZIP code</span><input name="zip" autocomplete="postal-code" inputmode="numeric" placeholder="12345" required${disabledAttr(pending)} /></label>`
       }
-      ${renderEventTransportSignupControl(event, pending)}
+      ${renderEventTransportSignupControl(event, pending, paymentReview)}
       <div class="shared-card__actions is-wide">
         <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(pending)}>${pending ? "Signing up..." : paid ? "Continue to payment" : "Sign up"}</button>
         <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(eventDetailRoute(event))}"${disabledAttr(pending)}>Cancel</button>
@@ -69386,24 +76579,166 @@ function renderEventSignupPanel(event) {
   </article>`;
 }
 
+function renderEventPaymentSummary(event, review) {
+  const attendeeName = eventPaymentReviewName(review || {});
+  const transportValue =
+    event.transportEnabled === true
+      ? review
+        ? review.transportOptIn
+          ? "Requested"
+          : "Not requested"
+        : eventTransportLabel(event)
+      : "None";
+  const rows = [
+    ["Amount", eventCostLabel(event)],
+    ["Attendee", attendeeName || "Return to signup"],
+    ["Date", formatAbsoluteDateTime(event.startAt) || "Date pending"],
+    ["Host", event.hostDisplayName || "Host"],
+    ["Transportation", transportValue],
+  ];
+  return `<div class="shared-event-payment-summary">
+    ${rows.map(([label, value]) => `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join("")}
+  </div>`;
+}
+
+function renderEventPaymentChecklistItem({ icon, title, copy, status }) {
+  return `<div class="shared-event-payment-check ${escapeHtml(status || "")}">
+    <span>${renderIcon(icon)}</span>
+    <div>
+      <strong>${escapeHtml(title)}</strong>
+      <small>${escapeHtml(copy)}</small>
+    </div>
+  </div>`;
+}
+
+function renderEventPaymentChecklist(event, review) {
+  const attendeeName = eventPaymentReviewName(review || {});
+  const hasReview = Boolean(review);
+  const hasAttendeeDetails = Boolean(
+    attendeeName && normalizeString(review?.address),
+  );
+  const hasEligibility = Boolean(review?.isCitizen && review?.isOwnFunds);
+  const items = [
+    {
+      icon: hasAttendeeDetails ? "check" : "edit",
+      title: "Attendee details",
+      status: hasAttendeeDetails ? "is-ready" : "is-pending",
+      copy: hasAttendeeDetails
+        ? `${attendeeName} is ready for checkout review.`
+        : "Return to signup to enter attendee name and contribution address.",
+    },
+    {
+      icon: hasEligibility ? "shield" : "lock",
+      title: "Contribution acknowledgements",
+      status: hasEligibility ? "is-ready" : "is-pending",
+      copy: hasEligibility
+        ? "Citizenship and own-funds confirmations are checked."
+        : "Required paid-event confirmations still need to be checked.",
+    },
+    {
+      icon: "payments",
+      title: "Payment",
+      status: "is-blocked",
+      copy: "Secure web checkout is not connected for paid event signup yet.",
+    },
+    {
+      icon: "calendar",
+      title: "RSVP",
+      status: "is-blocked",
+      copy: "No attendance has been recorded. RSVP only happens after payment succeeds.",
+    },
+  ];
+  if (event.transportEnabled === true) {
+    items.push({
+      icon: review?.transportOptIn ? "check" : "calendar",
+      title: "Transportation",
+      status: review?.transportOptIn ? "is-ready" : "is-pending",
+      copy: hasReview
+        ? review.transportOptIn
+          ? "Transportation was requested; pickup details may still change."
+          : "Transportation was not requested for this signup."
+        : `${eventTransportLabel(event)} from the signup form.`,
+    });
+  }
+  return `<div class="shared-event-payment-checklist">${items.map(renderEventPaymentChecklistItem).join("")}</div>`;
+}
+
+function renderEventPaymentContactControls(event) {
+  const contact = eventContactOptions(event);
+  const controls = [];
+  if (contact.email) {
+    controls.push(
+      `<a class="shared-feed-chip" href="mailto:${escapeHtml(contact.email)}">${renderIcon("mail")} Email host</a>`,
+    );
+  }
+  if (contact.website) {
+    controls.push(
+      `<a class="shared-feed-chip" href="${escapeHtml(contact.website)}" target="_blank" rel="noopener noreferrer">${renderIcon("share")} Host website</a>`,
+    );
+  }
+  if (contact.link && contact.link !== contact.website) {
+    controls.push(
+      `<a class="shared-feed-chip" href="${escapeHtml(contact.link)}" target="_blank" rel="noopener noreferrer">${renderIcon("share")} Event link</a>`,
+    );
+  }
+  return controls.join("");
+}
+
+function renderEventPaymentAction(icon, title, copy, controls) {
+  return `<div class="shared-event-payment-action">
+    <span>${renderIcon(icon)}</span>
+    <div>
+      <strong>${escapeHtml(title)}</strong>
+      <small>${escapeHtml(copy)}</small>
+      <div class="shared-event-payment-action__controls">${controls}</div>
+    </div>
+  </div>`;
+}
+
 function renderEventPaymentPanel(event) {
+  const review = eventPaymentReviewFor(event);
+  const contactControls = renderEventPaymentContactControls(event);
   return `<article class="shared-event-panel shared-event-payment-panel">
     <div class="shared-event-panel__header">
       <div>
-        <p class="shared-page__eyebrow">Payment</p>
-        <h2>Secure web payment is not available yet</h2>
-        <p>Paid event signups require payment before attendance is recorded. This page keeps the web flow honest instead of marking you as going without checkout.</p>
+        <p class="shared-page__eyebrow">Payment review</p>
+        <h2>Checkout still needs web setup</h2>
+        <p>Paid event signups require a successful checkout before attendance is recorded. This route keeps the web flow honest while the secure payment step is not connected.</p>
       </div>
       <strong>${escapeHtml(eventCostLabel(event))}</strong>
     </div>
-    ${renderEventStats(event)}
+    <div class="shared-event-payment-status">
+      <span>${renderIcon("lock")}</span>
+      <div>
+        <strong>Checkout unavailable</strong>
+        <small>${review ? "Your signup details are ready to review, but no payment or RSVP has been submitted." : "This direct visit has no signup details attached yet."}</small>
+      </div>
+    </div>
+    ${renderEventPaymentSummary(event, review)}
+    ${renderEventPaymentChecklist(event, review)}
     <div class="shared-event-payment-note">
       <strong>No RSVP has been recorded.</strong>
-      <span>Use the Polis mobile app when event payments are enabled, or check with the host for current paid-event instructions.</span>
+      <span>When event checkout is enabled, payment will complete before Polis adds you to the attendee list.</span>
     </div>
-    <div class="shared-card__actions">
-      <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="${escapeHtml(eventSignupRoute(event))}">Back to signup</button>
-      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(eventDetailRoute(event))}">Event details</button>
+    <div class="shared-event-payment-actions">
+      ${renderEventPaymentAction(
+        "edit",
+        review ? "Change signup details" : "Enter signup details",
+        review ? "Go back with your attendee, acknowledgement, and transport choices prefilled." : "Start from the paid-event signup form before checkout can continue.",
+        `<button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="${escapeHtml(eventSignupRoute(event))}">${review ? "Edit signup" : "Start signup"}</button>`,
+      )}
+      ${renderEventPaymentAction(
+        "phone",
+        "Open the app route",
+        "Use the installed Polis app for app-only testing or to check whether this event has newer mobile payment instructions.",
+        `<button class="shared-feed-chip" type="button" data-action="open-app-shell">Open app</button>`,
+      )}
+      ${renderEventPaymentAction(
+        contactControls ? "mail" : "calendar",
+        contactControls ? "Host instructions" : "Event details",
+        contactControls ? "Use the organizer contact details attached to this event." : "Return to the public event page for location, host, and attendance context.",
+        contactControls || `<button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(eventDetailRoute(event))}">Event details</button>`,
+      )}
     </div>
   </article>`;
 }
@@ -69566,6 +76901,10 @@ function renderProfilePage() {
           item.previewTitle || item.caption || item.authorDisplayName || "Post",
         getOverlayText: (item) =>
           `${formatCount(item.likesCount)} like${Number(item.likesCount) === 1 ? "" : "s"}`,
+        getDetailAction: (item) =>
+          item.postId && Number(item.likesCount) > 0
+            ? { action: "open-likers", label: "View", postId: item.postId }
+            : null,
         getPlaceholderLabel: () => "P",
         overlayBare: true,
       })}
@@ -69620,53 +76959,579 @@ function renderProfileConnectionsPage() {
   </section>`;
 }
 
-function renderProfileNotificationsPage() {
-  const notifications = state.pages.profile.notifications;
-  return `<section class="shared-page">
-    ${renderTopChrome()}
-    <div class="shared-page__content">
-      <div class="shared-page__header">
-        <div>
-          <p class="shared-page__eyebrow">Notifications</p>
-          <h1>Notifications</h1>
-          <p>${escapeHtml(formatCount(notifications.unreadCount))} unread notifications.</p>
-        </div>
-        <div class="shared-card__actions">
-          <button class="shared-feed-chip shared-feed-chip--primary" data-action="notifications-read">Mark all read</button>
-        </div>
-      </div>
+const PROFILE_NOTIFICATION_FILTERS = [
+  ["all", "All"],
+  ["unread", "Unread"],
+  ["access", "Access"],
+  ["likes", "Likes"],
+  ["comments", "Comments"],
+  ["follows", "Follows"],
+  ["missions", "Missions"],
+  ["account", "Account"],
+];
+
+function profileNotificationIsUnread(item, notifications) {
+  if (item.readAt) {
+    return false;
+  }
+  const lastSeenAt = Number(notifications.lastSeenAt) || 0;
+  const timestamp = Number(item.lastEventTs || item.createdAt || 0);
+  return !lastSeenAt || timestamp > lastSeenAt;
+}
+
+function profileNotificationMatchesFilter(item, filter, notifications) {
+  switch (filter) {
+    case "unread":
+      return profileNotificationIsUnread(item, notifications);
+    case "access":
+      return (
+        item.kind === "coalition_invite" ||
+        item.kind === "campaign_staff_invite"
+      );
+    case "likes":
+      return item.kind === "post_like";
+    case "comments":
+      return item.kind === "post_comment" || item.kind === "mention";
+    case "follows":
+      return item.kind === "follow";
+    case "missions":
+      return item.kind === "mission";
+    case "account":
+      return item.kind === "account_lifecycle";
+    case "all":
+    default:
+      return true;
+  }
+}
+
+function profileNotificationActorPair(item) {
+  const first = item.actors[0];
+  const second = item.actors[1];
+  return {
+    firstActor: first ? notificationActorLabel(first) : "Someone",
+    firstDisplayActor: first ? notificationActorDisplayLabel(first) : "Someone",
+    secondActor: second ? notificationActorLabel(second) : "",
+    secondDisplayActor: second ? notificationActorDisplayLabel(second) : "",
+  };
+}
+
+function profileNotificationExtraCount(item) {
+  return Math.max(0, Number(item.count || 0) - item.actors.length);
+}
+
+function profileNotificationTitle(item) {
+  if (item.kind === "account_lifecycle") {
+    if (item.accountLifecycle?.title) {
+      return item.accountLifecycle.title;
+    }
+    return item.accountLifecycle?.transitionType === "promotion"
+      ? "Congratulations on your election"
+      : "Candidate access updated";
+  }
+  const {
+    firstActor,
+    firstDisplayActor,
+    secondActor,
+    secondDisplayActor,
+  } = profileNotificationActorPair(item);
+  const extraCount = profileNotificationExtraCount(item);
+  if (
+    item.kind === "coalition_invite" ||
+    item.kind === "campaign_staff_invite"
+  ) {
+    return `${firstActor} invited you`;
+  }
+  if (item.kind === "mission") {
+    return item.title || "Mission update";
+  }
+  if (item.kind === "post_like") {
+    if (item.aggregationMode === "actor_multi_post") {
+      return `${firstActor} liked ${formatCount(item.count)} of your posts`;
+    }
+    if (item.aggregationMode === "multi_target") {
+      if (extraCount > 0 && secondActor) {
+        return `${firstActor}, ${secondActor} and ${formatCount(extraCount)} others liked your posts`;
+      }
+      return Number(item.count) <= 1
+        ? `${firstActor} liked your posts`
+        : `${firstActor} and others liked your posts`;
+    }
+    if (item.aggregated) {
+      if (Number(item.count) <= 1) {
+        return `${firstActor} liked your post`;
+      }
+      if (extraCount > 0 && secondActor) {
+        return `${firstActor}, ${secondActor} and ${formatCount(extraCount)} others liked your post`;
+      }
+      return `${firstActor} and others liked your post`;
+    }
+    return item.title || `${firstActor} liked your post`;
+  }
+  if (item.kind === "post_comment") {
+    if (item.aggregationMode === "multi_target") {
+      if (extraCount > 0 && secondActor) {
+        return `${firstActor}, ${secondActor} and ${formatCount(extraCount)} others commented on your posts`;
+      }
+      return Number(item.count) <= 1
+        ? `${firstActor} commented on your posts`
+        : `${firstActor} and others commented on your posts`;
+    }
+    if (item.aggregated) {
+      if (Number(item.count) <= 1) {
+        return `${firstActor} commented on your post`;
+      }
+      if (extraCount > 0 && secondActor) {
+        return `${firstActor}, ${secondActor} and ${formatCount(extraCount)} others commented on your post`;
+      }
+      return `${firstActor} and others commented on your post`;
+    }
+    return item.title || `${firstActor} commented on your post`;
+  }
+  if (item.kind === "mention") {
+    if (item.aggregated) {
+      if (Number(item.count) <= 1) {
+        return `${firstDisplayActor} mentioned you`;
+      }
+      if (extraCount > 0 && secondDisplayActor) {
+        return `${firstDisplayActor}, ${secondDisplayActor} and ${formatCount(extraCount)} others mentioned you`;
+      }
+      return `${firstDisplayActor} and others mentioned you`;
+    }
+    return item.title || `${firstDisplayActor} mentioned you`;
+  }
+  if (item.kind === "follow") {
+    if (item.aggregated) {
+      if (Number(item.count) <= 1) {
+        return `${firstActor} started following you`;
+      }
+      if (extraCount > 0 && secondActor) {
+        return `${firstActor}, ${secondActor} and ${formatCount(extraCount)} others started following you`;
+      }
+      return `${firstActor} and others started following you`;
+    }
+    return item.title || `${firstActor} started following you`;
+  }
+  return item.title || "Notification";
+}
+
+function profileNotificationInviteTargetName(item) {
+  if (item.kind === "campaign_staff_invite") {
+    return item.campaignStaffInvite?.candidateName || "this campaign";
+  }
+  return item.invite?.coalitionName || "this coalition";
+}
+
+function profileNotificationInvite(item) {
+  return item.kind === "campaign_staff_invite"
+    ? item.campaignStaffInvite
+    : item.invite;
+}
+
+function profileNotificationInviteStatus(item) {
+  const status = normalizeString(profileNotificationInvite(item)?.status)
+    .toLowerCase();
+  if (status === "approved" || status === "accepted" || status === "active") {
+    return ["Accepted", "good"];
+  }
+  if (status === "rejected" || status === "declined") {
+    return ["Declined", "bad"];
+  }
+  return ["Pending", "pending"];
+}
+
+function profileNotificationInviteIsPending(item) {
+  return normalizeString(profileNotificationInvite(item)?.status)
+    .toLowerCase() === "pending";
+}
+
+function profileNotificationSubtitle(item) {
+  if (item.kind === "account_lifecycle") {
+    return (
+      item.accountLifecycle?.body ||
+      item.preview?.textSnippet ||
+      item.body ||
+      ""
+    );
+  }
+  if (
+    item.kind === "coalition_invite" ||
+    item.kind === "campaign_staff_invite"
+  ) {
+    const invite = profileNotificationInvite(item);
+    if (!invite) {
+      return item.body || "";
+    }
+    if (profileNotificationInviteIsPending(item)) {
+      const targetKind =
+        item.kind === "campaign_staff_invite" ? "campaign staff" : "coalition";
+      return `You have been invited to join ${profileNotificationInviteTargetName(item)} as ${targetKind}.`;
+    }
+    if (invite.decisionReason) {
+      return invite.decisionReason;
+    }
+    const [statusLabel] = profileNotificationInviteStatus(item);
+    return `Invitation ${statusLabel.toLowerCase()}.`;
+  }
+  if (item.kind === "mission") {
+    return (
+      item.preview?.textSnippet ||
+      item.body ||
+      "Open this mission to review the latest update."
+    );
+  }
+  if (
+    item.kind === "post_comment" &&
+    !item.aggregated &&
+    item.preview?.commentText
+  ) {
+    return item.preview.commentText;
+  }
+  if (item.kind === "mention" && item.preview?.textSnippet) {
+    return item.preview.textSnippet;
+  }
+  if (item.aggregated && item.children.length) {
+    return `${formatCount(item.children.length)} related updates.`;
+  }
+  return item.body || "";
+}
+
+function profileNotificationIcon(item) {
+  if (item.kind === "post_like") return "heart";
+  if (item.kind === "post_comment" || item.kind === "mention") return "comment";
+  if (item.kind === "follow") return "profile";
+  if (item.kind === "mission") return "mission";
+  if (item.kind === "campaign_staff_invite") return "candidate";
+  if (item.kind === "coalition_invite") return "team";
+  if (item.kind === "account_lifecycle") return "shield";
+  return "bell";
+}
+
+function profileNotificationKindLabel(item) {
+  const labels = {
+    post_like: "Like",
+    post_comment: "Comment",
+    mention: "Mention",
+    follow: "Follow",
+    coalition_invite: "Coalition invite",
+    campaign_staff_invite: "Campaign staff",
+    account_lifecycle: "Account",
+    mission: "Mission",
+  };
+  return labels[item.kind] || "Notification";
+}
+
+function profileNotificationTargetRoute(item) {
+  if (item.route) {
+    return item.route;
+  }
+  const target = item.target || {};
+  const missionId = normalizeString(target.missionId);
+  const coalitionId =
+    normalizeString(target.coalitionId) ||
+    normalizeString(item.invite?.coalitionId);
+  const candidateId =
+    normalizeString(target.candidateId) ||
+    normalizeString(item.campaignStaffInvite?.candidateId);
+  const conversationId = normalizeString(target.conversationId);
+  const messageId = normalizeString(target.messageId);
+  const profileUserId = normalizeString(target.profileUserId);
+  const postId = normalizeString(target.postId);
+  const commentId = normalizeString(target.commentId);
+  if (missionId) {
+    return `/missions/${encodeURIComponent(missionId)}`;
+  }
+  if (item.kind === "coalition_invite" && coalitionId) {
+    return `/coalitions/${encodeURIComponent(coalitionId)}`;
+  }
+  if (item.kind === "campaign_staff_invite" && candidateId) {
+    return `/candidate-dashboard/${encodeURIComponent(candidateId)}`;
+  }
+  if (conversationId) {
+    const query = messageId
+      ? `?messageId=${encodeURIComponent(messageId)}`
+      : "";
+    return `/messages/conversations/${encodeURIComponent(conversationId)}${query}`;
+  }
+  if (item.kind === "follow" && profileUserId) {
+    return `/profile/${encodeURIComponent(profileUserId)}`;
+  }
+  if (postId) {
+    const query = commentId
+      ? `?commentId=${encodeURIComponent(commentId)}`
+      : "";
+    return `/posts/${encodeURIComponent(postId)}${query}`;
+  }
+  if (item.kind === "account_lifecycle") {
+    const lifecycleCandidateId =
+      normalizeString(item.accountLifecycle?.candidateId) || candidateId;
+    if (lifecycleCandidateId) {
+      return `/candidate-dashboard/${encodeURIComponent(lifecycleCandidateId)}`;
+    }
+  }
+  if (item.children.length) {
+    return profileNotificationTargetRoute(item.children[0]);
+  }
+  return "";
+}
+
+function profileNotificationDateGroup(timestamp) {
+  const numeric = Number(timestamp) || Date.now();
+  const date = new Date(numeric);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const day = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const diffDays = Math.round((today.getTime() - day.getTime()) / 86400000);
+  if (diffDays <= 0) {
+    return "Today";
+  }
+  if (diffDays === 1) {
+    return "Yesterday";
+  }
+  return date.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function renderProfileNotificationAvatar(item) {
+  const actor = item.actors[0];
+  const label = profileNotificationTitle(item);
+  if (actor?.avatarUrl) {
+    return `<img class="shared-profile-notification__avatar" src="${escapeHtml(actor.avatarUrl)}" alt="${escapeHtml(notificationActorDisplayLabel(actor))}" />`;
+  }
+  return `<span class="shared-profile-notification__avatar shared-profile-notification__avatar--icon">${renderIcon(profileNotificationIcon(item))}<small>${escapeHtml(label.slice(0, 1).toUpperCase() || "N")}</small></span>`;
+}
+
+function renderProfileNotificationFilterBar(notifications, visibleItems) {
+  return `<div class="shared-profile-notifications__filters" role="group" aria-label="Notification filters">
+    ${PROFILE_NOTIFICATION_FILTERS.map(([key, label]) => {
+      const count = notifications.items.filter((item) =>
+        profileNotificationMatchesFilter(item, key, notifications),
+      ).length;
+      const active = key === notifications.filter;
+      return `<button class="shared-profile-notifications__filter${active ? " is-active" : ""}" type="button" data-action="profile-notifications-filter" data-filter="${escapeHtml(key)}">
+        <strong>${escapeHtml(label)}</strong>
+        <span>${escapeHtml(formatCount(key === notifications.filter ? visibleItems.length : count))}</span>
+      </button>`;
+    }).join("")}
+  </div>`;
+}
+
+function profileNotificationAggregateChildren(item) {
+  return (Array.isArray(item.children) ? item.children : [])
+    .filter(Boolean)
+    .slice(0, 12);
+}
+
+function profileNotificationChildKey(child, index) {
+  return (
+    normalizeString(child.notificationId || child.id) ||
+    `${normalizeString(child.kind) || "notification"}-${index}`
+  );
+}
+
+function renderProfileNotificationChildRow(child, index) {
+  const route = profileNotificationTargetRoute(child);
+  const subtitle = profileNotificationSubtitle(child);
+  const timestamp = Number(child.lastEventTs || child.createdAt || 0);
+  const thumb = child.preview?.postThumbUrl;
+  const meta = [
+    profileNotificationKindLabel(child),
+    timestamp ? formatAbsoluteDateTime(timestamp) : "",
+  ].filter(Boolean);
+  return `<article class="shared-profile-notification-child" data-notification-child-id="${escapeHtml(profileNotificationChildKey(child, index))}">
+    ${renderProfileNotificationAvatar(child)}
+    <div class="shared-profile-notification-child__body">
+      <span class="shared-profile-notification__meta">${meta.map((entry) => `<small>${escapeHtml(entry)}</small>`).join("")}</span>
+      <strong>${escapeHtml(profileNotificationTitle(child))}</strong>
+      ${subtitle ? `<span>${escapeHtml(subtitle)}</span>` : ""}
+    </div>
+    ${thumb ? `<img class="shared-profile-notification__thumb" src="${escapeHtml(thumb)}" alt="" />` : ""}
+    <div class="shared-profile-notification-child__actions">
       ${
-        notifications.loading
-          ? '<div class="shared-page__loading">Loading notifications…</div>'
+        route
+          ? `<button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(route)}">Open</button>`
+          : `<span class="shared-profile-notification-child__unavailable">No route</span>`
+      }
+    </div>
+  </article>`;
+}
+
+function renderProfileNotificationAggregatePanel(item, children) {
+  if (!children.length) {
+    return "";
+  }
+  const remainingCount = Math.max(0, Number(item.count || children.length) - children.length);
+  return `<div class="shared-profile-notification-aggregate" role="region" aria-label="${escapeHtml(`${profileNotificationTitle(item)} details`)}">
+    <div class="shared-profile-notification-aggregate__header">
+      <div>
+        <strong>${escapeHtml(formatCount(children.length))} grouped updates</strong>
+        <span>${escapeHtml("Open the exact post, comment, profile, mission, or workspace for each item.")}</span>
+      </div>
+      ${remainingCount ? `<em>${escapeHtml(formatCount(remainingCount))} more in this group</em>` : ""}
+    </div>
+    <div class="shared-profile-notification-aggregate__list">
+      ${children.map(renderProfileNotificationChildRow).join("")}
+    </div>
+  </div>`;
+}
+
+function renderProfileNotificationCard(item, notifications) {
+  const isUnread = profileNotificationIsUnread(item, notifications);
+  const route = profileNotificationTargetRoute(item);
+  const subtitle = profileNotificationSubtitle(item);
+  const timestamp = Number(item.lastEventTs || item.createdAt || 0);
+  const thumb = item.preview?.postThumbUrl;
+  const aggregateChildren = item.aggregated
+    ? profileNotificationAggregateChildren(item)
+    : [];
+  const hasAggregateChildren = aggregateChildren.length > 0;
+  const aggregateExpanded =
+    hasAggregateChildren &&
+    normalizeString(notifications.expandedAggregateId) ===
+      normalizeString(item.notificationId);
+  const [inviteStatusLabel, inviteStatusTone] =
+    profileNotificationInviteStatus(item);
+  const isInvite =
+    item.kind === "coalition_invite" || item.kind === "campaign_staff_invite";
+  const invitePending = isInvite && profileNotificationInviteIsPending(item);
+  const acceptPending =
+    notifications.actionPendingKey === `invite:${item.notificationId}:accept`;
+  const declinePending =
+    notifications.actionPendingKey === `invite:${item.notificationId}:decline`;
+  const busy = Boolean(notifications.actionPendingKey);
+  const meta = [
+    profileNotificationKindLabel(item),
+    timestamp ? formatAbsoluteDateTime(timestamp) : "",
+    item.aggregated && item.count > 1 ? `${formatCount(item.count)} updates` : "",
+  ].filter(Boolean);
+  return `<article class="shared-profile-notification${isUnread ? " is-unread" : ""}${aggregateExpanded ? " is-expanded" : ""} shared-profile-notification--${escapeHtml(item.kind)}">
+    <button class="shared-profile-notification__main" type="button" data-action="${hasAggregateChildren ? "profile-notification-aggregate-toggle" : "profile-notification-open"}" data-notification-id="${escapeHtml(item.notificationId)}"${disabledAttr(!route && !hasAggregateChildren)}>
+      ${renderProfileNotificationAvatar(item)}
+      <span class="shared-profile-notification__body">
+        <span class="shared-profile-notification__meta">${meta.map((entry) => `<small>${escapeHtml(entry)}</small>`).join("")}</span>
+        <strong>${escapeHtml(profileNotificationTitle(item))}</strong>
+        ${subtitle ? `<span>${escapeHtml(subtitle)}</span>` : ""}
+        ${
+          isInvite
+            ? `<em class="shared-profile-notification__status is-${escapeHtml(inviteStatusTone)}">${escapeHtml(inviteStatusLabel)}</em>`
+            : ""
+        }
+      </span>
+      ${
+        thumb
+          ? `<img class="shared-profile-notification__thumb" src="${escapeHtml(thumb)}" alt="" />`
+          : `<span class="shared-profile-notification__chevron">${renderIcon(hasAggregateChildren && aggregateExpanded ? "chevronUp" : route || hasAggregateChildren ? "chevronDown" : "bell")}</span>`
+      }
+    </button>
+    <div class="shared-profile-notification__actions">
+      ${
+        invitePending
+          ? `<button class="shared-feed-chip" type="button" data-action="profile-notification-invite" data-notification-id="${escapeHtml(item.notificationId)}" data-invite-action="decline"${disabledAttr(busy)}>${declinePending ? "Declining..." : "Decline"}</button>
+            <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="profile-notification-invite" data-notification-id="${escapeHtml(item.notificationId)}" data-invite-action="accept"${disabledAttr(busy)}>${acceptPending ? "Accepting..." : "Accept"}</button>`
           : ""
       }
+      ${
+        hasAggregateChildren
+          ? `<button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="profile-notification-aggregate-toggle" data-notification-id="${escapeHtml(item.notificationId)}">${aggregateExpanded ? "Hide updates" : "Review updates"}</button>`
+          : route
+          ? `<button class="shared-feed-chip${invitePending ? "" : " shared-feed-chip--primary"}" type="button" data-action="navigate" data-route="${escapeHtml(route)}">${escapeHtml(isInvite && !invitePending ? "Open workspace" : "Open")}</button>`
+          : ""
+      }
+      ${
+        hasAggregateChildren && route
+          ? `<button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(route)}">Open latest</button>`
+          : ""
+      }
+    </div>
+    ${aggregateExpanded ? renderProfileNotificationAggregatePanel(item, aggregateChildren) : ""}
+  </article>`;
+}
+
+function renderProfileNotificationGroups(items, notifications) {
+  if (!items.length) {
+    return `<div class="shared-profile-notifications__empty">
+      <span>${renderIcon("bell")}</span>
+      <strong>No notifications in this view.</strong>
+      <p>Mentions, follows, mission updates, invites, replies, and account notices will appear here.</p>
+    </div>`;
+  }
+  const groups = [];
+  let current = null;
+  items.forEach((item) => {
+    const label = profileNotificationDateGroup(item.lastEventTs || item.createdAt);
+    if (!current || current.label !== label) {
+      current = { label, items: [] };
+      groups.push(current);
+    }
+    current.items.push(item);
+  });
+  return groups
+    .map(
+      (group) => `<section class="shared-profile-notifications__group">
+        <h2>${escapeHtml(group.label)}</h2>
+        <div class="shared-profile-notifications__list">
+          ${group.items
+            .map((item) => renderProfileNotificationCard(item, notifications))
+            .join("")}
+        </div>
+      </section>`,
+    )
+    .join("");
+}
+
+function renderProfileNotificationsPage() {
+  const notifications = state.pages.profile.notifications;
+  const filter =
+    PROFILE_NOTIFICATION_FILTERS.some(([key]) => key === notifications.filter)
+      ? notifications.filter
+      : "all";
+  notifications.filter = filter;
+  const visibleItems = notifications.items.filter((item) =>
+    profileNotificationMatchesFilter(item, filter, notifications),
+  );
+  const pendingInvites = notifications.items.filter(
+    (item) =>
+      (item.kind === "coalition_invite" ||
+        item.kind === "campaign_staff_invite") &&
+      profileNotificationInviteIsPending(item),
+  ).length;
+  const markReadPending = notifications.actionPendingKey === "mark-read";
+  return `<section class="shared-page shared-profile-notifications-page">
+    ${renderTopChrome()}
+    <div class="shared-page__content">
+      <div class="shared-page__header shared-profile-notifications__hero">
+        <div>
+          <p class="shared-page__eyebrow">Notifications</p>
+          <h1>Notification center</h1>
+          <p>Review social activity, mission updates, message handoffs, and campaign or coalition access invites.</p>
+        </div>
+        <div class="shared-profile-notifications__hero-actions">
+          <button class="shared-feed-chip" type="button" data-action="profile-notifications-refresh"${disabledAttr(notifications.loading)}>Refresh</button>
+          <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="notifications-read"${disabledAttr(markReadPending || !notifications.items.length)}>${markReadPending ? "Marking..." : "Mark all read"}</button>
+        </div>
+      </div>
+      <div class="shared-profile-notifications__metrics">
+        <article><strong>${escapeHtml(formatCount(notifications.unreadCount))}</strong><span>Unread</span></article>
+        <article><strong>${escapeHtml(formatCount(pendingInvites))}</strong><span>Pending invites</span></article>
+        <article><strong>${escapeHtml(formatCount(notifications.items.length))}</strong><span>Total loaded</span></article>
+      </div>
+      ${renderProfileNotificationFilterBar(notifications, visibleItems)}
+      ${
+        notifications.loading && !notifications.loaded
+          ? '<div class="shared-page__loading">Loading notifications...</div>'
+          : ""
+      }
+      ${notifications.notice ? `<div class="shared-page__banner">${escapeHtml(notifications.notice)}</div>` : ""}
       ${notifications.error ? `<div class="shared-page__error">${escapeHtml(notifications.error)}</div>` : ""}
-      <div class="shared-stack">
-        ${notifications.items
-          .map(
-            (item) => `<article class="shared-card">
-              <div class="shared-card__body">
-                <div class="shared-card__meta">
-                  <span>${item.readAt ? "Read" : "Unread"}</span>
-                  ${
-                    item.createdAt
-                      ? `<span>${escapeHtml(formatAbsoluteDateTime(item.createdAt))}</span>`
-                      : ""
-                  }
-                </div>
-                <h3>${escapeHtml(item.title)}</h3>
-                <p>${escapeHtml(item.body || "Notification")}</p>
-                ${
-                  item.route
-                    ? `<div class="shared-card__actions">
-                        <button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="${escapeHtml(item.route)}">Open</button>
-                      </div>`
-                    : ""
-                }
-              </div>
-            </article>`,
-          )
-          .join("")}
+      <div class="shared-profile-notifications__content">
+        ${renderProfileNotificationGroups(visibleItems, notifications)}
+        ${
+          notifications.nextCursor
+            ? `<button class="shared-feed-chip shared-profile-notifications__load-more" type="button" data-action="profile-notifications-load-more"${disabledAttr(notifications.loadingMore)}>${notifications.loadingMore ? "Loading..." : "Load more"}</button>`
+            : ""
+        }
       </div>
     </div>
   </section>`;
@@ -70601,6 +78466,75 @@ function renderMessagingWorkspaceStatus() {
   return `<span class="shared-messaging-status${connected ? " is-connected" : ""}"><span></span>${escapeHtml(connected ? "Realtime connected" : "Connecting")}</span>`;
 }
 
+function messagingServiceErrorMessage(value, fallback = "Messaging services could not be reached.") {
+  const raw = normalizeString(value);
+  const normalized = raw.toLowerCase();
+  if (!normalized) {
+    return fallback;
+  }
+  if (normalized === "video_backend_base_url_missing") {
+    return "Messaging sync is unavailable because this local website is missing its API base URL.";
+  }
+  if (
+    normalized === "request_failed" ||
+    normalized === "failed to fetch" ||
+    normalized.includes("networkerror")
+  ) {
+    return "Messaging services could not be reached from this browser session.";
+  }
+  if (/^[a-z0-9_]+$/u.test(normalized)) {
+    return fallback;
+  }
+  return raw;
+}
+
+function renderMessagingServiceAlert(errors = []) {
+  const rawErrors = errors.map(normalizeString).filter(Boolean);
+  const messages = Array.from(
+    new Set(
+      rawErrors
+        .map((error) => messagingServiceErrorMessage(error))
+        .map(normalizeString)
+        .filter(Boolean),
+    ),
+  );
+  if (!messages.length) {
+    return "";
+  }
+  const localConfigMissing = rawErrors.some(
+    (error) =>
+      normalizeString(error).toLowerCase() === "video_backend_base_url_missing" ||
+      messagingServiceErrorMessage(error).toLowerCase().includes("api base url"),
+  );
+  const title = localConfigMissing
+    ? "Messaging services are not connected locally"
+    : "Messaging needs attention";
+  const body = localConfigMissing
+    ? "The web inbox can still render, but conversations, requests, rooms, trusted devices, and recovery cannot sync until this local website is started with backend API configuration."
+    : messages[0];
+  const supporting = localConfigMissing ? messages : messages.slice(1);
+  return `<section class="shared-messaging-service-alert" aria-live="polite">
+    <span class="shared-messaging-service-alert__icon" aria-hidden="true">${renderIcon(localConfigMissing ? "settings" : "messages")}</span>
+    <div class="shared-messaging-service-alert__body">
+      <span>Service status</span>
+      <h2>${escapeHtml(title)}</h2>
+      <p>${escapeHtml(body)}</p>
+      ${
+        supporting.length
+          ? `<div class="shared-messaging-service-alert__details">${supporting
+              .map((message) => `<small>${escapeHtml(message)}</small>`)
+              .join("")}</div>`
+          : ""
+      }
+    </div>
+    <div class="shared-messaging-service-alert__actions">
+      <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="refresh-current-route">Refresh</button>
+      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/messages/settings">Settings</button>
+      <button class="shared-feed-chip" type="button" data-action="open-app-shell">Open app</button>
+    </div>
+  </section>`;
+}
+
 function renderMessagingWorkspacePanel({
   title,
   subtitle = "",
@@ -70653,7 +78587,7 @@ function renderMessagingWorkspaceSidebarSummary(subroute) {
       active: subroute?.view === "conversation",
     },
     {
-      label: "Workspaces",
+      label: "Rooms",
       value: servers.length,
       route: "/messages",
       active: subroute?.view === "server" || subroute?.view === "server-room",
@@ -70704,7 +78638,7 @@ function renderMessagingWorkspaceRail(subroute) {
       </button>`;
     })
     .join("");
-  return `<aside class="shared-messaging-rail" aria-label="Messaging workspaces">
+  return `<aside class="shared-messaging-rail" aria-label="Message rooms">
     <button class="shared-messaging-rail-button${activeScopeType ? "" : " is-active"}" title="Inbox" data-action="navigate" data-route="/messages">
       ${renderMessagingWorkspaceAvatar({ label: "Inbox", icon: "messages" })}
     </button>
@@ -72508,7 +80442,7 @@ function renderMessagingAccountSettings(settingsInput, messaging) {
       ${renderMessagingAccountToggle({
         name: "dailyDigestEnabled",
         label: "Daily digest",
-        description: "Summarize missed DMs, mentions, invite updates, and top unread server activity.",
+        description: "Summarize missed DMs, mentions, invite updates, and top unread room activity.",
         checked: settings.dailyDigestEnabled,
         disabled: saving,
       })}
@@ -72935,8 +80869,8 @@ function renderMessagingRoomSettingsNav(subroute) {
     ],
     [
       "room-permissions",
-      "Access",
-      "Who can enter",
+      "Room access",
+      "Members and access groups",
       "/settings/permissions",
     ],
     [
@@ -72948,7 +80882,7 @@ function renderMessagingRoomSettingsNav(subroute) {
     [
       "room-settings-invites",
       "Invites",
-      "Links and access",
+      "Room invite links",
       "/settings/invites",
     ],
     [
@@ -73190,7 +81124,7 @@ function renderMessagingRoomNotificationForm(subroute, notificationLevel) {
   const options = [
     [
       "inherit",
-      "Inherit server default",
+      "Workspace default",
       "Use the notification level configured for this workspace.",
     ],
     ["all", "All activity", "Receive notifications for every message."],
@@ -73246,7 +81180,7 @@ function renderMessagingRoomSettingsForm({
     }),
   ].join("");
   return renderMessagingRoomSection({
-    title: "Channel identity",
+    title: "Room details",
     subtitle:
       "Update the room name, topic, category, announcement mode, slowmode, and default visibility behavior.",
     badge: canManage ? "Editable" : "Read only",
@@ -73258,7 +81192,7 @@ function renderMessagingRoomSettingsForm({
         <input type="hidden" name="currentRoomType" value="${escapeHtml(model.roomType)}" />
         <div class="shared-messaging-room-settings-form__grid">
           <label class="is-wide">
-            <span>Channel name</span>
+            <span>Room name</span>
             <input name="title" value="${escapeHtml(model.title)}" maxlength="120" required${disabledAttr(disabled)} />
           </label>
           <label>
@@ -73284,15 +81218,15 @@ function renderMessagingRoomSettingsForm({
             </select>
           </label>
           <label class="is-wide">
-            <span>Channel topic</span>
+            <span>Room topic</span>
             <textarea name="topic" maxlength="1024" rows="4"${disabledAttr(disabled)}>${escapeHtml(model.topic)}</textarea>
           </label>
         </div>
         <label class="shared-messaging-room-toggle${advancedRoomType ? " is-disabled" : ""}">
           <input type="checkbox" name="announcementOnly"${checkedAttr(model.announcementOnly)}${disabledAttr(disabled || advancedRoomType)} />
           <span>
-            <strong>Announcement channel</strong>
-            <em>${escapeHtml(advancedRoomType ? `${humanizeLabel(model.roomType) || "Advanced"} access is managed in channel permissions.` : "Posts from this channel can be distributed like announcements.")}</em>
+            <strong>Announcement room</strong>
+            <em>${escapeHtml(advancedRoomType ? `${humanizeLabel(model.roomType) || "Advanced"} access is managed in room access.` : "Messages from this room can be distributed like announcements.")}</em>
           </span>
         </label>
         <div class="shared-messaging-room-settings-summary">
@@ -73315,16 +81249,16 @@ function renderMessagingRoomDangerSection(subroute, conversation) {
   const canManage = conversation?.canManage || raw.canManage;
   const pending = state.pages.messaging.conversation.deletePending;
   return renderMessagingRoomSection({
-    title: "Delete channel",
+    title: "Delete room",
     subtitle:
-      "Remove this channel and its message history for everyone in the server.",
+      "Remove this room and its message history for everyone in the workspace.",
     badge: "Permanent",
     className: "shared-messaging-room-section--danger",
     body: `
       <div class="shared-messaging-room-danger">
         <div class="shared-messaging-room-danger__copy">
           <strong>${escapeHtml(roomTitle)}</strong>
-          <span>${escapeHtml(canManage ? "This cannot be undone. Type the channel name to confirm before deleting." : "You can review this channel, but this account cannot delete it.")}</span>
+          <span>${escapeHtml(canManage ? "This cannot be undone. Type the room name to confirm before deleting." : "You can review this room, but this account cannot delete it.")}</span>
         </div>
         <form class="shared-messaging-room-danger-form" data-route-form="messaging-room-delete">
           <input type="hidden" name="conversationId" value="${escapeHtml(subroute.conversationId)}" />
@@ -73332,10 +81266,10 @@ function renderMessagingRoomDangerSection(subroute, conversation) {
           <input type="hidden" name="scopeId" value="${escapeHtml(subroute.scopeId)}" />
           <input type="hidden" name="roomTitle" value="${escapeHtml(roomTitle)}" />
           <label>
-            <span>Type channel name</span>
+            <span>Type room name</span>
             <input name="confirmTitle" placeholder="${escapeHtml(roomTitle)}"${disabledAttr(pending || !canManage)} autocomplete="off" />
           </label>
-          <button class="shared-feed-chip shared-messaging-room-danger-button" type="submit"${disabledAttr(pending || !canManage)}>${pending ? "Deleting..." : "Delete channel"}</button>
+          <button class="shared-feed-chip shared-messaging-room-danger-button" type="submit"${disabledAttr(pending || !canManage)}>${pending ? "Deleting..." : "Delete room"}</button>
         </form>
       </div>`,
   });
@@ -74949,7 +82883,7 @@ function renderMessagingServerDirectoryCreatePanel({
       <input type="hidden" name="scopeId" value="${escapeHtml(subroute.scopeId)}" />
       <div class="shared-messaging-directory-create__intro">
         <strong>${renderIcon("create")} <span>Create room</span></strong>
-        <small>Add a room directly into the server directory.</small>
+        <small>Add a room directly into this workspace directory.</small>
       </div>
       <label><span>Room name</span><input name="title" placeholder="Field team" autocomplete="off" required${disabledAttr(disabled)} /></label>
       <label><span>Category</span><select name="categoryId"${disabledAttr(disabled)}>${renderMessagingServerCategorySelectOptions(categories)}</select></label>
@@ -75838,7 +83772,7 @@ function renderMessagingRoomSettingsBody(
     return `${nav}${hero}
       ${renderMessagingRoomSection({
         title: "Notification behavior",
-        subtitle: "Set whether this room follows the server default, alerts on all activity, only mentions you, or stays muted.",
+        subtitle: "Set whether this room follows the workspace default, alerts on all activity, only mentions you, or stays muted.",
         badge: messagingRoomNotificationLabel(notificationLevel),
         body: `
       <div class="shared-messaging-settings-grid">
@@ -76542,36 +84476,136 @@ function renderMessagingPermissionPanel({
   });
 }
 
+function messagingRequestCanBlock(item = {}) {
+  const type = normalizeString(item.type).toLowerCase();
+  return (
+    type.includes("conversation") ||
+    Boolean(item.conversationId && !item.scopeType && !item.scopeId)
+  );
+}
+
+function messagingRequestKindLabel(item = {}) {
+  const type = normalizeString(item.type).toLowerCase();
+  if (type === "server_invite" || type.includes("invite")) {
+    return "Room invite";
+  }
+  if (type.includes("conversation")) {
+    return "DM request";
+  }
+  return humanizeLabel(type) || "Request";
+}
+
+function renderMessagingRequestActionButton({
+  item,
+  action,
+  label,
+  pendingLabel,
+  primary = false,
+  danger = false,
+}) {
+  const requestId = normalizeString(item.requestId);
+  const actionPendingKey = normalizeString(
+    state.pages.messaging.requests.actionPendingKey,
+  );
+  const pendingKey = `${action}:${requestId}`;
+  const isPending = actionPendingKey === pendingKey;
+  const anyPending = Boolean(actionPendingKey);
+  const classes = [
+    "shared-feed-chip",
+    primary ? "shared-feed-chip--primary" : "",
+    danger ? "is-danger" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return `<button class="${classes}" type="button" data-action="messaging-request-${escapeHtml(action)}" data-request-id="${escapeHtml(requestId)}"${disabledAttr(!requestId || anyPending)}>${escapeHtml(isPending ? pendingLabel : label)}</button>`;
+}
+
+function renderMessagingRequestCard(item = {}) {
+  const requestId = normalizeString(item.requestId);
+  const kindLabel = messagingRequestKindLabel(item);
+  const createdLabel = item.createdAt
+    ? formatAbsoluteDateTime(item.createdAt)
+    : "Review needed";
+  const canBlock = messagingRequestCanBlock(item);
+  const actionPendingKey = normalizeString(
+    state.pages.messaging.requests.actionPendingKey,
+  );
+  const isPending =
+    Boolean(requestId) && actionPendingKey.endsWith(`:${requestId}`);
+  return `<article class="shared-messaging-request${isPending ? " is-pending" : ""}">
+    ${renderMessagingWorkspaceAvatar({ label: item.title, icon: canBlock ? "messages" : "team" })}
+    <div>
+      <p>${escapeHtml(kindLabel)} | ${escapeHtml(createdLabel)}</p>
+      <h3>${escapeHtml(item.title || "Request")}</h3>
+      <span>${escapeHtml(item.subtitle || "Review this request.")}</span>
+      <div class="shared-messaging-request__meta">
+        ${item.inviterName ? `<em>${renderIcon("profile")}<span>${escapeHtml(item.inviterName)}</span></em>` : ""}
+        ${item.serverTitle ? `<em>${renderIcon("team")}<span>${escapeHtml(item.serverTitle)}</span></em>` : ""}
+        ${canBlock ? `<em>${renderIcon("shield")}<span>Can block sender</span></em>` : ""}
+      </div>
+    </div>
+    ${
+      requestId
+        ? `<div class="shared-messaging-request__actions">
+            ${renderMessagingRequestActionButton({
+              item,
+              action: "accept",
+              label: "Accept",
+              pendingLabel: "Accepting...",
+              primary: true,
+            })}
+            ${renderMessagingRequestActionButton({
+              item,
+              action: "refuse",
+              label: "Refuse",
+              pendingLabel: "Refusing...",
+            })}
+            ${
+              canBlock
+                ? renderMessagingRequestActionButton({
+                    item,
+                    action: "block",
+                    label: "Refuse & block",
+                    pendingLabel: "Blocking...",
+                    danger: true,
+                  })
+                : ""
+            }
+          </div>`
+        : ""
+    }
+  </article>`;
+}
+
 function renderMessagingWorkspaceRequests(items = []) {
   if (!items.length) {
     return renderMessagingEmptyState({
       title: "No pending requests",
-      body: "New direct-message requests and server invitations will collect here for review.",
+      body: "New direct-message requests and room invitations will collect here for review.",
       icon: "bell",
       actions:
         '<button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="/messages/compose">Start message</button><button class="shared-feed-chip" type="button" data-action="navigate" data-route="/messages/settings">Privacy settings</button>',
     });
   }
-  return `<div class="shared-messaging-card-list">${items
-    .map(
-      (item) => `<article class="shared-messaging-request">
-        ${renderMessagingWorkspaceAvatar({ label: item.title })}
-        <div>
-          <p>${escapeHtml(humanizeLabel(item.type) || "Request")}${item.createdAt ? ` | ${escapeHtml(formatAbsoluteDateTime(item.createdAt))}` : ""}</p>
-          <h3>${escapeHtml(item.title || "Request")}</h3>
-          <span>${escapeHtml(item.subtitle || "Review this request.")}</span>
-        </div>
-        ${
-          item.requestId
-            ? `<div class="shared-messaging-request__actions">
-                <button class="shared-feed-chip shared-feed-chip--primary" data-action="messaging-request-accept" data-request-id="${escapeHtml(item.requestId)}">Accept</button>
-                <button class="shared-feed-chip" data-action="messaging-request-refuse" data-request-id="${escapeHtml(item.requestId)}">Refuse</button>
-              </div>`
-            : ""
-        }
-      </article>`,
-    )
-    .join("")}</div>`;
+  const dmCount = items.filter(messagingRequestCanBlock).length;
+  const inviteCount = Math.max(0, items.length - dmCount);
+  return `<div class="shared-messaging-requests-console">
+    <div class="shared-messaging-requests-console__summary">
+      <div>
+        <span>Request triage</span>
+        <h3>${escapeHtml(`${formatCount(items.length)} waiting`)}</h3>
+        <p>Accept trusted chats and room invites, refuse unwanted requests, or block direct-message senders without leaving the browser inbox.</p>
+      </div>
+      <div class="shared-messaging-requests-console__metrics">
+        <span><strong>${escapeHtml(formatCount(dmCount))}</strong><small>DMs</small></span>
+        <span><strong>${escapeHtml(formatCount(inviteCount))}</strong><small>Invites</small></span>
+      </div>
+    </div>
+    ${state.pages.messaging.requests.error ? `<div class="shared-page__error">${escapeHtml(state.pages.messaging.requests.error)}</div>` : ""}
+    <div class="shared-messaging-card-list">${items
+      .map((item) => renderMessagingRequestCard(item))
+      .join("")}</div>
+  </div>`;
 }
 
 function messagingServiceRecoveryLabel(messaging) {
@@ -76705,7 +84739,7 @@ function renderMessagingInboxRequestQueue(requestItems = []) {
   if (!visibleItems.length) {
     return renderMessagingEmptyState({
       title: "No requests waiting",
-      body: "Message requests and workspace invites will appear here.",
+      body: "Message requests and room invites will appear here.",
       icon: "bell",
       actions:
         '<button class="shared-feed-chip" type="button" data-action="navigate" data-route="/messages/requests">Open requests</button>',
@@ -76775,10 +84809,10 @@ function renderMessagingInboxToolTray({ messaging = {}, serverItems = [] }) {
     },
     {
       icon: "team",
-      title: "Room workspaces",
+      title: "Campaign and coalition rooms",
       copy: firstServer
         ? `${firstServer.scopeBadge || "Workspace"} rooms are available.`
-        : "Open campaign and coalition rooms.",
+        : "Find campaign and coalition rooms.",
       route: firstServer
         ? buildMessagingServerRoute(firstServer.scopeType, firstServer.scopeId)
         : "/coalitions",
@@ -76896,8 +84930,8 @@ function renderMessagingInboxServiceCenter({
       title: "Requests",
       detail: "Review",
       copy: requestItems.length
-        ? "Accept or refuse pending DMs and workspace invitations."
-        : "Message requests and workspace invitations are clear.",
+        ? "Accept or refuse pending DMs and room invitations."
+        : "Message requests and room invitations are clear.",
       route: "/messages/requests",
       action: requestItems.length ? "Review" : "Open",
       status: requestItems.length ? `${formatCount(requestItems.length)} waiting` : "Clear",
@@ -76964,12 +84998,12 @@ function renderMessagingInboxServiceCenter({
       tone: recoveryLabel === "Configured" ? "" : "attention",
     },
   ];
-  return `<section class="shared-messaging-service-center" aria-label="Messaging service center">
+  return `<section class="shared-messaging-service-center" aria-label="Messages overview">
     <div class="shared-messaging-service-center__header">
       <div>
-        <span>Messaging workspace</span>
-        <h3>One inbox for people, campaigns, and coalitions.</h3>
-        <p>Use the web app to move between private chats, requests, campaign rooms, coalition rooms, device trust, and recovery without falling back to the mobile app.</p>
+        <span>Messages inbox</span>
+        <h3>One place for conversations and rooms.</h3>
+        <p>Open private chats, groups, campaign rooms, coalition rooms, requests, privacy, trusted devices, and recovery from the browser.</p>
       </div>
       <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/messages/settings">${renderIcon("settings")}<span>Settings</span></button>
     </div>
@@ -76995,14 +85029,14 @@ function renderMessagingInboxHomePanel({ inbox, requests, servers, messaging }) 
     title: "Messages",
     subtitle: "Direct chats, requests, and campaign or coalition rooms.",
     actions:
-      '<button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="/messages/compose">New message</button><button class="shared-feed-chip" data-action="navigate" data-route="/messages/requests">Requests</button>',
+      '<button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="/messages/compose">New message</button><button class="shared-feed-chip" data-action="navigate" data-route="/messages/requests">Requests</button><button class="shared-feed-chip" data-action="navigate" data-route="/messages/settings">Settings</button>',
     className: "shared-messaging-panel--inbox-home",
     body: `<div class="shared-messaging-inbox-home">
       <section class="shared-messaging-inbox-overview" aria-label="Inbox overview">
         <div class="shared-messaging-inbox-overview__copy">
           <span>${escapeHtml(unreadCount ? `${formatCount(unreadCount)} unread` : "All caught up")}</span>
-          <h3>Open the next conversation without leaving the web app.</h3>
-          <p>Direct messages, group chats, campaign rooms, coalition rooms, requests, privacy, devices, and recovery now share the same messaging workspace.</p>
+          <h3>Open the next conversation.</h3>
+          <p>Direct messages, group chats, campaign rooms, coalition rooms, requests, privacy, devices, and recovery are available in the web inbox.</p>
         </div>
         <div class="shared-messaging-inbox-overview__stats">
           ${renderMessagingInboxStat({
@@ -77021,7 +85055,7 @@ function renderMessagingInboxHomePanel({ inbox, requests, servers, messaging }) 
           })}
           ${renderMessagingInboxStat({
             icon: "team",
-            label: "Workspaces",
+            label: "Rooms",
             value: serverItems.length,
             route: serverItems[0]
               ? buildMessagingServerRoute(serverItems[0].scopeType, serverItems[0].scopeId)
@@ -77045,7 +85079,7 @@ function renderMessagingInboxHomePanel({ inbox, requests, servers, messaging }) 
             <div class="shared-messaging-inbox-section__header">
               <div>
                 <h3>Requests</h3>
-                <p>${escapeHtml(requestItems.length ? "Accept DMs and workspace invites." : "Nothing waiting right now.")}</p>
+                <p>${escapeHtml(requestItems.length ? "Accept DMs and room invites." : "Nothing waiting right now.")}</p>
               </div>
               <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/messages/requests">Open</button>
             </div>
@@ -77887,20 +85921,37 @@ function renderMessagingMessageReactions(message, { conversationId = "" } = {}) 
     ]),
   );
   const pendingKey = state.pages.messaging.conversation.reactionPendingKey;
-  return `<div class="shared-message-reactions" aria-label="Message reactions">${emojis
+  const activeReactions = emojis
     .map((emoji) => {
-      const reaction = reactionMap.get(emoji) || {
-        emoji,
-        count: 0,
-        reactedByMe: false,
-      };
+      const reaction = reactionMap.get(emoji);
+      if (!reaction) {
+        return "";
+      }
       const count = Math.max(0, Number(reaction.count) || 0);
       const reactedByMe = reaction.reactedByMe === true;
+      if (!count && !reactedByMe) {
+        return "";
+      }
       const pending =
         pendingKey === messagingReactionPendingKey(message.messageId, emoji);
       return `<button class="shared-message-reaction${reactedByMe ? " is-active" : ""}" type="button" data-action="messaging-message-reaction" data-conversation-id="${escapeHtml(conversationId || message.conversationId)}" data-message-id="${escapeHtml(message.messageId)}" data-emoji="${escapeHtml(emoji)}" data-reacted="${reactedByMe ? "true" : "false"}"${disabledAttr(pending)} aria-pressed="${reactedByMe ? "true" : "false"}" aria-label="${escapeHtml(`${reactedByMe ? "Remove" : "Add"} ${emoji} reaction`)}"><strong>${escapeHtml(emoji)}</strong>${count ? `<span>${escapeHtml(formatCount(count))}</span>` : ""}</button>`;
     })
-    .join("")}</div>`;
+    .join("");
+  const quickReactions = MESSAGING_QUICK_REACTIONS.map((emoji) => {
+    const reaction = reactionMap.get(emoji) || {
+      emoji,
+      count: 0,
+      reactedByMe: false,
+    };
+    const reactedByMe = reaction.reactedByMe === true;
+    const pending =
+      pendingKey === messagingReactionPendingKey(message.messageId, emoji);
+    return `<button class="shared-message-quick-reaction${reactedByMe ? " is-active" : ""}" type="button" data-action="messaging-message-reaction" data-conversation-id="${escapeHtml(conversationId || message.conversationId)}" data-message-id="${escapeHtml(message.messageId)}" data-emoji="${escapeHtml(emoji)}" data-reacted="${reactedByMe ? "true" : "false"}"${disabledAttr(pending)} aria-pressed="${reactedByMe ? "true" : "false"}" aria-label="${escapeHtml(`${reactedByMe ? "Remove" : "Add"} ${emoji} reaction`)}">${escapeHtml(emoji)}</button>`;
+  }).join("");
+  return `<div class="shared-message-reaction-stack">
+    ${activeReactions ? `<div class="shared-message-reactions" aria-label="Message reactions">${activeReactions}</div>` : ""}
+    <div class="shared-message-quick-reactions" aria-label="Quick reactions">${quickReactions}</div>
+  </div>`;
 }
 
 function renderMessagingMessageActions(
@@ -78402,7 +86453,15 @@ function renderMessagingThreadMessage(
         `<span>${labelText === "Encrypted" ? renderIcon("lock") : ""}${escapeHtml(labelText)}</span>`,
     )
     .join("");
-  return `<article class="shared-message${isSelf ? " is-self" : ""}${compact ? " is-compact" : ""}${message.isDeleted ? " is-deleted" : ""}" data-message-id="${escapeHtml(message.messageId)}">
+  const messageId = normalizeString(message.messageId);
+  const actionsOpen =
+    messageId &&
+    state.pages.messaging.conversation.openMessageActionId === messageId;
+  const actionToggleMarkup =
+    messageId && !message.isDeleted
+      ? `<button class="shared-message__action-toggle" type="button" data-action="messaging-message-actions-toggle" data-message-id="${escapeHtml(messageId)}" aria-expanded="${actionsOpen ? "true" : "false"}" aria-label="${escapeHtml(actionsOpen ? "Hide message actions" : "Show message actions")}" title="${escapeHtml(actionsOpen ? "Hide actions" : "Show actions")}">${renderIcon("more")}<span class="shared-sr-only">Actions</span></button>`
+      : "";
+  return `<article class="shared-message${isSelf ? " is-self" : ""}${compact ? " is-compact" : ""}${message.isDeleted ? " is-deleted" : ""}${actionsOpen ? " is-actions-open" : ""}" data-message-id="${escapeHtml(messageId)}">
     ${
       !isSelf && !compact
         ? renderMessagingWorkspaceAvatar({
@@ -78426,6 +86485,7 @@ function renderMessagingThreadMessage(
       ${renderMessagingMessageAttachments(message)}
       ${statePills ? `<div class="shared-message__footer">${statePills}</div>` : ""}
       ${renderMessagingSeenByStatus(message, { isSelf })}
+      ${actionToggleMarkup}
       ${renderMessagingMessageActions(message, { conversationId, isSelf })}
       ${renderMessagingMessageReactions(message, { conversationId })}
     </div>
@@ -80586,7 +88646,7 @@ function renderMessagingPage() {
     });
   }
 
-  const errorMarkup = [
+  const errorMarkup = renderMessagingServiceAlert([
     messaging.error,
     messaging.serverDirectory.error,
     messaging.serverSettings.error,
@@ -80598,13 +88658,7 @@ function renderMessagingPage() {
     messaging.serverWorkflows.error,
     messaging.roomMembers.error,
     messaging.permissionTarget.error,
-  ]
-    .filter(Boolean)
-    .map(
-      (error) =>
-        `<div class="shared-page__error">${escapeHtml(error)}</div>`,
-    )
-    .join("");
+  ]);
 
   return `<section class="shared-page shared-messaging-page">
     ${renderTopChrome()}
@@ -80861,6 +88915,55 @@ function renderAccountDeletionRequestedPage() {
   </section>`;
 }
 
+function onboardingActiveKeyForRoute(route = getCurrentRoute()) {
+  const routeKey = normalizeString(route.routeKey);
+  if (routeKey === ROUTE_KEY_ONBOARDING_PHOTO) return "photo";
+  if (routeKey === ROUTE_KEY_ONBOARDING_LOCATION) return "location";
+  if (routeKey === ROUTE_KEY_ONBOARDING_ADDRESS) return "address";
+  if (routeKey === ROUTE_KEY_ONBOARDING_TOPICS) return "topics";
+  return "profile";
+}
+
+function renderOnboardingAuthGate() {
+  const activeKey = onboardingActiveKeyForRoute();
+  const returnTo = encodeURIComponent(getCurrentRoute().routePath || "/onboarding/profile");
+  const setupCards = [
+    ["Profile", "Display name, username, bio, and public context."],
+    ["Photo", "Upload a profile image before joining conversations."],
+    ["Location", "Set district and ballot context without leaving web."],
+    ["Topics", "Choose issue tags that tune feed, discovery, and prompts."],
+  ];
+  return `<section class="shared-page shared-onboarding-page shared-onboarding-page--auth">
+    ${renderTopChrome()}
+    <div class="shared-page__content shared-onboarding-content">
+      <section class="shared-auth-route-hero">
+        <span class="shared-settings-eyebrow">Account setup</span>
+        <h1>Finish Polis setup from the browser.</h1>
+        <p>Create or sign in to a Polis account to complete profile basics, profile photo, location context, and topic picks with the same onboarding flow used in the app.</p>
+      </section>
+      ${renderOnboardingNav(activeKey)}
+      <section class="shared-auth-route-panel shared-onboarding-panel">
+        <h2>Start with your account</h2>
+        <p>Onboarding saves profile, upload, home-location, and topic choices to your signed-in Polis profile.</p>
+        <div class="shared-auth-route-actions">
+          <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="/auth/signup/email?returnTo=${escapeHtml(returnTo)}">Create account</button>
+          <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/auth?returnTo=${escapeHtml(returnTo)}">Sign in</button>
+          <button class="shared-feed-chip" type="button" data-action="open-app-shell">Open app</button>
+        </div>
+        <div class="shared-bootstrap-grid">
+          ${setupCards
+            .map(
+              ([title, copy]) => `<article class="shared-settings-resource-card">
+                <div><h3>${escapeHtml(title)}</h3><p>${escapeHtml(copy)}</p></div><span>Setup</span>
+              </article>`,
+            )
+            .join("")}
+        </div>
+      </section>
+    </div>
+  </section>`;
+}
+
 function profileLinkValue(profile, type) {
   const links = Array.isArray(profile?.links) ? profile.links : [];
   return links.find((entry) => entry.type === type || (type === "x" && entry.type === "twitter"))?.url || "";
@@ -80922,40 +89025,116 @@ function renderOnboardingProfileStep(profileState) {
 
 function renderOnboardingPhotoStep(profileState) {
   const profile = profileState.current || profileState.me || {};
+  const avatarUpload =
+    profileState.avatarUpload || createProfileAvatarUploadState();
+  const avatarUrl =
+    avatarUpload.remoteUrl || avatarUpload.previewUrl || profile.avatarUrl || "";
+  const uploading = avatarUpload.uploading === true;
   return `<div class="shared-onboarding-photo">
-    <div class="shared-onboarding-avatar">
-      ${profile.avatarUrl ? `<img src="${escapeHtml(profile.avatarUrl)}" alt="" />` : `<span>${escapeHtml((profile.displayName || "P").slice(0, 1).toUpperCase())}</span>`}
-    </div>
+    <section class="shared-onboarding-photo__card">
+      <div class="shared-onboarding-avatar">
+        ${avatarUrl ? `<img src="${escapeHtml(avatarUrl)}" alt="" />` : `<span>${escapeHtml((profile.displayName || profile.username || "P").slice(0, 1).toUpperCase())}</span>`}
+      </div>
+      <div>
+        <h2>${escapeHtml(avatarUrl ? "Photo ready" : "Choose a profile photo")}</h2>
+        <p>${escapeHtml(avatarUrl ? "This image will be saved to your Polis profile when you continue." : "Upload from this browser like the native app, or paste an image URL if upload is not available.")}</p>
+        ${
+          avatarUpload.fileName
+            ? `<small>${escapeHtml(avatarUpload.fileName)}</small>`
+            : ""
+        }
+        ${
+          avatarUpload.error
+            ? `<small class="shared-onboarding-photo__error">${escapeHtml(avatarUpload.error)}</small>`
+            : ""
+        }
+      </div>
+    </section>
     <form class="shared-form shared-onboarding-form" data-route-form="profile-edit">
       ${renderProfileHiddenInputs(profile, "/onboarding/location")}
+      <input type="hidden" name="avatarUploadId" value="${escapeHtml(avatarUpload.uploadId)}" />
+      <input type="hidden" name="previousAvatarUploadId" value="${escapeHtml(avatarUpload.uploadId ? avatarUpload.previousAvatarUploadId : "")}" />
+      <input type="hidden" name="previousAvatarUrl" value="${escapeHtml(avatarUpload.uploadId ? avatarUpload.previousAvatarUrl : "")}" />
+      <input class="shared-onboarding-photo__file-input" type="file" accept="${POST_COMPOSER_IMAGE_ACCEPT}" data-profile-avatar-file />
+      <div class="shared-onboarding-photo__actions">
+        <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="profile-avatar-pick"${disabledAttr(profileState.saving || uploading)}>${uploading ? "Uploading..." : avatarUrl ? "Change photo" : "Upload photo"}</button>
+        ${
+          avatarUpload.uploadId || avatarUpload.previewUrl
+            ? `<button class="shared-feed-chip" type="button" data-action="profile-avatar-clear"${disabledAttr(profileState.saving || uploading)}>Clear staged</button>`
+            : ""
+        }
+      </div>
       <label>
-        <span>Avatar image URL</span>
-        <input name="avatarUrl" value="${escapeHtml(profile.avatarUrl || "")}" autocomplete="url" placeholder="https://" />
+        <span>Image URL fallback</span>
+        <input name="avatarUrl" value="${escapeHtml(avatarUrl)}" autocomplete="url" inputmode="url" placeholder="https://"${disabledAttr(profileState.saving || uploading)} />
       </label>
+      <div class="shared-onboarding-photo__fallback">
+        <span>${renderIcon("shield")}</span>
+        <p>Uploaded images are staged until you save this step, matching the app flow that cleans up abandoned profile-photo uploads.</p>
+      </div>
       <div class="shared-auth-route-actions">
-        <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(profileState.saving)}>${profileState.saving ? "Saving..." : "Save photo"}</button>
-        <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/onboarding/location">Skip</button>
+        <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(profileState.saving || uploading)}>${profileState.saving ? "Saving..." : "Save photo"}</button>
+        <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/onboarding/location"${disabledAttr(profileState.saving || uploading)}>Skip</button>
       </div>
     </form>
   </div>`;
 }
 
+function renderOnboardingLocationResourceStatus(entries = []) {
+  const normalizedEntries = entries.filter(([resource]) => resource);
+  const errors = normalizedEntries
+    .map(([resource]) => resource?.error)
+    .filter(Boolean);
+  if (errors.length) {
+    return renderWorkspaceServiceAlert(errors, {
+      title: "Location setup could not sync",
+      localBody:
+        "This local website can render onboarding, but profile and district context cannot sync until backend API configuration is available.",
+      secondaryRoute: "/onboarding/address",
+      secondaryLabel: "Continue to address",
+    });
+  }
+  return normalizedEntries
+    .map(([resource, label]) => renderSettingsResourceStatus(resource, label))
+    .join("");
+}
+
 function renderOnboardingLocationStep() {
   const profileResource = state.pages.settings.voterProfile.profile;
   const profile = profileResource.item || {};
+  const savedAddress = [
+    profile.addressLine1,
+    profile.city,
+    profile.locationStateId || profile.state,
+    profile.postalCode,
+  ]
+    .map(normalizeString)
+    .filter(Boolean)
+    .join(", ");
   return `<div class="shared-onboarding-location">
-    ${renderSettingsResourceStatus(profileResource, "profile")}
-    <form class="shared-settings-form" data-route-form="settings-location-gps">
-      <label class="shared-settings-toggle">
-        <input type="checkbox" name="gpsEnabled" value="true"${checkedAttr(profile?.gpsEnabled === true)}${disabledAttr(profileResource.saving)} />
-        <span>Use foreground GPS updates in the browser</span>
-      </label>
-      <div class="shared-auth-route-actions">
-        <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(profileResource.saving)}>${profileResource.saving ? "Saving..." : "Save GPS preference"}</button>
-        <button class="shared-feed-chip" type="button" data-action="settings-permission-request" data-permission-key="location">Request location permission</button>
-        <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/onboarding/address">Continue</button>
+    ${renderOnboardingLocationResourceStatus([[profileResource, "profile"]])}
+    <section class="shared-onboarding-location__intro">
+      <span class="shared-onboarding-location__icon" aria-hidden="true">${renderIcon("map")}</span>
+      <div>
+        <h2>Use your home address for local content</h2>
+        <p>Location services are disabled during setup. Polis will use the home address you enter next to prepare district, ballot, and local civic context.</p>
       </div>
-    </form>
+    </section>
+    <div class="shared-onboarding-location__steps" aria-label="Location setup checklist">
+      <span><strong>1</strong><small>Enter address</small></span>
+      <span><strong>2</strong><small>Match districts</small></span>
+      <span><strong>3</strong><small>Choose topics</small></span>
+    </div>
+    <div class="shared-onboarding-location__status">
+      <div>
+        <strong>${escapeHtml(savedAddress ? "Saved home address" : "Home address not set")}</strong>
+        <small>${escapeHtml(savedAddress || "Continue to add the address used for election and local content.")}</small>
+      </div>
+      <div class="shared-auth-route-actions">
+        <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="/onboarding/address">Continue</button>
+        <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/settings/location">Location settings</button>
+      </div>
+    </div>
   </div>`;
 }
 
@@ -80972,8 +89151,10 @@ function renderOnboardingAddressStep() {
       <label><span>State</span><input name="state" value="${escapeHtml(profile.locationStateId || "")}" autocomplete="address-level1" maxlength="2" required /></label>
       <label><span>ZIP</span><input name="postalCode" value="${escapeHtml(profile.postalCode || "")}" autocomplete="postal-code" /></label>
     </div>
-    ${renderSettingsResourceStatus(voterProfile.profile, "profile")}
-    ${renderSettingsResourceStatus(voterProfile.districts, "district context")}
+    ${renderOnboardingLocationResourceStatus([
+      [voterProfile.profile, "profile"],
+      [voterProfile.districts, "district context"],
+    ])}
     <div class="shared-auth-route-actions">
       <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(saving)}>${saving ? "Saving..." : "Save and continue"}</button>
       <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/onboarding/topics">Skip</button>
@@ -80984,10 +89165,13 @@ function renderOnboardingAddressStep() {
 function renderOnboardingPage(activeKey) {
   const profileState = state.pages.profile;
   const profileLoading = profileState.loading && !(profileState.current || profileState.me);
+  const profileError = normalizeString(profileState.error);
+  const showProfileError =
+    profileError && !["location", "address"].includes(activeKey);
   const titles = {
     profile: ["Profile basics", "Set the public name and context people see around your posts."],
     photo: ["Profile photo", "Add a recognizable image so conversations and messages feel grounded."],
-    location: ["Location permission", "Choose whether browser GPS can assist local civic context."],
+    location: ["Set your location", "Use your home address for local content."],
     address: ["Home location", "Save the address used for district and ballot context."],
   };
   let body = "";
@@ -81013,7 +89197,7 @@ function renderOnboardingPage(activeKey) {
       </section>
       ${renderOnboardingNav(activeKey)}
       <section class="shared-auth-route-panel shared-onboarding-panel">
-        ${profileState.error ? `<div class="shared-page__error">${escapeHtml(profileState.error)}</div>` : ""}
+        ${showProfileError ? `<div class="shared-page__error">${escapeHtml(workspaceServiceErrorMessage(profileError, "Profile could not be loaded."))}</div>` : ""}
         ${body}
       </section>
     </div>
@@ -81021,25 +89205,100 @@ function renderOnboardingPage(activeKey) {
 }
 
 function renderSettingsAuthGate() {
+  const settingsStats = [
+    {
+      icon: "profile",
+      eyebrow: "Account",
+      title: "Username + profile",
+      detail: "Handle changes, voter profile, districts, and display preferences stay together.",
+    },
+    {
+      icon: "shield",
+      eyebrow: "Safety",
+      title: "Privacy controls",
+      detail: "Location, permissions, blocked users, muted users, and campaign sharing are grouped.",
+    },
+    {
+      icon: "share",
+      eyebrow: "Publishing",
+      title: "Connected accounts",
+      detail: "Social providers, audiences, post defaults, and crosspost settings live in one flow.",
+    },
+  ];
+  const settingsQueue = [
+    ["Security", "Password reset and authenticator MFA", "Account"],
+    ["Voter", "Political matrix, ballot guide, and districts", "Profile"],
+    ["Recovery", "Trusted devices and restore kit", "Safety"],
+    ["Notifications", "Categories, mentions, and quiet hours", "Alerts"],
+  ];
+  const settingsFeatures = [
+    ["Connected accounts", "Meta, Instagram, Threads, Bluesky, and publishing targets."],
+    ["Privacy & Safety", "Messaging privacy, location, browser permissions, blocks, and mutes."],
+    ["Voter profile", "Home location, districts, voter intelligence, and policy-question context."],
+    ["Publishing & Social", "Post visibility, review defaults, custom audiences, and crossposting."],
+    ["Notifications", "Category controls, mentions, social updates, and quiet hours."],
+    ["Security & recovery", "Account security, trusted devices, recovery restore, and activity."],
+  ];
   return `<section class="shared-page shared-settings-page">
     ${renderTopChrome()}
     <div class="shared-page__content">
       <div class="shared-settings-auth">
-        <div>
+        <div class="shared-settings-auth__copy">
           <span class="shared-settings-eyebrow">Account controls</span>
           <h1>Manage Polis from the browser.</h1>
-          <p>Sign in to manage connected accounts, publishing defaults, crosspost targets, and notification preferences without leaving the web app.</p>
+          <p>Sign in to manage account identity, security, connected accounts, voter profile, publishing, privacy, safety, notifications, and recovery controls without leaving the web app.</p>
           <div class="shared-auth-modal__actions">
             <button class="shared-feed-chip shared-feed-chip--primary" data-action="auth-login-inline">Sign in</button>
             <button class="shared-feed-chip" data-action="auth-signup-inline">Create account</button>
             <button class="shared-feed-chip" data-action="open-app-shell">Open app</button>
           </div>
         </div>
-        <div class="shared-settings-auth__grid">
-          <div><strong>Social</strong><span>Connect accounts and discover publishing targets.</span></div>
-          <div><strong>Publishing</strong><span>Set default visibility, comments, and reuse controls.</span></div>
-          <div><strong>Crosspost</strong><span>Choose synced target keys and YouTube defaults.</span></div>
-          <div><strong>Notifications</strong><span>Control categories and quiet hours.</span></div>
+        <div class="shared-settings-auth__workspace">
+          <aside class="shared-settings-command-preview" aria-label="Settings workspace preview">
+            <header>
+              <span aria-hidden="true">${renderIcon("settings")}</span>
+              <div>
+                <small>Settings command center</small>
+                <strong>Your Polis account</strong>
+              </div>
+            </header>
+            <div class="shared-settings-command-preview__metrics" role="list" aria-label="Settings priority areas">
+              ${settingsStats
+                .map(
+                  (item) => `<article role="listitem">
+                    <span aria-hidden="true">${renderIcon(item.icon)}</span>
+                    <div>
+                      <small>${escapeHtml(item.eyebrow)}</small>
+                      <strong>${escapeHtml(item.title)}</strong>
+                      <p>${escapeHtml(item.detail)}</p>
+                    </div>
+                  </article>`,
+                )
+                .join("")}
+            </div>
+            <div class="shared-settings-command-preview__queue" aria-label="Settings quick routes">
+              ${settingsQueue
+                .map(
+                  ([scope, title, status]) => `<article>
+                    <span>${escapeHtml(scope)}</span>
+                    <strong>${escapeHtml(title)}</strong>
+                    <em>${escapeHtml(status)}</em>
+                  </article>`,
+                )
+                .join("")}
+            </div>
+            <footer><span aria-hidden="true">${renderIcon("lock")}</span><span>Account, voter, privacy, and social controls stay scoped to your signed-in profile.</span></footer>
+          </aside>
+          <div class="shared-settings-auth__grid" role="list" aria-label="Settings feature areas">
+            ${settingsFeatures
+              .map(
+                ([title, detail]) => `<article role="listitem">
+                  <strong>${escapeHtml(title)}</strong>
+                  <span>${escapeHtml(detail)}</span>
+                </article>`,
+              )
+              .join("")}
+          </div>
         </div>
       </div>
     </div>
@@ -81426,8 +89685,6 @@ function renderSettingsOverview() {
   );
   const publishing =
     settings.publishing.item || normalizePublishingDefaults(settings.publishing.item);
-  const crosspost =
-    settings.crosspost.item || normalizeCrosspostDefaults(settings.crosspost.item);
   const notifications =
     settings.notifications.item ||
     normalizeNotificationPreferences(settings.notifications.item);
@@ -81511,11 +89768,11 @@ function renderSettingsOverview() {
         actionLabel: "Manage groups",
       })}
       ${renderSettingsSummaryCard({
-        title: "Crosspost targets",
-        value: formatCount(crosspost.selectedTargetKeys.length),
-        copy: "Saved target keys and YouTube privacy defaults for new posts.",
-        route: "/settings/publishing-social",
-        actionLabel: "Configure",
+        title: "Publishing channels",
+        value: formatCount(targetCount),
+        copy: `${connectedCopy} available for crossposting from the post composer and review flow.`,
+        route: "/settings/connected-accounts",
+        actionLabel: "Manage channels",
       })}
       ${renderSettingsSummaryCard({
         title: "Notifications",
@@ -81637,7 +89894,7 @@ function renderSettingsOverview() {
       ${renderSettingsOverviewGroup({
         eyebrow: "Publishing",
         title: "Social publishing and notifications",
-        copy: "Set default visibility, custom audiences, crosspost targets, and notification categories.",
+        copy: "Set default visibility, custom audiences, social connections, and notification categories.",
         commands: [
           {
             icon: "send",
@@ -81740,7 +89997,6 @@ function renderSettingsOverview() {
     ${renderSettingsResourceStatus(settings.social, "connected accounts")}
     ${renderSettingsResourceStatus(settings.publishing, "publishing defaults")}
     ${renderSettingsResourceStatus(settings.audienceGroups, "audience groups")}
-    ${renderSettingsResourceStatus(settings.crosspost, "crosspost defaults")}
     ${renderSettingsResourceStatus(settings.notifications, "notification preferences")}
     ${renderSettingsResourceStatus(profileResource, "profile")}
   </div>`;
@@ -81989,55 +90245,60 @@ function renderSettingsPublishingForm() {
   </form>`;
 }
 
-function renderSettingsCrosspostForm() {
-  const resource = state.pages.settings.crosspost;
-  const crosspost = resource.item || defaultCrosspostDefaults();
-  const targets = state.pages.settings.social.connections.flatMap(
-    (connection) => connection.targets,
-  );
-  return `<form class="shared-settings-form" data-route-form="settings-crosspost">
-    <label>
-      <span>Default target keys</span>
-      <textarea name="selectedTargetKeys" rows="3" placeholder="Comma-separated synced crosspost targets">${escapeHtml(crosspost.selectedTargetKeys.join(", "))}</textarea>
-    </label>
-    ${
-      targets.length
-        ? `<div class="shared-settings-target-hints">
-            ${targets
-              .map(
-                (target) => `<span title="${escapeHtml(target.targetId)}">${escapeHtml(target.label)}</span>`,
-              )
-              .join("")}
-          </div>`
-        : `<div class="shared-settings-empty">Connect social accounts to see target labels here.</div>`
-    }
-    <div class="shared-settings-form-grid">
-      <label>
-        <span>Default YouTube privacy</span>
-        <select name="youtubePrivacy">
-          ${["private", "unlisted", "public"]
-            .map(
-              (value) => `<option value="${escapeHtml(value)}"${
-                crosspost.youtubePrivacy === value ? " selected" : ""
-              }>${escapeHtml(humanizeLabel(value))}</option>`,
-            )
-            .join("")}
-        </select>
-      </label>
-      <label>
-        <span>Default YouTube title</span>
-        <input name="youtubeTitle" value="${escapeHtml(crosspost.youtubeTitle)}" maxlength="100" />
-      </label>
+function renderSettingsCrosspostHandoff() {
+  const social = state.pages.settings.social;
+  const stats = getSettingsConnectedAccountStats(social);
+  const statusCopy = social.loading
+    ? "Refreshing provider status and publishing targets."
+    : stats.targetCount
+      ? `${formatCount(stats.targetCount)} publishing target${stats.targetCount === 1 ? "" : "s"} can be selected from the post composer and review flow.`
+      : "Connect a provider to make crossposting targets available when creating a post.";
+  return `<div class="shared-settings-connected-command">
+    <div class="shared-settings-connected-command__header">
+      <div>
+        <span class="shared-settings-eyebrow">Crossposting</span>
+        <h3>${escapeHtml(`${formatCount(stats.connectedProviderCount)} provider${stats.connectedProviderCount === 1 ? "" : "s"} connected`)}</h3>
+        <p>${escapeHtml(statusCopy)}</p>
+      </div>
+      <div class="shared-settings-connected-command__actions">
+        <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="/settings/connected-accounts">Manage accounts</button>
+        <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/create">New post</button>
+        <button class="shared-feed-chip" type="button" data-action="settings-refresh">Refresh</button>
+      </div>
     </div>
-    <label>
-      <span>Default YouTube description</span>
-      <textarea name="youtubeDescription" rows="4" maxlength="5000">${escapeHtml(crosspost.youtubeDescription)}</textarea>
-    </label>
-    ${renderSettingsResourceStatus(resource, "crosspost defaults")}
-    <div class="shared-settings-form-actions">
-      <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(resource.saving)}>Save crosspost defaults</button>
+    <div class="shared-settings-connected-metrics">
+      ${renderSettingsConnectedMetric(
+        "Providers",
+        `${formatCount(stats.connectedProviderCount)}/${formatCount(stats.providerCount)}`,
+        "Connected social services",
+        stats.connectedProviderCount ? "ready" : "muted",
+      )}
+      ${renderSettingsConnectedMetric(
+        "Targets",
+        formatCount(stats.targetCount),
+        "Pages, channels, and profiles synced",
+        stats.targetCount ? "ready" : "pending",
+      )}
+      ${renderSettingsConnectedMetric(
+        "Review",
+        formatCount(stats.pendingConsentCount),
+        "Tagging consent decisions pending",
+        stats.pendingConsentCount ? "pending" : "ready",
+      )}
+      ${renderSettingsConnectedMetric(
+        "Attention",
+        formatCount(stats.attentionCount),
+        stats.attentionCount ? "Connections needing review" : "No account issues found",
+        stats.attentionCount ? "bad" : "ready",
+      )}
     </div>
-  </form>`;
+    ${renderSettingsConnectedProviderLanes()}
+    ${renderSettingsResourceStatus(social, "connected accounts")}
+    <div class="shared-settings-inline-note">
+      <span>Target selection and provider-specific publishing details happen while creating or reviewing a post.</span>
+      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/create">Open composer</button>
+    </div>
+  </div>`;
 }
 
 function renderSettingsPublishingSocial() {
@@ -82054,12 +90315,12 @@ function renderSettingsPublishingSocial() {
     <section class="shared-settings-panel">
       <div class="shared-settings-panel__header">
         <div>
-          <h2>Crosspost defaults</h2>
-          <p>Set default social target keys and YouTube metadata for crossposts.</p>
+          <h2>Crossposting</h2>
+          <p>Connect social accounts here, then choose target pages, channels, and profiles when a post is created or reviewed.</p>
         </div>
         <button class="shared-feed-chip" data-action="navigate" data-route="/settings/connected-accounts">Connected accounts</button>
       </div>
-      ${renderSettingsCrosspostForm()}
+      ${renderSettingsCrosspostHandoff()}
     </section>
   </div>`;
 }
@@ -82117,9 +90378,196 @@ function renderSettingsNotifications() {
         ${renderSettingsResourceStatus(resource, "notification preferences")}
         <div class="shared-settings-form-actions">
           <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(resource.saving)}>Save notifications</button>
+          <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/settings/quiet-hours">Quiet hours</button>
         </div>
       </form>
     </section>
+  </div>`;
+}
+
+function settingsQuietHoursLabel(quietHours) {
+  if (!quietHours?.enabled) {
+    return "Off";
+  }
+  return `${messagingMinuteLabel(quietHours.startMinutes)} to ${messagingMinuteLabel(quietHours.endMinutes)}`;
+}
+
+function settingsQuietHoursTone(enabled) {
+  return enabled ? "pending" : "good";
+}
+
+function renderSettingsQuietHoursMetric({ icon, label, value, copy, tone = "" }) {
+  return `<article class="shared-settings-quiet-metric${tone ? ` is-${escapeHtml(tone)}` : ""}">
+    <span>${renderIcon(icon)}</span>
+    <strong>${escapeHtml(value)}</strong>
+    <small>${escapeHtml(label)}</small>
+    <p>${escapeHtml(copy)}</p>
+  </article>`;
+}
+
+function renderSettingsQuietHoursRow({
+  title,
+  copy,
+  enabledName,
+  enabled,
+  startName,
+  startMinutes,
+  endName,
+  endMinutes,
+  timezoneName = "",
+  timezone = "",
+  disabled = false,
+}) {
+  return `<section class="shared-settings-quiet-row">
+    <div class="shared-settings-quiet-row__copy">
+      <h3>${escapeHtml(title)}</h3>
+      <p>${escapeHtml(copy)}</p>
+      <em>${escapeHtml(enabled ? `${messagingMinuteLabel(startMinutes)} to ${messagingMinuteLabel(endMinutes)}` : "Off")}</em>
+    </div>
+    <div class="shared-settings-quiet-row__controls">
+      <label class="shared-settings-toggle">
+        <input type="checkbox" name="${escapeHtml(enabledName)}" value="true"${checkedAttr(enabled)}${disabledAttr(disabled)} />
+        <span>Enabled</span>
+      </label>
+      <div class="shared-settings-quiet-time-grid">
+        <label>
+          <span>Start</span>
+          <input type="time" name="${escapeHtml(startName)}" value="${escapeHtml(minutesToTimeInput(startMinutes))}"${disabledAttr(disabled)} />
+        </label>
+        <label>
+          <span>End</span>
+          <input type="time" name="${escapeHtml(endName)}" value="${escapeHtml(minutesToTimeInput(endMinutes))}"${disabledAttr(disabled)} />
+        </label>
+        ${
+          timezoneName
+            ? `<label>
+                <span>Timezone</span>
+                <input name="${escapeHtml(timezoneName)}" value="${escapeHtml(timezone || "UTC")}" placeholder="America/Denver"${disabledAttr(disabled)} />
+              </label>`
+            : ""
+        }
+      </div>
+    </div>
+  </section>`;
+}
+
+function renderSettingsQuietHours() {
+  const notificationResource = state.pages.settings.notifications;
+  const preferences =
+    notificationResource.item || defaultNotificationPreferences();
+  const messaging = state.pages.messaging;
+  const messageSettings = normalizeMessagingAccountSettings(messaging.settings);
+  const quietHours = preferences.quietHours;
+  const notificationQuietHours = preferences.notificationQuietHours;
+  const globalLabel = settingsQuietHoursLabel(quietHours);
+  const notificationLabel = settingsQuietHoursLabel(notificationQuietHours);
+  const messageLabel = messageSettings.quietHoursEnabled
+    ? `${messagingMinuteLabel(messageSettings.quietHoursStartMinutes)} to ${messagingMinuteLabel(messageSettings.quietHoursEndMinutes)}`
+    : "Off";
+  const notificationSaving = notificationResource.saving === true;
+  const messagingSaving = messaging.settingsSaving === true;
+  return `<div class="shared-settings-main shared-settings-quiet-hours">
+    <section class="shared-settings-panel shared-settings-quiet-hero">
+      <div>
+        <span class="shared-settings-eyebrow">Quiet Hours</span>
+        <h2>Control when Polis can interrupt you.</h2>
+        <p>Set the global quiet window first, then tune category notifications and message delivery separately. These values match the Polis app settings screen.</p>
+      </div>
+      <div class="shared-settings-quiet-metrics">
+        ${renderSettingsQuietHoursMetric({
+          icon: "shield",
+          label: "Global",
+          value: globalLabel,
+          copy: "Top-level routine alert window",
+          tone: settingsQuietHoursTone(quietHours.enabled),
+        })}
+        ${renderSettingsQuietHoursMetric({
+          icon: "bell",
+          label: "Notifications",
+          value: notificationLabel,
+          copy: "Social, campaign, election, upload, and mention alerts",
+          tone: settingsQuietHoursTone(notificationQuietHours.enabled),
+        })}
+        ${renderSettingsQuietHoursMetric({
+          icon: "messages",
+          label: "Messages",
+          value: messageLabel,
+          copy: messageSettings.dailyDigestEnabled ? "Daily digest enabled" : "Daily digest off",
+          tone: settingsQuietHoursTone(messageSettings.quietHoursEnabled),
+        })}
+      </div>
+    </section>
+
+    <form class="shared-settings-panel shared-settings-form shared-settings-quiet-panel" data-route-form="settings-quiet-hours">
+      <div class="shared-settings-panel__header">
+        <div>
+          <h2>Notification quiet hours</h2>
+          <p>Global quiet hours apply broadly. Notification quiet hours tune non-message alert categories.</p>
+        </div>
+        ${renderSettingsStatusPill(notificationSaving ? "Saving" : "Ready", notificationSaving ? "pending" : "good")}
+      </div>
+      ${renderSettingsQuietHoursRow({
+        title: "Global Quiet Hours",
+        copy: "Overrides message and notification quiet hours while active.",
+        enabledName: "quietHoursEnabled",
+        enabled: quietHours.enabled,
+        startName: "quietStart",
+        startMinutes: quietHours.startMinutes,
+        endName: "quietEnd",
+        endMinutes: quietHours.endMinutes,
+        timezoneName: "timezone",
+        timezone: quietHours.timezone,
+        disabled: notificationSaving,
+      })}
+      ${renderSettingsQuietHoursRow({
+        title: "Notification Quiet Hours",
+        copy: "Quiets social, campaign, election, upload, and non-message mention notifications.",
+        enabledName: "notificationQuietHoursEnabled",
+        enabled: notificationQuietHours.enabled,
+        startName: "notificationQuietStart",
+        startMinutes: notificationQuietHours.startMinutes,
+        endName: "notificationQuietEnd",
+        endMinutes: notificationQuietHours.endMinutes,
+        timezoneName: "notificationTimezone",
+        timezone: notificationQuietHours.timezone,
+        disabled: notificationSaving,
+      })}
+      ${renderSettingsResourceStatus(notificationResource, "notification preferences")}
+      <div class="shared-settings-form-actions">
+        <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(notificationSaving)}>${notificationSaving ? "Saving..." : "Save notification quiet hours"}</button>
+        <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/settings/notifications">Notification categories</button>
+      </div>
+    </form>
+
+    <form class="shared-settings-panel shared-settings-form shared-settings-quiet-panel" data-route-form="messaging-quiet-hours">
+      <div class="shared-settings-panel__header">
+        <div>
+          <h2>Message quiet hours</h2>
+          <p>Control quiet windows for direct messages, mentions, request updates, and room activity.</p>
+        </div>
+        ${renderSettingsStatusPill(messagingSaving ? "Saving" : "Ready", messagingSaving ? "pending" : "good")}
+      </div>
+      ${messaging.error ? `<div class="shared-page__error">${escapeHtml(messaging.error)}</div>` : ""}
+      ${renderSettingsQuietHoursRow({
+        title: "Message Quiet Hours",
+        copy: "Quiets message pushes, direct mentions, and server activity while active.",
+        enabledName: "quietHoursEnabled",
+        enabled: messageSettings.quietHoursEnabled,
+        startName: "quietHoursStart",
+        startMinutes: messageSettings.quietHoursStartMinutes,
+        endName: "quietHoursEnd",
+        endMinutes: messageSettings.quietHoursEndMinutes,
+        disabled: messagingSaving,
+      })}
+      <label class="shared-settings-toggle shared-settings-quiet-digest">
+        <input type="checkbox" name="dailyDigestEnabled" value="true"${checkedAttr(messageSettings.dailyDigestEnabled)}${disabledAttr(messagingSaving)} />
+        <span>Daily digest for missed DMs, mentions, invites, and unread room activity</span>
+      </label>
+      <div class="shared-settings-form-actions">
+        <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(messagingSaving)}>${messagingSaving ? "Saving..." : "Save message quiet hours"}</button>
+        <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/messages/settings">All message settings</button>
+      </div>
+    </form>
   </div>`;
 }
 
@@ -82159,6 +90607,41 @@ function voterProfileAddress(profile) {
     .map(normalizeString)
     .filter(Boolean);
   return parts.join(" - ");
+}
+
+function settingsProfileHasSavedAddress(profile) {
+  return Boolean(
+    normalizeString(profile?.addressLine1) &&
+      normalizeString(profile?.city) &&
+      normalizeString(profile?.locationStateId || profile?.locationState),
+  );
+}
+
+function settingsProfileIsVerified(profile) {
+  const status = normalizeString(profile?.candidateAccessStatus).toLowerCase();
+  const roles = [
+    ...normalizeStringList(profile?.roles),
+    ...normalizeStringList(state.auth.user?.roles),
+  ].map((role) => role.toLowerCase());
+  return (
+    status === "approved" ||
+    profile?.isAdmin === true ||
+    roles.some((role) => ["admin", "campaign", "staff"].includes(role))
+  );
+}
+
+function settingsManualDistrictNextAllowedLabel(profile, districts) {
+  const nextAllowedAt =
+    Number(profile?.manualDistrictNextAllowedAt) ||
+    Number(districts?.homeLocation?.manualDistrictNextAllowedAt) ||
+    Number(districts?.manualDistrict?.nextAllowedAt) ||
+    0;
+  if (!nextAllowedAt) {
+    return "";
+  }
+  return nextAllowedAt <= Date.now()
+    ? "Manual district changes are available now."
+    : `Manual district changes unlock ${formatSettingsDate(nextAllowedAt)}.`;
 }
 
 function voterProfileCompletion(profile, districts) {
@@ -82281,7 +90764,7 @@ function renderVoterProfileForm(profile, resource) {
       ${renderSettingsResourceStatus(resource, "voter profile")}
       <div class="shared-settings-form-actions">
         <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(saving)}>${saving ? "Saving..." : "Save profile"}</button>
-        <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/settings/voter-profile/home-location">Home location</button>
+        <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/settings/preferences/home-location">Home location</button>
       </div>
     </form>
   </section>`;
@@ -82290,6 +90773,10 @@ function renderVoterProfileForm(profile, resource) {
 function renderVoterProfileHomeLocation(profile) {
   const voterProfile = state.pages.settings.voterProfile;
   const saving = voterProfile.homeLocationSaving === true;
+  const clearing = voterProfile.homeLocationClearing === true;
+  const isVerified = settingsProfileIsVerified(profile);
+  const hasSavedAddress = settingsProfileHasSavedAddress(profile);
+  const fieldDisabled = saving || isVerified;
   return `<section class="shared-settings-panel shared-voter-profile-home">
     <div class="shared-settings-panel__header">
       <div>
@@ -82298,33 +90785,142 @@ function renderVoterProfileHomeLocation(profile) {
       </div>
       <button class="shared-feed-chip" data-action="navigate" data-route="/settings/voter-profile">Profile card</button>
     </div>
+    <div class="shared-settings-inline-note">${escapeHtml(
+      isVerified
+        ? "Verified accounts require staff review before changing home location."
+        : hasSavedAddress
+          ? "Your saved address is the source of truth for district-aware features."
+          : "Add a home address, or use a congressional district when address verification is not available.",
+    )}</div>
     <form class="shared-settings-form" data-route-form="settings-home-location">
       <div class="shared-settings-form-grid">
         <label>
           <span>Address</span>
-          <input name="addressLine1" value="${escapeHtml(profile?.addressLine1 || "")}" autocomplete="address-line1" required />
+          <input name="addressLine1" value="${escapeHtml(profile?.addressLine1 || "")}" autocomplete="address-line1" required${disabledAttr(fieldDisabled)} />
         </label>
         <label>
           <span>Apartment, suite, unit</span>
-          <input name="addressLine2" value="${escapeHtml(profile?.addressLine2 || "")}" autocomplete="address-line2" />
+          <input name="addressLine2" value="${escapeHtml(profile?.addressLine2 || "")}" autocomplete="address-line2"${disabledAttr(fieldDisabled)} />
         </label>
         <label>
           <span>City</span>
-          <input name="city" value="${escapeHtml(profile?.city || "")}" autocomplete="address-level2" required />
+          <input name="city" value="${escapeHtml(profile?.city || "")}" autocomplete="address-level2" required${disabledAttr(fieldDisabled)} />
         </label>
         <label>
           <span>State</span>
-          <input name="state" value="${escapeHtml(profile?.locationStateId || "")}" autocomplete="address-level1" maxlength="2" required />
+          <input name="state" value="${escapeHtml(profile?.locationStateId || "")}" autocomplete="address-level1" maxlength="2" required${disabledAttr(fieldDisabled)} />
         </label>
         <label>
           <span>ZIP</span>
-          <input name="postalCode" value="${escapeHtml(profile?.postalCode || "")}" autocomplete="postal-code" />
+          <input name="postalCode" value="${escapeHtml(profile?.postalCode || "")}" autocomplete="postal-code"${disabledAttr(fieldDisabled)} />
         </label>
       </div>
       <div class="shared-settings-form-actions">
-        <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(saving)}>${saving ? "Saving..." : "Save home location"}</button>
-        <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/settings/voter-profile/home-location/request">Request review</button>
+        ${
+          isVerified
+            ? `<button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="/settings/preferences/home-location/request">Request change</button>`
+            : `<button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(saving)}>${saving ? "Saving..." : "Save home location"}</button>`
+        }
+        ${
+          !isVerified && hasSavedAddress
+            ? `<button class="shared-feed-chip is-danger" type="button" data-action="settings-home-location-clear"${disabledAttr(saving || clearing)}>${clearing ? "Clearing..." : "Clear saved address"}</button>`
+            : ""
+        }
+        ${!isVerified ? `<button class="shared-feed-chip" type="button" data-action="navigate" data-route="/settings/preferences/home-location/request">Request review</button>` : ""}
         <button class="shared-feed-chip" type="button" data-action="settings-voter-profile-refresh-districts">Refresh districts</button>
+      </div>
+    </form>
+    ${renderVoterProfileManualDistrictPanel(profile)}
+  </section>`;
+}
+
+function renderVoterProfileManualDistrictPanel(profile) {
+  const voterProfile = state.pages.settings.voterProfile;
+  const resource = voterProfile.manualDistrict;
+  const districts = voterProfile.districts.item;
+  const isVerified = settingsProfileIsVerified(profile);
+  const hasSavedAddress = settingsProfileHasSavedAddress(profile);
+  const stateId = normalizeString(
+    resource.stateId ||
+      profile?.manualDistrictStateId ||
+      profile?.locationStateId ||
+      profile?.locationState,
+  ).toUpperCase();
+  const selectedDistrictId = normalizeString(
+    resource.selectedDistrictId ||
+      profile?.manualCongressionalDistrictId ||
+      (!hasSavedAddress ? profile?.locationDistrictId : ""),
+  ).toUpperCase();
+  const disabled = isVerified || hasSavedAddress || resource.saving;
+  const manualActive =
+    profile?.manualDistrictActive === true ||
+    districts?.homeLocation?.manualDistrictActive === true;
+  const currentDistrictLabel =
+    selectedDistrictId && manualActive
+      ? `${selectedDistrictId} - ${settingsStateNameForId(stateId)}`
+      : "No manual district saved";
+  const nextAllowed = settingsManualDistrictNextAllowedLabel(profile, districts);
+  const districtOptions = resource.items.length
+    ? resource.items
+        .map(
+          (district) =>
+            `<option value="${escapeHtml(district.congressionalDistrictId)}"${selectedAttr(district.congressionalDistrictId === selectedDistrictId)}>${escapeHtml(settingsManualDistrictLabel(district))}</option>`,
+        )
+        .join("")
+    : `<option value="">${escapeHtml(
+        stateId
+          ? resource.loading
+            ? "Loading districts..."
+            : resource.error
+              ? "Districts unavailable"
+              : "Load districts for this state"
+          : "Choose a state first",
+      )}</option>`;
+  return `<section class="shared-voter-profile-manual-district">
+    <div class="shared-settings-panel__header">
+      <div>
+        <h2>Congressional district fallback</h2>
+        <p>Use this only when an address cannot be verified. Address-based voter outreach and precise local personalization still require a saved home address.</p>
+      </div>
+      ${renderSettingsStatusPill(manualActive ? "Manual district active" : "Optional fallback", manualActive ? "pending" : "")}
+    </div>
+    <div class="shared-voter-profile-manual-district__summary">
+      <strong>${escapeHtml(currentDistrictLabel)}</strong>
+      <span>${escapeHtml(
+        hasSavedAddress
+          ? "Clear the saved address before switching to a manual district."
+          : isVerified
+            ? "Verified accounts must request a reviewed location change."
+            : nextAllowed || "Manual district changes are limited to once every 60 days.",
+      )}</span>
+    </div>
+    <form class="shared-settings-form shared-manual-district-form" data-route-form="settings-manual-district">
+      <div class="shared-settings-form-grid">
+        <label>
+          <span>State</span>
+          <select name="stateId" data-settings-manual-district-state${disabledAttr(disabled)}>
+            <option value="">Choose state</option>
+            ${SETTINGS_US_STATES.map(
+              ([code, name]) =>
+                `<option value="${escapeHtml(code)}"${selectedAttr(code === stateId)}>${escapeHtml(`${name} (${code})`)}</option>`,
+            ).join("")}
+          </select>
+        </label>
+        <label>
+          <span>U.S. House district</span>
+          <select name="congressionalDistrictId" data-settings-manual-district-option${disabledAttr(disabled || resource.loading || !stateId || !resource.items.length)}>
+            ${districtOptions}
+          </select>
+        </label>
+      </div>
+      <label class="shared-settings-toggle shared-voter-profile-manual-district__ack">
+        <input type="checkbox" name="acknowledgedRestrictions" value="true"${checkedAttr(resource.acknowledged === true)} data-settings-manual-district-ack${disabledAttr(disabled)} />
+        <span>I understand district fallback is less precise, can change only once every 60 days, and will be replaced by a saved address.</span>
+      </label>
+      ${resource.error ? `<div class="shared-page__error">${escapeHtml(resource.error)}</div>` : ""}
+      <div class="shared-settings-form-actions">
+        <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(disabled || !stateId || !resource.items.length)}>${resource.saving ? "Saving..." : "Save district"}</button>
+        <button class="shared-feed-chip" type="button" data-action="settings-manual-district-refresh"${disabledAttr(disabled || !stateId || resource.loading)}>${resource.loading ? "Loading..." : "Load districts"}</button>
       </div>
     </form>
   </section>`;
@@ -82414,7 +91010,7 @@ function renderVoterProfileHomeLocationRequest(profile) {
         <p>Use this when the direct save path cannot verify the correction or a previous district assignment needs staff approval.</p>
       </div>
       <div class="shared-settings-form-actions">
-        <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/settings/voter-profile/home-location">Direct save</button>
+        <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/settings/preferences/home-location">Direct save</button>
         <button class="shared-feed-chip" type="button" data-action="settings-address-change-refresh"${disabledAttr(resource.loading)}>Refresh</button>
       </div>
     </div>
@@ -82608,7 +91204,7 @@ function renderSettingsPreferences() {
           icon: "home",
           title: "Home Location",
           copy: "Manage the address used for districts and ballot context.",
-          route: "/settings/voter-profile/home-location",
+          route: "/settings/preferences/home-location",
           status: districtId ? "Ready" : "Set up",
         })}
         ${renderSettingsPreferenceCard({
@@ -83103,7 +91699,7 @@ function renderSettingsMyDistricts() {
         </div>
         ${renderSettingsResourceStatus(resource, "district context")}
         <div class="shared-settings-form-actions">
-          <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="/settings/voter-profile/home-location">Home location</button>
+          <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="/settings/preferences/home-location">Home location</button>
           <button class="shared-feed-chip" type="button" data-action="settings-voter-profile-refresh-districts">Retry</button>
         </div>
       </section>
@@ -83118,7 +91714,7 @@ function renderSettingsMyDistricts() {
       </div>
       <div class="shared-settings-districts-hero__actions">
         <button class="shared-feed-chip" type="button" data-action="settings-voter-profile-refresh-districts"${disabledAttr(resource.loading)}>${resource.loading ? "Refreshing..." : "Refresh"}</button>
-        <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/settings/voter-profile/home-location">Home location</button>
+        <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/settings/preferences/home-location">Home location</button>
         ${electionRoute ? `<button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="${escapeHtml(electionRoute)}">Election Day</button>` : ""}
       </div>
     </section>
@@ -83239,6 +91835,128 @@ const VOTER_INTEL_TAB_CONFIG = [
   },
 ];
 
+const VOTER_INTEL_PERSONAL_SOURCE_DEFINITIONS = [
+  {
+    key: "publicCivic",
+    icon: "election",
+    label: "Civic",
+    description:
+      "Public civic data such as offices, districts, representatives, and election information.",
+  },
+  {
+    key: "fec",
+    icon: "payments",
+    label: "FEC",
+    description:
+      "Federal Election Commission data used to enrich federal candidate and committee records.",
+  },
+  {
+    key: "appSignals",
+    icon: "profile",
+    label: "App",
+    description:
+      "Your in-app issue answers, bill opinions, follows, rankings, and guide activity.",
+  },
+];
+
+const VOTER_INTEL_CAMPAIGN_SOURCE_DEFINITIONS = [
+  {
+    key: "voterFile",
+    icon: "registry",
+    label: "Voter file",
+    description:
+      "Voter-file fields, when available, used for district and registration context.",
+  },
+  {
+    key: "voterHistory",
+    icon: "calendar",
+    label: "History",
+    description:
+      "Past participation indicators, when available. This is about turnout history, not who you voted for.",
+  },
+  {
+    key: "campaignContact",
+    icon: "messages",
+    label: "Contact",
+    description:
+      "Campaign contact preferences and outreach history shared through campaign tools.",
+  },
+];
+
+const VOTER_INTEL_KNOWN_SOURCE_KEYS = new Set(
+  [
+    ...VOTER_INTEL_PERSONAL_SOURCE_DEFINITIONS,
+    ...VOTER_INTEL_CAMPAIGN_SOURCE_DEFINITIONS,
+  ].map((source) => source.key),
+);
+
+function voterIntelSourceEnabled(capability, key) {
+  const value = capability?.sources?.[key];
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "number") {
+    return value > 0;
+  }
+  const normalized = normalizeString(value).toLowerCase();
+  return ["true", "1", "yes", "on", "enabled", "available"].includes(normalized);
+}
+
+function voterIntelCapabilityJurisdictionLabel(capability = {}) {
+  const key = normalizeString(capability.jurisdictionKey).toUpperCase();
+  if (key) {
+    const match = /^US#([A-Z]{2})(?:#(.+))?$/u.exec(key);
+    if (match) {
+      const state = match[1];
+      const district = normalizeString(match[2]);
+      if (district) {
+        return `${state}-${district}`;
+      }
+      return state;
+    }
+    if (key === "FEDERAL") {
+      return "US";
+    }
+    return key;
+  }
+  return normalizeString(capability.stateId).toUpperCase();
+}
+
+function voterIntelUserInitials(profile = {}) {
+  const name =
+    normalizeString(profile.displayName || profile.fullName || profile.username) ||
+    "You";
+  return (
+    name
+      .split(/\s+/u)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase() || "")
+      .join("") || "Y"
+  );
+}
+
+function renderVoterIntelSourceRow(source, capability) {
+  const enabled = voterIntelSourceEnabled(capability, source.key);
+  return `<div class="shared-voter-intel-source-row${enabled ? " is-enabled" : ""}">
+    <span aria-hidden="true">${renderIcon(source.icon)}</span>
+    <div>
+      <strong>${escapeHtml(source.label)}</strong>
+      <p>${escapeHtml(source.description)}</p>
+    </div>
+    <em>${escapeHtml(enabled ? "On" : "Off")}</em>
+  </div>`;
+}
+
+function renderVoterIntelSourceGroup(title, sources, capability) {
+  return `<div class="shared-voter-intel-source-group">
+    <h3>${escapeHtml(title)}</h3>
+    <div class="shared-voter-intel-source-list">
+      ${sources.map((source) => renderVoterIntelSourceRow(source, capability)).join("")}
+    </div>
+  </div>`;
+}
+
 function getVoterIntelActiveTab() {
   const tab = normalizeString(readCurrentSearchParams().get("tab")).toLowerCase();
   return VOTER_INTEL_TAB_CONFIG.some((item) => item.key === tab)
@@ -83282,54 +92000,196 @@ function renderVoterIntelMetric({ label, value, copy }) {
   </article>`;
 }
 
-function renderVoterIntelMatrix(profile) {
+function renderVoterIntelReadiness(profile) {
   const matrix = profile.matrix || normalizeVoterIntelMatrix();
+  const matrixReady = matrix.available === true;
+  const completedContestCount = Number(profile.ballotGame?.completedContestCount) || 0;
+  const guideReady = profile.ballotGame?.ready === true || completedContestCount > 0;
+  const questionRoute = "/questions";
+  const electionRoute = voterIntelTabRoute("elections", true);
+  const nextAction =
+    normalizeString(profile.ballotGame?.nextAction) ||
+    (guideReady
+      ? "Review saved rankings and keep the ballot guide current."
+      : "Rank a race to build the ballot guide.");
+  const items = [
+    {
+      icon: "search",
+      label: matrixReady ? "Keep the profile current" : "Unlock the matrix",
+      value: matrixReady
+        ? "Answer new reviewed questions as local issues change."
+        : "Answer one counted policy or bill signal to establish your placement.",
+      route: questionRoute,
+      action: "Open questions",
+    },
+    {
+      icon: "election",
+      label: guideReady ? "Ballot guide started" : "Start ballot ranking",
+      value: guideReady
+        ? `${formatCount(completedContestCount)} ranked contest${completedContestCount === 1 ? "" : "s"} saved.`
+        : nextAction,
+      route: electionRoute,
+      action: guideReady ? "Review elections" : "Rank a race",
+    },
+    {
+      icon: "shield",
+      label: "Transparent controls",
+      value:
+        "These signals are built from profile, issue, ballot, and consented campaign context.",
+      route: "/settings/privacy-safety",
+      action: "Review controls",
+    },
+  ];
+  return `<section class="shared-voter-intel-next">
+    ${items
+      .map(
+        (item) => `<button class="shared-voter-intel-next__item" type="button" data-action="navigate" data-route="${escapeHtml(item.route)}">
+          <span aria-hidden="true">${renderIcon(item.icon)}</span>
+          <strong>${escapeHtml(item.label)}</strong>
+          <p>${escapeHtml(item.value)}</p>
+          <em>${escapeHtml(item.action)}</em>
+        </button>`,
+      )
+      .join("")}
+  </section>`;
+}
+
+function voterIntelMatrixPosition(matrix = {}) {
   const x = Math.max(-1, Math.min(1, Number(matrix.x) || 0));
   const y = Math.max(-1, Math.min(1, Number(matrix.y) || 0));
-  const left = ((x + 1) / 2) * 100;
-  const top = ((1 - y) / 2) * 100;
-  return `<section class="shared-voter-intel-panel shared-voter-intel-panel--matrix">
+  return {
+    x,
+    y,
+    left: ((x + 1) / 2) * 100,
+    top: ((1 - y) / 2) * 100,
+  };
+}
+
+function voterIntelOfficialInitials(official = {}) {
+  return (
+    normalizeString(official.displayName)
+      .split(/\s+/u)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase() || "")
+      .join("") || "O"
+  );
+}
+
+function renderVoterIntelOfficialMarker(official, index) {
+  const position = voterIntelMatrixPosition(official.matrix);
+  const name = normalizeString(official.displayName) || "Official";
+  const route = buildOfficialProfileRoute(official.officialId, getCurrentPathWithQuery());
+  const avatar = official.avatarUrl
+    ? `<img src="${escapeHtml(official.avatarUrl)}" alt="" loading="lazy" />`
+    : `<strong>${escapeHtml(voterIntelOfficialInitials(official))}</strong>`;
+  return `<button class="shared-voter-intel-matrix__official" type="button" data-action="navigate" data-route="${escapeHtml(route)}" style="left:${escapeHtml(position.left.toFixed(2))}%;top:${escapeHtml(position.top.toFixed(2))}%;--official-index:${escapeHtml(String(index % 6))}" title="${escapeHtml(`${name}: X ${position.x.toFixed(2)}, Y ${position.y.toFixed(2)}`)}">
+    ${avatar}
+  </button>`;
+}
+
+function renderVoterIntelOfficialLegend(officials = []) {
+  if (!officials.length) {
+    return "";
+  }
+  return `<div class="shared-voter-intel-officials">
+    <div class="shared-voter-intel-officials__header">
+      <strong>Followed officials</strong>
+      <span>${escapeHtml(`${formatCount(officials.length)} plotted`)}</span>
+    </div>
+    <div class="shared-voter-intel-officials__list">
+      ${officials
+        .map((official, index) => {
+          const position = voterIntelMatrixPosition(official.matrix);
+          const name = normalizeString(official.displayName) || "Official";
+          const route = buildOfficialProfileRoute(official.officialId, getCurrentPathWithQuery());
+          return `<button class="shared-voter-intel-official-row" type="button" data-action="navigate" data-route="${escapeHtml(route)}" style="--official-index:${escapeHtml(String(index % 6))}">
+            <span>${official.avatarUrl ? `<img src="${escapeHtml(official.avatarUrl)}" alt="" loading="lazy" />` : `<strong>${escapeHtml(voterIntelOfficialInitials(official))}</strong>`}</span>
+            <em>${escapeHtml(name)}</em>
+            <small>${escapeHtml(`X ${position.x.toFixed(2)} / Y ${position.y.toFixed(2)}`)}</small>
+          </button>`;
+        })
+        .join("")}
+    </div>
+  </div>`;
+}
+
+function renderVoterIntelMatrix(profile) {
+  const matrix = profile.matrix || normalizeVoterIntelMatrix();
+  const position = voterIntelMatrixPosition(matrix);
+  const officials = (profile.followedOfficials || []).slice(0, 16);
+  const settingsProfile =
+    state.pages.settings.voterProfile.profile.item || normalizeMyProfile();
+  const userAvatarUrl = normalizeUrl(settingsProfile.avatarUrl);
+  const userLabel =
+    normalizeString(
+      settingsProfile.displayName ||
+        settingsProfile.fullName ||
+        settingsProfile.username,
+    ) || "You";
+  const userMarker = userAvatarUrl
+    ? `<img src="${escapeHtml(userAvatarUrl)}" alt="" loading="lazy" />`
+    : `<strong>${escapeHtml(voterIntelUserInitials(settingsProfile))}</strong>`;
+  return `<section class="shared-voter-intel-panel shared-voter-intel-panel--matrix${matrix.available ? "" : " is-pending"}">
     <div class="shared-settings-panel__header">
       <div>
         <h2>Political matrix</h2>
         <p>${escapeHtml(
           matrix.available
-            ? "Your placement updates as you answer issue and bill questions."
+            ? "Your placement updates as Polis learns from reviewed issue answers, bill opinions, and ballot work."
             : matrix.explanation ||
-                "Answer policy questions to unlock a more confident matrix placement.",
+                "Answer one counted policy or bill signal to unlock your matrix placement.",
         )}</p>
       </div>
       <span class="shared-settings-status">${escapeHtml(
-        `${formatCount(matrix.answeredCount)} answers`,
+        matrix.available ? "Active" : "Building",
       )}</span>
     </div>
-    <div class="shared-voter-intel-matrix" role="img" aria-label="Political matrix position">
+    <div class="shared-voter-intel-matrix${matrix.available ? "" : " is-pending"}" role="img" aria-label="Political matrix position with followed official markers">
       <span class="shared-voter-intel-matrix__axis shared-voter-intel-matrix__axis--x"></span>
       <span class="shared-voter-intel-matrix__axis shared-voter-intel-matrix__axis--y"></span>
       <span class="shared-voter-intel-matrix__label shared-voter-intel-matrix__label--top">Institutional</span>
       <span class="shared-voter-intel-matrix__label shared-voter-intel-matrix__label--bottom">Local-first</span>
       <span class="shared-voter-intel-matrix__label shared-voter-intel-matrix__label--left">Collective</span>
       <span class="shared-voter-intel-matrix__label shared-voter-intel-matrix__label--right">Individual</span>
-      <span class="shared-voter-intel-matrix__point" style="left:${escapeHtml(left.toFixed(2))}%;top:${escapeHtml(top.toFixed(2))}%"></span>
+      ${officials.map(renderVoterIntelOfficialMarker).join("")}
+      ${
+        matrix.available
+          ? ""
+          : `<span class="shared-voter-intel-matrix__empty">
+              <strong>Awaiting a counted signal</strong>
+              <small>Reviewed questions and substantive bill opinions move the placement.</small>
+            </span>`
+      }
+      <span class="shared-voter-intel-matrix__point${userAvatarUrl ? " has-avatar" : ""}" style="left:${escapeHtml(position.left.toFixed(2))}%;top:${escapeHtml(position.top.toFixed(2))}%" title="${escapeHtml(`${userLabel}'s matrix position`)}">${userMarker}</span>
     </div>
+    ${renderVoterIntelOfficialLegend(officials)}
     <div class="shared-voter-intel-matrix__meta">
-      <span>X ${escapeHtml(x.toFixed(2))}</span>
-      <span>Y ${escapeHtml(y.toFixed(2))}</span>
-      <span>${escapeHtml(formatVoterIntelPercent(matrix.confidence))} confidence</span>
+      <span><strong>${escapeHtml(matrix.available ? "Active" : "Not ready")}</strong><small>Matrix status</small></span>
+      <span><strong>${escapeHtml(formatVoterIntelPercent(matrix.confidence))}</strong><small>Confidence</small></span>
+      <span><strong>${escapeHtml(formatCount(matrix.answeredCount))}</strong><small>Counted signals</small></span>
     </div>
   </section>`;
 }
 
 function renderVoterIntelCapability(snapshot) {
   const capability = snapshot?.capability || normalizeVoterIntelCapability();
-  const sources = Object.entries(capability.sources || {});
+  const jurisdiction = voterIntelCapabilityJurisdictionLabel(capability);
+  const additionalSources = Object.entries(capability.sources || {})
+    .filter(([key]) => !VOTER_INTEL_KNOWN_SOURCE_KEYS.has(key))
+    .map(([key]) => ({
+      key,
+      icon: "file",
+      label: humanizeLabel(key) || key,
+      description: `${humanizeLabel(key) || key} source returned by the voter-intelligence service.`,
+    }));
   return `<section class="shared-voter-intel-panel">
     <div class="shared-settings-panel__header">
       <div>
-        <h2>Jurisdiction coverage</h2>
+        <h2>${escapeHtml(jurisdiction ? `Data sources for ${jurisdiction}` : "Data sources")}</h2>
         <p>${escapeHtml(
           capability.enabled
-            ? "These sources are available for your voter intelligence profile."
+            ? "This shows which sources are available for building your voter intelligence profile in this jurisdiction."
             : "Voter intelligence is limited in this jurisdiction.",
         )}</p>
       </div>
@@ -83337,18 +92197,13 @@ function renderVoterIntelCapability(snapshot) {
         capability.enabled ? "Enabled" : "Limited",
       )}</span>
     </div>
-    <div class="shared-voter-intel-source-grid">
+    <div class="shared-voter-intel-source-groups">
+      ${renderVoterIntelSourceGroup("Personal profile signals", VOTER_INTEL_PERSONAL_SOURCE_DEFINITIONS, capability)}
+      ${renderVoterIntelSourceGroup("Campaign voter-map signals", VOTER_INTEL_CAMPAIGN_SOURCE_DEFINITIONS, capability)}
       ${
-        sources.length
-          ? sources
-              .map(
-                ([key, enabled]) => `<div class="shared-voter-intel-source${enabled ? " is-enabled" : ""}">
-                  <strong>${escapeHtml(humanizeLabel(key) || key)}</strong>
-                  <span>${escapeHtml(enabled ? "Available" : "Unavailable")}</span>
-                </div>`,
-              )
-              .join("")
-          : `<div class="shared-settings-empty">No jurisdiction source details were returned yet.</div>`
+        additionalSources.length
+          ? renderVoterIntelSourceGroup("Additional sources", additionalSources, capability)
+          : ""
       }
     </div>
   </section>`;
@@ -83476,6 +92331,7 @@ function renderVoterIntelProfileTab(profile, snapshot) {
         copy: `${formatCount(profile.ballotGame.completedContestCount)} ranked contest${profile.ballotGame.completedContestCount === 1 ? "" : "s"}.`,
       })}
     </div>
+    ${renderVoterIntelReadiness(profile)}
     ${renderVoterIntelMatrix(profile)}
     ${
       profile.explanations.length
@@ -83491,6 +92347,88 @@ function renderVoterIntelProfileTab(profile, snapshot) {
 
 function voterIntelRaceCardRoute(districts) {
   return settingsDistrictElectionRoute(districts) || "/election-day";
+}
+
+function voterIntelElectionRelativeLabel(electionDay) {
+  const dateKey = voterIntelDateKey(electionDay);
+  if (!dateKey) return "";
+  const timestamp = Date.parse(`${dateKey}T00:00:00`);
+  if (Number.isNaN(timestamp)) return "";
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const target = new Date(timestamp);
+  const diffDays = Math.round((target.getTime() - today.getTime()) / 86400000);
+  if (diffDays === 0) return "Today";
+  if (diffDays === 1) return "Tomorrow";
+  if (diffDays === -1) return "Yesterday";
+  if (diffDays > 1) return `In ${formatCount(diffDays)} days`;
+  return `${formatCount(Math.abs(diffDays))} days ago`;
+}
+
+function voterIntelElectionGroupFallbackLabel(race = {}) {
+  return (
+    formatCalendarDate(race.electionDay) ||
+    normalizeString(race.electionName) ||
+    "Election date pending"
+  );
+}
+
+function voterIntelElectionRaceGroups(raceItems = []) {
+  const groups = new Map();
+  raceItems.forEach((item) => {
+    const race = item.race || {};
+    const dateKey = voterIntelDateKey(race.electionDay);
+    const key = dateKey || normalizeString(race.electionName) || "unknown";
+    const existing = groups.get(key) || {
+      key,
+      dateKey,
+      label: voterIntelElectionGroupFallbackLabel(race),
+      relative: voterIntelElectionRelativeLabel(race.electionDay),
+      items: [],
+    };
+    existing.items.push(item);
+    groups.set(key, existing);
+  });
+  return Array.from(groups.values())
+    .map((group) => ({
+      ...group,
+      items: group.items.slice().sort((left, right) =>
+        normalizeString(left.race?.title || left.race?.officeTitle).localeCompare(
+          normalizeString(right.race?.title || right.race?.officeTitle),
+        ),
+      ),
+    }))
+    .sort((left, right) => {
+      if (left.dateKey && right.dateKey) {
+        return left.dateKey.localeCompare(right.dateKey);
+      }
+      if (left.dateKey) return -1;
+      if (right.dateKey) return 1;
+      return left.label.localeCompare(right.label);
+    });
+}
+
+function renderVoterIntelElectionGroup(group, districts, index) {
+  const selectedContestId = voterIntelRankingsState().selectedContestId;
+  const selected = group.items.some(
+    (item) => voterIntelRaceContestId(item.race) === selectedContestId,
+  );
+  const open = index === 0 || selected;
+  return `<details class="shared-voter-intel-election-group${selected ? " is-selected" : ""}"${open ? " open" : ""}>
+    <summary class="shared-voter-intel-election-group__summary">
+      <span class="shared-voter-intel-election-group__icon">${renderIcon("election")}</span>
+      <span class="shared-voter-intel-election-group__main">
+        <small>Election date</small>
+        <strong>${escapeHtml(group.label)}</strong>
+        <em>${escapeHtml(`${formatCount(group.items.length)} rankable race${group.items.length === 1 ? "" : "s"}`)}</em>
+      </span>
+      ${group.relative ? `<span class="shared-voter-intel-election-group__relative">${escapeHtml(group.relative)}</span>` : ""}
+      <span class="shared-voter-intel-election-group__chevron" aria-hidden="true">${renderIcon("chevronDown")}</span>
+    </summary>
+    <div class="shared-voter-intel-election-group__races">
+      ${group.items.map((item) => renderVoterIntelRaceCard(districts, item.entry, item.race)).join("")}
+    </div>
+  </details>`;
 }
 
 function voterIntelCandidateInitials(candidate = {}) {
@@ -83785,15 +92723,15 @@ function renderVoterIntelElectionsTab(profile, guidedMode) {
     entry,
     race: voterIntelRankableRaceFromDistrictEntry(districts, entry),
   }));
+  const rankableRaceItems = raceItems.filter((item) =>
+    voterIntelRaceIsRankable(item.race),
+  );
+  const electionGroups = voterIntelElectionRaceGroups(rankableRaceItems);
   const selectedContestId = voterIntelRankingsState().selectedContestId;
   const selectedRace =
-    raceItems.find(
+    rankableRaceItems.find(
       (item) => voterIntelRaceContestId(item.race) === selectedContestId,
     )?.race || null;
-  const openRaceCount = raceEntries.filter((entry) => {
-    const status = normalizeString(settingsDistrictOfficeReelection(entry.office).status).toLowerCase();
-    return status.includes("up_for") || status.includes("open");
-  }).length;
   return `<div class="shared-voter-intel-tab-body shared-voter-intel-elections">
     ${
       guidedMode
@@ -83801,7 +92739,7 @@ function renderVoterIntelElectionsTab(profile, guidedMode) {
             <span>${renderIcon("election")}</span>
             <div>
               <strong>Ballot ranking</strong>
-              <p>Pick one race from your district context, open it in Election Day, and build the rankings that feed your ballot guide.</p>
+              <p>Pick a candidate-backed race, rank the choices inline, and continue through each election date when you are ready.</p>
             </div>
           </section>`
         : ""
@@ -83820,14 +92758,14 @@ function renderVoterIntelElectionsTab(profile, guidedMode) {
     ${renderSettingsResourceStatus(districtsResource, "district election data")}
     <div class="shared-voter-intel-metrics">
       ${renderVoterIntelMetric({
-        label: "Races",
-        value: formatCount(raceEntries.length),
-        copy: "Offices returned for your saved home location.",
+        label: "Rankable",
+        value: formatCount(rankableRaceItems.length),
+        copy: "Candidate-backed races ready for ballot ranking.",
       })}
       ${renderVoterIntelMetric({
-        label: "Open",
-        value: formatCount(openRaceCount),
-        copy: "Races currently marked open or up for reelection.",
+        label: "Election dates",
+        value: formatCount(electionGroups.length),
+        copy: "Races grouped by the election day returned for your district.",
       })}
       ${renderVoterIntelMetric({
         label: "Ranked",
@@ -83837,14 +92775,18 @@ function renderVoterIntelElectionsTab(profile, guidedMode) {
     </div>
     ${selectedRace ? renderVoterIntelRankingWorkspace(selectedRace) : ""}
     ${
-      raceEntries.length
-        ? `<section class="shared-voter-intel-election-grid">
-            ${raceItems.map((item) => renderVoterIntelRaceCard(districts, item.entry, item.race)).join("")}
+      electionGroups.length
+        ? `<section class="shared-voter-intel-election-list">
+            ${electionGroups.map((group, index) => renderVoterIntelElectionGroup(group, districts, index)).join("")}
           </section>`
         : `<section class="shared-voter-intel-panel">
-            <div class="shared-settings-empty">No upcoming races were returned yet. Add or verify your home location, then refresh district election data.</div>
+            <div class="shared-settings-empty">${
+              raceEntries.length
+                ? "No candidate-backed races are ready for ballot ranking yet. Review all district offices in My Districts, then refresh when candidate data is available."
+                : "No upcoming races were returned yet. Add or verify your home location, then refresh district election data."
+            }</div>
             <div class="shared-settings-form-actions">
-              <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="/settings/voter-profile/home-location">Home location</button>
+              <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="${raceEntries.length ? "/settings/preferences/my-districts" : "/settings/preferences/home-location"}">${raceEntries.length ? "My districts" : "Home location"}</button>
               <button class="shared-feed-chip" type="button" data-action="settings-voter-profile-refresh-districts">Retry</button>
             </div>
           </section>`
@@ -84394,7 +93336,7 @@ function renderSettingsLocation() {
       </div>
       ${renderSettingsResourceStatus(districtResource, "district context")}
       <div class="shared-settings-resource-grid">
-        <button class="shared-settings-resource-card" type="button" data-action="navigate" data-route="/settings/voter-profile/home-location">
+        <button class="shared-settings-resource-card" type="button" data-action="navigate" data-route="/settings/preferences/home-location">
           <div><h3>Home location</h3><p>${escapeHtml(profile?.homeLocation?.formattedAddress || profile?.addressLine1 || "Add a home location to resolve district context.")}</p></div><span>Open</span>
         </button>
         <button class="shared-settings-resource-card" type="button" data-action="navigate" data-route="/settings/voter-profile">
@@ -85137,7 +94079,7 @@ function renderSettingsSecurityRestore() {
         })}
         ${renderSettingsSecurityMetric({
           value: hasBundle ? "Available" : "Missing",
-          label: "server backup",
+          label: "encrypted backup",
           detail: hasBundle ? "Ready to verify" : "Export a kit first",
           tone: hasBundle ? "good" : "pending",
         })}
@@ -85158,7 +94100,7 @@ function renderSettingsSecurityRestore() {
         <div class="shared-settings-panel__header">
           <div>
             <h2>Restore encrypted history</h2>
-            <p>Enter your recovery key to restore the server backup on this browser. If you saved a recovery kit, paste it as a fallback.</p>
+            <p>Enter your recovery key to restore the encrypted backup on this browser. If you saved a recovery kit, paste it as a fallback.</p>
           </div>
           ${renderSettingsStatusPill(hasBundle ? "Encrypted backup ready" : "Kit required", hasBundle ? "good" : "pending")}
         </div>
@@ -85781,6 +94723,8 @@ function renderSettingsPage() {
     body = renderSettingsAudienceGroups();
   } else if (activeSection === "notifications") {
     body = renderSettingsNotifications();
+  } else if (activeSection === "quiet-hours") {
+    body = renderSettingsQuietHours();
   } else if (activeSection === "preferences") {
     body = renderSettingsPreferences();
   } else if (
@@ -85812,7 +94756,7 @@ function renderSettingsPage() {
     body = renderSettingsCampaignDataSharing();
   } else if (activeSection === "security") {
     body = renderSettingsSecurityCenter();
-  } else if (activeSection === "voter-profile") {
+  } else if (activeSection === "voter-profile" || activeSection === "home-location") {
     body = renderSettingsVoterProfile();
   } else if (activeSection === "my-districts") {
     body = renderSettingsMyDistricts();
@@ -87885,10 +96829,12 @@ function renderRouteStage() {
     if (routeKey === ROUTE_KEY_ACHIEVEMENTS) {
       return renderAchievementsAuthGate();
     }
+    if (routeKey === ROUTE_KEY_CANDIDATE_EDIT) {
+      return renderCandidateEditAuthGate();
+    }
     if (
       routeKey === ROUTE_KEY_CANDIDATES ||
       routeKey === ROUTE_KEY_CANDIDATE_DETAIL ||
-      routeKey === ROUTE_KEY_CANDIDATE_EDIT ||
       routeKey === ROUTE_KEY_CONGRESSIONAL_REPORT_CARD ||
       routeKey === ROUTE_KEY_OFFICIAL_DETAIL ||
       routeKey === ROUTE_KEY_OFFICIAL_REPORT_CARD ||
@@ -87955,18 +96901,22 @@ function renderRouteStage() {
       return renderMessagesAuthGate();
     }
     if (
-      routeKey === ROUTE_KEY_TOPICS ||
+      routeKey === ROUTE_KEY_ONBOARDING_PROFILE ||
+      routeKey === ROUTE_KEY_ONBOARDING_PHOTO ||
+      routeKey === ROUTE_KEY_ONBOARDING_LOCATION ||
+      routeKey === ROUTE_KEY_ONBOARDING_ADDRESS ||
       routeKey === ROUTE_KEY_ONBOARDING_TOPICS
+    ) {
+      return renderOnboardingAuthGate();
+    }
+    if (
+      routeKey === ROUTE_KEY_TOPICS
     ) {
       return renderTopicsAuthGate();
     }
     if (
       routeKey === ROUTE_KEY_SETTINGS ||
-      routeKey === ROUTE_KEY_SETTINGS_SECTION ||
-      routeKey === ROUTE_KEY_ONBOARDING_PROFILE ||
-      routeKey === ROUTE_KEY_ONBOARDING_PHOTO ||
-      routeKey === ROUTE_KEY_ONBOARDING_LOCATION ||
-      routeKey === ROUTE_KEY_ONBOARDING_ADDRESS
+      routeKey === ROUTE_KEY_SETTINGS_SECTION
     ) {
       return renderSettingsAuthGate();
     }
@@ -88014,6 +96964,9 @@ function renderRouteStage() {
   if (routeKey === ROUTE_KEY_ACCOUNT_DELETION_REQUESTED) {
     return renderAccountDeletionRequestedPage();
   }
+  if (routeKey === ROUTE_KEY_POST_VIEW) {
+    return renderPostViewFallbackPage();
+  }
   if (isShareRoute()) {
     return renderFeedStage();
   }
@@ -88037,6 +96990,9 @@ function renderRouteStage() {
   }
   if (routeKey === ROUTE_KEY_PUBLIC_PETITION) {
     return renderPublicPetitionPage();
+  }
+  if (routeKey === ROUTE_KEY_PUBLIC_PETITION_RESULTS) {
+    return renderPublicPetitionResultsPage();
   }
   if (routeKey === ROUTE_KEY_SEARCH) {
     return renderSearchLandingPage();
@@ -88175,14 +97131,50 @@ function renderRouteStage() {
   return renderRouteFallbackPage();
 }
 
+function commentResponseBadgeLabel(comment = {}) {
+  return (
+    normalizeString(comment.badgeLabel) ||
+    candidateEngagementResponseModeLabel(comment.responseMode)
+  );
+}
+
+function renderCommentsEngagementBanner() {
+  const engagement = commentsEngagementContext();
+  const modeLabel = candidateEngagementResponseModeLabel(engagement.responseMode);
+  if (!engagement.candidateId || !modeLabel) {
+    return "";
+  }
+  return `<div class="shared-comments__engagement-mode">
+    <span>${renderIcon("candidate")}</span>
+    <div>
+      <strong>${escapeHtml(`Replying as ${modeLabel}`)}</strong>
+      <small>Campaign engagement context is active for this reply.</small>
+    </div>
+    <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(candidateDashboardSectionPath(engagement.candidateId, "engagement"))}">Engagement</button>
+  </div>`;
+}
+
+function commentComposerPlaceholder(currentPost) {
+  const engagement = commentsEngagementContext();
+  const modeLabel = candidateEngagementResponseModeLabel(engagement.responseMode);
+  if (engagement.candidateId && modeLabel) {
+    return `Reply as ${modeLabel}`;
+  }
+  return `Write a comment about ${currentPost?.authorDisplayName || "this post"}`;
+}
+
 function renderCommentsPanel() {
   const open = state.ui.comments.open;
   const postId = state.ui.comments.postId;
   const currentPost = getCurrentItems().find((item) => item.postId === postId);
   const comments = state.ui.comments.items
     .map((comment) => {
+      const responseBadge = commentResponseBadgeLabel(comment);
       const replyBadge = comment.replyTo
-        ? `<span class="shared-comments__reply-pill">Reply</span>`
+        ? `<span class="shared-comment__reply-pill">Reply</span>`
+        : "";
+      const modeBadge = responseBadge
+        ? `<span class="shared-comment__reply-pill shared-comment__reply-pill--mode">${escapeHtml(responseBadge)}</span>`
         : "";
       const replyClass = comment.replyTo ? " is-reply" : "";
       const highlightClass =
@@ -88211,6 +97203,7 @@ function renderCommentsPanel() {
                 ? `<span class="shared-comment__time">${escapeHtml(formatRelativeTime(comment.createdAt))}</span>`
                 : ""
             }
+            ${modeBadge}
           </div>
           <p class="shared-comment__text">${escapeHtml(comment.text)}</p>
           <div class="shared-comment__actions">
@@ -88257,13 +97250,175 @@ function renderCommentsPanel() {
         ${
           state.auth.session
             ? `<form class="shared-comments__form" data-comment-form="1">
-                <textarea name="comment" rows="2" placeholder="Write a comment about ${escapeHtml(currentPost?.authorDisplayName || "this post")}"></textarea>
-                <button type="submit"${state.ui.comments.submitting ? " disabled" : ""}>${state.ui.comments.submitting ? "Posting…" : "Post"}</button>
+                ${renderCommentsEngagementBanner()}
+                <textarea name="comment" rows="2" placeholder="${escapeHtml(commentComposerPlaceholder(currentPost))}"></textarea>
+                <button type="submit"${state.ui.comments.submitting ? " disabled" : ""}>${state.ui.comments.submitting ? "Posting..." : "Post"}</button>
               </form>`
             : `<button class="shared-comments__locked" data-action="auth-login-inline">
                 Log in or sign up to comment
               </button>`
         }
+      </div>
+    </section>
+  </div>`;
+}
+
+function renderLikerRow(liker) {
+  const canOpen = Boolean(liker.userId);
+  const username = normalizeString(liker.username);
+  const subtitle =
+    username && liker.displayName !== `@${username}` ? `@${username}` : "";
+  return `<article class="shared-liker">
+    <button class="shared-liker__identity" type="button" data-action="liker-profile" data-user-id="${escapeHtml(liker.userId)}"${disabledAttr(!canOpen)}>
+      <span class="shared-liker__avatar">
+        ${
+          liker.avatarUrl
+            ? `<img src="${escapeHtml(liker.avatarUrl)}" alt="${escapeHtml(liker.displayName)}" />`
+            : `<em>${escapeHtml(liker.displayName.slice(0, 1).toUpperCase() || "P")}</em>`
+        }
+      </span>
+      <span class="shared-liker__copy">
+        <strong>${escapeHtml(liker.displayName)}</strong>
+        ${subtitle ? `<small>${escapeHtml(subtitle)}</small>` : ""}
+      </span>
+    </button>
+    <span class="shared-liker__time">${escapeHtml(liker.createdAt ? formatRelativeTime(liker.createdAt) : "")}</span>
+  </article>`;
+}
+
+function renderLikersPanel() {
+  const panel = state.ui.likers;
+  const open = panel.open;
+  const postId = normalizeString(panel.postId);
+  const currentPost = getCurrentItems().find((item) => item.postId === postId);
+  const knownCount = Number(currentPost?.likesCount) || panel.items.length;
+  const peopleLabel = panel.loading
+    ? "Loading people"
+    : `${formatCount(knownCount)} ${knownCount === 1 ? "person" : "people"}`;
+  const rows = panel.items.map(renderLikerRow).join("");
+  return `<div class="shared-likers${open ? " is-open" : ""}">
+    <button class="shared-likers__backdrop" data-action="close-likers" aria-label="Close likes"></button>
+    <section class="shared-likers__panel" aria-hidden="${open ? "false" : "true"}">
+      <div class="shared-likers__handle"></div>
+      <div class="shared-likers__header">
+        <div>
+          <h2>Likes</h2>
+          <p>${escapeHtml(peopleLabel)}</p>
+        </div>
+        <button class="shared-likers__close" data-action="close-likers" aria-label="Close likes">${renderIcon("close")}</button>
+      </div>
+      <div class="shared-likers__list">
+        ${
+          panel.loading
+            ? `<div class="shared-likers__empty">Loading likes...</div>`
+            : panel.error
+              ? `<div class="shared-likers__empty is-error">${escapeHtml(panel.error)}</div>`
+              : rows || `<div class="shared-likers__empty">No likes yet.</div>`
+        }
+      </div>
+      <div class="shared-likers__footer">
+        ${
+          panel.cursor
+            ? `<button class="shared-feed-chip shared-likers__load-more" type="button" data-action="likers-load-more"${disabledAttr(panel.loadingMore)}>${panel.loadingMore ? "Loading..." : "Load more"}</button>`
+            : `<span>${escapeHtml(panel.items.length ? "End of likes" : "Likes appear here after people tap the heart.")}</span>`
+        }
+      </div>
+    </section>
+  </div>`;
+}
+
+function renderPostSharePreview() {
+  const share = state.ui.postShare;
+  const postId = normalizeString(share.postId);
+  const preview = share.preview || buildPostSharePreviewFromPost(postId);
+  if (!postId && !preview) {
+    return "";
+  }
+  return renderMessagingPostShareCard({
+    postId,
+    text: normalizeString(preview?.previewText),
+    snapshot: preview,
+    raw: { snapshot: preview },
+  });
+}
+
+function renderPostShareConversationRow(conversation) {
+  const share = state.ui.postShare;
+  const conversationId = normalizeString(conversation?.conversationId);
+  if (!conversationId) {
+    return "";
+  }
+  const currentUserId = normalizeString(state.auth.user?.userId);
+  const title = messagingConversationDisplayTitle(conversation, currentUserId);
+  const subtitle = messagingConversationDisplaySubtitle(conversation, currentUserId);
+  const avatarUrl = messagingConversationDisplayAvatar(conversation, currentUserId);
+  const sending = share.sendingConversationId === conversationId;
+  const unreadCount = Number(conversation.unreadCount) || 0;
+  const meta = [
+    messagingConversationKindLabel(conversation),
+    conversation.updatedAt ? messagingConversationTimeLabel(conversation.updatedAt) : "",
+    unreadCount ? `${formatCount(unreadCount)} unread` : "",
+  ].filter(Boolean);
+  return `<button class="shared-post-share__conversation" type="button" data-action="post-share-send" data-conversation-id="${escapeHtml(conversationId)}"${disabledAttr(Boolean(share.sendingConversationId))}>
+    ${renderMessagingWorkspaceAvatar({ label: title, imageUrl: avatarUrl })}
+    <span class="shared-post-share__conversation-copy">
+      <strong>${escapeHtml(title)}</strong>
+      <small>${escapeHtml(subtitle || "Send this post into the thread.")}</small>
+      ${meta.length ? `<em>${meta.map(escapeHtml).join(" / ")}</em>` : ""}
+    </span>
+    <span class="shared-post-share__conversation-action">${escapeHtml(sending ? "Sending..." : "Send")}</span>
+  </button>`;
+}
+
+function renderPostSharePanel() {
+  const share = state.ui.postShare;
+  const open = share.open;
+  const conversations = (state.pages.messaging.inbox.items || []).filter(
+    (conversation) => normalizeString(conversation?.conversationId),
+  );
+  const visibleConversations = conversations.slice(0, 8);
+  const loadingConversations =
+    share.loading || state.pages.messaging.inbox.loading || state.pages.messaging.loading;
+  const conversationRows = visibleConversations
+    .map(renderPostShareConversationRow)
+    .join("");
+  const listMarkup = loadingConversations
+    ? '<div class="shared-post-share__empty">Loading conversations...</div>'
+    : share.error
+      ? `<div class="shared-post-share__empty is-error">${escapeHtml(share.error)}</div>`
+      : conversationRows ||
+        `<div class="shared-post-share__empty">
+          <strong>No recent conversations yet</strong>
+          <span>Start a DM, group chat, campaign room, or coalition room before sending posts inside Polis.</span>
+        </div>`;
+  return `<div class="shared-post-share${open ? " is-open" : ""}">
+    <button class="shared-post-share__backdrop" type="button" data-action="post-share-close" aria-label="Close share sheet"></button>
+    <section class="shared-post-share__panel" aria-hidden="${open ? "false" : "true"}" aria-labelledby="post-share-title">
+      <div class="shared-post-share__handle"></div>
+      <div class="shared-post-share__header">
+        <div>
+          <p>Share in Polis</p>
+          <h2 id="post-share-title">Send this post</h2>
+        </div>
+        <button class="shared-likers__close shared-post-share__close" type="button" data-action="post-share-close" aria-label="Close share sheet">${renderIcon("close")}</button>
+      </div>
+      <div class="shared-post-share__body">
+        <div class="shared-post-share__preview">${renderPostSharePreview()}</div>
+        <div class="shared-post-share__section">
+          <div class="shared-post-share__section-header">
+            <strong>Recent conversations</strong>
+            <button class="shared-feed-chip" type="button" data-action="post-share-refresh"${disabledAttr(loadingConversations || Boolean(share.sendingConversationId))}>Refresh</button>
+          </div>
+          <div class="shared-post-share__conversation-list">${listMarkup}</div>
+        </div>
+      </div>
+      <div class="shared-post-share__footer">
+        ${share.notice ? `<span class="shared-post-share__notice">${escapeHtml(share.notice)}</span>` : ""}
+        <div class="shared-post-share__actions">
+          <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="/messages/compose">${renderIcon("create")}<span>New message</span></button>
+          <button class="shared-feed-chip" type="button" data-action="post-share-copy"${disabledAttr(Boolean(share.sendingConversationId))}>${renderIcon("share")}<span>Copy link</span></button>
+          <button class="shared-feed-chip" type="button" data-action="post-share-external"${disabledAttr(Boolean(share.sendingConversationId))}>${renderIcon("send")}<span>Share outside Polis</span></button>
+        </div>
       </div>
     </section>
   </div>`;
@@ -88558,7 +97713,9 @@ function renderApp() {
         ${renderRail()}
         ${renderRouteStage()}
       </div>
-      ${isShareRoute() ? renderCommentsPanel() : ""}
+      ${renderCommentsPanel()}
+      ${renderLikersPanel()}
+      ${renderPostSharePanel()}
       ${renderAuthModal()}
       ${renderCandidateDonationFlowModal()}
       ${renderToast()}`;
@@ -88568,6 +97725,7 @@ function renderApp() {
   bindObservers();
   bindVideos();
   bindPostComposerCameraPreview();
+  bindPostComposerCoverPreview();
   bindEventsMap().catch(() => {});
   bindElectionMap().catch(() => {});
   bindElectionCounters();
@@ -89492,6 +98650,9 @@ function handleRootClick(event) {
     if (state.pages.create.camera?.active) {
       stopPostComposerCamera({ schedule: false });
     }
+    if (state.ui.postShare.open) {
+      state.ui.postShare = createPostShareState();
+    }
     navigateWithAuthGate(target.getAttribute("data-route"));
     return;
   }
@@ -89585,6 +98746,16 @@ function handleRootClick(event) {
 
   if (action === "candidate-avatar-clear") {
     clearCandidateAvatarUpload();
+    return;
+  }
+
+  if (action === "profile-avatar-pick") {
+    root?.querySelector("[data-profile-avatar-file]")?.click();
+    return;
+  }
+
+  if (action === "profile-avatar-clear") {
+    clearProfileAvatarUpload();
     return;
   }
 
@@ -89813,6 +98984,44 @@ function handleRootClick(event) {
     return;
   }
 
+  if (action === "petition-results-share-create") {
+    createPetitionResultsShare(
+      target.getAttribute("data-owner-type"),
+      target.getAttribute("data-owner-id"),
+      target.getAttribute("data-petition-id"),
+    ).catch(() => {});
+    return;
+  }
+
+  if (action === "petition-results-share-copy") {
+    const shareUrl = normalizeString(target.getAttribute("data-share-url"));
+    if (shareUrl) {
+      navigator.clipboard?.writeText(shareUrl).then(
+        () => showToast("Results link copied."),
+        () => showToast(shareUrl),
+      );
+    }
+    return;
+  }
+
+  if (action === "petition-results-share-revoke") {
+    if (window.confirm("Revoke this public results link?")) {
+      revokePetitionResultsShare(
+        target.getAttribute("data-owner-type"),
+        target.getAttribute("data-owner-id"),
+        target.getAttribute("data-petition-id"),
+      ).catch(() => {});
+    }
+    return;
+  }
+
+  if (action === "petition-public-results-csv") {
+    downloadPublicPetitionResultsCsv(
+      target.getAttribute("data-share-token"),
+    ).catch(() => {});
+    return;
+  }
+
   if (action === "petition-address-select") {
     selectPetitionAddressSuggestion(target.getAttribute("data-index")).catch(
       () => {},
@@ -89931,10 +99140,101 @@ function handleRootClick(event) {
     return;
   }
 
+  if (action === "mission-create-target-select") {
+    const form = target.closest("[data-route-form]");
+    const assigneeInput = form?.querySelector('input[name="assignee"]');
+    const targetModeSelect = form?.querySelector('select[name="targetMode"]');
+    const rawMode = normalizeString(target.getAttribute("data-target-mode"));
+    const currentMode = normalizeString(targetModeSelect?.value) || "user";
+    const resolvedMode =
+      rawMode === "role"
+        ? currentMode === "role_fanout"
+          ? "role_fanout"
+          : "role_claim"
+        : rawMode || normalizeString(target.getAttribute("data-resolved-target-mode")) || "user";
+    const assignee = normalizeString(target.getAttribute("data-assignee"));
+    if (!form || !assigneeInput || !targetModeSelect || !assignee) {
+      showToast("Mission target could not be applied.");
+      return;
+    }
+    assigneeInput.value = assignee;
+    targetModeSelect.value = resolvedMode;
+    syncMissionCreateDraftFromForm(form);
+    syncMissionFollowUpDraftFromForm(form);
+    syncMissionTemplateDraftFromForm(form);
+    form
+      .querySelectorAll(".shared-campaign-mission-target-option")
+      .forEach((button) => {
+        const buttonAssignee = normalizeString(button.getAttribute("data-assignee"));
+        const buttonMode = normalizeString(button.getAttribute("data-target-mode"));
+        const buttonResolvedMode =
+          buttonMode === "role"
+            ? resolvedMode === "role_fanout"
+              ? "role_fanout"
+              : "role_claim"
+            : buttonMode || normalizeString(button.getAttribute("data-resolved-target-mode"));
+        const active =
+          buttonAssignee === assignee &&
+          (buttonMode === "role"
+            ? resolvedMode !== "user"
+            : buttonResolvedMode === resolvedMode);
+        button.classList.toggle("is-active", active);
+        button.setAttribute("aria-pressed", active ? "true" : "false");
+      });
+    form
+      .querySelectorAll(".shared-campaign-mission-target-fanout")
+      .forEach((button) => {
+        const active = resolvedMode === "role_fanout";
+        button.classList.toggle("is-active", active);
+        button.setAttribute("aria-pressed", active ? "true" : "false");
+      });
+    const summary = form.querySelector("[data-mission-target-summary]");
+    if (summary) {
+      const label =
+        normalizeString(target.getAttribute("data-label")) ||
+        (resolvedMode === "user" ? "Selected person" : "Selected role");
+      const meta =
+        normalizeString(target.getAttribute("data-meta")) ||
+        (resolvedMode === "user"
+          ? "The backend will verify this user."
+          : "The backend will verify this role.");
+      summary.textContent = `${label} - ${meta}`;
+    }
+    showToast("Mission target selected.");
+    return;
+  }
+
   if (action === "discover-refresh") {
     loadDiscoverPage({ refresh: true }).catch(() => {
       showToast("Discover refresh failed.");
     });
+    return;
+  }
+
+  if (action === "discover-manage-toggle") {
+    state.pages.discover.manageOpen = !state.pages.discover.manageOpen;
+    scheduleRender();
+    return;
+  }
+
+  if (action === "discover-module-toggle") {
+    setDiscoverModuleVisibility(
+      target.getAttribute("data-module-key"),
+      target.getAttribute("data-visible") === "true",
+    );
+    return;
+  }
+
+  if (action === "discover-module-move") {
+    moveDiscoverModule(
+      target.getAttribute("data-module-key"),
+      target.getAttribute("data-direction"),
+    );
+    return;
+  }
+
+  if (action === "discover-modules-reset") {
+    resetDiscoverModulePreferences();
     return;
   }
 
@@ -91029,6 +100329,25 @@ function handleRootClick(event) {
     return;
   }
 
+  if (action === "candidate-donation-payout-remove-confirm") {
+    const donations = state.pages.candidateDashboard.detail.donations;
+    donations.confirmingPayoutBankRemoval = true;
+    scheduleRender();
+    return;
+  }
+
+  if (action === "candidate-donation-payout-remove-cancel") {
+    const donations = state.pages.candidateDashboard.detail.donations;
+    donations.confirmingPayoutBankRemoval = false;
+    scheduleRender();
+    return;
+  }
+
+  if (action === "candidate-donation-payout-remove") {
+    removeCandidateDonationPayoutBank().catch(() => {});
+    return;
+  }
+
   if (action === "candidate-donation-payout-clear") {
     const donations = state.pages.candidateDashboard.detail.donations;
     donations.pendingPayoutSession = null;
@@ -91170,6 +100489,27 @@ function handleRootClick(event) {
   if (action === "settings-address-change-attachment-remove") {
     removeSettingsAddressChangeAttachment(
       target.getAttribute("data-attachment-id"),
+    );
+    return;
+  }
+
+  if (action === "settings-home-location-clear") {
+    if (
+      window.confirm(
+        "Clear the saved home address? District features may ask you to add one again later.",
+      )
+    ) {
+      clearSettingsHomeLocationAddress().catch(() => {});
+    }
+    return;
+  }
+
+  if (action === "settings-manual-district-refresh") {
+    const resource = state.pages.settings.voterProfile.manualDistrict;
+    loadSettingsManualDistrictOptions(resource.stateId, { refresh: true }).catch(
+      () => {
+        showToast("Districts could not be loaded.");
+      },
     );
     return;
   }
@@ -91655,6 +100995,30 @@ function handleRootClick(event) {
     return;
   }
 
+  if (action === "open-likers") {
+    openLikers(target.getAttribute("data-post-id")).catch(() => {});
+    return;
+  }
+
+  if (action === "close-likers") {
+    closeLikers();
+    return;
+  }
+
+  if (action === "likers-load-more") {
+    loadPostLikers({ append: true }).catch(() => {});
+    return;
+  }
+
+  if (action === "liker-profile") {
+    const userId = normalizeString(target.getAttribute("data-user-id"));
+    if (userId) {
+      closeLikers();
+      navigateWithAuthGate(`/profile/${encodeURIComponent(userId)}`);
+    }
+    return;
+  }
+
   if (action === "reply-comment") {
     const commentId = normalizeString(target.getAttribute("data-comment-id"));
     if (!state.auth.session) {
@@ -91679,6 +101043,37 @@ function handleRootClick(event) {
 
   if (action === "share") {
     handleShare(target.getAttribute("data-post-id")).catch(() => {});
+    return;
+  }
+
+  if (action === "post-share-close") {
+    closePostShare();
+    return;
+  }
+
+  if (action === "post-share-refresh") {
+    loadPostShareSheetData(state.ui.postShare.postId, {
+      refreshConversations: true,
+    }).catch(() => {
+      showToast("Share options could not be refreshed.");
+    });
+    return;
+  }
+
+  if (action === "post-share-send") {
+    sendPostShareToConversation(target.getAttribute("data-conversation-id")).catch(
+      () => {},
+    );
+    return;
+  }
+
+  if (action === "post-share-copy") {
+    copyPostShareLink().catch(() => {});
+    return;
+  }
+
+  if (action === "post-share-external") {
+    sharePostExternally(state.ui.postShare.postId).catch(() => {});
     return;
   }
 
@@ -91786,6 +101181,7 @@ function handleRootClick(event) {
   }
 
   if (action === "logout") {
+    clearProfileAvatarUpload({ abort: true });
     clearSharedFeedSession();
     state.auth.session = null;
     state.auth.user = null;
@@ -91978,6 +101374,7 @@ function handleRootClick(event) {
     state.pages.topics = createTopicsPageState();
     state.pages.policyQuestions = createPolicyQuestionsPageState();
     state.pages.postAnalytics = createPostAnalyticsPageState();
+    state.pages.profile.notifications = createProfileNotificationsState();
     messagingSocket.releaseSession();
     messagingSessionRetained = false;
     closeAuthModal();
@@ -92082,6 +101479,9 @@ function handleRootClick(event) {
           ) ||
           state.pages.events.manage.items.find(
             (entry) => entry.eventId === eventId,
+          ) ||
+          state.pages.discover.events.items.find(
+            (entry) => entry.eventId === eventId,
           );
     toggleEventInterested(eventId, eventItem?.isInterested === true).catch(
       () => {
@@ -92171,6 +101571,50 @@ function handleRootClick(event) {
   if (action === "notifications-read") {
     markNotificationsRead().catch(() => {
       showToast("Notification update failed.");
+    });
+    return;
+  }
+
+  if (action === "profile-notifications-filter") {
+    const filter = normalizeString(target.getAttribute("data-filter")) || "all";
+    if (PROFILE_NOTIFICATION_FILTERS.some(([key]) => key === filter)) {
+      state.pages.profile.notifications.filter = filter;
+      state.pages.profile.notifications.expandedAggregateId = "";
+      scheduleRender();
+    }
+    return;
+  }
+
+  if (action === "profile-notifications-refresh") {
+    loadProfileNotifications({ refresh: true }).catch(() => {
+      showToast("Notifications could not refresh.");
+    });
+    return;
+  }
+
+  if (action === "profile-notifications-load-more") {
+    loadProfileNotifications({ append: true }).catch(() => {
+      showToast("More notifications could not load.");
+    });
+    return;
+  }
+
+  if (action === "profile-notification-open") {
+    openProfileNotificationTarget(target.getAttribute("data-notification-id"));
+    return;
+  }
+
+  if (action === "profile-notification-aggregate-toggle") {
+    toggleProfileNotificationAggregate(target.getAttribute("data-notification-id"));
+    return;
+  }
+
+  if (action === "profile-notification-invite") {
+    respondProfileNotificationInvite(
+      target.getAttribute("data-notification-id"),
+      target.getAttribute("data-invite-action"),
+    ).catch(() => {
+      showToast("Invitation response failed.");
     });
     return;
   }
@@ -92289,6 +101733,15 @@ function handleRootClick(event) {
     return;
   }
 
+  if (action === "messaging-request-block") {
+    refuseMessagingRequest(target.getAttribute("data-request-id"), {
+      blockUser: true,
+    }).catch(() => {
+      showToast("Request block failed.");
+    });
+    return;
+  }
+
   if (action === "messaging-device-revoke") {
     const deviceId = normalizeString(target.getAttribute("data-device-id"));
     if (deviceId && window.confirm("Revoke this device?")) {
@@ -92354,6 +101807,11 @@ function handleRootClick(event) {
 
   if (action === "messaging-mission-cancel") {
     closeMessagingMissionDraft();
+    return;
+  }
+
+  if (action === "messaging-message-actions-toggle") {
+    toggleMessagingMessageActions(target.getAttribute("data-message-id"));
     return;
   }
 
@@ -93129,6 +102587,22 @@ function handleRootInput(event) {
     return;
   }
 
+  const missionFollowUpForm = event.target.closest(
+    '[data-route-form="mission-follow-up-create"]',
+  );
+  if (missionFollowUpForm) {
+    syncMissionFollowUpDraftFromForm(missionFollowUpForm);
+    return;
+  }
+
+  const missionTemplateForm = event.target.closest(
+    '[data-route-form="candidate-missions-template-save"], [data-route-form="coalition-missions-template-save"]',
+  );
+  if (missionTemplateForm) {
+    syncMissionTemplateDraftFromForm(missionTemplateForm);
+    return;
+  }
+
   const donationFlowField = event.target.closest("[data-donation-flow-field]");
   if (donationFlowField) {
     updateCandidateDonationFlowField(
@@ -93153,6 +102627,26 @@ function handleRootInput(event) {
       }
       refreshEventEditorPreviewFromDraft(draft);
     }
+    return;
+  }
+
+  const petitionResponseSearchField = event.target.closest(
+    "[data-petition-response-search]",
+  );
+  if (petitionResponseSearchField) {
+    const ownerType =
+      normalizeString(petitionResponseSearchField.getAttribute("data-owner-type")) ||
+      "candidate";
+    const searchKind = normalizeString(
+      petitionResponseSearchField.getAttribute("data-petition-response-search"),
+    );
+    const workspace = petitionWorkspaceForOwner(ownerType);
+    if (searchKind === "address") {
+      workspace.responseAddressSearch = normalizeString(petitionResponseSearchField.value);
+    } else {
+      workspace.responseNameSearch = normalizeString(petitionResponseSearchField.value);
+    }
+    applyPetitionResponseFiltersDom(ownerType);
     return;
   }
 
@@ -93185,6 +102679,9 @@ function handleRootInput(event) {
       createField.getAttribute("data-create-field"),
       createField.value,
     );
+    if (normalizeString(createField.getAttribute("data-create-field")).startsWith("cover.")) {
+      scheduleRender();
+    }
     return;
   }
 
@@ -93403,6 +102900,28 @@ function syncCampaignQuestOutcomeChoices(row, outreachType) {
 }
 
 function handleRootChange(event) {
+  const missionFollowUpForm = event.target.closest(
+    '[data-route-form="mission-follow-up-create"]',
+  );
+  if (missionFollowUpForm) {
+    syncMissionFollowUpDraftFromForm(missionFollowUpForm);
+    if (event.target.tagName === "SELECT") {
+      scheduleRender();
+    }
+    return;
+  }
+
+  const missionTemplateForm = event.target.closest(
+    '[data-route-form="candidate-missions-template-save"], [data-route-form="coalition-missions-template-save"]',
+  );
+  if (missionTemplateForm) {
+    syncMissionTemplateDraftFromForm(missionTemplateForm);
+    if (event.target.tagName === "SELECT") {
+      scheduleRender();
+    }
+    return;
+  }
+
   const questOutreachField = event.target.closest("[data-quest-outreach]");
   if (questOutreachField) {
     syncCampaignQuestOutcomeChoices(
@@ -93619,6 +103138,47 @@ function handleRootChange(event) {
     return;
   }
 
+  const manualDistrictState = event.target.closest(
+    "[data-settings-manual-district-state]",
+  );
+  if (manualDistrictState) {
+    const resource = state.pages.settings.voterProfile.manualDistrict;
+    const nextStateId = normalizeString(manualDistrictState.value).toUpperCase();
+    resource.stateId = nextStateId;
+    resource.selectedDistrictId = "";
+    resource.items = [];
+    resource.loadedStateId = "";
+    resource.error = "";
+    if (nextStateId) {
+      loadSettingsManualDistrictOptions(nextStateId, { refresh: true }).catch(
+        () => {},
+      );
+    } else {
+      scheduleRender();
+    }
+    return;
+  }
+
+  const manualDistrictOption = event.target.closest(
+    "[data-settings-manual-district-option]",
+  );
+  if (manualDistrictOption) {
+    state.pages.settings.voterProfile.manualDistrict.selectedDistrictId =
+      normalizeString(manualDistrictOption.value).toUpperCase();
+    scheduleRender();
+    return;
+  }
+
+  const manualDistrictAck = event.target.closest(
+    "[data-settings-manual-district-ack]",
+  );
+  if (manualDistrictAck) {
+    state.pages.settings.voterProfile.manualDistrict.acknowledged =
+      manualDistrictAck.checked === true;
+    scheduleRender();
+    return;
+  }
+
   const addressChangeFile = event.target.closest("[data-address-change-file]");
   if (addressChangeFile) {
     addSettingsAddressChangeAttachmentFile(addressChangeFile.files?.[0] || null)
@@ -93635,6 +103195,14 @@ function handleRootChange(event) {
         candidateAvatarFile.value = "";
       },
     );
+    return;
+  }
+
+  const profileAvatarFile = event.target.closest("[data-profile-avatar-file]");
+  if (profileAvatarFile) {
+    uploadProfileAvatarFile(profileAvatarFile.files?.[0] || null).finally(() => {
+      profileAvatarFile.value = "";
+    });
     return;
   }
 
@@ -93661,6 +103229,13 @@ function handleRootChange(event) {
     return;
   }
 
+  const createCoverFile = event.target.closest("[data-create-cover-file]");
+  if (createCoverFile) {
+    setPostComposerCoverImageFile(createCoverFile.files?.[0] || null);
+    createCoverFile.value = "";
+    return;
+  }
+
   const createField = event.target.closest("[data-create-field]");
   if (createField) {
     const fieldName = normalizeString(createField.getAttribute("data-create-field"));
@@ -93672,6 +103247,7 @@ function handleRootChange(event) {
     );
     if (
       fieldName.startsWith("teleprompter.") ||
+      fieldName.startsWith("cover.") ||
       ["visibility", "audienceGroupIds"].includes(fieldName)
     ) {
       scheduleRender();
@@ -94575,12 +104151,12 @@ function handleCommentSubmit(event) {
         .catch(() => {});
       return;
     }
-    if (formKind === "settings-crosspost") {
-      saveSettingsCrosspostDefaults(formData).catch(() => {});
-      return;
-    }
     if (formKind === "settings-notifications") {
       saveSettingsNotificationPreferences(formData).catch(() => {});
+      return;
+    }
+    if (formKind === "settings-quiet-hours") {
+      saveSettingsQuietHoursPreferences(formData).catch(() => {});
       return;
     }
     if (formKind === "settings-display-preferences") {
@@ -94605,6 +104181,10 @@ function handleCommentSubmit(event) {
           if (submitted) routeForm.reset();
         })
         .catch(() => {});
+      return;
+    }
+    if (formKind === "settings-manual-district") {
+      saveSettingsManualDistrict(formData).catch(() => {});
       return;
     }
     if (formKind === "settings-location-gps") {
@@ -94633,6 +104213,10 @@ function handleCommentSubmit(event) {
     }
     if (formKind === "messaging-account-settings") {
       saveMessagingAccountSettings(formData).catch(() => {});
+      return;
+    }
+    if (formKind === "messaging-quiet-hours") {
+      saveMessagingQuietHoursSettings(formData).catch(() => {});
       return;
     }
     if (formKind === "messaging-device-link-lookup") {
