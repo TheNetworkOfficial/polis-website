@@ -3,10 +3,28 @@ const MiniCssExtractPlugin = require("mini-css-extract-plugin");
 const { CleanWebpackPlugin } = require("clean-webpack-plugin");
 const webpack = require("webpack");
 const path = require("path");
+const rootPackage = require("../package.json");
+const frontendPackage = require("./package.json");
 
 const deleteAccountUrl = process.env.DELETE_ACCOUNT_PUBLIC_URL || "";
 const webAppApiBaseUrl =
   process.env.VIDEO_BACKEND_BASE_URL || process.env.CTA_API_BASE_URL || "";
+const webAppCommit =
+  process.env.POLIS_WEB_COMMIT_SHA ||
+  process.env.GITHUB_SHA ||
+  process.env.VERCEL_GIT_COMMIT_SHA ||
+  process.env.CF_PAGES_COMMIT_SHA ||
+  "";
+const webAppInfo = {
+  name: rootPackage.name || "polisapp.io",
+  displayName: process.env.POLIS_WEB_DISPLAY_NAME || "polisapp.io",
+  version: rootPackage.version || frontendPackage.version || "",
+  frontendName: frontendPackage.name || "polisapp.io frontend",
+  frontendVersion: frontendPackage.version || rootPackage.version || "",
+  buildNumber: process.env.POLIS_WEB_BUILD_NUMBER || "",
+  commit: webAppCommit ? webAppCommit.slice(0, 12) : "",
+  builtAt: process.env.POLIS_WEB_BUILD_TIME || "",
+};
 
 function serializeInlineJson(value) {
   return JSON.stringify(value)
@@ -38,6 +56,7 @@ function buildStaticSharedFeedShellHtml({
     canonicalUrl: "",
     publicWebBaseUrl: process.env.PUBLIC_WEB_BASE_URL || "",
     apiBaseUrl: webAppApiBaseUrl,
+    appInfo: webAppInfo,
     appUrlScheme:
       process.env.APP_URL_SCHEME ||
       process.env.STRIPE_RETURN_URL_SCHEME ||
@@ -256,6 +275,251 @@ function staticSharedAppShell(
   });
 }
 
+function settingsSectionShell(route, label, description, supportingCopy) {
+  const settingsPath = route.replace(/^\/settings\/?/u, "");
+  return {
+    filename: `${route.replace(/^\//u, "")}/index.html`,
+    route,
+    routeKey: "settings-section",
+    routeParams: { settingsPath },
+    title: `${label} | Polis`,
+    description,
+    eyebrow: label,
+    headline: `Opening ${label.toLowerCase()}`,
+    supportingCopy,
+  };
+}
+
+function escapeRoutePattern(route) {
+  return route.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
+
+const settingsSectionShells = [
+  settingsSectionShell(
+    "/settings/connected-accounts",
+    "Connected Accounts",
+    "Connect social accounts and sync publishing targets in Polis.",
+    "Connect social providers, refresh pages and channels, and review crosspost readiness from the browser.",
+  ),
+  settingsSectionShell(
+    "/settings/publishing-social",
+    "Publishing & Social",
+    "Set Polis publishing defaults and manage social crossposting readiness.",
+    "Set post visibility, audience, review defaults, and connected-account readiness from the browser.",
+  ),
+  settingsSectionShell(
+    "/settings/audience-groups",
+    "Audience Groups",
+    "Manage custom post audiences in Polis.",
+    "Create, edit, and reuse private audience groups for custom post visibility.",
+  ),
+  settingsSectionShell(
+    "/settings/notifications",
+    "Notifications",
+    "Tune Polis notification categories and alert behavior.",
+    "Manage social, message, campaign, election, upload, mention, and quiet-hour notification controls.",
+  ),
+  settingsSectionShell(
+    "/settings/quiet-hours",
+    "Quiet Hours",
+    "Set global, notification, and message quiet hours in Polis.",
+    "Set global, notification, and message quiet-hour schedules from the browser.",
+  ),
+  settingsSectionShell(
+    "/settings/preferences",
+    "Preferences",
+    "Manage voter context and Polis app behavior.",
+    "Review profile context, topics, district readiness, voter intelligence, appearance, and accessibility controls.",
+  ),
+  settingsSectionShell(
+    "/settings/appearance",
+    "Appearance & Accessibility",
+    "Set the Polis web theme and display size.",
+    "Choose theme and display-size preferences for this browser.",
+  ),
+  settingsSectionShell(
+    "/settings/accessibility",
+    "Accessibility",
+    "Open Polis accessibility display controls.",
+    "Use the shared appearance and accessibility controls for this browser.",
+  ),
+  settingsSectionShell(
+    "/settings/account-username",
+    "Username",
+    "Claim or change the public Polis account handle.",
+    "Update the username used across profiles, posts, messages, campaign staff, and coalition invites.",
+  ),
+  settingsSectionShell(
+    "/settings/account-security",
+    "Account Security",
+    "Manage Polis password recovery and authenticator security.",
+    "Reset passwords, configure authenticator MFA, and review account security options from the browser.",
+  ),
+  settingsSectionShell(
+    "/settings/account-security/totp",
+    "Authenticator App",
+    "Configure authenticator MFA for Polis sign-in.",
+    "Generate an authenticator setup URI and verify a one-time code from the browser.",
+  ),
+  settingsSectionShell(
+    "/settings/privacy-safety",
+    "Privacy & Safety",
+    "Manage Polis privacy, safety, location, and data-sharing controls.",
+    "Review blocked users, muted users, permissions, location, activity, and campaign data sharing.",
+  ),
+  settingsSectionShell(
+    "/settings/location",
+    "Location",
+    "Manage home location, district context, and foreground GPS preference.",
+    "Review district readiness, home-location workflows, and browser location status.",
+  ),
+  settingsSectionShell(
+    "/settings/permissions",
+    "Permissions",
+    "Review browser notification, location, camera, microphone, and file access.",
+    "Check browser permission readiness and open the relevant Polis settings areas.",
+  ),
+  settingsSectionShell(
+    "/settings/blocked-users",
+    "Blocked Users",
+    "Review accounts blocked from interacting with you.",
+    "Inspect and unblock accounts from the web privacy controls.",
+  ),
+  settingsSectionShell(
+    "/settings/muted-users",
+    "Muted Users",
+    "Review accounts muted from your Polis experience.",
+    "Inspect and unmute accounts from the web privacy controls.",
+  ),
+  settingsSectionShell(
+    "/settings/data-storage",
+    "Data & Storage",
+    "Clear browser storage and reset feed personalization.",
+    "Manage local browser data, search history, and personalization resets.",
+  ),
+  settingsSectionShell(
+    "/settings/activity-history",
+    "Activity History",
+    "Review private saved, liked, watched, and comment activity.",
+    "Open account activity, saved items, watch history, and feed reset controls.",
+  ),
+  settingsSectionShell(
+    "/settings/campaign-data-sharing",
+    "Campaign Data Sharing",
+    "Review voter contact preferences shared with campaigns.",
+    "Inspect, update, or revoke campaign access to voter contact preference data.",
+  ),
+  settingsSectionShell(
+    "/settings/security",
+    "Security Center",
+    "Manage messaging trusted devices, recovery, and encrypted history controls.",
+    "Review secure messaging health, trusted devices, recovery kits, and activity signals.",
+  ),
+  settingsSectionShell(
+    "/settings/security/device-link",
+    "Trusted Devices",
+    "Link trusted devices for Polis secure messaging.",
+    "Display or look up device-link codes for encrypted message history continuity.",
+  ),
+  settingsSectionShell(
+    "/settings/security/restore",
+    "Message Recovery",
+    "Restore encrypted Polis messaging history.",
+    "Use a recovery key or kit to restore secure message access from the browser.",
+  ),
+  settingsSectionShell(
+    "/settings/voter-profile",
+    "Voter Profile",
+    "Manage profile, home location, issues, and district context.",
+    "Update voter profile details, home location, district readiness, and civic workflows.",
+  ),
+  settingsSectionShell(
+    "/settings/voter-profile/home-location",
+    "Home Location",
+    "Manage the home location used for Polis district context.",
+    "Update address context and check the districts tied to your voter profile.",
+  ),
+  settingsSectionShell(
+    "/settings/voter-profile/home-location/request",
+    "Location Request",
+    "Request a correction to Polis home-location context.",
+    "Submit evidence and notes for home-location or district correction review.",
+  ),
+  settingsSectionShell(
+    "/settings/preferences/home-location",
+    "Home Location",
+    "Open the home-location settings route used by the Polis app.",
+    "Continue to the voter-profile home-location workflow from the browser.",
+  ),
+  settingsSectionShell(
+    "/settings/preferences/home-location/request",
+    "Location Request",
+    "Open the home-location correction route used by the Polis app.",
+    "Submit evidence and notes for home-location or district correction review from the browser.",
+  ),
+  settingsSectionShell(
+    "/settings/preferences/my-districts",
+    "My Districts",
+    "Review districts, offices, incumbents, and election context.",
+    "Open district offices and jurisdiction context tied to your home location.",
+  ),
+  settingsSectionShell(
+    "/settings/payments",
+    "Payments",
+    "Review donation receipts and payment-related Polis settings.",
+    "Open donation history and candidate donation dashboard paths from the browser.",
+  ),
+  settingsSectionShell(
+    "/settings/donations",
+    "Donation History",
+    "Review Polis donation receipts and compliance details.",
+    "Inspect donation rows, receipt status, payment method, and certification details.",
+  ),
+  settingsSectionShell(
+    "/settings/donation-history",
+    "Donation History",
+    "Review Polis donation receipts and compliance details.",
+    "Inspect donation rows, receipt status, payment method, and certification details.",
+  ),
+  settingsSectionShell(
+    "/settings/help-about",
+    "Help & About",
+    "Open Polis version, support, legal, and product information.",
+    "Review support links, legal resources, licenses, and app metadata from the browser.",
+  ),
+  settingsSectionShell(
+    "/settings/candidate-access",
+    "Candidate Access",
+    "Apply for Polis candidate dashboard access.",
+    "Submit legal name, office, district, and filing details for dashboard review.",
+  ),
+  settingsSectionShell(
+    "/settings/candidate-access/name",
+    "Candidate Access",
+    "Start a Polis candidate dashboard access application.",
+    "Enter the legal-name details needed to request candidate dashboard access.",
+  ),
+  settingsSectionShell(
+    "/settings/candidate-access/office",
+    "Candidate Office",
+    "Complete office details for candidate dashboard access.",
+    "Enter filing authority, district, campaign address, and candidate identifiers.",
+  ),
+  settingsSectionShell(
+    "/settings/candidate-edit",
+    "Edit Candidate Page",
+    "Update the candidate profile tied to your Polis account.",
+    "Edit display name, office context, biography, photo, tags, and contact links from the browser.",
+  ),
+];
+
+const settingsSectionRouteRewrites = [...settingsSectionShells]
+  .sort((a, b) => b.route.length - a.route.length)
+  .map((shell) => [
+    new RegExp(`^${escapeRoutePattern(shell.route)}(?:/.*)?$`, "u"),
+    `/${shell.filename}`,
+  ]);
+
 const sharedAppShells = [
   {
     filename: "feed/index.html",
@@ -432,6 +696,7 @@ const sharedAppShells = [
     supportingCopy:
       "Manage account, privacy, security, profile, notifications, voter intelligence, and connected services from the browser.",
   },
+  ...settingsSectionShells,
   {
     filename: "onboarding/index.html",
     route: "/onboarding/profile",
@@ -607,6 +872,7 @@ const sharedAppRouteRewrites = [
   [/^\/social-return(?:\/.*)?$/u, "/social-return/index.html"],
   [/^\/oauth\/complete(?:\/.*)?$/u, "/oauth/complete/index.html"],
   [/^\/calendar-return(?:\/.*)?$/u, "/calendar-return/index.html"],
+  ...settingsSectionRouteRewrites,
   [/^\/settings\/voter-intelligence(?:\/.*)?$/u, "/settings/voter-intelligence/index.html"],
   [/^\/messages(?:\/.*)?$/u, "/messages/index.html"],
   [/^\/candidate-dashboard(?:\/.*)?$/u, "/candidate-dashboard/index.html"],
@@ -755,10 +1021,14 @@ module.exports = {
     new HtmlWebpackPlugin({
       template: "./src/components/header/header.html",
       filename: "header.html",
+      chunks: [],
+      inject: false,
     }),
     new HtmlWebpackPlugin({
       template: "./src/components/footer/footer.html",
       filename: "footer.html",
+      chunks: [],
+      inject: false,
     }),
     new HtmlWebpackPlugin({
       template: "./src/pages/index/index.html",

@@ -8,6 +8,13 @@
   gap: 0.35rem;
 }
 
+.features-intro__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin-top: 0.55rem;
+}
+
 .feature-journeys {
   display: grid;
   gap: var(--space-md);

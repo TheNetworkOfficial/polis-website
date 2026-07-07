@@ -13,30 +13,52 @@
     <div id="header-placeholder"></div>
 
     <main class="page-shell delete-main">
-      <section class="container delete-shell surface">
-        <span class="badge">Compliance Resource</span>
-        <h1>Delete your Polis account</h1>
-        <p>
-          This action is irreversible once executed. For account protection, you
-          must sign in and complete an emailed verification code before deletion
-          is allowed.
-        </p>
+      <section class="container delete-shell">
+        <aside class="delete-intro surface" aria-labelledby="delete-title">
+          <span class="badge">Account removal</span>
+          <h1 id="delete-title">Delete your Polis account</h1>
+          <p>
+            Request permanent removal with the same verified deletion workflow
+            used inside the Polis app. You will sign in, verify an emailed code,
+            and confirm the request before anything is submitted.
+          </p>
 
-        <ol class="delete-steps" aria-label="Delete account steps">
-          <li data-step-index="1">1. Sign in</li>
-          <li data-step-index="2">2. Verify email code</li>
-          <li data-step-index="3">3. Confirm deletion</li>
-          <li data-step-index="4">4. Submit request</li>
-        </ol>
+          <ol class="delete-steps" aria-label="Delete account steps">
+            <li data-step-index="1"><strong>1</strong><span>Sign in</span></li>
+            <li data-step-index="2">
+              <strong>2</strong><span>Verify email</span>
+            </li>
+            <li data-step-index="3"><strong>3</strong><span>Confirm</span></li>
+            <li data-step-index="4"><strong>4</strong><span>Submit</span></li>
+          </ol>
 
-        <p
-          id="delete-global-feedback"
-          class="form-feedback hidden"
-          role="status"
-          aria-live="polite"
-        ></p>
+          <div class="delete-impact-grid" aria-label="Deletion requirements">
+            <article>
+              <strong>What is removed</strong>
+              <p>
+                Profile, account access, posts, messaging identity, campaign
+                access, coalition access, and related Polis account data.
+              </p>
+            </article>
+            <article>
+              <strong>What you need</strong>
+              <p>
+                A valid sign-in session and access to the email address attached
+                to your Polis account.
+              </p>
+            </article>
+          </div>
+        </aside>
 
-        <section data-state-panel="unauthenticated" class="delete-panel">
+        <section class="delete-workspace surface" aria-label="Delete account workflow">
+          <p
+            id="delete-global-feedback"
+            class="form-feedback hidden"
+            role="status"
+            aria-live="polite"
+          ></p>
+
+          <section data-state-panel="unauthenticated" class="delete-panel">
           <h2>Step 1: Sign in</h2>
           <p>
             Sign in on the Cognito page to continue. You can use your existing
@@ -107,23 +129,23 @@
             <a href="mailto:lux.corp.app@gmail.com">lux.corp.app@gmail.com</a>
             for assisted deletion support.
           </p>
-        </section>
+          </section>
 
-        <section data-state-panel="authenticating" class="delete-panel" hidden>
-          <h2>Authenticating</h2>
-          <p>Please wait while we verify your sign-in session.</p>
-        </section>
+          <section data-state-panel="authenticating" class="delete-panel" hidden>
+            <h2>Authenticating</h2>
+            <p>Please wait while we verify your sign-in session.</p>
+          </section>
 
-        <section data-state-panel="authenticated" class="delete-panel" hidden>
-          <h2>Step 2: Send verification code</h2>
-          <p>
-            Signed in as:
-            <strong id="delete-authenticated-user">Authenticated user</strong>
-          </p>
-          <p>
-            Send a one-time code to your account email. You must verify that
-            code before deletion is allowed.
-          </p>
+          <section data-state-panel="authenticated" class="delete-panel" hidden>
+            <h2>Step 2: Send verification code</h2>
+            <p>
+              Signed in as:
+              <strong id="delete-authenticated-user">Authenticated user</strong>
+            </p>
+            <p>
+              Send a one-time code to your account email. You must verify that
+              code before deletion is allowed.
+            </p>
 
           <div class="delete-actions-inline">
             <button
@@ -141,20 +163,20 @@
               Start Over
             </button>
           </div>
-        </section>
+          </section>
 
-        <section data-state-panel="sendingCode" class="delete-panel" hidden>
-          <h2>Sending code</h2>
-          <p>Please wait while we send your verification code.</p>
-        </section>
+          <section data-state-panel="sendingCode" class="delete-panel" hidden>
+            <h2>Sending code</h2>
+            <p>Please wait while we send your verification code.</p>
+          </section>
 
-        <section data-state-panel="codeSent" class="delete-panel" hidden>
-          <h2>Step 2: Verify emailed code</h2>
-          <p>
-            We sent a code to
-            <strong id="delete-code-destination">your email</strong>. Enter the
-            code below.
-          </p>
+          <section data-state-panel="codeSent" class="delete-panel" hidden>
+            <h2>Step 2: Verify emailed code</h2>
+            <p>
+              We sent a code to
+              <strong id="delete-code-destination">your email</strong>. Enter the
+              code below.
+            </p>
 
           <form id="delete-code-form" novalidate>
             <label for="delete-email-code">Verification code</label>
@@ -199,19 +221,19 @@
               aria-live="polite"
             ></p>
           </form>
-        </section>
+          </section>
 
-        <section data-state-panel="verifyingCode" class="delete-panel" hidden>
-          <h2>Verifying code</h2>
-          <p>Please wait while we validate your verification code.</p>
-        </section>
+          <section data-state-panel="verifyingCode" class="delete-panel" hidden>
+            <h2>Verifying code</h2>
+            <p>Please wait while we validate your verification code.</p>
+          </section>
 
-        <section data-state-panel="confirming" class="delete-panel" hidden>
-          <h2>Step 3: Confirm deletion</h2>
-          <p>
-            This request will call the same account-deletion function used by
-            the app settings page.
-          </p>
+          <section data-state-panel="confirming" class="delete-panel" hidden>
+            <h2>Step 3: Confirm deletion</h2>
+            <p>
+              This request will call the same account-deletion function used by
+              the app settings page.
+            </p>
 
           <form id="delete-confirm-form" novalidate>
             <label class="checkbox-row" for="delete-irreversible-check">
@@ -251,31 +273,32 @@
               </button>
             </div>
           </form>
-        </section>
+          </section>
 
-        <section data-state-panel="submitting" class="delete-panel" hidden>
-          <h2>Step 4: Submitting request</h2>
-          <p>Submitting your account deletion request.</p>
-        </section>
+          <section data-state-panel="submitting" class="delete-panel" hidden>
+            <h2>Step 4: Submitting request</h2>
+            <p>Submitting your account deletion request.</p>
+          </section>
 
-        <section data-state-panel="success" class="delete-panel" hidden>
-          <h2>Request status</h2>
-          <p id="delete-success-message"></p>
-          <button
-            id="success-reset-button"
-            class="btn btn-outline"
-            type="button"
-          >
-            Submit Another Request
-          </button>
-        </section>
+          <section data-state-panel="success" class="delete-panel" hidden>
+            <h2>Request status</h2>
+            <p id="delete-success-message"></p>
+            <button
+              id="success-reset-button"
+              class="btn btn-outline"
+              type="button"
+            >
+              Submit Another Request
+            </button>
+          </section>
 
-        <section data-state-panel="error" class="delete-panel" hidden>
-          <h2>We could not complete that step</h2>
-          <p id="delete-error-message"></p>
-          <button id="delete-error-back" class="btn btn-outline" type="button">
-            Go Back
-          </button>
+          <section data-state-panel="error" class="delete-panel" hidden>
+            <h2>We could not complete that step</h2>
+            <p id="delete-error-message"></p>
+            <button id="delete-error-back" class="btn btn-outline" type="button">
+              Go Back
+            </button>
+          </section>
         </section>
       </section>
     </main>

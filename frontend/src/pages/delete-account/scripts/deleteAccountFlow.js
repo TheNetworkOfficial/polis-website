@@ -236,7 +236,7 @@ function initializeDeleteAccountFlow() {
       !authCapabilities.hosted
     ) {
       setLoginFeedback(
-        "Delete-account sign-in is not configured. Contact support at lux.corp.app@gmail.com.",
+        "Sign-in is not configured for this local website build. In a configured environment, sign in here or contact lux.corp.app@gmail.com for assisted deletion support.",
         "error",
       );
       return;
