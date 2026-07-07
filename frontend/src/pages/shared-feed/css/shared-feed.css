@@ -68848,25 +68848,39 @@ button.shared-settings-district-person:focus-visible {
 
 .shared-petition-results-table {
   display: grid;
-  gap: 0;
+  gap: 8px;
   overflow-x: auto;
+}
+
+.shared-petition-results-table__row {
+  min-width: 780px;
+  overflow: hidden;
   border: 1px solid var(--sf-line);
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.055);
 }
 
-.shared-petition-results-table__row {
+.shared-petition-results-table__summary,
+.shared-petition-results-table__row.is-header {
   display: grid;
-  grid-template-columns: 92px 180px repeat(var(--petition-results-column-count, 3), minmax(160px, 1fr));
-  min-width: 780px;
+  grid-template-columns: 92px minmax(140px, 1fr) minmax(220px, 1.35fr) 170px 96px;
   align-items: center;
   gap: 10px;
+  min-height: 46px;
   padding: 9px 12px;
-  border-bottom: 1px solid var(--sf-line);
 }
 
-.shared-petition-results-table__row:last-child {
-  border-bottom: 0;
+.shared-petition-results-table__summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.shared-petition-results-table__summary::-webkit-details-marker {
+  display: none;
+}
+
+.shared-petition-results-table__summary::marker {
+  content: "";
 }
 
 .shared-petition-results-table__row.is-header {
@@ -68874,22 +68888,120 @@ button.shared-settings-district-person:focus-visible {
   font-size: 0.75rem;
   font-weight: 900;
   text-transform: uppercase;
+  background: transparent;
 }
 
 .shared-petition-results-table__row.is-flagged {
   background: color-mix(in srgb, var(--sf-red) 12%, transparent);
 }
 
-.shared-petition-results-table__row span {
+.shared-petition-results-table__summary span,
+.shared-petition-results-table__row.is-header span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.shared-petition-results-table__summary strong {
+  font-weight: 900;
+}
+
+.shared-petition-results-table__review {
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.shared-petition-results-table__review.is-clear {
+  color: var(--sf-muted);
+}
+
+.shared-petition-results-table__review.is-flagged {
+  color: var(--sf-red);
+}
+
+.shared-petition-results-table__toggle {
+  justify-self: end;
+  min-height: 30px;
+  padding: 6px 10px;
+  border: 1px solid var(--sf-line);
+  border-radius: 999px;
+  color: #bffcf9;
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-align: center;
+}
+
+.shared-petition-results-table__row[open] .shared-petition-results-table__toggle {
+  color: var(--sf-ink);
+  background: rgba(38, 244, 238, 0.16);
+}
+
+.shared-petition-results-table__details {
+  display: grid;
+  gap: 12px;
+  padding: 0 12px 12px;
+  border-top: 1px solid var(--sf-line);
+}
+
+.shared-petition-results-table__flags {
+  display: grid;
+  gap: 4px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--sf-red) 38%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--sf-red) 10%, transparent);
+}
+
+.shared-petition-results-table__flags strong {
+  color: var(--sf-red);
+}
+
+.shared-petition-results-table__flags span {
+  color: var(--sf-muted);
+}
+
+.shared-petition-results-table__answers {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  margin: 12px 0 0;
+}
+
+.shared-petition-results-table__answers div {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  padding: 10px 12px;
+  border: 1px solid var(--sf-line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.shared-petition-results-table__answers dt {
+  color: var(--sf-muted);
+  font-size: 0.7rem;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.shared-petition-results-table__answers dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.38;
+}
+
 .shared-petition-results-table__row a {
   color: inherit;
   font-weight: 800;
+}
+
+.shared-petition-results-table__empty-value {
+  color: var(--sf-muted);
 }
 
 @media (prefers-color-scheme: light) {
@@ -68908,7 +69020,8 @@ button.shared-settings-district-person:focus-visible {
   .shared-petition-public-brand__mark,
   .shared-petition-public-cover,
   .shared-petition-public-form,
-  .shared-petition-results-table,
+  .shared-petition-results-table__row,
+  .shared-petition-results-table__answers div,
   .shared-petition-video-field,
   .shared-petition-public-upload {
     border-color: rgba(20, 24, 33, 0.14);
@@ -68953,6 +69066,16 @@ button.shared-settings-district-person:focus-visible {
   .shared-petition-public-upload strong {
     background: rgba(0, 150, 145, 0.12);
     color: #006f6b;
+  }
+
+  .shared-petition-results-table__toggle {
+    background: rgba(0, 150, 145, 0.08);
+    color: #006f6b;
+  }
+
+  .shared-petition-results-table__row[open] .shared-petition-results-table__toggle {
+    background: rgba(0, 150, 145, 0.16);
+    color: #004f4c;
   }
 }
 
@@ -69070,10 +69193,7 @@ button.shared-settings-district-person:focus-visible {
 
   .shared-petition-results-table {
     overflow: visible;
-    border: 0;
-    background: transparent;
-    box-shadow: none;
-    gap: 12px;
+    gap: 8px;
   }
 
   .shared-petition-results-table__row.is-header {
@@ -69082,36 +69202,68 @@ button.shared-settings-district-person:focus-visible {
 
   .shared-petition-results-table__row {
     min-width: 0;
+    border-radius: 14px;
+  }
+
+  .shared-petition-results-table__summary {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 4px 10px;
+    min-height: 58px;
+    padding: 10px;
+  }
+
+  .shared-petition-results-table__summary span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .shared-petition-results-table__review {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+    align-self: center;
+    max-width: 72px;
+    white-space: normal;
+  }
+
+  .shared-petition-results-table__summary span[data-label="Name"] {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .shared-petition-results-table__summary span[data-label="Address"],
+  .shared-petition-results-table__summary span[data-label="Submitted"] {
+    grid-column: 2;
+    color: var(--sf-muted);
+    font-size: 0.78rem;
+  }
+
+  .shared-petition-results-table__summary span[data-label="Address"] {
+    grid-row: 2;
+  }
+
+  .shared-petition-results-table__summary span[data-label="Submitted"] {
+    grid-row: 3;
+  }
+
+  .shared-petition-results-table__toggle {
+    grid-column: 3;
+    grid-row: 1 / span 3;
+    align-self: center;
+  }
+
+  .shared-petition-results-table__details {
+    padding: 0 10px 10px;
+  }
+
+  .shared-petition-results-table__answers {
     grid-template-columns: minmax(0, 1fr);
     gap: 8px;
-    padding: 14px;
-    border: 1px solid var(--sf-line);
-    border-radius: 16px;
-    background: rgba(255, 255, 255, 0.07);
   }
 
-  .shared-petition-results-table__row:last-child {
-    border-bottom: 1px solid var(--sf-line);
-  }
-
-  .shared-petition-results-table__row span {
-    display: grid;
-    grid-template-columns: minmax(92px, 0.42fr) minmax(0, 1fr);
-    gap: 10px;
-    align-items: start;
-    overflow: visible;
-    text-overflow: clip;
-    white-space: normal;
-    line-height: 1.38;
-  }
-
-  .shared-petition-results-table__row span::before {
-    content: attr(data-label);
-    color: var(--sf-muted);
-    font-size: 0.7rem;
-    font-weight: 900;
-    letter-spacing: 0;
-    text-transform: uppercase;
+  .shared-petition-results-table__answers div {
+    padding: 9px 10px;
   }
 }
 

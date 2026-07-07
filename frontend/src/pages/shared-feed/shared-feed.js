@@ -80751,6 +80751,67 @@ function petitionResponseVideoLinks(response, field) {
   return links;
 }
 
+function renderPublicPetitionResultFieldValue(response, field) {
+  if (field.type === "cta_video") {
+    const links = petitionResponseVideoLinks(response, field);
+    if (!links.length) {
+      return '<span class="shared-petition-results-table__empty-value">No video</span>';
+    }
+    return links
+      .map(
+        (link, index) =>
+          `<a href="${escapeHtml(link)}" target="_blank" rel="noreferrer">${escapeHtml(links.length > 1 ? `Video ${index + 1}` : "Video")}</a>`,
+      )
+      .join("");
+  }
+  const label = petitionResponseValueLabel(response.values?.[field.id]);
+  return label
+    ? escapeHtml(label)
+    : '<span class="shared-petition-results-table__empty-value">No answer</span>';
+}
+
+function renderPublicPetitionResultRow(response, fields, index) {
+  const flags = response.duplicateFlags || [];
+  const flagged = flags.length > 0;
+  const name = petitionResponseNameLabel(response, fields) || `Response ${index + 1}`;
+  const address = petitionResponseAddressLabel(response, fields) || "No address";
+  const submitted = petitionResponseSubmittedAtLabel(response.createdAt) || "Not dated";
+  return `<details class="shared-petition-results-table__row${flagged ? " is-flagged" : ""}" role="row">
+    <summary class="shared-petition-results-table__summary">
+      <span class="shared-petition-results-table__review${flagged ? " is-flagged" : " is-clear"}" data-label="Review">${flagged ? "Flagged" : "Clear"}</span>
+      <span data-label="Name"><strong>${escapeHtml(name)}</strong></span>
+      <span data-label="Address">${escapeHtml(address)}</span>
+      <span data-label="Submitted">${escapeHtml(submitted)}</span>
+      <span class="shared-petition-results-table__toggle" data-label="Details">Details</span>
+    </summary>
+    <div class="shared-petition-results-table__details">
+      ${
+        flagged
+          ? `<div class="shared-petition-results-table__flags">
+              <strong>Duplicate review</strong>
+              <span>${escapeHtml(
+                flags
+                  .map((flag) => normalizeString(flag.message || flag.type))
+                  .filter(Boolean)
+                  .join("; ") || "This response matched another submission.",
+              )}</span>
+            </div>`
+          : ""
+      }
+      <dl class="shared-petition-results-table__answers">
+        ${fields
+          .map(
+            (field) => `<div>
+              <dt>${escapeHtml(field.label)}</dt>
+              <dd>${renderPublicPetitionResultFieldValue(response, field)}</dd>
+            </div>`,
+          )
+          .join("")}
+      </dl>
+    </div>
+  </details>`;
+}
+
 function renderPublicPetitionResultsPage() {
   const page = state.pages.petitions.results;
   if (page.loading && !page.item) {
@@ -80781,29 +80842,14 @@ function renderPublicPetitionResultsPage() {
         <div class="shared-petition-results-table" role="table" aria-label="Petition results" style="--petition-results-column-count: ${escapeHtml(String(Math.max(1, fields.length)))};">
           <div class="shared-petition-results-table__row is-header" role="row">
             <span>Review</span>
+            <span>Name</span>
+            <span>Address</span>
             <span>Submitted</span>
-            ${fields.map((field) => `<span>${escapeHtml(field.label)}</span>`).join("")}
+            <span>Details</span>
           </div>
           ${
             responses.length
-              ? responses
-                  .map((response) => {
-                    const flagged = (response.duplicateFlags || []).length > 0;
-                    return `<div class="shared-petition-results-table__row${flagged ? " is-flagged" : ""}" role="row">
-                      <span data-label="Review">${flagged ? "Flagged" : "Clear"}</span>
-                      <span data-label="Submitted">${escapeHtml(petitionResponseSubmittedAtLabel(response.createdAt))}</span>
-                      ${fields
-                        .map((field) => {
-                          if (field.type === "cta_video") {
-                            const links = petitionResponseVideoLinks(response, field);
-                            return `<span data-label="${escapeHtml(field.label)}">${links.length ? links.map((link) => `<a href="${escapeHtml(link)}" target="_blank" rel="noreferrer">Video</a>`).join("<br>") : ""}</span>`;
-                          }
-                          return `<span data-label="${escapeHtml(field.label)}">${escapeHtml(petitionResponseValueLabel(response.values[field.id]))}</span>`;
-                        })
-                        .join("")}
-                    </div>`;
-                  })
-                  .join("")
+              ? responses.map((response, index) => renderPublicPetitionResultRow(response, fields, index)).join("")
               : '<div class="shared-page__empty">No responses yet.</div>'
           }
         </div>
