@@ -2099,7 +2099,10 @@ router.get("/.well-known/assetlinks.json", (_req, res) => {
     fingerprints.length > 0
       ? [
           {
-            relation: ["delegate_permission/common.handle_all_urls"],
+            relation: [
+              "delegate_permission/common.handle_all_urls",
+              "delegate_permission/common.get_login_creds",
+            ],
             target: {
               namespace: "android_app",
               package_name: packageName,
@@ -2160,6 +2163,9 @@ router.get("/.well-known/apple-app-site-association", (_req, res) => {
       applinks: {
         apps: [],
         details,
+      },
+      webcredentials: {
+        apps: appIds,
       },
     }),
   );
