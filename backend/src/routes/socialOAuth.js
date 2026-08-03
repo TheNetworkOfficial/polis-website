@@ -63,12 +63,15 @@ function buildBackendCallbackUrl(provider, req) {
   return url.toString();
 }
 
-function buildCompletionUrl(req, {
-  provider = "",
-  status = "error",
-  message = "Connection failed.",
-  connectionId = "",
-} = {}) {
+function buildCompletionUrl(
+  req,
+  {
+    provider = "",
+    status = "error",
+    message = "Connection failed.",
+    connectionId = "",
+  } = {},
+) {
   const origin = requestOrigin(req);
   const url = new URL(`${origin}/oauth/complete`);
   if (provider) {
@@ -106,12 +109,10 @@ function normalizeAppPath(value) {
   return normalized;
 }
 
-function appendCompletionParams(url, {
-  provider,
-  status,
-  message,
-  connectionId,
-}) {
+function appendCompletionParams(
+  url,
+  { provider, status, message, connectionId },
+) {
   if (provider) {
     url.searchParams.set("social_provider", provider);
   }
@@ -178,7 +179,8 @@ function completionPageHtml({
       normalizeString(process.env.ANDROID_APP_PACKAGE) || "com.luxcorp.polis",
     fallbackUrl: webTargetUrl,
   });
-  const headline = status === "success" ? "Connection complete" : "Connection issue";
+  const headline =
+    status === "success" ? "Connection complete" : "Connection issue";
   const actionLabel = status === "success" ? "Open Polis" : "Back to Polis";
   return `<!DOCTYPE html>
 <html lang="en">
@@ -186,15 +188,36 @@ function completionPageHtml({
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>${escapeHtml(headline)}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;600;700;800&display=swap" />
     <style>
       :root {
-        color-scheme: light;
-        --bg: #f7f3ea;
-        --ink: #17222d;
-        --muted: #5c6470;
-        --card: rgba(255, 255, 255, 0.94);
-        --line: rgba(23, 34, 45, 0.08);
-        --brand: #0d7c66;
+        color-scheme: dark light;
+        --bg: #081020;
+        --surface: #111d34;
+        --raised: #172746;
+        --line: #30537f;
+        --brand: #5ea1ff;
+        --brand-strong: #2d78d8;
+        --on-brand: #101828;
+        --ink: #f5f8ff;
+        --muted: #a7b5c8;
+        --shadow: 0 20px 56px rgba(0, 0, 0, 0.32);
+      }
+      @media (prefers-color-scheme: light) {
+        :root {
+          --bg: #f5f8fd;
+          --surface: #ffffff;
+          --raised: #eaf2fc;
+          --line: #c6d7ea;
+          --brand: #1d67b8;
+          --brand-strong: #123b74;
+          --on-brand: #ffffff;
+          --ink: #101828;
+          --muted: #475467;
+          --shadow: 0 20px 56px rgba(16, 24, 40, 0.16);
+        }
       }
       * { box-sizing: border-box; }
       body {
@@ -203,24 +226,25 @@ function completionPageHtml({
         display: grid;
         place-items: center;
         background:
-          radial-gradient(circle at top left, rgba(13, 124, 102, 0.16), transparent 28%),
-          linear-gradient(180deg, #fbf9f2 0%, var(--bg) 100%);
+          radial-gradient(circle at top left, color-mix(in srgb, var(--brand) 14%, transparent), transparent 30rem),
+          var(--bg);
         color: var(--ink);
-        font-family: "Segoe UI", Arial, sans-serif;
+        font-family: Roboto, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       }
       .shell {
         width: min(92vw, 520px);
         padding: 32px;
-        border-radius: 28px;
+        border-radius: 24px;
         border: 1px solid var(--line);
-        background: var(--card);
-        box-shadow: 0 24px 64px rgba(21, 31, 41, 0.14);
+        background: var(--surface);
+        box-shadow: var(--shadow);
       }
       .eyebrow {
         display: inline-flex;
         padding: 6px 10px;
-        border-radius: 999px;
-        background: rgba(13, 124, 102, 0.12);
+        border: 1px solid var(--line);
+        border-radius: 24px;
+        background: var(--raised);
         color: var(--brand);
         font-size: 12px;
         font-weight: 700;
@@ -249,12 +273,20 @@ function completionPageHtml({
         justify-content: center;
         min-width: 180px;
         padding: 14px 18px;
-        border-radius: 999px;
-        border: 1px solid rgba(13, 124, 102, 0.18);
+        min-height: 44px;
+        border-radius: 12px;
+        border: 1px solid transparent;
         text-decoration: none;
-        color: #ffffff;
-        background: linear-gradient(135deg, #0d7c66 0%, #129678 100%);
-        font-weight: 700;
+        color: var(--on-brand);
+        background: var(--brand);
+        font-weight: 800;
+      }
+      .button:hover {
+        background: var(--brand-strong);
+      }
+      .button:focus-visible {
+        outline: 2px solid var(--brand);
+        outline-offset: 3px;
       }
       .status {
         margin-top: 16px;
@@ -348,8 +380,7 @@ router.get("/oauth/:platform/callback", async (req, res) => {
       buildCompletionUrl(req, {
         provider,
         status: "error",
-        message:
-          error instanceof Error ? error.message : "OAuth relay failed.",
+        message: error instanceof Error ? error.message : "OAuth relay failed.",
       }),
     );
   }
@@ -391,7 +422,8 @@ router.get("/oauth/complete", (req, res) => {
   const status = normalizeString(req.query.status) || "success";
   const message = normalizeString(req.query.message);
   const connectionId = normalizeString(req.query.connectionId);
-  const appPath = normalizeString(req.query.path) || "/settings/connected-accounts";
+  const appPath =
+    normalizeString(req.query.path) || "/settings/connected-accounts";
   res
     .set(
       "Content-Security-Policy",

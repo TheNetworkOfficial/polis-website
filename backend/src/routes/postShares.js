@@ -500,8 +500,8 @@ function renderSocialCardSvg({
   const initials = initialsFromName(authorDisplayName);
   const avatarMarkup = authorAvatar
     ? `<image href="${authorAvatar}" x="64" y="526" width="56" height="56" preserveAspectRatio="xMidYMid slice" clip-path="url(#avatarClip)" />`
-    : `<rect x="64" y="526" width="56" height="56" rx="18" fill="#D8F1E8" />
-       <text x="92" y="563" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="800" fill="#0D7C66">${escapeXml(initials)}</text>`;
+    : `<rect x="64" y="526" width="56" height="56" rx="16" fill="#EAF2FC" />
+       <text x="92" y="563" text-anchor="middle" font-family="Roboto, Arial, Helvetica, sans-serif" font-size="24" font-weight="800" fill="#123B74">${escapeXml(initials)}</text>`;
   const mediaMarkup = mediaImage
     ? `<image href="${mediaImage}" x="0" y="0" width="${SOCIAL_CARD_WIDTH}" height="${SOCIAL_CARD_HEIGHT}" preserveAspectRatio="xMidYMid slice" />`
     : `<rect width="${SOCIAL_CARD_WIDTH}" height="${SOCIAL_CARD_HEIGHT}" fill="url(#fallbackBg)" />`;
@@ -518,7 +518,7 @@ function renderSocialCardSvg({
     )
     .join("");
   const usernameMarkup = authorUsername
-    ? `<text x="130" y="560" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="500" fill="#D8E1EB">@${escapeXml(authorUsername)}</text>`
+    ? `<text x="130" y="560" font-family="Roboto, Arial, Helvetica, sans-serif" font-size="24" font-weight="500" fill="#A7B5C8">@${escapeXml(authorUsername)}</text>`
     : "";
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${SOCIAL_CARD_WIDTH}" height="${SOCIAL_CARD_HEIGHT}" viewBox="0 0 ${SOCIAL_CARD_WIDTH} ${SOCIAL_CARD_HEIGHT}">
@@ -529,9 +529,9 @@ function renderSocialCardSvg({
         <stop offset="100%" stop-color="rgba(10,19,31,0.92)" />
       </linearGradient>
       <linearGradient id="fallbackBg" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0%" stop-color="#0B1624" />
-        <stop offset="55%" stop-color="#17314B" />
-        <stop offset="100%" stop-color="#0D7C66" />
+        <stop offset="0%" stop-color="#081020" />
+        <stop offset="55%" stop-color="#172746" />
+        <stop offset="100%" stop-color="#123B74" />
       </linearGradient>
       <clipPath id="avatarClip">
         <rect x="64" y="526" width="56" height="56" rx="18" />
@@ -539,14 +539,14 @@ function renderSocialCardSvg({
     </defs>
     ${mediaMarkup}
     <rect width="${SOCIAL_CARD_WIDTH}" height="${SOCIAL_CARD_HEIGHT}" fill="url(#fade)" />
-    <rect x="48" y="48" width="130" height="38" rx="19" fill="rgba(255,255,255,0.92)" />
-    <text x="113" y="73" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="800" fill="#0D7C66">${escapeXml(brandName.toUpperCase())}</text>
+    <rect x="48" y="48" width="130" height="38" rx="19" fill="#DCEBFF" />
+    <text x="113" y="73" text-anchor="middle" font-family="Roboto, Arial, Helvetica, sans-serif" font-size="18" font-weight="800" fill="#123B74">${escapeXml(brandName.toUpperCase())}</text>
     <rect x="1022" y="48" width="130" height="38" rx="19" fill="rgba(9,20,32,0.62)" />
-    <text x="1087" y="73" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="800" fill="#FFFFFF">${escapeXml(mediaType.toUpperCase())}</text>
-    <text x="64" y="336" font-family="Arial, Helvetica, sans-serif" font-size="42" font-weight="800" fill="#FFFFFF">${titleMarkup}</text>
-    <text x="64" y="468" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="500" fill="#D8E1EB">${descriptionMarkup}</text>
+    <text x="1087" y="73" text-anchor="middle" font-family="Roboto, Arial, Helvetica, sans-serif" font-size="18" font-weight="800" fill="#FFFFFF">${escapeXml(mediaType.toUpperCase())}</text>
+    <text x="64" y="336" font-family="Roboto, Arial, Helvetica, sans-serif" font-size="42" font-weight="800" fill="#FFFFFF">${titleMarkup}</text>
+    <text x="64" y="468" font-family="Roboto, Arial, Helvetica, sans-serif" font-size="24" font-weight="500" fill="#A7B5C8">${descriptionMarkup}</text>
     ${avatarMarkup}
-    <text x="130" y="540" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="800" fill="#FFFFFF">${escapeXml(authorDisplayName)}</text>
+    <text x="130" y="540" font-family="Roboto, Arial, Helvetica, sans-serif" font-size="28" font-weight="800" fill="#FFFFFF">${escapeXml(authorDisplayName)}</text>
     ${usernameMarkup}
   </svg>`;
 }
@@ -720,7 +720,7 @@ function renderPetitionSocialCardSvg({ petition, coverImage = "" }) {
   const logoDataUri = readPolisLogoDataUri();
   const logoMarkup = logoDataUri
     ? `<image href="${logoDataUri}" x="1052" y="486" width="84" height="84" preserveAspectRatio="xMidYMid meet" />`
-    : `<text x="1094" y="537" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="900" fill="#0D7C66">${escapeXml(brandName.toUpperCase())}</text>`;
+    : `<text x="1094" y="537" text-anchor="middle" font-family="Roboto, Arial, Helvetica, sans-serif" font-size="22" font-weight="900" fill="#123B74">${escapeXml(brandName.toUpperCase())}</text>`;
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${SOCIAL_CARD_WIDTH}" height="${SOCIAL_CARD_HEIGHT}" viewBox="0 0 ${SOCIAL_CARD_WIDTH} ${SOCIAL_CARD_HEIGHT}">
     <defs>
@@ -730,14 +730,14 @@ function renderPetitionSocialCardSvg({ petition, coverImage = "" }) {
         <stop offset="100%" stop-color="rgba(10,19,31,0.76)" />
       </linearGradient>
       <linearGradient id="fallbackBg" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0%" stop-color="#0B1624" />
-        <stop offset="55%" stop-color="#17314B" />
-        <stop offset="100%" stop-color="#0D7C66" />
+        <stop offset="0%" stop-color="#081020" />
+        <stop offset="55%" stop-color="#172746" />
+        <stop offset="100%" stop-color="#123B74" />
       </linearGradient>
     </defs>
     ${coverMarkup}
     <rect width="${SOCIAL_CARD_WIDTH}" height="${SOCIAL_CARD_HEIGHT}" fill="url(#fade)" />
-    <text x="64" y="444" font-family="Arial, Helvetica, sans-serif" font-size="46" font-weight="850" fill="#FFFFFF">${titleMarkup}</text>
+    <text x="64" y="444" font-family="Roboto, Arial, Helvetica, sans-serif" font-size="46" font-weight="850" fill="#FFFFFF">${titleMarkup}</text>
     <rect x="1028" y="462" width="132" height="132" rx="30" fill="rgba(255,255,255,0.9)" />
     ${logoMarkup}
   </svg>`;
@@ -909,13 +909,37 @@ function renderUnavailablePage({ title, subtitle, statusCode }) {
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>${escapeHtml(title)}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;600;700;800&display=swap" />
     <style>
       :root {
-        color-scheme: dark;
-        --bg: #050608;
-        --line: rgba(255, 255, 255, 0.12);
-        --ink: #f7f8fb;
-        --muted: rgba(232, 235, 245, 0.7);
+        color-scheme: dark light;
+        --bg: #081020;
+        --surface: #111d34;
+        --line: #30537f;
+        --primary: #5ea1ff;
+        --accent: #e7b94f;
+        --ink: #f5f8ff;
+        --muted: #a7b5c8;
+        --shadow: 0 20px 56px rgba(0, 0, 0, 0.32);
+      }
+      @media (prefers-color-scheme: light) {
+        :root {
+          --bg: #f5f8fd;
+          --surface: #ffffff;
+          --line: #c6d7ea;
+          --primary: #1d67b8;
+          --accent: #b07808;
+          --ink: #101828;
+          --muted: #475467;
+          --shadow: 0 20px 56px rgba(16, 24, 40, 0.16);
+        }
+      }
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
       }
       body {
         margin: 0;
@@ -923,18 +947,19 @@ function renderUnavailablePage({ title, subtitle, statusCode }) {
         display: grid;
         place-items: center;
         background:
-          radial-gradient(circle at top left, rgba(255, 51, 95, 0.16), transparent 28%),
-          linear-gradient(180deg, #0b0f15 0%, var(--bg) 100%);
+          radial-gradient(circle at top left, color-mix(in srgb, var(--primary) 14%, transparent), transparent 30rem),
+          radial-gradient(circle at top right, color-mix(in srgb, var(--accent) 7%, transparent), transparent 24rem),
+          var(--bg);
         color: var(--ink);
-        font-family: "Avenir Next", "Space Grotesk", "IBM Plex Sans", sans-serif;
+        font-family: Roboto, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       }
       main {
         width: min(92vw, 540px);
         padding: 30px;
-        border-radius: 28px;
+        border-radius: 24px;
         border: 1px solid var(--line);
-        background: rgba(9, 12, 18, 0.92);
-        box-shadow: 0 28px 80px rgba(0, 0, 0, 0.3);
+        background: var(--surface);
+        box-shadow: var(--shadow);
       }
       p {
         margin: 0;
@@ -947,7 +972,7 @@ function renderUnavailablePage({ title, subtitle, statusCode }) {
         line-height: 1.02;
       }
       .eyebrow {
-        color: rgba(255, 255, 255, 0.58);
+        color: var(--primary);
         font-size: 0.78rem;
         font-weight: 700;
         letter-spacing: 0.12em;
@@ -997,6 +1022,9 @@ function renderWebShellPage({
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>${escapeHtml(safeTitle)}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;600;700;800&display=swap" />
     <meta name="description" content="${escapeAttribute(safeDescription)}" />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="${escapeAttribute(canonicalUrl)}" />
@@ -1021,21 +1049,43 @@ function renderWebShellPage({
     ${extraMeta}
     <style>
       :root {
-        color-scheme: dark;
-        --bg: #050608;
-        --ink: #f7f8fb;
-        --muted: rgba(232, 235, 245, 0.7);
-        --line: rgba(255, 255, 255, 0.12);
+        color-scheme: dark light;
+        --bg: #081020;
+        --surface: #111d34;
+        --raised: #172746;
+        --line: #30537f;
+        --primary: #5ea1ff;
+        --primary-strong: #2d78d8;
+        --on-primary: #101828;
+        --accent: #e7b94f;
+        --ink: #f5f8ff;
+        --muted: #a7b5c8;
+        --shadow: 0 20px 56px rgba(0, 0, 0, 0.32);
+      }
+      @media (prefers-color-scheme: light) {
+        :root {
+          --bg: #f5f8fd;
+          --surface: #ffffff;
+          --raised: #eaf2fc;
+          --line: #c6d7ea;
+          --primary: #1d67b8;
+          --primary-strong: #123b74;
+          --on-primary: #ffffff;
+          --accent: #b07808;
+          --ink: #101828;
+          --muted: #475467;
+          --shadow: 0 20px 56px rgba(16, 24, 40, 0.16);
+        }
       }
       body {
         margin: 0;
         min-height: 100vh;
         background:
-          radial-gradient(circle at 14% 12%, rgba(255, 51, 95, 0.18), transparent 28%),
-          radial-gradient(circle at 84% 20%, rgba(37, 244, 238, 0.12), transparent 24%),
-          linear-gradient(180deg, #0b0f15 0%, var(--bg) 100%);
+          radial-gradient(circle at 14% 12%, color-mix(in srgb, var(--primary) 14%, transparent), transparent 30rem),
+          radial-gradient(circle at 84% 20%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 24rem),
+          var(--bg);
         color: var(--ink);
-        font-family: "Avenir Next", "Space Grotesk", "IBM Plex Sans", sans-serif;
+        font-family: Roboto, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       }
       #shared-feed-app {
         min-height: 100vh;
@@ -1049,14 +1099,14 @@ function renderWebShellPage({
       .shared-feed-shell-fallback__card {
         width: min(92vw, 560px);
         padding: 30px;
-        border-radius: 28px;
-        background: rgba(9, 12, 18, 0.92);
+        border-radius: 24px;
+        background: var(--surface);
         border: 1px solid var(--line);
-        box-shadow: 0 28px 80px rgba(0, 0, 0, 0.34);
+        box-shadow: var(--shadow);
       }
       .shared-feed-shell-fallback__eyebrow {
         margin: 0 0 10px;
-        color: rgba(255, 255, 255, 0.58);
+        color: var(--primary);
         font-size: 0.8rem;
         font-weight: 700;
         letter-spacing: 0.12em;
@@ -1079,21 +1129,29 @@ function renderWebShellPage({
         gap: 10px;
       }
       .shared-feed-shell-fallback__button {
-        min-height: 46px;
-        padding: 0 18px;
-        border-radius: 999px;
+        min-height: 44px;
+        padding: 12px 16px;
+        border-radius: 12px;
         border: 1px solid var(--line);
-        background: rgba(255, 255, 255, 0.05);
-        color: #fff;
+        background: var(--raised);
+        color: var(--ink);
         text-decoration: none;
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        font-weight: 700;
+        font-weight: 800;
       }
       .shared-feed-shell-fallback__button--primary {
         border-color: transparent;
-        background: linear-gradient(135deg, #ff335f, #ff6e88);
+        background: var(--primary);
+        color: var(--on-primary);
+      }
+      .shared-feed-shell-fallback__button--primary:hover {
+        background: var(--primary-strong);
+      }
+      .shared-feed-shell-fallback__button:focus-visible {
+        outline: 2px solid var(--primary);
+        outline-offset: 3px;
       }
     </style>
   </head>
@@ -1235,7 +1293,10 @@ function getAppShellPageMeta(routeMatch) {
 
   switch (routeKey) {
     case "auth":
-      if (routePath === "/auth/signup/email" || routePath === "/auth/signup/password") {
+      if (
+        routePath === "/auth/signup/email" ||
+        routePath === "/auth/signup/password"
+      ) {
         return {
           title: "Create Account | Polis",
           description: "Create a Polis account from the browser.",
@@ -1248,7 +1309,8 @@ function getAppShellPageMeta(routeMatch) {
       if (routePath === "/auth/confirm-code") {
         return {
           title: "Confirm Account | Polis",
-          description: "Confirm a Polis account verification code from the browser.",
+          description:
+            "Confirm a Polis account verification code from the browser.",
           eyebrow: "Account",
           headline: "Confirm your Polis account",
           supportingCopy:
@@ -1317,7 +1379,8 @@ function getAppShellPageMeta(routeMatch) {
     case "post-analytics":
       return {
         title: "Post analytics | Polis",
-        description: "Review post reach, engagement, shares, and watch time in Polis.",
+        description:
+          "Review post reach, engagement, shares, and watch time in Polis.",
         eyebrow: "Post analytics",
         headline: "Post performance",
         supportingCopy:
@@ -1335,8 +1398,7 @@ function getAppShellPageMeta(routeMatch) {
     case "create":
       return {
         title: "Create | Polis",
-        description:
-          "Publish image posts to the Polis feed from the browser.",
+        description: "Publish image posts to the Polis feed from the browser.",
         eyebrow: "Create",
         headline: "Publish an image post",
         supportingCopy:
@@ -1402,7 +1464,8 @@ function getAppShellPageMeta(routeMatch) {
     case "candidate-dashboard-section":
       return {
         title: "Campaigns | Polis",
-        description: "Open the Polis candidate campaign dashboard in the browser.",
+        description:
+          "Open the Polis candidate campaign dashboard in the browser.",
         eyebrow: "Campaigns",
         headline: "Candidate dashboard",
         supportingCopy:
@@ -1465,8 +1528,7 @@ function getAppShellPageMeta(routeMatch) {
         description:
           "Follow civic topics in Polis and tune the web feed around the issues you care about.",
         eyebrow: "Topics",
-        headline:
-          routeKey === "onboarding-topics" ? "Pick topics" : "Topics",
+        headline: routeKey === "onboarding-topics" ? "Pick topics" : "Topics",
         supportingCopy:
           "Sign in to follow issue areas, shape recommendations, and continue onboarding from the browser.",
       };
@@ -1484,8 +1546,7 @@ function getAppShellPageMeta(routeMatch) {
     case "election-day":
       return {
         title: "Election Day | Polis",
-        description:
-          "Track live and finalized election results in Polis.",
+        description: "Track live and finalized election results in Polis.",
         eyebrow: "Election Day",
         headline: "Live election results",
         supportingCopy:
@@ -1586,7 +1647,9 @@ async function renderAppShellPage(req, routeMatch) {
   let metaImage = "";
   let extraMeta = "";
   if (routeMatch.routeKey === "public-petition") {
-    const petition = await fetchPublicPetition(routeMatch.routeParams.publicSlug);
+    const petition = await fetchPublicPetition(
+      routeMatch.routeParams.publicSlug,
+    );
     if (petition) {
       meta = {
         ...meta,
@@ -1605,7 +1668,9 @@ async function renderAppShellPage(req, routeMatch) {
       `;
     }
   } else if (routeMatch.routeKey === "public-petition-results") {
-    const petition = await fetchPublicPetitionResults(routeMatch.routeParams.shareToken);
+    const petition = await fetchPublicPetitionResults(
+      routeMatch.routeParams.shareToken,
+    );
     if (petition) {
       meta = {
         ...meta,
@@ -1786,7 +1851,9 @@ router.get("/api/candidateApplications/me", (req, res) => {
 
   res
     .status(200)
-    .json(buildCandidateApplicationResponse(candidateApplicationStore.get(userKey)));
+    .json(
+      buildCandidateApplicationResponse(candidateApplicationStore.get(userKey)),
+    );
 });
 
 router.post(
@@ -1819,14 +1886,17 @@ router.post(
     const application = {
       ...(previous || {}),
       ...submitted,
-      applicationId: previous?.applicationId || `cand-app-${crypto.randomUUID()}`,
+      applicationId:
+        previous?.applicationId || `cand-app-${crypto.randomUUID()}`,
       status: "pending",
       createdAt: previous?.createdAt || now,
       updatedAt: now,
     };
 
     candidateApplicationStore.set(userKey, application);
-    res.status(previous ? 200 : 201).json(buildCandidateApplicationResponse(application));
+    res
+      .status(previous ? 200 : 201)
+      .json(buildCandidateApplicationResponse(application));
   },
 );
 
@@ -1874,25 +1944,28 @@ router.get("/petitions/:publicSlug/social-card.png", async (req, res) => {
     .send(png);
 });
 
-router.get("/petitions/results/:shareToken/social-card.png", async (req, res) => {
-  const petition = await fetchPublicPetitionResults(req.params.shareToken);
-  if (!petition) {
-    res.status(404).send(
-      renderUnavailablePage({
-        title: "Petition results unavailable",
-        subtitle: "This petition results social card could not be loaded.",
-        statusCode: 404,
-      }),
-    );
-    return;
-  }
-  const png = await renderPetitionSocialCardPng(petition);
-  res
-    .status(200)
-    .type("png")
-    .set("Cache-Control", "public, max-age=300")
-    .send(png);
-});
+router.get(
+  "/petitions/results/:shareToken/social-card.png",
+  async (req, res) => {
+    const petition = await fetchPublicPetitionResults(req.params.shareToken);
+    if (!petition) {
+      res.status(404).send(
+        renderUnavailablePage({
+          title: "Petition results unavailable",
+          subtitle: "This petition results social card could not be loaded.",
+          statusCode: 404,
+        }),
+      );
+      return;
+    }
+    const png = await renderPetitionSocialCardPng(petition);
+    res
+      .status(200)
+      .type("png")
+      .set("Cache-Control", "public, max-age=300")
+      .send(png);
+  },
+);
 
 router.get(
   [
@@ -1978,7 +2051,10 @@ router.get(
       return;
     }
 
-    res.status(200).type("html").send(await renderAppShellPage(req, routeMatch));
+    res
+      .status(200)
+      .type("html")
+      .send(await renderAppShellPage(req, routeMatch));
   },
 );
 

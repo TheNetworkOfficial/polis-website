@@ -3,38 +3,44 @@
 }
 
 .delete-shell {
-  width: min(100% - 2rem, 1120px);
-  margin-inline: auto;
   display: grid;
   grid-template-columns: minmax(280px, 0.78fr) minmax(360px, 1fr);
-  gap: clamp(1rem, 3vw, 1.5rem);
+  gap: clamp(16px, 3vw, 24px);
   align-items: start;
+  width: min(100% - 32px, var(--polis-content-max));
+  margin-inline: auto;
 }
 
 .delete-intro,
 .delete-workspace {
-  padding: clamp(1.2rem, 3vw, 2rem);
   display: grid;
-  gap: 1.05rem;
+  gap: var(--polis-space-lg);
+  padding: clamp(20px, 3vw, 32px);
 }
 
 .delete-intro {
   position: sticky;
-  top: 6rem;
+  top: 96px;
   overflow: hidden;
+  background: linear-gradient(
+      145deg,
+      rgb(var(--polis-danger-rgb) / 10%),
+      transparent 52%
+    ),
+    var(--polis-surface);
 }
 
 .delete-intro h1 {
+  max-width: 12ch;
   margin: 0;
-  max-width: 11ch;
-  font-size: clamp(2.5rem, 6vw, 4.8rem);
-  line-height: 0.95;
+  font-size: clamp(2.4rem, 6vw, 4.2rem);
+  line-height: 1;
 }
 
 .delete-intro > p {
-  margin: 0;
   max-width: 58ch;
-  color: var(--text-muted);
+  margin: 0;
+  color: var(--polis-text-muted);
   line-height: 1.65;
 }
 
@@ -43,36 +49,37 @@
 }
 
 .delete-steps {
-  list-style: none;
+  display: grid;
+  gap: var(--polis-space-sm);
   margin: 0;
   padding: 0;
-  display: grid;
-  gap: 0.65rem;
+  list-style: none;
 }
 
 .delete-steps li {
-  margin: 0;
-  border: 1px solid var(--surface-border);
-  border-radius: var(--radius-sm);
-  padding: 0.65rem;
   display: grid;
-  grid-template-columns: 2rem minmax(0, 1fr);
+  grid-template-columns: 32px minmax(0, 1fr);
   align-items: center;
-  gap: 0.65rem;
+  gap: var(--polis-space-md);
+  min-height: 52px;
+  margin: 0;
+  padding: var(--polis-space-sm) var(--polis-space-md);
+  border: 1px solid var(--polis-border);
+  border-radius: var(--polis-radius-md);
+  background: var(--polis-surface-raised);
+  color: var(--polis-text-muted);
   font-size: 0.95rem;
   font-weight: 700;
-  color: var(--text-muted);
-  background: rgba(255, 255, 255, 0.58);
 }
 
 .delete-steps li strong {
-  width: 2rem;
-  height: 2rem;
-  border-radius: 999px;
   display: grid;
   place-items: center;
-  background: rgba(36, 66, 101, 0.08);
-  color: var(--color-ink-900);
+  width: 32px;
+  height: 32px;
+  border-radius: var(--polis-radius-xl);
+  background: rgb(var(--polis-primary-rgb) / 12%);
+  color: var(--polis-text);
 }
 
 .delete-steps li span {
@@ -80,88 +87,89 @@
 }
 
 .delete-steps li.is-current {
-  border-color: var(--color-ink-500);
-  color: var(--color-ink-900);
-  background: rgba(36, 66, 101, 0.08);
+  border-color: var(--polis-primary);
+  background: rgb(var(--polis-primary-rgb) / 12%);
+  color: var(--polis-text);
 }
 
 .delete-steps li.is-complete {
-  border-color: rgba(47, 143, 99, 0.35);
-  color: #206545;
-  background: rgba(47, 143, 99, 0.1);
+  border-color: var(--polis-success);
+  background: var(--polis-success-container);
+  color: var(--polis-on-secondary-container);
 }
 
 .delete-steps li.is-complete strong {
-  background: rgba(47, 143, 99, 0.14);
-  color: #206545;
+  background: var(--polis-success-container);
+  color: var(--polis-on-secondary-container);
 }
 
 .delete-impact-grid {
   display: grid;
-  gap: 0.75rem;
+  gap: var(--polis-space-md);
 }
 
 .delete-impact-grid article {
   min-width: 0;
-  padding: 0.9rem;
-  border: 1px solid var(--surface-border);
-  border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, 0.62);
+  padding: var(--polis-space-md);
+  border: 1px solid var(--polis-border);
+  border-radius: var(--polis-radius-md);
+  background: var(--polis-surface-raised);
 }
 
 .delete-impact-grid strong {
   display: block;
-  color: var(--color-ink-900);
+  color: var(--polis-text);
 }
 
 .delete-impact-grid p {
-  margin: 0.35rem 0 0;
-  color: var(--text-muted);
+  margin: var(--polis-space-xs) 0 0;
+  color: var(--polis-text-muted);
   font-size: 0.92rem;
   line-height: 1.55;
 }
 
 .delete-panel {
-  border: 1px solid var(--surface-border);
-  border-radius: var(--radius-md);
-  padding: clamp(1rem, 2.5vw, 1.4rem);
-  background: var(--surface-soft);
   display: grid;
-  gap: 0.95rem;
+  gap: var(--polis-space-lg);
+  padding: clamp(16px, 2.5vw, 24px);
+  border: 1px solid var(--polis-border);
+  border-radius: var(--polis-radius-lg);
+  background: var(--polis-surface-raised);
 }
 
 .delete-panel h2 {
   margin: 0;
   font-size: clamp(1.35rem, 3vw, 2rem);
-  line-height: 1.05;
+  line-height: 1.12;
 }
 
 .delete-panel p {
   margin: 0;
-  color: var(--text-muted);
+  color: var(--polis-text-muted);
   line-height: 1.55;
 }
 
 .delete-panel form {
   display: grid;
-  gap: 0.85rem;
+  gap: var(--polis-space-md);
 }
 
 .delete-panel label:not(.checkbox-row) {
   display: grid;
-  gap: 0.35rem;
-  color: var(--color-ink-900);
+  gap: var(--polis-space-xs);
+  color: var(--polis-text);
   font-weight: 700;
 }
 
 .delete-panel input[type="text"],
 .delete-panel input[type="password"] {
   width: 100%;
-  min-height: 3rem;
-  border: 1px solid var(--surface-border);
-  border-radius: var(--radius-sm);
-  padding: 0 0.85rem;
-  background: rgba(255, 255, 255, 0.9);
+  min-height: 48px;
+  padding: 0 var(--polis-space-md);
+  border: 1px solid var(--polis-border);
+  border-radius: var(--polis-radius-md);
+  background: var(--polis-surface);
+  color: var(--polis-text);
 }
 
 .delete-panel input:disabled {
@@ -170,66 +178,69 @@
 }
 
 .delete-panel input:focus {
-  border-color: var(--color-ink-500);
-  outline: none;
-  box-shadow: 0 0 0 3px rgba(36, 66, 101, 0.14);
+  border-color: var(--polis-primary);
+  outline: 3px solid var(--polis-primary);
+  outline-offset: 2px;
+  box-shadow: none;
 }
 
 .delete-actions-inline {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.55rem;
+  gap: var(--polis-space-sm);
 }
 
 .delete-divider {
   display: grid;
   align-items: center;
-  margin: 0.1rem 0;
+  margin: var(--polis-space-xs) 0;
 }
 
 .delete-divider span {
   justify-self: center;
-  padding: 0.1rem 0.6rem;
-  border: 1px solid var(--surface-border);
-  border-radius: 999px;
-  background: var(--surface-soft);
+  padding: var(--polis-space-xs) var(--polis-space-sm);
+  border: 1px solid var(--polis-border);
+  border-radius: var(--polis-radius-xl);
+  background: var(--polis-surface-raised);
+  color: var(--polis-text-muted);
   font-size: 0.82rem;
-  color: var(--text-muted);
 }
 
 .checkbox-row {
   display: flex;
-  gap: 0.55rem;
+  gap: var(--polis-space-sm);
   align-items: flex-start;
-  color: var(--color-ink-900);
+  min-height: 44px;
+  color: var(--polis-text);
   font-weight: 700;
 }
 
 .checkbox-row input {
-  width: auto;
-  margin-top: 0.15rem;
-  accent-color: var(--color-ink-500);
+  width: 20px;
+  min-height: 20px;
+  margin-top: 2px;
+  accent-color: var(--polis-primary);
 }
 
 .form-help {
-  color: var(--text-muted);
+  color: var(--polis-text-muted);
   font-size: 0.94rem;
 }
 
 .form-feedback {
   margin: 0;
-  border: 1px solid rgba(47, 143, 99, 0.24);
-  border-radius: var(--radius-sm);
-  padding: 0.75rem 0.85rem;
-  background: rgba(47, 143, 99, 0.08);
-  color: #206545;
+  padding: var(--polis-space-md);
+  border: 1px solid var(--polis-success);
+  border-radius: var(--polis-radius-md);
+  background: var(--polis-success-container);
+  color: var(--polis-on-secondary-container);
   font-weight: 700;
 }
 
 .form-feedback[data-tone="error"] {
-  border-color: rgba(184, 44, 75, 0.28);
-  background: rgba(184, 44, 75, 0.08);
-  color: #8d1f38;
+  border-color: var(--polis-danger);
+  background: var(--polis-danger-container);
+  color: var(--polis-on-danger-container);
 }
 
 input[name="code"] {
@@ -252,13 +263,16 @@ input[name="code"] {
 }
 
 @media (max-width: 520px) {
+  .delete-shell {
+    width: min(100% - 24px, var(--polis-content-max));
+  }
+
   .delete-actions-inline .btn {
     width: 100%;
-    justify-content: center;
   }
 
   .delete-intro,
   .delete-workspace {
-    padding: 1rem;
+    padding: var(--polis-space-lg);
   }
 }

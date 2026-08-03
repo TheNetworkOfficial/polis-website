@@ -1,5 +1,6 @@
 /* global __CTA_API_BASE_URL__, __CTA_APP_DEEP_LINK_BASE_URL__, __CTA_IOS_STORE_URL__, __CTA_ANDROID_STORE_URL__ */
 
+import "../../css/polis-design-system.css";
 import "./css/cta-invite.css";
 
 function readToken() {
@@ -48,11 +49,16 @@ async function loadInvitation() {
   const apiBase = apiBaseUrl();
   if (!apiBase) {
     setText("cta-title", "Invitation unavailable");
-    setText("cta-subtitle", "CTA_API_BASE_URL is not configured for this site.");
+    setText(
+      "cta-subtitle",
+      "CTA_API_BASE_URL is not configured for this site.",
+    );
     return;
   }
 
-  const response = await fetch(`${apiBase}/api/cta-invite/${encodeURIComponent(token)}`);
+  const response = await fetch(
+    `${apiBase}/api/cta-invite/${encodeURIComponent(token)}`,
+  );
   if (!response.ok) {
     setText("cta-title", "Invitation unavailable");
     setText("cta-subtitle", "We couldn't load this CTA invitation.");
@@ -63,8 +69,9 @@ async function loadInvitation() {
   const coalitionName = String(event.hostCoalitionName || "").trim();
   const title = String(event.title || "Call to Action").trim();
   const description = String(event.description || "").trim();
-  const bannerImageUrl =
-    String(event?.ctaPayload?.bannerImageUrl || event.imageUrl || "").trim();
+  const bannerImageUrl = String(
+    event?.ctaPayload?.bannerImageUrl || event.imageUrl || "",
+  ).trim();
   const openAppUrl = `${appDeepLinkBase()}/cta-invite/${encodeURIComponent(token)}`;
 
   setText("cta-title", title);

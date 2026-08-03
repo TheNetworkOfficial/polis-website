@@ -1,4 +1,6 @@
+import "../../css/polis-design-system.css";
 import "./css/shared-feed.css";
+import "./css/civic-neon.css";
 import polisLogoUrl from "../../assets/images/polis/Polis.png";
 
 import {
@@ -7415,7 +7417,7 @@ function ensureElectionMapLayers(map) {
     type: "line",
     source: ELECTION_MAP_DISTRICT_SOURCE_ID,
     paint: {
-      "line-color": "#f59e0b",
+      "line-color": "#e7b94f",
       "line-opacity": ["case", ["==", ["get", "selected"], true], 0.86, 0],
       "line-width": 9,
       "line-blur": 5,
@@ -7429,7 +7431,7 @@ function ensureElectionMapLayers(map) {
       "line-color": [
         "case",
         ["==", ["get", "selected"], true],
-        "#fbbf24",
+        "#e7b94f",
         "#475569",
       ],
       "line-opacity": 0.94,
@@ -10567,7 +10569,7 @@ function electionPartyColor(value) {
   if (token === "IND") return "#7c3aed";
   if (token === "LIB") return "#eab308";
   if (token === "GRN") return "#16a34a";
-  return "#26f4ee";
+  return "#5ea1ff";
 }
 
 function normalizeElectionScope(value) {
@@ -62274,9 +62276,9 @@ function renderPolicyQuestionsAuthGate() {
               <h2>Background and sources stay with the answer.</h2>
               <p>Each prompt can include a chart, plain-language background, citations, and the exact question text before you choose an option.</p>
               <div class="shared-policy-questions-auth__chart-mini" aria-label="Example policy question chart">
-                <span style="--policy-question-bar-width:68%;--policy-question-bar-color:#26f4ee"><strong>Rent pressure</strong><em>68</em></span>
-                <span style="--policy-question-bar-width:44%;--policy-question-bar-color:#ff335f"><strong>Permit pace</strong><em>44</em></span>
-                <span style="--policy-question-bar-width:29%;--policy-question-bar-color:#f7c948"><strong>Vacancy</strong><em>29</em></span>
+                <span style="--policy-question-bar-width:68%;--policy-question-bar-color:#5ea1ff"><strong>Rent pressure</strong><em>68</em></span>
+                <span style="--policy-question-bar-width:44%;--policy-question-bar-color:#cc223a"><strong>Permit pace</strong><em>44</em></span>
+                <span style="--policy-question-bar-width:29%;--policy-question-bar-color:#e7b94f"><strong>Vacancy</strong><em>29</em></span>
               </div>
             </section>
             <aside class="shared-policy-question-answer-panel">
@@ -62738,7 +62740,7 @@ function renderPostViewFallbackPage() {
 }
 
 function policyQuestionPalette(index) {
-  const palette = ["#26f4ee", "#ff335f", "#38d29d", "#f59e0b", "#a78bfa", "#60a5fa"];
+  const palette = ["#5ea1ff", "#cc223a", "#33e0bd", "#e7b94f", "#a78bfa", "#60a5fa"];
   return palette[Math.abs(index) % palette.length];
 }
 
@@ -72427,7 +72429,7 @@ function renderCandidateCalendarTimelineItem(item, resource, canApprove) {
     <div class="shared-campaign-calendar-board__slot-body">
       <div class="shared-campaign-calendar-board__slot-title">
         <div>
-          <span class="shared-campaign-staff-role-pill" style="--role-color: ${item.status === "pending_approval" ? "#f59e0b" : "#26f4ee"}">
+          <span class="shared-campaign-staff-role-pill" style="--role-color: ${item.status === "pending_approval" ? "#e7b94f" : "#5ea1ff"}">
             <strong>${escapeHtml(humanizeLabel(item.status))}</strong>
             <span>${escapeHtml(candidateCalendarPrivacyLabel(item.privacy))}</span>
           </span>
@@ -72688,7 +72690,7 @@ function renderCandidateCalendarItemCard(item, resource, canApprove) {
     <div class="shared-campaign-calendar-item__body">
       <div class="shared-campaign-calendar-item__title">
         <div>
-          <span class="shared-campaign-staff-role-pill" style="--role-color: ${item.status === "pending_approval" ? "#f59e0b" : "#26f4ee"}">
+          <span class="shared-campaign-staff-role-pill" style="--role-color: ${item.status === "pending_approval" ? "#e7b94f" : "#5ea1ff"}">
             <strong>${escapeHtml(candidateCalendarItemTypeLabel(item.itemType))}</strong>
             <span>${escapeHtml(humanizeLabel(item.status))}</span>
           </span>
@@ -72842,7 +72844,7 @@ function renderCandidateCalendarConnection(connection, resource, canManage) {
   return `<article class="shared-campaign-calendar-connection">
     <div class="shared-campaign-calendar-connection__top">
       <div>
-        <span class="shared-campaign-staff-role-pill" style="--role-color: #26f4ee"><strong>${escapeHtml(connection.providerLabel)}</strong><span>${escapeHtml(humanizeLabel(connection.status))}</span></span>
+        <span class="shared-campaign-staff-role-pill" style="--role-color: #5ea1ff"><strong>${escapeHtml(connection.providerLabel)}</strong><span>${escapeHtml(humanizeLabel(connection.status))}</span></span>
         <h3>${escapeHtml(connection.accountLabel)}</h3>
         <p>${escapeHtml(connection.lastSyncAt ? `Last sync ${formatAbsoluteDateTime(connection.lastSyncAt)}` : connection.lastSyncStatus || "Sync pending")}</p>
       </div>
@@ -84391,7 +84393,7 @@ function renderCoalitionCalendarConnection(connection) {
   return `<article class="shared-campaign-calendar-connection">
     <div class="shared-campaign-calendar-connection__top">
       <div>
-        <span class="shared-campaign-staff-role-pill" style="--role-color: #26f4ee"><strong>${escapeHtml(connection.providerLabel)}</strong><span>${escapeHtml(humanizeLabel(connection.status))}</span></span>
+        <span class="shared-campaign-staff-role-pill" style="--role-color: #5ea1ff"><strong>${escapeHtml(connection.providerLabel)}</strong><span>${escapeHtml(humanizeLabel(connection.status))}</span></span>
         <h3>${escapeHtml(connection.accountLabel)}</h3>
         <p>${escapeHtml(connection.lastSyncAt ? `Last sync ${formatAbsoluteDateTime(connection.lastSyncAt)}` : connection.lastSyncStatus || "Sync pending")}</p>
       </div>
@@ -85076,7 +85078,7 @@ function renderCoalitionVoterMapTerritoryAdminPanel(
   </div>`;
 }
 
-function coalitionVoterMapColor(value, fallback = "#0f766e") {
+function coalitionVoterMapColor(value, fallback = "#007a64") {
   const color = normalizeString(value);
   return /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/iu.test(color)
     ? color
@@ -95097,7 +95099,7 @@ const MESSAGING_ROLE_PRESETS = Object.freeze([
     description: "For staff who help handle reports, blocked people, and sensitive rooms.",
     values: {
       name: "Safety reviewer",
-      color: "#f59e0b",
+      color: "#e7b94f",
       displaySeparately: true,
       mentionable: true,
     },

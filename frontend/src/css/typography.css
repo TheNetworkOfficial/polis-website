@@ -1,50 +1,78 @@
 h1,
 h2,
 h3,
-h4 {
-  color: var(--text-main);
-  font-family: var(--font-heading);
-  letter-spacing: -0.02em;
+h4,
+h5,
+h6 {
   margin: 0 0 var(--space-md);
-  line-height: 1.2;
+  color: var(--polis-text);
+  font-family: var(--font-heading);
+  line-height: 1.18;
+  letter-spacing: -0.02em;
+  text-wrap: balance;
 }
 
 h1 {
-  font-size: clamp(2rem, 6vw, 3.4rem);
+  font-size: clamp(2.25rem, 6vw, 3.56rem);
+  font-weight: 800;
+  line-height: 1.12;
 }
 
 h2 {
-  font-size: clamp(1.6rem, 4vw, 2.45rem);
+  font-size: clamp(1.75rem, 4vw, 2.25rem);
+  font-weight: 800;
+  line-height: 1.2;
 }
 
 h3 {
-  font-size: clamp(1.15rem, 3vw, 1.5rem);
+  font-size: clamp(1.25rem, 3vw, 1.5rem);
+  font-weight: 800;
+  line-height: 1.3;
+}
+
+h4 {
+  font-size: 1.125rem;
+  font-weight: 700;
 }
 
 p,
 li {
-  color: var(--text-main);
-  font-size: clamp(1rem, 2.1vw, 1.08rem);
   margin: 0 0 var(--space-md);
+  color: var(--polis-text);
+  font-size: clamp(1rem, 2vw, 1.075rem);
+  line-height: 1.55;
 }
 
 small,
 .text-muted {
-  color: var(--text-muted);
+  color: var(--polis-text-muted);
 }
 
 a {
-  color: var(--color-ink-700);
+  color: var(--polis-primary);
   text-decoration-thickness: 1px;
   text-underline-offset: 3px;
 }
 
-a:hover,
+a:hover {
+  color: var(--polis-text);
+}
+
 a:focus-visible {
-  color: var(--color-ink-900);
+  border-radius: var(--polis-radius-xs);
+}
+
+strong {
+  font-weight: 700;
 }
 
 ul,
 ol {
   padding-left: 1.25rem;
+}
+
+@media (max-width: 520px) {
+  h1 {
+    font-size: clamp(2rem, 12vw, 2.75rem);
+  }
 }

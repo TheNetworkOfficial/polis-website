@@ -1,61 +1,106 @@
 :root {
-  --font-heading: "Space Grotesk", sans-serif;
-  --font-body: "Manrope", sans-serif;
+  --font-heading: var(--polis-font-heading);
+  --font-body: var(--polis-font-body);
 
-  --color-ink-900: #11233b;
-  --color-ink-700: #244265;
-  --color-ink-500: #3d5f89;
-  --color-slate-100: #edf3fb;
-  --color-slate-200: #d5e2f3;
-  --color-slate-300: #bed1ea;
-  --color-white: #ffffff;
-  --color-accent-500: #f08d49;
-  --color-accent-600: #d66f2d;
-  --color-success-500: #2f8f63;
-  --color-danger-500: #b23a48;
+  --color-ink-900: var(--polis-text);
+  --color-ink-700: var(--polis-text-muted);
+  --color-ink-500: var(--polis-text-subtle);
+  --color-slate-100: var(--polis-surface-raised);
+  --color-slate-200: var(--polis-border);
+  --color-slate-300: var(--polis-border-strong);
+  --color-white: var(--polis-surface);
+  --color-accent-500: var(--polis-accent);
+  --color-accent-600: var(--polis-warning);
+  --color-success-500: var(--polis-success);
+  --color-danger-500: var(--polis-danger);
 
-  --page-bg: linear-gradient(180deg, #f7fbff 0%, #eaf2fc 100%);
-  --text-main: var(--color-ink-900);
-  --text-muted: #4f617a;
-  --surface-main: rgba(255, 255, 255, 0.86);
-  --surface-soft: rgba(237, 243, 251, 0.92);
-  --surface-border: rgba(36, 66, 101, 0.2);
+  --page-bg: radial-gradient(
+      circle at 10% 0%,
+      rgb(var(--polis-primary-rgb) / 13%),
+      transparent 30rem
+    ),
+    radial-gradient(
+      circle at 92% 12%,
+      rgb(var(--polis-accent-rgb) / 8%),
+      transparent 26rem
+    ),
+    var(--polis-background);
+  --text-main: var(--polis-text);
+  --text-muted: var(--polis-text-muted);
+  --surface-main: var(--polis-surface);
+  --surface-soft: var(--polis-surface-raised);
+  --surface-border: var(--polis-border);
 
-  --shadow-soft: 0 12px 30px rgba(17, 35, 59, 0.08);
-  --radius-sm: 8px;
-  --radius-md: 14px;
-  --radius-lg: 22px;
+  --shadow-soft: var(--polis-shadow-soft);
+  --radius-sm: var(--polis-radius-sm);
+  --radius-md: var(--polis-radius-md);
+  --radius-lg: var(--polis-radius-lg);
 
-  --container-max: 1120px;
-  --space-xs: 0.5rem;
-  --space-sm: 0.875rem;
-  --space-md: 1.25rem;
-  --space-lg: 2rem;
-  --space-xl: 3rem;
-  --space-2xl: 5rem;
+  --container-max: var(--polis-content-max);
+  --space-xs: var(--polis-space-sm);
+  --space-sm: var(--polis-space-md);
+  --space-md: var(--polis-space-lg);
+  --space-lg: var(--polis-space-xl);
+  --space-xl: 36px;
+  --space-2xl: 64px;
 }
 
 * {
   box-sizing: border-box;
 }
 
-html,
-body {
-  margin: 0;
+html {
   min-height: 100%;
+  scroll-behavior: smooth;
+  background: var(--polis-background);
 }
 
 body {
+  margin: 0;
+  min-height: 100vh;
   background: var(--page-bg);
   color: var(--text-main);
   font-family: var(--font-body);
   line-height: 1.55;
-  min-height: 100vh;
+  text-rendering: optimizeLegibility;
+}
+
+body::before {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  content: "";
+  background-image: linear-gradient(
+      rgb(var(--polis-border-rgb) / 8%) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      90deg,
+      rgb(var(--polis-border-rgb) / 8%) 1px,
+      transparent 1px
+    );
+  background-size: 48px 48px;
+  mask-image: linear-gradient(
+    to bottom,
+    rgb(var(--polis-fixed-black-rgb) / 45%),
+    transparent 72%
+  );
+}
+
+::selection {
+  background: rgb(var(--polis-primary-rgb) / 34%);
+  color: var(--polis-text);
+}
+
+:focus-visible {
+  outline: 3px solid var(--polis-primary) !important;
+  outline-offset: 2px !important;
 }
 
 img {
-  max-width: 100%;
   display: block;
+  max-width: 100%;
 }
 
 main {
@@ -63,7 +108,7 @@ main {
 }
 
 .container {
-  width: min(100% - 2rem, var(--container-max));
+  width: min(100% - 32px, var(--container-max));
   margin-inline: auto;
 }
 
@@ -88,10 +133,16 @@ main {
 
 @media (max-width: 900px) {
   :root {
-    --space-2xl: 3.5rem;
+    --space-2xl: 48px;
   }
 
   .page-shell {
     padding: var(--space-md) 0 var(--space-xl);
+  }
+}
+
+@media (max-width: 520px) {
+  .container {
+    width: min(100% - 24px, var(--container-max));
   }
 }
