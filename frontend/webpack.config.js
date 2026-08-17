@@ -943,6 +943,7 @@ const deleteAccountDefineEnv = {
   __CTA_APP_DEEP_LINK_BASE_URL__: JSON.stringify(
     process.env.CTA_APP_DEEP_LINK_BASE_URL || "",
   ),
+  __POLIS_FILES_API_BASE_URL__: JSON.stringify(webAppApiBaseUrl),
 };
 
 module.exports = {
@@ -959,6 +960,7 @@ module.exports = {
     dataSafety: "./src/pages/data-safety/data-safety.js",
     childSafety: "./src/pages/child-safety/child-safety.js",
     deleteAccount: "./src/pages/delete-account/delete-account.js",
+    files: "./src/pages/files/files.js",
     "shared-feed": "./src/pages/shared-feed/shared-feed.js",
     notFound: "./src/pages/404/404.js",
   },
@@ -1096,6 +1098,13 @@ module.exports = {
       chunks: ["main", "deleteAccount"],
       favicon: "./src/assets/images/polis/Polis.png",
     }),
+    new HtmlWebpackPlugin({
+      template: "./src/pages/files/files.html",
+      filename: "files/index.html",
+      chunks: ["files"],
+      publicPath: "/",
+      favicon: "./src/assets/images/polis/Polis.png",
+    }),
     staticCtaInviteShell("cta-invite/index.html"),
     staticSettingsVoterIntelligenceShell("settings/voter-intelligence/index.html"),
     staticMessagesShell("messages.html"),
@@ -1119,7 +1128,11 @@ module.exports = {
   ],
   devServer: {
     historyApiFallback: {
-      rewrites: [...publicPageRouteRewrites, ...sharedAppRouteRewrites],
+      rewrites: [
+        ...publicPageRouteRewrites,
+        { from: /^\/files(?:\/.*)?$/u, to: "/files/index.html" },
+        ...sharedAppRouteRewrites,
+      ],
     },
     proxy: [
       {

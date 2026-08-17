@@ -29,6 +29,7 @@ import {
   createMessagingBrowserDevice,
   createMessagingSocketClient,
 } from "./scripts/webMessaging.js";
+import { isFilesWorkspaceAccessible } from "../files/scripts/filesEntitlements.js";
 
 const runtimeConfig =
   window.__POLIS_WEB_APP__ || window.__POLIS_SHARED_FEED__ || {};
@@ -4431,6 +4432,10 @@ const state = {
     session: null,
     user: null,
     message: "",
+  },
+  filesNavigation: {
+    loaded: false,
+    enabled: false,
   },
   ui: {
     toast: "",
@@ -60182,6 +60187,17 @@ function getNavItems() {
       path: "/coalitions",
       active: activeSection === "coalitions",
     },
+    ...(state.filesNavigation.enabled
+      ? [
+          {
+            label: "Files",
+            key: "files",
+            icon: "file",
+            path: "/files",
+            active: activeSection === "files",
+          },
+        ]
+      : []),
     {
       label: "Missions",
       key: "missions",
@@ -127486,6 +127502,21 @@ async function bootstrapAuth() {
   }
 }
 
+async function bootstrapFilesNavigation() {
+  state.filesNavigation.loaded = true;
+  state.filesNavigation.enabled = false;
+  if (!state.auth.session) return;
+  try {
+    const payload = await fetchJson("/api/files/workspaces", { auth: true });
+    const workspaces = Array.isArray(payload?.workspaces)
+      ? payload.workspaces
+      : [];
+    state.filesNavigation.enabled = workspaces.some(isFilesWorkspaceAccessible);
+  } catch {
+    // Files stays hidden when entitlement discovery is unavailable.
+  }
+}
+
 function attachGlobalListeners() {
   root?.addEventListener("click", handleRootClick);
   root?.addEventListener("keydown", handleRootKeydown);
@@ -127573,6 +127604,7 @@ async function init() {
   applySettingsDisplayPreferences();
   attachGlobalListeners();
   await bootstrapAuth();
+  await bootstrapFilesNavigation();
   maybeOpenAuthPromptFromUrl();
   await loadCurrentRoute({ refresh: true });
 }
