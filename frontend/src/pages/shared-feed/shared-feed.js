@@ -30,6 +30,12 @@ import {
   createMessagingSocketClient,
 } from "./scripts/webMessaging.js";
 import { isFilesWorkspaceAccessible } from "../files/scripts/filesEntitlements.js";
+import {
+  buildComposerMediaItems,
+  mediaPresentation,
+  normalizeOrderedPostMedia,
+  visibleMediaUsageBadges,
+} from "./scripts/postMedia.js";
 
 const runtimeConfig =
   window.__POLIS_WEB_APP__ || window.__POLIS_SHARED_FEED__ || {};
@@ -4442,6 +4448,7 @@ const state = {
     authModal: null,
     routeAuth: createAuthRouteState(),
     expandedPostId: "",
+    postMediaIndexById: {},
     comments: {
       open: false,
       loading: false,
@@ -6022,12 +6029,52 @@ function formatRelativeTime(value) {
   });
 }
 
-function isVideoItem(item) {
-  return item?.kind === "post" && item.mediaType === "video";
+function postMediaItems(item) {
+  return Array.isArray(item?.mediaItems) && item.mediaItems.length
+    ? item.mediaItems
+    : normalizeOrderedPostMedia(item?.raw || item || {});
 }
 
-function isImageItem(item) {
-  return item?.kind === "post" && item.mediaType === "image";
+function postMediaIndex(item) {
+  const mediaItems = postMediaItems(item);
+  if (!mediaItems.length) {
+    return 0;
+  }
+  const stored = Number(
+    state.ui.postMediaIndexById?.[normalizeString(item?.postId)],
+  );
+  return Number.isInteger(stored)
+    ? Math.max(0, Math.min(mediaItems.length - 1, stored))
+    : 0;
+}
+
+function setPostMediaIndex(postId, requestedIndex, { focus = true } = {}) {
+  const item = findFeedPostItem(postId);
+  const mediaItems = postMediaItems(item);
+  if (!item || mediaItems.length < 2) {
+    return;
+  }
+  const numericIndex = Number(requestedIndex);
+  if (!Number.isFinite(numericIndex)) {
+    return;
+  }
+  const nextIndex =
+    ((Math.trunc(numericIndex) % mediaItems.length) + mediaItems.length) %
+    mediaItems.length;
+  state.ui.postMediaIndexById[normalizeString(postId)] = nextIndex;
+  scheduleRender();
+  if (focus) {
+    window.requestAnimationFrame(() => {
+      const carousel = root?.querySelector(
+        `[data-post-carousel][data-post-id="${CSS.escape(normalizeString(postId))}"]`,
+      );
+      try {
+        carousel?.focus({ preventScroll: true });
+      } catch {
+        carousel?.focus();
+      }
+    });
+  }
 }
 
 function buildDeepLinkOpenUrl(path) {
@@ -8542,7 +8589,32 @@ function normalizeFeedItem(raw = {}, index = 0) {
 
   const postId = normalizeString(raw.postId);
   const rawType = normalizeString(raw.mediaType || raw.type).toLowerCase();
-  const mediaType = rawType === "image" ? "image" : "video";
+  const hasCanonicalMediaPayload = Array.isArray(raw.mediaItems);
+  const mediaItems = normalizeOrderedPostMedia(raw);
+  const firstMedia = mediaItems[0] || {};
+  const firstPresentation = mediaItems.length
+    ? mediaPresentation(firstMedia)
+    : {
+        mediaType: rawType === "image" ? "image" : "video",
+        imageUrl: hasCanonicalMediaPayload ? "" : normalizeUrl(raw.imageUrl),
+        videoUrl: hasCanonicalMediaPayload
+          ? ""
+          : normalizeUrl(raw.videoUrl || raw.mediaUrl),
+        mp4Url: hasCanonicalMediaPayload ? "" : normalizeUrl(raw.mp4Url),
+        posterUrl: hasCanonicalMediaPayload
+          ? ""
+          : normalizeUrl(
+              raw.thumbUrl ||
+                raw.previewUrl ||
+                raw.imageUrl ||
+                raw.previewMediaThumbnail,
+            ),
+        playbackId: hasCanonicalMediaPayload
+          ? ""
+          : normalizeString(raw.playbackId),
+        durationMs: hasCanonicalMediaPayload ? null : Number(raw.durationMs) || null,
+      };
+  const mediaType = firstPresentation.mediaType;
   const caption =
     normalizeString(raw.description) ||
     normalizeString(raw.caption) ||
@@ -8550,13 +8622,19 @@ function normalizeFeedItem(raw = {}, index = 0) {
     normalizeString(raw.previewText) ||
     normalizeString(raw.previewTitle);
   const rawPosterUrl =
-    normalizeUrl(raw.thumbUrl) ||
-    normalizeUrl(raw.previewUrl) ||
-    normalizeUrl(raw.imageUrl) ||
-    normalizeUrl(raw.previewMediaThumbnail);
+    normalizeUrl(firstPresentation.posterUrl) ||
+    (hasCanonicalMediaPayload
+      ? ""
+      : normalizeUrl(raw.thumbUrl) ||
+        normalizeUrl(raw.previewUrl) ||
+        normalizeUrl(raw.imageUrl) ||
+        normalizeUrl(raw.previewMediaThumbnail));
   const posterUrl =
     mediaType === "video" ? upgradePosterUrl(rawPosterUrl) : rawPosterUrl;
-  const imageUrl = normalizeUrl(raw.imageUrl) || posterUrl;
+  const imageUrl =
+    normalizeUrl(firstPresentation.imageUrl) ||
+    (hasCanonicalMediaPayload ? "" : normalizeUrl(raw.imageUrl)) ||
+    posterUrl;
   const rawFeedSlot = raw.feedSlot ?? raw.feed_slot ?? raw.slot ?? raw.rankPos;
   const feedSlot = Number(rawFeedSlot);
 
@@ -8570,13 +8648,24 @@ function normalizeFeedItem(raw = {}, index = 0) {
       normalizeString(raw.displayName || raw.userDisplayName) || "Post author",
     authorUsername: normalizeString(raw.username),
     authorAvatarUrl: normalizeUrl(raw.avatarUrl || raw.userAvatarUrl),
+    mediaItems,
     mediaType,
-    videoUrl: normalizeUrl(raw.videoUrl || raw.mediaUrl),
-    mp4Url: normalizeUrl(raw.mp4Url),
+    videoUrl:
+      normalizeUrl(firstPresentation.videoUrl) ||
+      (hasCanonicalMediaPayload ? "" : normalizeUrl(raw.videoUrl || raw.mediaUrl)),
+    mp4Url:
+      normalizeUrl(firstPresentation.mp4Url) ||
+      (hasCanonicalMediaPayload ? "" : normalizeUrl(raw.mp4Url)),
     imageUrl,
     posterUrl,
-    playbackId: normalizeString(raw.playbackId),
-    durationMs: Number(raw.durationMs) || null,
+    playbackId:
+      normalizeString(firstPresentation.playbackId) ||
+      (hasCanonicalMediaPayload ? "" : normalizeString(raw.playbackId)),
+    durationMs:
+      Number(
+        firstPresentation.durationMs ||
+          (hasCanonicalMediaPayload ? null : raw.durationMs),
+      ) || null,
     caption,
     tags: normalizeTagList(raw.tags || raw.hashtags || raw.hashTags),
     issueIds: normalizeStringList(raw.issueIds || raw.issue_ids),
@@ -53872,6 +53961,10 @@ function normalizeCreateUploadPayload(payload = {}) {
     payload.cfAsset && typeof payload.cfAsset === "object"
       ? payload.cfAsset
       : {};
+  const mediaItem =
+    payload.mediaItem && typeof payload.mediaItem === "object"
+      ? payload.mediaItem
+      : {};
   const uploadUrl =
     normalizeString(
       payload.uploadURL ||
@@ -53891,6 +53984,12 @@ function normalizeCreateUploadPayload(payload = {}) {
   return {
     uploadUrl,
     uid,
+    assetId: normalizeString(payload.assetId || cfAsset.assetId || mediaItem.assetId),
+    sourceAssetVersionId: normalizeString(
+      payload.sourceAssetVersionId ||
+        cfAsset.sourceAssetVersionId ||
+        mediaItem.sourceAssetVersionId,
+    ),
     postId: normalizeString(payload.postId) || uid,
     type: payloadType,
     method: normalizeString(payload.method || cfAsset.method).toUpperCase(),
@@ -55215,12 +55314,16 @@ async function submitPostComposer(formData) {
       },
     });
 
+    const composerMediaItems = buildComposerMediaItems(upload, mediaType);
     composer.stage = "Publishing post";
     scheduleRender();
     const createPayload = await fetchJson("/api/posts", {
       auth: true,
       method: "POST",
       body: {
+        ...(composerMediaItems.length
+          ? { mediaItems: composerMediaItems }
+          : {}),
         type: mediaType,
         cfUid: upload.uid,
         ...(mediaType === "image"
@@ -60498,8 +60601,85 @@ function renderFeedPostIssueTags(item, { compact = false } = {}) {
   </div>`;
 }
 
+function renderPostMediaUsageBadges(mediaItem) {
+  const badges = visibleMediaUsageBadges(
+    mediaItem || {},
+    window.location.origin,
+  ).slice(0, 4);
+  if (!badges.length) {
+    return "";
+  }
+  return `<div class="shared-feed-post__provenance" data-playback-control="1" aria-label="Published posts using this media">
+    ${badges
+      .map((badge) => {
+        const badgeUrl = normalizeUrl(badge.badgeUrl);
+        const content = `${
+          badgeUrl ? `<img src="${escapeHtml(badgeUrl)}" alt="" />` : ""
+        }<span>${escapeHtml(badge.label)}</span>`;
+        return badge.path
+          ? `<a href="${escapeHtml(badge.path)}" aria-label="View published post by ${escapeHtml(badge.label)}">${content}</a>`
+          : `<span class="shared-feed-post__provenance-badge">${content}</span>`;
+      })
+      .join("")}
+  </div>`;
+}
+
+function renderPostCarouselControls(item, mediaIndex, mediaCount) {
+  if (mediaCount < 2) {
+    return "";
+  }
+  const postId = normalizeString(item.postId);
+  return `<div class="shared-feed-post__carousel-controls" data-playback-control="1">
+    <button class="shared-feed-post__carousel-step shared-feed-post__carousel-step--previous" type="button" data-action="post-carousel-step" data-post-id="${escapeHtml(postId)}" data-direction="-1" aria-label="Previous media">&#8249;</button>
+    <div class="shared-feed-post__carousel-status" aria-live="polite" aria-atomic="true">${mediaIndex + 1} / ${mediaCount}</div>
+    <button class="shared-feed-post__carousel-step shared-feed-post__carousel-step--next" type="button" data-action="post-carousel-step" data-post-id="${escapeHtml(postId)}" data-direction="1" aria-label="Next media">&#8250;</button>
+    <div class="shared-feed-post__carousel-dots" role="group" aria-label="Choose media item">
+      ${Array.from(
+        { length: mediaCount },
+        (_, dotIndex) =>
+          `<button type="button" data-action="post-carousel-go" data-post-id="${escapeHtml(postId)}" data-media-index="${dotIndex}" aria-label="Show media ${dotIndex + 1} of ${mediaCount}"${dotIndex === mediaIndex ? ' aria-current="true"' : ""}></button>`,
+      ).join("")}
+    </div>
+  </div>`;
+}
+
+function postMediaCropAttributes(mediaItem) {
+  const crop = mediaItem?.crop;
+  if (!crop || typeof crop !== "object") {
+    return "";
+  }
+  const x = Number(crop.x);
+  const y = Number(crop.y);
+  const width = Number(crop.width);
+  const height = Number(crop.height);
+  if (
+    ![x, y, width, height].every(Number.isFinite) ||
+    width <= 0 ||
+    height <= 0
+  ) {
+    return "";
+  }
+  const centerX = Math.max(0, Math.min(100, (x + width / 2) * 100));
+  const centerY = Math.max(0, Math.min(100, (y + height / 2) * 100));
+  return ` data-media-crop data-media-crop-x="${centerX.toFixed(3)}" data-media-crop-y="${centerY.toFixed(3)}"`;
+}
+
 function renderPostItem(item, index) {
   const active = index === state.activeIndex;
+  const mediaItems = postMediaItems(item);
+  const mediaIndex = postMediaIndex(item);
+  const mediaItem = mediaItems[mediaIndex] || mediaItems[0] || {};
+  const presentation = mediaPresentation(mediaItem);
+  const mediaType = presentation.mediaType;
+  const imageSource = normalizeUrl(presentation.imageUrl || item.imageUrl);
+  const videoSource = normalizeUrl(presentation.videoUrl || item.videoUrl);
+  const mp4Source = normalizeUrl(presentation.mp4Url || item.mp4Url);
+  const hasVideoMedia = mediaType === "video" && Boolean(videoSource || mp4Source);
+  const videoKey = `${normalizeString(item.postId)}:${
+    normalizeString(mediaItem.sourceAssetVersionId) ||
+    normalizeString(mediaItem.publicDerivative?.derivativeId) ||
+    mediaIndex
+  }`;
   const hasExpandableCopy = hasExpandablePostCopy(item);
   const isExpanded =
     normalizeString(state.ui.expandedPostId) === normalizeString(item.postId);
@@ -60510,18 +60690,23 @@ function renderPostItem(item, index) {
     item.authorUserId && !item.isFollowing
       ? `<button class="shared-feed-avatar__follow" data-action="follow-author" data-post-id="${escapeHtml(item.postId)}" aria-label="Follow ${escapeHtml(item.authorDisplayName)}">+</button>`
       : "";
-  const mediaMarkup = isImageItem(item)
-    ? `<img class="shared-feed-post__image" src="${escapeHtml(item.imageUrl)}" alt="${escapeHtml(item.previewTitle || item.caption || item.authorDisplayName)}" loading="${index < 2 ? "eager" : "lazy"}" />`
-    : `<video
+  const mediaMarkup = mediaType === "image" && imageSource
+    ? `<img class="shared-feed-post__image" src="${escapeHtml(imageSource)}" alt="${escapeHtml(mediaItem.altText || item.previewTitle || item.caption || item.authorDisplayName)}" loading="${index < 2 ? "eager" : "lazy"}"${postMediaCropAttributes(mediaItem)} />`
+    : hasVideoMedia
+      ? `<video
         class="shared-feed-post__video"
         playsinline
         loop
         preload="${index <= 1 ? "auto" : "metadata"}"
-        poster="${escapeHtml(item.posterUrl)}"
+        poster="${escapeHtml(upgradePosterUrl(presentation.posterUrl || item.posterUrl))}"
+        aria-label="${escapeHtml(mediaItem.altText || item.previewTitle || item.caption || "Post video")}"
         data-video-post-id="${escapeHtml(item.postId)}"
-        data-video-url="${escapeHtml(item.videoUrl)}"
-        data-mp4-url="${escapeHtml(item.mp4Url)}"
-      ></video>`;
+        data-video-key="${escapeHtml(videoKey)}"
+        data-video-url="${escapeHtml(videoSource)}"
+        data-mp4-url="${escapeHtml(mp4Source)}"
+        ${postMediaCropAttributes(mediaItem)}
+      ></video>`
+      : `<div class="shared-feed-post__media-unavailable" role="img" aria-label="Media unavailable"><span>Media unavailable</span></div>`;
   const previewCopy =
     item.caption ||
     item.tags.map((tag) => `#${normalizeString(tag)}`).join(" ");
@@ -60552,16 +60737,19 @@ function renderPostItem(item, index) {
         ${tagMarkup}
       </div>`
     : captionLine;
+  const isCarousel = mediaItems.length > 1;
   const duration =
-    isVideoItem(item) && item.durationMs
-      ? `<div class="shared-feed-post__duration">${escapeHtml(formatDuration(item.durationMs))}</div>`
+    hasVideoMedia && presentation.durationMs
+      ? `<div class="shared-feed-post__duration">${escapeHtml(formatDuration(presentation.durationMs))}</div>`
       : "";
 
   return `<article class="shared-feed-item shared-feed-item--post${active ? " is-active" : ""}" data-index="${index}" data-post-id="${escapeHtml(item.postId)}">
     <div class="shared-feed-post">
-      <div class="shared-feed-post__frame" data-action="toggle-play" data-post-id="${escapeHtml(item.postId)}">
+      <div class="shared-feed-post__frame${isCarousel ? " shared-feed-post__frame--carousel" : ""}"${hasVideoMedia ? ' data-action="toggle-play"' : ""} data-post-id="${escapeHtml(item.postId)}"${isCarousel ? ` data-post-carousel tabindex="0" role="region" aria-roledescription="carousel" aria-label="Post media carousel, item ${mediaIndex + 1} of ${mediaItems.length}"` : ""}>
         ${mediaMarkup}
         <div class="shared-feed-post__overlay shared-feed-post__overlay--gradient${isExpanded ? " is-expanded" : ""}"></div>
+        ${renderPostMediaUsageBadges(mediaItem)}
+        ${renderPostCarouselControls(item, mediaIndex, mediaItems.length)}
         <div class="shared-feed-post__overlay shared-feed-post__overlay--chrome">
           ${duration}
           <div class="shared-feed-post__content">
@@ -60577,9 +60765,9 @@ function renderPostItem(item, index) {
               ${copyMarkup}
             </div>
             ${
-              isVideoItem(item)
+              hasVideoMedia
                 ? `<div class="shared-feed-scrubber" data-scrubber="${escapeHtml(item.postId)}" data-playback-control="1">
-                    <div class="shared-feed-scrubber__time" data-scrubber-time="${escapeHtml(item.postId)}">00:00 / ${escapeHtml(formatDuration(item.durationMs || 0))}</div>
+                    <div class="shared-feed-scrubber__time" data-scrubber-time="${escapeHtml(item.postId)}">00:00 / ${escapeHtml(formatDuration(presentation.durationMs || 0))}</div>
                     <input class="shared-feed-scrubber__slider" type="range" min="0" max="1000" value="0" step="1" data-scrubber-input="${escapeHtml(item.postId)}" />
                   </div>`
                 : ""
@@ -60637,14 +60825,22 @@ function renderPostItem(item, index) {
                   </button>`
                 : ""
             }
-            <button class="shared-feed-post__volume" data-action="toggle-volume" aria-label="${state.userHasInteracted ? "Toggle sound" : "Enable sound"}">
-              ${renderIcon(state.userHasInteracted ? "soundOn" : "soundOff")}
-            </button>
+            ${
+              hasVideoMedia
+                ? `<button class="shared-feed-post__volume" data-action="toggle-volume" aria-label="${state.userHasInteracted ? "Toggle sound" : "Enable sound"}">
+                    ${renderIcon(state.userHasInteracted ? "soundOn" : "soundOff")}
+                  </button>`
+                : ""
+            }
           </div>
         </div>
-        <button class="shared-feed-post__playback-indicator${active ? "" : " is-visible"}" data-playback-indicator="${escapeHtml(item.postId)}" aria-hidden="true">
-          ${renderIcon("play")}
-        </button>
+        ${
+          hasVideoMedia
+            ? `<button class="shared-feed-post__playback-indicator${active ? "" : " is-visible"}" data-playback-indicator="${escapeHtml(item.postId)}" aria-hidden="true">
+                ${renderIcon("play")}
+              </button>`
+            : ""
+        }
       </div>
     </div>
   </article>`;
@@ -119015,6 +119211,7 @@ function renderApp() {
   restoreFeedScrollState(scrollSnapshot);
   restorePetitionAddressFocusState(petitionAddressFocusSnapshot);
   bindObservers();
+  bindPostMediaCrops();
   bindVideos();
   bindPostComposerCameraPreview();
   bindPostComposerCoverPreview();
@@ -119313,6 +119510,18 @@ function bindVideos() {
   syncPlayback();
 }
 
+function bindPostMediaCrops() {
+  Array.from(root?.querySelectorAll("[data-media-crop]") || []).forEach(
+    (media) => {
+      const x = Number(media.getAttribute("data-media-crop-x"));
+      const y = Number(media.getAttribute("data-media-crop-y"));
+      if (Number.isFinite(x) && Number.isFinite(y)) {
+        media.style.objectPosition = `${x}% ${y}%`;
+      }
+    },
+  );
+}
+
 function snapshotPlaybackState() {
   if (!root) {
     return {};
@@ -119320,10 +119529,11 @@ function snapshotPlaybackState() {
   return Array.from(root.querySelectorAll("video[data-video-post-id]")).reduce(
     (snapshot, video) => {
       const postId = normalizeString(video.dataset.videoPostId);
-      if (!postId) {
+      const videoKey = normalizeString(video.dataset.videoKey) || postId;
+      if (!videoKey) {
         return snapshot;
       }
-      snapshot[postId] = {
+      snapshot[videoKey] = {
         currentTime: Number(video.currentTime) || 0,
         paused: video.paused,
         muted: video.muted,
@@ -119335,9 +119545,9 @@ function snapshotPlaybackState() {
 }
 
 function restorePlaybackState(snapshot = {}) {
-  Object.entries(snapshot).forEach(([postId, value]) => {
+  Object.entries(snapshot).forEach(([videoKey, value]) => {
     const video = root?.querySelector(
-      `video[data-video-post-id="${CSS.escape(postId)}"]`,
+      `video[data-video-key="${CSS.escape(videoKey)}"]`,
     );
     if (!video) {
       return;
@@ -124693,6 +124903,24 @@ async function handleRootClick(event) {
     return;
   }
 
+  if (action === "post-carousel-step") {
+    event.preventDefault();
+    const postId = normalizeString(target.getAttribute("data-post-id"));
+    const item = findFeedPostItem(postId);
+    const direction = Number(target.getAttribute("data-direction")) || 0;
+    setPostMediaIndex(postId, postMediaIndex(item) + direction);
+    return;
+  }
+
+  if (action === "post-carousel-go") {
+    event.preventDefault();
+    setPostMediaIndex(
+      target.getAttribute("data-post-id"),
+      target.getAttribute("data-media-index"),
+    );
+    return;
+  }
+
   if (action === "toggle-volume") {
     state.userHasInteracted = !state.userHasInteracted;
     Array.from(
@@ -124931,6 +125159,26 @@ function handleRootKeydown(event) {
   if (event.key === "Escape" && state.ui.confirmation?.open) {
     event.preventDefault();
     closeConfirmationSheet(false);
+    return;
+  }
+
+  const postCarousel = event.target.closest("[data-post-carousel]");
+  if (
+    postCarousel &&
+    ["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)
+  ) {
+    event.preventDefault();
+    const postId = normalizeString(postCarousel.getAttribute("data-post-id"));
+    const item = findFeedPostItem(postId);
+    const currentIndex = postMediaIndex(item);
+    const mediaCount = postMediaItems(item).length;
+    const nextIndex =
+      event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? mediaCount - 1
+          : currentIndex + (event.key === "ArrowRight" ? 1 : -1);
+    setPostMediaIndex(postId, nextIndex);
     return;
   }
 
