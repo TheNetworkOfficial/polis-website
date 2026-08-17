@@ -54,6 +54,7 @@ const frontendRouteRewrites = [
   [/^\/messages(?:\/.*)?$/u, "messages/index.html"],
   [/^\/candidate-dashboard(?:\/.*)?$/u, "candidate-dashboard/index.html"],
   [/^\/coalitions(?:\/.*)?$/u, "coalitions/index.html"],
+  [/^\/files(?:\/.*)?$/u, "files/index.html"],
   [/^\/cta-invite(?:\/.*)?$/u, "cta-invite/index.html"],
   [/^\/petitions(?:\/.*)?$/u, "petitions/index.html"],
   [/^\/election-day(?:\/.*)?$/u, "election-day/index.html"],
