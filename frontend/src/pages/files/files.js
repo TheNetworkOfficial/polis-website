@@ -47,7 +47,7 @@ const VIEW_PATHS = new Map([
   ["recent", "recent"],
   ["shared", "shared_with_me"],
   ["review", "needs_review"],
-  ["recommended", "recommended"],
+  ["recommended", "recommended_shares"],
   ["uploads", "uploads"],
 ]);
 const authConfig = {
