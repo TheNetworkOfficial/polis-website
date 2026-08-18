@@ -395,6 +395,14 @@ export function uploadSignedObject({
   signal,
 }) {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(
+        signal.reason instanceof Error
+          ? signal.reason
+          : new DOMException("Upload interrupted.", "AbortError"),
+      );
+      return;
+    }
     const xhr = new XMLHttpRequest();
     xhr.open(method, url, true);
     Object.entries(headers || {}).forEach(([key, value]) =>

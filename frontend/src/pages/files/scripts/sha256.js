@@ -131,13 +131,21 @@ function bytesToBase64(bytes) {
 
 export async function checksumBlob(
   blob,
-  { chunkSize = 4 * 1024 * 1024, onProgress } = {},
+  { chunkSize = 4 * 1024 * 1024, onProgress, signal } = {},
 ) {
   const sha = new IncrementalSha256();
   let offset = 0;
   while (offset < blob.size) {
+    signal?.throwIfAborted?.();
+    if (signal?.aborted) {
+      throw new DOMException("Checksum paused.", "AbortError");
+    }
     const end = Math.min(offset + chunkSize, blob.size);
     sha.update(new Uint8Array(await blob.slice(offset, end).arrayBuffer()));
+    signal?.throwIfAborted?.();
+    if (signal?.aborted) {
+      throw new DOMException("Checksum paused.", "AbortError");
+    }
     offset = end;
     onProgress?.(blob.size ? offset / blob.size : 1);
   }

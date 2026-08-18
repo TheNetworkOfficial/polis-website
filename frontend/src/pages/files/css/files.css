@@ -1440,6 +1440,13 @@ summary:focus-visible {
   background: linear-gradient(90deg, var(--files-blue), var(--files-accent));
 }
 
+.files-upload-item__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
 .files-upload-item__actions button,
 .files-upload-resume {
   min-height: 36px;
