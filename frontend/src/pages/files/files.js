@@ -414,6 +414,10 @@ function workspaceFlags() {
   );
 }
 
+function aiSuggestionsAvailable() {
+  return workspaceFlags().aiSuggestionsEnabled === true;
+}
+
 function hostReferencesEnabled() {
   return Boolean(
     workspaceFlags().hostReferencesEnabled === true &&
@@ -1992,6 +1996,9 @@ function renderModal() {
 
 function renderSetupModal() {
   const selected = state.modal?.presetKey || "blank";
+  const aiControl = aiSuggestionsAvailable()
+    ? '<label><input type="checkbox" name="aiSuggestionsEnabled" /> Optional AI caption and next-step assistance <small>(off by default)</small></label>'
+    : "";
   return `<div class="files-setup"><div class="files-setup__intro"><span class="files-setup__mark">${icon("folder")}</span><p class="files-eyebrow">Set up Polis Files</p><h2 id="files-modal-title">Start organized—not empty.</h2><p>Choose a workspace pattern. You can rename folders, change role access, or turn automations off at any time.</p></div><form data-form="setup"><div class="files-preset-grid"><label class="files-preset ${selected === "blank" ? "is-selected" : ""}"><input type="radio" name="presetKey" value="blank" ${selected === "blank" ? "checked" : ""}/><span class="files-preset__icon">${icon("folder")}</span><strong>Blank workspace</strong><small>Start with no default folders.</small></label>${state.presets
     .map(
       (preset) =>
@@ -2005,7 +2012,7 @@ function renderSetupModal() {
     )
     .join(
       "",
-    )}</div><div class="files-setup__toggles"><label><input type="checkbox" name="contextMatchingEnabled" checked /> Suggest relevant folders from district and election context</label><label><input type="checkbox" name="eventMediaPromptsEnabled" checked /> Rule-based event media prompts <small>(no AI)</small></label><label><input type="checkbox" name="aiSuggestionsEnabled" /> Optional AI caption and next-step assistance <small>(off by default)</small></label></div><div class="files-modal__actions"><button class="files-button files-button--ghost" type="submit" name="intent" value="skip">Skip setup</button><button class="files-button files-button--primary" type="submit" name="intent" value="initialize">Create my Files space</button></div></form></div>`;
+    )}</div><div class="files-setup__toggles"><label><input type="checkbox" name="contextMatchingEnabled" checked /> Suggest relevant folders from district and election context</label><label><input type="checkbox" name="eventMediaPromptsEnabled" checked /> Rule-based event media prompts <small>(no AI)</small></label>${aiControl}</div><div class="files-modal__actions"><button class="files-button files-button--ghost" type="submit" name="intent" value="skip">Skip setup</button><button class="files-button files-button--primary" type="submit" name="intent" value="initialize">Create my Files space</button></div></form></div>`;
 }
 
 function uploadFolderOptions() {
@@ -2161,7 +2168,15 @@ function renderSettingsModal() {
     "canManageAutomations",
     "files_automations_manage",
   );
-  return `<div class="files-modal__heading"><p class="files-eyebrow">Workspace defaults</p><h2 id="files-modal-title">Files settings</h2><p>These defaults apply across this workspace. Folder managers can narrow them for a specific folder.</p></div><form data-form="settings"><div class="files-settings-list">${toggleField("contextMatchingEnabled", "Context matching", "Match district, office, election, and event context to relevant folders.")}${toggleField("connectionSharePromptsEnabled", "Connection share prompts", "Ask before sharing useful folders when organizations or campaigns connect.")}${toggleField("eventMediaPromptsEnabled", "Rule-based media prompts", "Prompt teams when event media arrives using folder and calendar metadata—no AI.")}${toggleField("postSuggestionsEnabled", "Files-to-post recommendations", "Offer post ideas from approved media without publishing automatically.")}${toggleField("aiSuggestionsEnabled", "AI assistance", "Optionally suggest captions and useful next steps; never post automatically.", false)}${toggleField("postUsageBadgesEnabled", "Post provenance badges", "Show which teams have already used a photo or video.", workspaceFlags().postProvenanceEnabled !== false)}${toggleField("uploadNotificationsEnabled", "Automation notifications", "Notify relevant teams when Files recommendations or automations need attention.")}</div>${!automationAccess ? '<p class="files-form-note">Only members with Files automation management permission can change automation defaults.</p>' : ""}<div class="files-modal__actions"><button class="files-button files-button--ghost" type="button" data-action="close-modal">Cancel</button><button class="files-button files-button--primary" type="submit" ${automationAccess ? "" : "disabled"}>Save settings</button></div></form>`;
+  const aiControl = aiSuggestionsAvailable()
+    ? toggleField(
+        "aiSuggestionsEnabled",
+        "AI assistance",
+        "Optionally suggest captions and useful next steps; never post automatically.",
+        false,
+      )
+    : "";
+  return `<div class="files-modal__heading"><p class="files-eyebrow">Workspace defaults</p><h2 id="files-modal-title">Files settings</h2><p>These defaults apply across this workspace. Folder managers can narrow them for a specific folder.</p></div><form data-form="settings"><div class="files-settings-list">${toggleField("contextMatchingEnabled", "Context matching", "Match district, office, election, and event context to relevant folders.")}${toggleField("connectionSharePromptsEnabled", "Connection share prompts", "Ask before sharing useful folders when organizations or campaigns connect.")}${toggleField("eventMediaPromptsEnabled", "Rule-based media prompts", "Prompt teams when event media arrives using folder and calendar metadata—no AI.")}${toggleField("postSuggestionsEnabled", "Files-to-post recommendations", "Offer post ideas from approved media without publishing automatically.")}${aiControl}${toggleField("postUsageBadgesEnabled", "Post provenance badges", "Show which teams have already used a photo or video.", workspaceFlags().postProvenanceEnabled !== false)}${toggleField("uploadNotificationsEnabled", "Automation notifications", "Notify relevant teams when Files recommendations or automations need attention.")}</div>${!automationAccess ? '<p class="files-form-note">Only members with Files automation management permission can change automation defaults.</p>' : ""}<div class="files-modal__actions"><button class="files-button files-button--ghost" type="button" data-action="close-modal">Cancel</button><button class="files-button files-button--primary" type="submit" ${automationAccess ? "" : "disabled"}>Save settings</button></div></form>`;
 }
 
 function renderFolderSettingsModal() {
@@ -2169,7 +2184,18 @@ function renderFolderSettingsModal() {
   const restricted = folderIsRestricted();
   state.modal.settings = state.modal.settings || settings;
   const inheritWorkspace = settings.inheritWorkspace !== false;
-  return `<div class="files-modal__heading"><p class="files-eyebrow">Folder controls</p><h2 id="files-modal-title">${escapeHtml(entityName(state.folder))} settings</h2><p>Override workspace automation and review behavior for this folder.</p></div><form data-form="folder-settings"><div class="files-field"><label for="folder-edit-name">Folder name</label><input id="folder-edit-name" name="name" value="${escapeHtml(entityName(state.folder))}" required /></div><label class="files-toggle"><span><strong>Review-gated changes</strong><small>Contributors suggest edits; folder reviewers merge them.</small></span><input type="checkbox" name="reviewRequired" ${state.folder?.reviewRequired !== false ? "checked" : ""}/><i></i></label><label class="files-toggle"><span><strong>Use workspace automation defaults</strong><small>Turn off to customize this folder.</small></span><input type="checkbox" name="inheritWorkspace" data-action="folder-inherit" ${inheritWorkspace ? "checked" : ""}/><i></i></label>${toggleField("contextMatchingEnabled", "Context matching", "Use this folder’s district, election, office, and event metadata.", true, { disabled: inheritWorkspace })}${toggleField("aiSuggestionsEnabled", "AI suggestions", restricted ? "AI processing is unavailable for restricted folders." : "Suggest useful actions from approved material.", false, { disabled: inheritWorkspace || restricted })}${toggleField("postSuggestionsEnabled", "Post suggestions", restricted ? "Restricted material cannot generate post suggestions." : "Suggest drafts when new media is added.", false, { disabled: inheritWorkspace || restricted })}${toggleField("postUsageBadgesEnabled", "Usage badges", "Show linked Polis posts on used media.", true, { disabled: inheritWorkspace })}<div class="files-modal__actions"><button class="files-button files-button--ghost" type="button" data-action="close-modal">Cancel</button><button class="files-button files-button--primary" type="submit">Save folder</button></div></form>`;
+  const aiControl = aiSuggestionsAvailable()
+    ? toggleField(
+        "aiSuggestionsEnabled",
+        "AI suggestions",
+        restricted
+          ? "AI processing is unavailable for restricted folders."
+          : "Suggest useful actions from approved material.",
+        false,
+        { disabled: inheritWorkspace || restricted },
+      )
+    : "";
+  return `<div class="files-modal__heading"><p class="files-eyebrow">Folder controls</p><h2 id="files-modal-title">${escapeHtml(entityName(state.folder))} settings</h2><p>Override workspace automation and review behavior for this folder.</p></div><form data-form="folder-settings"><div class="files-field"><label for="folder-edit-name">Folder name</label><input id="folder-edit-name" name="name" value="${escapeHtml(entityName(state.folder))}" required /></div><label class="files-toggle"><span><strong>Review-gated changes</strong><small>Contributors suggest edits; folder reviewers merge them.</small></span><input type="checkbox" name="reviewRequired" ${state.folder?.reviewRequired !== false ? "checked" : ""}/><i></i></label><label class="files-toggle"><span><strong>Use workspace automation defaults</strong><small>Turn off to customize this folder.</small></span><input type="checkbox" name="inheritWorkspace" data-action="folder-inherit" ${inheritWorkspace ? "checked" : ""}/><i></i></label>${toggleField("contextMatchingEnabled", "Context matching", "Use this folder’s district, election, office, and event metadata.", true, { disabled: inheritWorkspace })}${aiControl}${toggleField("postSuggestionsEnabled", "Post suggestions", restricted ? "Restricted material cannot generate post suggestions." : "Suggest drafts when new media is added.", false, { disabled: inheritWorkspace || restricted })}${toggleField("postUsageBadgesEnabled", "Usage badges", "Show linked Polis posts on used media.", true, { disabled: inheritWorkspace })}<div class="files-modal__actions"><button class="files-button files-button--ghost" type="button" data-action="close-modal">Cancel</button><button class="files-button files-button--primary" type="submit">Save folder</button></div></form>`;
 }
 
 function proposalAssetOptions(selectedId = "") {
@@ -2954,7 +2980,8 @@ async function submitSetup(data, intent) {
               contextMatches: data.has("contextMatchingEnabled"),
               socialPosts: true,
               duplicateMedia: true,
-              aiAssistance: data.has("aiSuggestionsEnabled"),
+              aiAssistance:
+                aiSuggestionsAvailable() && data.has("aiSuggestionsEnabled"),
             },
             automations: {
               contextSharingPrompts: true,
@@ -3396,7 +3423,8 @@ function settingsFromData(data, { folder = false } = {}) {
     suggestions: {
       contextMatches: data.has("contextMatchingEnabled"),
       socialPosts: data.has("postSuggestionsEnabled"),
-      aiAssistance: data.has("aiSuggestionsEnabled"),
+      aiAssistance:
+        aiSuggestionsAvailable() && data.has("aiSuggestionsEnabled"),
     },
     automations: {
       usageBadges: data.has("postUsageBadgesEnabled"),
