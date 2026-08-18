@@ -188,6 +188,8 @@ function entityId(entity) {
       entity?.proposalId ||
       entity?.grantId ||
       entity?.editionId ||
+      entity?.shareSuggestionId ||
+      entity?.suggestionId ||
       entity?.folderId ||
       entity?.id,
   );
@@ -1578,6 +1580,14 @@ function renderSuggestionCard(suggestion) {
       ${canDisable ? `<button class="files-button files-button--ghost files-button--small" data-suggestion="disable" data-id="${escapeHtml(id)}">Disable these</button>` : ""}
     </div>
   </article>`;
+}
+
+function isContextualSharePrompt(suggestion) {
+  return (
+    normalizeString(suggestion?.suggestionType).toLowerCase() ===
+      "contextual_folder_share" &&
+    normalizeString(suggestion?.action).toLowerCase() === "prompt_share"
+  );
 }
 
 function renderHome() {
@@ -4330,8 +4340,13 @@ async function actOnSuggestion(id, action) {
   );
   if (!result) return;
   state.suggestions = state.suggestions.filter((item) => entityId(item) !== id);
-  const folderId = result.folderId || result.folder?.folderId;
-  if (action === "accept" && folderId)
+  const folderId = normalizeString(
+    result?.suggestion?.folderId ||
+      result?.folderId ||
+      result?.folder?.folderId ||
+      suggestion?.folderId,
+  );
+  if (action === "accept" && isContextualSharePrompt(suggestion) && folderId)
     navigate(`/files/folders/${encodeURIComponent(folderId)}?tab=access`);
 }
 

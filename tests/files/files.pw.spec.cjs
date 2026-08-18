@@ -693,7 +693,7 @@ async function mockFiles(page, overrides = {}) {
     if (path.endsWith("/suggestions") && method === "GET") {
       return json(route, {
         ok: true,
-        suggestions: [
+        suggestions: overrides.suggestions || [
           {
             id: "suggestion-1",
             type: "event_media",
@@ -722,7 +722,11 @@ async function mockFiles(page, overrides = {}) {
       const action = path.split("/").at(-1);
       return json(route, {
         ok: true,
-        suggestion: { id: "suggestion-1", status: action },
+        suggestion: {
+          id: "suggestion-1",
+          status: action,
+          ...(overrides.suggestionDecision || {}),
+        },
         ...(action === "disable"
           ? { folder: { ...folder, settings: { inheritWorkspace: false } } }
           : {}),
@@ -1219,6 +1223,42 @@ test("Files home is entitled, contextual, responsive, and supports list/grid", a
   await expect(
     page.getByRole("button", { name: "Recent", exact: true }),
   ).toBeFocused();
+});
+
+test("accepting a contextual share prompt opens existing access review without granting", async ({
+  page,
+}) => {
+  await seedSession(page);
+  const captures = await mockFiles(page, {
+    suggestions: [
+      {
+        suggestionId: "suggestion-1",
+        suggestionType: "contextual_folder_share",
+        action: "prompt_share",
+        version: 4,
+        title: "Share Campaign Media with Florida State Party",
+        reason: "The campaign connection and media purpose are an exact match.",
+        confidence: 1,
+      },
+    ],
+    suggestionDecision: {
+      suggestionId: "suggestion-1",
+      folderId: "folder-1",
+    },
+  });
+
+  await page.goto("/files/recommended");
+  await page.getByRole("button", { name: "Review & share" }).click();
+
+  await expect(page).toHaveURL(/\/files\/folders\/folder-1\?tab=access$/u);
+  await expect(page.getByRole("heading", { name: "Who has access" })).toBeVisible();
+  expect(captures.suggestions).toEqual([
+    expect.objectContaining({
+      path: "/api/files/suggestions/suggestion-1/accept",
+      body: { expectedVersion: 4 },
+    }),
+  ]);
+  expect(captures.grants).toEqual([]);
 });
 
 test("proposal review, restricted named sharing, provenance, and ordered post draft use canonical contracts", async ({
