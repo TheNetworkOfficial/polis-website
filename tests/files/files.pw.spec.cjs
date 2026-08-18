@@ -1251,7 +1251,9 @@ test("accepting a contextual share prompt opens existing access review without g
   await page.getByRole("button", { name: "Review & share" }).click();
 
   await expect(page).toHaveURL(/\/files\/folders\/folder-1\?tab=access$/u);
-  await expect(page.getByRole("heading", { name: "Who has access" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Who has access" }),
+  ).toBeVisible();
   expect(captures.suggestions).toEqual([
     expect.objectContaining({
       path: "/api/files/suggestions/suggestion-1/accept",
@@ -1259,6 +1261,72 @@ test("accepting a contextual share prompt opens existing access review without g
     }),
   ]);
   expect(captures.grants).toEqual([]);
+});
+
+test("canonical media prompt reviews Current without creating a grant or post draft", async ({
+  page,
+}) => {
+  await seedSession(page);
+  const captures = await mockFiles(page, {
+    suggestions: [
+      {
+        suggestionId: "suggestion-1",
+        suggestionType: "event_recap",
+        recommendedAction: "create_post_draft",
+        folderId: "folder-1",
+        version: 4,
+        title: "Create a Fourth of July recap post",
+        summary: "Review the event media and prepare an editable Polis post.",
+      },
+    ],
+    suggestionDecision: {
+      suggestionId: "suggestion-1",
+      folderId: "folder-1",
+    },
+  });
+
+  await page.goto("/files/recommended");
+  await expect(page.getByText("Rule-based media prompt")).toBeVisible();
+  await expect(
+    page.getByRole("heading", {
+      name: "Create a Fourth of July recap post",
+      level: 3,
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(
+      "Review the event media and prepare an editable Polis post.",
+    ),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Create draft" })).toHaveCount(
+    0,
+  );
+  await expect(
+    page.getByRole("button", { name: "Review & share" }),
+  ).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Review media" }).click();
+
+  await expect(page).toHaveURL(/\/files\/folders\/folder-1\?tab=current$/u);
+  await expect(
+    page.getByRole("button", { name: "Current", exact: true }),
+  ).toHaveAttribute("aria-current", "page");
+  expect(captures.suggestions).toEqual([
+    expect.objectContaining({
+      path: "/api/files/suggestions/suggestion-1/accept",
+      body: { expectedVersion: 4 },
+    }),
+  ]);
+  expect(captures.grants).toEqual([]);
+  expect(captures.grantRequests).toEqual([]);
+  expect(captures.posts).toEqual([]);
+  expect(
+    captures.requests.filter(
+      ({ method, path }) =>
+        method === "POST" &&
+        (path.includes("/grants") || path === "/api/files/post-drafts"),
+    ),
+  ).toEqual([]);
 });
 
 test("proposal review, restricted named sharing, provenance, and ordered post draft use canonical contracts", async ({
