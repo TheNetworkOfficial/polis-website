@@ -9,8 +9,17 @@ function workspace({ initialized = true, principal = null } = {}) {
     orgKind: "independent_organization",
     jurisdiction: { stateCode: "FL" },
   };
+  const sourceType = workspacePrincipal.sourceType || workspacePrincipal.type;
+  const activeAuthorizationRoot = ["official", "elected_official"].includes(
+    sourceType,
+  )
+    ? "official_office"
+    : ["candidate", "campaign", "political_account"].includes(sourceType)
+      ? "campaign"
+      : "organization";
+  const filesWorkspaceId = `files:v1:${workspacePrincipal.type}:${workspacePrincipal.id}`;
   return {
-    filesWorkspaceId: `files:v1:${workspacePrincipal.type}:${workspacePrincipal.id}`,
+    filesWorkspaceId,
     principal: workspacePrincipal,
     entitlement: "organization_files",
     permissions: [
@@ -41,6 +50,7 @@ function workspace({ initialized = true, principal = null } = {}) {
       automationsEnabled: true,
       aiSuggestionsEnabled: true,
       postProvenanceEnabled: true,
+      hostReferencesEnabled: false,
     },
     settings: {
       version: 1,
@@ -63,9 +73,28 @@ function workspace({ initialized = true, principal = null } = {}) {
         automations: true,
       },
       rolePurposeMappings: {},
+      rolePurposeMappingsByRoot: { [activeAuthorizationRoot]: {} },
     },
+    activeAuthorizationRoot,
     setup: { initialized, presetKey: initialized ? "independent_org" : null },
-    revision: 9,
+    setupByRoot: {
+      [activeAuthorizationRoot]: {
+        initialized,
+        presetKey: initialized ? "independent_org" : null,
+      },
+    },
+    governanceAuthority: {
+      roleId: "governance-role",
+      revision: 2,
+      authorizationRoot: activeAuthorizationRoot,
+      actorIsCurrentAuthority: true,
+    },
+    governanceAuthorityRoleIds: {
+      [activeAuthorizationRoot]: "governance-role",
+    },
+    governanceAuthorityRevisions: { [activeAuthorizationRoot]: 2 },
+    revision: initialized ? 9 : 0,
+    etag: initialized ? '"workspace-9"' : null,
     roots: [
       {
         folderId: "folder-1",
@@ -73,6 +102,10 @@ function workspace({ initialized = true, principal = null } = {}) {
         name: "Florida House District 3",
         description: "Current district research",
         itemCount: 2,
+        filesWorkspaceId,
+        authorizationRoot: activeAuthorizationRoot,
+        version: 3,
+        etag: '"folder-3"',
       },
       {
         folderId: "folder-2",
@@ -80,6 +113,10 @@ function workspace({ initialized = true, principal = null } = {}) {
         name: "Field plans",
         description: "Canvass and organizing plans",
         itemCount: 0,
+        filesWorkspaceId,
+        authorizationRoot: activeAuthorizationRoot,
+        version: 4,
+        etag: '"folder-4"',
       },
     ],
     views: ["my_files", "shared_with_me", "recent", "needs_review", "archive"],
@@ -93,6 +130,10 @@ const folder = {
   name: "Florida House District 3",
   description: "Current district research for connected campaigns.",
   version: 3,
+  etag: '"folder-3"',
+  filesWorkspaceId: "files:v1:organization:org-1",
+  authorizationRoot: "organization",
+  currentEditionId: "edition-2026",
   reviewRequired: true,
   restriction: "standard",
   settings: { inheritWorkspace: true },
@@ -111,6 +152,8 @@ const assets = [
     assetId: "asset-1",
     folderId: "folder-1",
     sourceAssetVersionId: "asset-version-1",
+    version: 5,
+    etag: '"asset-5"',
     name: "Fourth of July crowd.jpg",
     mimeType: "image/jpeg",
     state: "ready",
@@ -160,6 +203,8 @@ const assets = [
     assetId: "asset-2",
     folderId: "folder-1",
     sourceAssetVersionId: "asset-version-2",
+    version: 6,
+    etag: '"asset-6"',
     name: "Parade clip.mp4",
     mimeType: "video/mp4",
     state: "ready",
@@ -230,12 +275,19 @@ async function seedSession(
 
 async function mockFiles(page, overrides = {}) {
   const currentWorkspace = overrides.workspace || workspace();
+  const discoveredWorkspaces = overrides.workspaces || [currentWorkspace];
   const sourceType =
     currentWorkspace.principal.sourceType || currentWorkspace.principal.type;
   const sourceId =
     sourceType === "official"
       ? currentWorkspace.principal.sourceId
       : currentWorkspace.principal.id;
+  const activeFolder = {
+    ...folder,
+    filesWorkspaceId: currentWorkspace.filesWorkspaceId,
+    authorizationRoot: currentWorkspace.activeAuthorizationRoot,
+    ...(overrides.folder || {}),
+  };
   const folderAccess = overrides.folderAccess || {
     shared: false,
     permissions: currentWorkspace.permissions,
@@ -247,25 +299,65 @@ async function mockFiles(page, overrides = {}) {
   let uploadStatusIndex = 0;
   let uploadIntent = "commit";
   let uploadProposal = null;
+  let editionMaterialization = currentWorkspace.activeMaterialization
+    ? { ...currentWorkspace.activeMaterialization }
+    : null;
+  let editionMaterializationStatusIndex = 0;
+  let activeEditionId = activeFolder.currentEditionId;
+  const editionItems = overrides.editions || [
+    {
+      id: "edition-2026",
+      name: "2026 cycle",
+      version: 7,
+      etag: '"edition-7"',
+    },
+    {
+      id: "edition-2024",
+      name: "2024 cycle",
+      version: 4,
+      etag: '"edition-4"',
+    },
+  ];
+  let hostReferenceItems = [...(overrides.hostReferenceItems || [])];
   const signedUploadAttempts = new Map();
   const captures = {
     grants: [],
     proposals: [],
     proposalCreates: [],
+    proposalResubmissions: [],
+    proposalWithdrawals: [],
     posts: [],
     uploads: [],
     uploadPartHeaders: [],
     signedUploadParts: [],
     uploadAborts: [],
     settings: [],
+    settingsRequests: [],
     suggestions: [],
     folders: [],
+    folderCreates: [],
     archives: [],
     editions: [],
+    editionArchives: [],
+    editionRestores: [],
+    editionMaterializationPolls: [],
     grantRequests: [],
     initializations: [],
+    initializationRequests: [],
+    previews: [],
+    hostReferences: [],
     requests: [],
   };
+  await page.route("**/signed-preview/**", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "image/png",
+      body: Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+        "base64",
+      ),
+    }),
+  );
   await page.route("**/signed-upload/**", async (route) => {
     const partNumber = Number(
       new URL(route.request().url()).pathname.split("-").at(-1),
@@ -296,7 +388,13 @@ async function mockFiles(page, overrides = {}) {
     const method = request.method();
     const body = request.postDataJSON?.() || {};
     const idempotencyKey = request.headers()["idempotency-key"] || "";
-    captures.requests.push({ path, method, body });
+    captures.requests.push({
+      path,
+      method,
+      body,
+      idempotencyKey,
+      ifMatch: request.headers()["if-match"] || "",
+    });
     if (overrides.onRequest) {
       const handled = await overrides.onRequest({
         route,
@@ -310,7 +408,7 @@ async function mockFiles(page, overrides = {}) {
       if (handled) return;
     }
     if (path === "/api/files/workspaces" && method === "GET") {
-      return json(route, { ok: true, workspaces: [currentWorkspace] });
+      return json(route, { ok: true, workspaces: discoveredWorkspaces });
     }
     if (path === "/api/files/setup-presets") {
       return json(route, {
@@ -338,12 +436,150 @@ async function mockFiles(page, overrides = {}) {
     }
     if (path.endsWith("/initialize") && method === "POST") {
       captures.initializations.push(body);
+      captures.initializationRequests.push({
+        body,
+        idempotencyKey,
+        ifMatch: request.headers()["if-match"] || "",
+      });
+      if (
+        overrides.staleInitializeOnce &&
+        captures.initializationRequests.length === 1
+      ) {
+        currentWorkspace.revision = 10;
+        currentWorkspace.etag = '"workspace-10"';
+        return json(
+          route,
+          {
+            ok: false,
+            error: "files_version_conflict",
+            message: "Workspace changed",
+          },
+          409,
+        );
+      }
       currentWorkspace.setup = { initialized: true, presetKey: body.presetKey };
+      currentWorkspace.setupByRoot = {
+        ...(currentWorkspace.setupByRoot || {}),
+        [currentWorkspace.activeAuthorizationRoot]: currentWorkspace.setup,
+      };
       return json(route, { ok: true, workspace: currentWorkspace });
     }
     if (path.endsWith("/settings") && method === "PUT") {
       captures.settings.push(body);
+      captures.settingsRequests.push({
+        body,
+        idempotencyKey,
+        ifMatch: request.headers()["if-match"] || "",
+      });
       return json(route, { ok: true, settings: body.settings });
+    }
+    if (
+      path === "/api/files/host-references/folder-picker" &&
+      method === "GET"
+    ) {
+      return json(route, {
+        items: overrides.hostPickerItems || [
+          {
+            folderId: "folder-1",
+            name: "Florida House District 3",
+            breadcrumb: "District research / Florida House 3",
+            filesWorkspaceId: currentWorkspace.filesWorkspaceId,
+            principal: currentWorkspace.principal,
+            authorizationRoot: currentWorkspace.activeAuthorizationRoot,
+            context: activeFolder.context,
+            restriction: "standard",
+            version: 3,
+            etag: '"folder-3"',
+            capabilities: {
+              canView: true,
+              canLinkHostReference: true,
+            },
+            allowedRelationKeys: ["supporting_material"],
+            allowedPurposeKeys: ["research"],
+          },
+        ],
+        referenceOptions: overrides.hostReferenceOptions || {
+          scope: "folder",
+          referenceType: url.searchParams.get("referenceType"),
+          relations: [
+            {
+              relationType: "supporting_material",
+              label: "Supporting material",
+            },
+          ],
+          purposes: [{ purposeKey: "research", label: "Research" }],
+        },
+        nextCursor: null,
+      });
+    }
+    if (path === "/api/files/host-references" && method === "GET") {
+      return json(route, { items: hostReferenceItems, nextCursor: null });
+    }
+    const hostReferenceDetailMatch = path.match(
+      /^\/api\/files\/host-references\/([^/]+)$/u,
+    );
+    if (hostReferenceDetailMatch && method === "GET") {
+      const hostReferenceId = decodeURIComponent(hostReferenceDetailMatch[1]);
+      const envelope = hostReferenceItems.find(
+        (item) => item.hostReference?.hostReferenceId === hostReferenceId,
+      );
+      return envelope
+        ? json(route, envelope)
+        : json(route, { ok: false, error: "host_reference_not_found" }, 404);
+    }
+    if (path === "/api/files/host-references" && method === "POST") {
+      captures.hostReferences.push({
+        body,
+        idempotencyKey,
+        ifMatch: request.headers()["if-match"] || "",
+      });
+      const envelope = {
+        hostReference: {
+          hostReferenceId: "host-reference-1",
+          ...body,
+          status: "active",
+          version: 1,
+          deepLink: {
+            route: "/files/references/host-reference-1",
+            params: { hostReferenceId: "host-reference-1" },
+          },
+        },
+        revision: 1,
+        etag: '"host-reference-1"',
+      };
+      hostReferenceItems = [envelope, ...hostReferenceItems];
+      return json(route, envelope);
+    }
+    if (
+      /^\/api\/files\/host-references\/[^/]+\/revoke$/u.test(path) &&
+      method === "POST"
+    ) {
+      captures.hostReferences.push({
+        path,
+        body,
+        idempotencyKey,
+        ifMatch: request.headers()["if-match"] || "",
+      });
+      const hostReferenceId = decodeURIComponent(path.split("/")[4]);
+      const current = hostReferenceItems.find(
+        (item) => item.hostReference?.hostReferenceId === hostReferenceId,
+      );
+      const envelope = {
+        hostReference: {
+          ...(current?.hostReference || {}),
+          hostReferenceId,
+          status: "revoked",
+          version: Number(current?.revision || 1) + 1,
+        },
+        revision: Number(current?.revision || 1) + 1,
+        etag: `"${hostReferenceId}-revoked"`,
+      };
+      hostReferenceItems = hostReferenceItems.map((item) =>
+        item.hostReference?.hostReferenceId === hostReferenceId
+          ? envelope
+          : item,
+      );
+      return json(route, envelope);
     }
     if (path.endsWith("/share-targets") && method === "GET") {
       return json(route, {
@@ -403,6 +639,42 @@ async function mockFiles(page, overrides = {}) {
     if (path.endsWith("/folders") && method === "GET") {
       return json(route, { ok: true, items: [currentWorkspace.roots[0]] });
     }
+    if (path.endsWith("/folders") && method === "POST") {
+      captures.folderCreates.push({
+        path,
+        body,
+        idempotencyKey,
+        ifMatch: request.headers()["if-match"] || "",
+      });
+      if (
+        overrides.staleFolderCreateOnce &&
+        captures.folderCreates.length === 1
+      ) {
+        currentWorkspace.revision = 10;
+        currentWorkspace.etag = '"workspace-10"';
+        return json(
+          route,
+          {
+            ok: false,
+            error: "files_version_conflict",
+            message: "Workspace changed",
+          },
+          409,
+        );
+      }
+      return json(route, {
+        ok: true,
+        folder: {
+          folderId: "folder-new",
+          entityType: "folder",
+          filesWorkspaceId: currentWorkspace.filesWorkspaceId,
+          authorizationRoot: currentWorkspace.activeAuthorizationRoot,
+          version: 1,
+          etag: '"folder-new-1"',
+          ...body,
+        },
+      });
+    }
     if (path === "/api/files/grant-requests" && method === "GET") {
       if (overrides.grantRequestsForbidden) {
         return json(
@@ -458,56 +730,230 @@ async function mockFiles(page, overrides = {}) {
     if (path === "/api/files/folders/folder-1" && method === "GET") {
       return json(route, {
         ok: true,
-        folder: overrides.folder || folder,
+        folder: { ...activeFolder, currentEditionId: activeEditionId },
         access: folderAccess,
-        version: (overrides.folder || folder).version,
+        version: activeFolder.version,
+        etag: activeFolder.etag,
+      });
+    }
+    if (path === "/api/files/folders/folder-2" && method === "GET") {
+      return json(route, {
+        ok: true,
+        folder: currentWorkspace.roots[1],
+        version: currentWorkspace.roots[1].version,
+        etag: currentWorkspace.roots[1].etag,
       });
     }
     if (path === "/api/files/folders/folder-1" && method === "PATCH") {
       captures.folders.push(body);
-      return json(route, { ok: true, folder: { ...folder, ...body } });
+      return json(route, { ok: true, folder: { ...activeFolder, ...body } });
     }
     if (path === "/api/files/folders/folder-1/archive" && method === "POST") {
       captures.archives.push({ path, body, idempotencyKey });
       return json(route, {
         ok: true,
-        folder: { ...folder, status: "archived", version: 4 },
+        folder: { ...activeFolder, status: "archived", version: 4 },
       });
     }
     if (path.endsWith("/assets") && method === "GET") {
       return json(route, { ok: true, assets: overrides.assets || assets });
     }
+    const previewMatch = path.match(
+      /^\/api\/files\/assets\/([^/]+)\/versions\/([^/]+)\/preview$/u,
+    );
+    if (previewMatch && method === "GET") {
+      const assetId = decodeURIComponent(previewMatch[1]);
+      const revisionId = decodeURIComponent(previewMatch[2]);
+      captures.previews.push({
+        assetId,
+        revisionId,
+        headers: request.headers(),
+      });
+      if (
+        overrides.previewForbiddenAfter !== undefined &&
+        captures.previews.length > overrides.previewForbiddenAfter
+      ) {
+        return json(route, { ok: false, error: "files_access_denied" }, 403, {
+          "Cache-Control": "private, no-store, max-age=0",
+        });
+      }
+      return json(
+        route,
+        {
+          assetId,
+          revisionId,
+          url: `http://127.0.0.1:9000/signed-preview/${encodeURIComponent(assetId)}/${encodeURIComponent(revisionId)}.png?signature=short-lived`,
+          expiresInSeconds: overrides.previewExpiresInSeconds || 300,
+          cachePolicy: "no-store",
+          offlineAvailable: false,
+          watermarked: assetId === "asset-1",
+          contentType: "image/png",
+        },
+        200,
+        { "Cache-Control": "private, no-store, max-age=0" },
+      );
+    }
     if (path.endsWith("/editions") && method === "GET") {
       return json(route, {
         ok: true,
-        editions: [
-          {
-            id: "edition-2026",
-            name: "2026 cycle",
-            status: "current",
-            isCurrent: true,
-          },
-          { id: "edition-2024", name: "2024 cycle", status: "archived" },
-        ],
+        editions: editionItems.map((edition) => ({
+          ...edition,
+          status: edition.id === activeEditionId ? "current" : "archived",
+          isCurrent: edition.id === activeEditionId,
+        })),
+      });
+    }
+    if (
+      path === "/api/files/folders/folder-1/editions/start" &&
+      method === "POST"
+    ) {
+      captures.editions.push({ path, body, idempotencyKey });
+      return json(route, {
+        ok: true,
+        edition: { editionId: "edition-new", state: "current", ...body },
       });
     }
     if (path.endsWith("/editions") && method === "POST") {
-      captures.editions.push(body);
+      captures.editions.push({ path, body, idempotencyKey });
       return json(route, {
         ok: true,
         edition: { editionId: "edition-new", state: "draft", ...body },
       });
     }
+    if (
+      path === "/api/files/editions/edition-2026/archive" &&
+      method === "POST"
+    ) {
+      captures.editionArchives.push({
+        path,
+        body,
+        idempotencyKey,
+        ifMatch: request.headers()["if-match"] || "",
+      });
+      editionMaterializationStatusIndex = 0;
+      editionMaterialization = {
+        materializationId: "materialization-archive",
+        mode: "archive",
+        status: "pending",
+        progress: {
+          phase: "pending",
+          sourceAssetCount: 0,
+          projectionItemCount: 0,
+          affectedFolderCount: 0,
+          complete: false,
+        },
+        createdAt: "2026-08-17T12:00:00.000Z",
+        updatedAt: "2026-08-17T12:00:00.000Z",
+        version: 1,
+      };
+      currentWorkspace.activeMaterialization = editionMaterialization;
+      return json(
+        route,
+        {
+          ok: true,
+          accepted: true,
+          materialization: editionMaterialization,
+          edition: { editionId: "edition-2026", state: "active", version: 7 },
+          folder: { ...activeFolder, currentEditionId: activeEditionId },
+          dispatchPending: false,
+          revision: 1,
+          etag: '"materialization-1"',
+        },
+        202,
+      );
+    }
+    if (
+      path === "/api/files/editions/edition-2024/restore" &&
+      method === "POST"
+    ) {
+      captures.editionRestores.push({
+        path,
+        body,
+        idempotencyKey,
+        ifMatch: request.headers()["if-match"] || "",
+      });
+      editionMaterializationStatusIndex = 0;
+      editionMaterialization = {
+        materializationId: "materialization-restore",
+        mode: "restore",
+        status: "pending",
+        progress: {
+          phase: "pending",
+          sourceAssetCount: 2,
+          projectionItemCount: 0,
+          affectedFolderCount: 1,
+          complete: false,
+        },
+        createdAt: "2026-08-17T12:00:00.000Z",
+        updatedAt: "2026-08-17T12:00:00.000Z",
+        version: 1,
+      };
+      currentWorkspace.activeMaterialization = editionMaterialization;
+      return json(
+        route,
+        {
+          ok: true,
+          accepted: true,
+          materialization: editionMaterialization,
+          edition: { editionId: "edition-2024", state: "archived", version: 4 },
+          folder: { ...activeFolder, currentEditionId: activeEditionId },
+          dispatchPending: false,
+          revision: 1,
+          etag: '"materialization-1"',
+        },
+        202,
+      );
+    }
+    const materializationMatch = path.match(
+      /^\/api\/files\/edition-materializations\/([^/]+)$/u,
+    );
+    if (materializationMatch && method === "GET" && editionMaterialization) {
+      captures.editionMaterializationPolls.push(path);
+      const statuses = overrides.editionMaterializationStatuses || ["complete"];
+      const status =
+        statuses[
+          Math.min(editionMaterializationStatusIndex, statuses.length - 1)
+        ];
+      editionMaterializationStatusIndex += 1;
+      editionMaterialization = {
+        ...editionMaterialization,
+        status,
+        progress: {
+          ...editionMaterialization.progress,
+          phase: status,
+          projectionItemCount: status === "complete" ? 2 : 1,
+          complete: status === "complete",
+        },
+        ...(status === "failed"
+          ? { failureCode: "edition_source_unavailable" }
+          : {}),
+        version: editionMaterialization.version + 1,
+        updatedAt: "2026-08-17T12:00:01.000Z",
+      };
+      currentWorkspace.activeMaterialization = editionMaterialization;
+      if (status === "complete") {
+        activeEditionId =
+          editionMaterialization.mode === "restore" ? "edition-2024" : "";
+        currentWorkspace.activeMaterialization = null;
+      }
+      return json(route, {
+        ok: true,
+        materialization: editionMaterialization,
+        revision: editionMaterialization.version,
+        etag: `"materialization-${editionMaterialization.version}"`,
+      });
+    }
     if (path.endsWith("/proposals") && method === "GET") {
       return json(route, {
         ok: true,
-        proposals: [
+        proposals: overrides.proposals || [
           {
             proposalId: "proposal-1",
             title: "Replace precinct contact sheet",
             summary: "Use the certified 2026 contacts.",
-            status: "pending",
+            status: "pending_review",
             version: 2,
+            etag: '"proposal-2"',
             createdBy: { displayName: "Jamie Lee" },
           },
         ],
@@ -528,6 +974,40 @@ async function mockFiles(page, overrides = {}) {
       return json(route, {
         ok: true,
         proposal: { proposalId: "proposal-1", status: body.decision },
+      });
+    }
+    if (path === "/api/files/proposals/proposal-1" && method === "PATCH") {
+      captures.proposalResubmissions.push({
+        body,
+        idempotencyKey,
+        ifMatch: request.headers()["if-match"] || "",
+      });
+      return json(route, {
+        ok: true,
+        proposal: {
+          proposalId: "proposal-1",
+          status: "pending_review",
+          version: Number(body.expectedVersion) + 1,
+          ...body,
+        },
+      });
+    }
+    if (
+      path === "/api/files/proposals/proposal-1/withdraw" &&
+      method === "POST"
+    ) {
+      captures.proposalWithdrawals.push({
+        body,
+        idempotencyKey,
+        ifMatch: request.headers()["if-match"] || "",
+      });
+      return json(route, {
+        ok: true,
+        proposal: {
+          proposalId: "proposal-1",
+          status: "withdrawn",
+          version: Number(body.expectedVersion) + 1,
+        },
       });
     }
     if (path.endsWith("/grants") && method === "GET") {
@@ -763,13 +1243,16 @@ test("proposal review, restricted named sharing, provenance, and ordered post dr
     page.getByRole("link", { name: "External Link Team used this" }),
   ).toHaveCount(0);
   await expect(
-    page.getByRole("button", { name: "Start new edition" }).first(),
+    page.getByRole("button", { name: "Start a new edition" }).first(),
   ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Archive folder" }).first(),
   ).toBeVisible();
 
-  await page.getByRole("button", { name: "Start new edition" }).first().click();
+  await page
+    .getByRole("button", { name: "Start a new edition" })
+    .first()
+    .click();
   await page.getByLabel("Edition label").fill("2028 district cycle");
   await page.getByLabel("Edition type").selectOption("election_cycle");
   await page.getByLabel("Effective year").fill("2028");
@@ -777,17 +1260,41 @@ test("proposal review, restricted named sharing, provenance, and ordered post dr
   await page.getByLabel("Boundary vintage").fill("2024");
   await page.getByLabel("Effective from").fill("2027-11-03");
   await page.getByLabel("Effective through").fill("2028-11-07");
-  await page.getByRole("button", { name: "Create edition" }).click();
+  await page.getByRole("button", { name: "Start new current edition" }).click();
   expect(captures.editions[0]).toEqual({
-    label: "2028 district cycle",
-    type: "election_cycle",
-    effectiveYear: "2028",
-    cycle: "2028",
-    boundaryVintage: "2024",
-    effectiveFrom: "2027-11-03",
-    effectiveTo: "2028-11-07",
-    expectedVersion: 3,
+    path: "/api/files/folders/folder-1/editions/start",
+    body: {
+      label: "2028 district cycle",
+      type: "election_cycle",
+      effectiveYear: 2028,
+      cycle: 2028,
+      boundaryVintage: "2024",
+      effectiveFrom: "2027-11-03",
+      effectiveTo: "2028-11-07",
+      archiveCurrent: true,
+      expectedVersion: 3,
+      expectedCurrentEditionVersion: 7,
+    },
+    idempotencyKey: expect.any(String),
   });
+
+  await page.getByRole("button", { name: "Archive current version" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Archive current version?" }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Archive current version" })
+    .last()
+    .click();
+  expect(captures.editionArchives[0]).toEqual({
+    path: "/api/files/editions/edition-2026/archive",
+    body: { expectedVersion: 7, expectedFolderVersion: 3 },
+    idempotencyKey: expect.any(String),
+    ifMatch: '"edition-7"',
+  });
+  await expect(
+    page.getByText("Current version archived and preserved in history."),
+  ).toBeVisible();
 
   await page.getByRole("button", { name: "Select all media" }).click();
   await expect(page.getByRole("button", { name: /Create post/ })).toContainText(
@@ -829,13 +1336,23 @@ test("proposal review, restricted named sharing, provenance, and ordered post dr
   ]);
   expect(captures.posts[0].mediaItems[0]).not.toHaveProperty("revisionId");
   expect(captures.posts[0].mediaItems[1]).not.toHaveProperty("revisionId");
+  expect(captures.posts[0]).toEqual(
+    expect.objectContaining({
+      expectedFolderVersion: 3,
+      expectedAssetVersions: { "asset-2": 6, "asset-1": 5 },
+    }),
+  );
 
-  await page.getByRole("button", { name: "Proposals" }).click();
+  await page.getByRole("button", { name: "Proposed changes" }).click();
   await page.getByRole("button", { name: "Approve & merge" }).click();
   await page.getByLabel(/Review note/).fill("Certified contacts verified.");
   await page.getByRole("button", { name: "Approve & merge" }).last().click();
   expect(captures.proposals[0]).toEqual(
-    expect.objectContaining({ decision: "approve", expectedVersion: "2" }),
+    expect.objectContaining({
+      decision: "approve",
+      expectedVersion: 2,
+      expectedFolderVersion: 3,
+    }),
   );
   await page.getByRole("button", { name: "Request changes" }).click();
   await page
@@ -845,7 +1362,8 @@ test("proposal review, restricted named sharing, provenance, and ordered post dr
   expect(captures.proposals[1]).toEqual(
     expect.objectContaining({
       decision: "request_changes",
-      expectedVersion: "2",
+      expectedVersion: 2,
+      expectedFolderVersion: 3,
     }),
   );
 
@@ -879,7 +1397,7 @@ test("proposal review, restricted named sharing, provenance, and ordered post dr
     expectedVersion: 3,
   });
 
-  await page.getByRole("button", { name: "Access" }).click();
+  await page.getByRole("button", { name: "Access & automations" }).click();
   await expect(page.getByText("Governance authority")).toBeVisible();
   await expect(page.getByText("Recipient acceptance")).toBeVisible();
   await page.getByRole("button", { name: "Share access" }).click();
@@ -927,6 +1445,177 @@ test("proposal review, restricted named sharing, provenance, and ordered post dr
     },
     idempotencyKey: expect.any(String),
   });
+});
+
+test("archived editions restore their contents through the bounded async materialization contract", async ({
+  page,
+}) => {
+  await seedSession(page);
+  const captures = await mockFiles(page, {
+    editionMaterializationStatuses: ["applying", "consolidating", "complete"],
+  });
+  await page.goto("/files/folders/folder-1");
+  await page.getByRole("button", { name: "Restore as Current" }).click();
+  await expect(
+    page.getByText("Restoring this edition as Current"),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Start a new edition" }).first(),
+  ).toBeDisabled();
+  expect(captures.editionRestores[0]).toEqual({
+    path: "/api/files/editions/edition-2024/restore",
+    body: {
+      expectedVersion: 4,
+      expectedFolderVersion: 3,
+      archiveCurrent: true,
+      expectedCurrentEditionVersion: 7,
+    },
+    idempotencyKey: expect.any(String),
+    ifMatch: '"edition-4"',
+  });
+  expect(captures.requests.some(({ path }) => path.endsWith("/activate"))).toBe(
+    false,
+  );
+  await expect(
+    page.getByText(
+      "Archived edition restored as Current with its versioned contents.",
+    ),
+  ).toBeVisible({ timeout: 10_000 });
+  expect(captures.editionMaterializationPolls).toHaveLength(3);
+  const restored = page
+    .locator(".files-edition")
+    .filter({ hasText: "2024 cycle" });
+  await expect(restored.getByText("Current", { exact: true })).toBeVisible();
+});
+
+test("reload reconciles a manager-visible active materialization and resumes polling", async ({
+  page,
+}) => {
+  await seedSession(page);
+  const captures = await mockFiles(page, {
+    editionMaterializationStatuses: ["applying", "applying", "complete"],
+  });
+  await page.goto("/files/folders/folder-1");
+  await page.getByRole("button", { name: "Restore as Current" }).click();
+  await expect(page.getByText(/applying · 2 source items/)).toBeVisible();
+  const pollsBeforeReload = captures.editionMaterializationPolls.length;
+  await page.reload();
+  await expect(
+    page.getByText("Restoring this edition as Current"),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Edition restore completed with its versioned contents."),
+  ).toBeVisible({ timeout: 10_000 });
+  expect(captures.editionRestores).toHaveLength(1);
+  expect(captures.editionMaterializationPolls.length).toBeGreaterThan(
+    pollsBeforeReload,
+  );
+});
+
+test("active materialization bootstrap is manager-only and malformed summaries fail closed", async ({
+  page,
+  context,
+}) => {
+  const activeMaterialization = {
+    materializationId: "materialization-existing",
+    mode: "restore",
+    status: "applying",
+    progress: {
+      phase: "applying",
+      sourceAssetCount: 2,
+      projectionItemCount: 1,
+      affectedFolderCount: 1,
+      complete: false,
+    },
+    createdAt: "2026-08-17T12:00:00.000Z",
+    updatedAt: "2026-08-17T12:00:01.000Z",
+    version: 2,
+  };
+  const viewerWorkspace = workspace();
+  viewerWorkspace.permissions = viewerWorkspace.permissions.filter(
+    (permission) => permission !== "files_manage",
+  );
+  viewerWorkspace.capabilities.canManage = false;
+  viewerWorkspace.activeMaterialization = activeMaterialization;
+  await seedSession(page);
+  const viewerCaptures = await mockFiles(page, { workspace: viewerWorkspace });
+  await page.goto("/files/folders/folder-1");
+  await expect(page.getByText("Restoring this edition as Current")).toHaveCount(
+    0,
+  );
+  expect(viewerCaptures.editionMaterializationPolls).toHaveLength(0);
+
+  const malformedPage = await context.newPage();
+  const malformedWorkspace = workspace();
+  malformedWorkspace.activeMaterialization = {
+    ...activeMaterialization,
+    status: "partially_visible",
+  };
+  await seedSession(malformedPage);
+  const malformedCaptures = await mockFiles(malformedPage, {
+    workspace: malformedWorkspace,
+  });
+  await malformedPage.goto("/files/folders/folder-1");
+  await expect(
+    malformedPage.getByText("Restoring this edition as Current"),
+  ).toHaveCount(0);
+  expect(malformedCaptures.editionMaterializationPolls).toHaveLength(0);
+});
+
+test("edition materialization fails closed without exposing a partial Current", async ({
+  page,
+}) => {
+  await seedSession(page);
+  const captures = await mockFiles(page, {
+    editionMaterializationStatuses: ["failed"],
+  });
+  await page.goto("/files/folders/folder-1");
+  await page.getByRole("button", { name: "Restore as Current" }).click();
+  await expect(
+    page.getByRole("alert").getByText("Version restore could not finish"),
+  ).toBeVisible();
+  await expect(page.getByRole("alert")).toContainText(
+    "edition source unavailable",
+  );
+  expect(captures.editionMaterializationPolls).toHaveLength(1);
+  const originalCurrent = page
+    .locator(".files-edition")
+    .filter({ hasText: "2026 cycle" });
+  await expect(
+    originalCurrent.getByText("Current", { exact: true }),
+  ).toBeVisible();
+});
+
+test("workspace materialization locks explain the 409 without pretending to mutate", async ({
+  page,
+}) => {
+  await seedSession(page);
+  const captures = await mockFiles(page, {
+    onRequest: async ({ route, path, method }) => {
+      if (
+        path === "/api/files/editions/edition-2024/restore" &&
+        method === "POST"
+      ) {
+        await json(
+          route,
+          {
+            ok: false,
+            error: "files_materialization_in_progress",
+            message: "Workspace locked",
+          },
+          409,
+        );
+        return true;
+      }
+      return false;
+    },
+  });
+  await page.goto("/files/folders/folder-1");
+  await page.getByRole("button", { name: "Restore as Current" }).click();
+  await expect(
+    page.getByText(/Another edition change is already/),
+  ).toBeVisible();
+  expect(captures.editionMaterializationPolls).toHaveLength(0);
 });
 
 test("Files denies a workspace when the feature flag is absent", async ({
@@ -1212,6 +1901,7 @@ test("setup presets keep rule prompts on and AI off by default", async ({
   ).toBeVisible();
   expect(captures.initializations[0]).toEqual({
     presetKey: "independent_org",
+    expectedVersion: 0,
     settings: {
       version: 1,
       defaultView: "my_files",
@@ -1233,7 +1923,13 @@ test("setup presets keep rule prompts on and AI off by default", async ({
         automations: true,
       },
       rolePurposeMappings: {},
+      rolePurposeMappingsByRoot: { organization: {} },
     },
+  });
+  expect(captures.initializationRequests[0]).toEqual({
+    body: captures.initializations[0],
+    idempotencyKey: expect.any(String),
+    ifMatch: "",
   });
 });
 
@@ -1270,12 +1966,18 @@ test("workspace settings preserve the canonical nested contract and revision", a
         automations: true,
       },
       rolePurposeMappings: {},
+      rolePurposeMappingsByRoot: { organization: {} },
     },
     expectedVersion: 9,
   });
   expect(captures.settings[0].settings).not.toHaveProperty(
     "aiSuggestionsEnabled",
   );
+  expect(captures.settingsRequests[0]).toEqual({
+    body: captures.settings[0],
+    idempotencyKey: expect.any(String),
+    ifMatch: '"workspace-9"',
+  });
 });
 
 test("official workspace bootstrap uses the official source alias id", async ({
@@ -1615,7 +2317,7 @@ test("named recipients can accept restricted shares with the live entity revisio
   expect(captures.grantRequests[0]).toEqual(
     expect.objectContaining({
       path: "/api/files/grants/grant-incoming/accept",
-      body: { expectedVersion: "7" },
+      body: { expectedVersion: 7 },
       idempotencyKey: expect.any(String),
     }),
   );
@@ -1722,4 +2424,527 @@ test("upload checkpoints are purged on logout and authorization revocation", asy
       sessionStorage.getItem("polisFilesUploads.v1"),
     ),
   ).toBeNull();
+});
+
+for (const rootFixture of [
+  {
+    name: "Campaign setup is independent from Official Office",
+    principal: {
+      type: "political_account",
+      id: "political-account-42",
+      sourceType: "candidate",
+      sourceId: "candidate-42",
+      displayName: "Jordan Lee for Florida",
+    },
+    initializedElsewhere: "official_office",
+    expectedRoot: "campaign",
+  },
+  {
+    name: "Official Office setup is independent from Campaign",
+    principal: {
+      type: "political_account",
+      id: "political-account-42",
+      sourceType: "official",
+      sourceId: "official-42",
+      displayName: "Mayor Jordan Lee",
+    },
+    initializedElsewhere: "campaign",
+    expectedRoot: "official_office",
+  },
+]) {
+  test(rootFixture.name, async ({ page }) => {
+    await seedSession(page);
+    const scopedWorkspace = workspace({
+      initialized: true,
+      principal: rootFixture.principal,
+    });
+    scopedWorkspace.setup = { initialized: true, presetKey: "other-root" };
+    scopedWorkspace.setupByRoot = {
+      [rootFixture.initializedElsewhere]: {
+        initialized: true,
+        presetKey: "other-root",
+      },
+    };
+    scopedWorkspace.settings.rolePurposeMappings = {
+      media: ["wrong-root-role"],
+    };
+    scopedWorkspace.settings.rolePurposeMappingsByRoot = {
+      [rootFixture.initializedElsewhere]: {
+        media: ["wrong-root-role"],
+      },
+    };
+    const captures = await mockFiles(page, { workspace: scopedWorkspace });
+
+    await page.goto("/files");
+    await expect(
+      page.getByRole("heading", { name: "Start organized—not empty." }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Create my Files space" }).click();
+    expect(captures.initializations[0]).toEqual(
+      expect.objectContaining({
+        expectedVersion: 9,
+        settings: expect.objectContaining({
+          rolePurposeMappings: {},
+          rolePurposeMappingsByRoot: { [rootFixture.expectedRoot]: {} },
+        }),
+      }),
+    );
+    expect(
+      captures.initializations[0].settings.rolePurposeMappingsByRoot,
+    ).not.toHaveProperty(rootFixture.initializedElsewhere);
+  });
+}
+
+test("stale setup refreshes the workspace fence and requires an intentional retry", async ({
+  page,
+}) => {
+  await seedSession(page);
+  const captures = await mockFiles(page, {
+    workspace: workspace({ initialized: false }),
+    staleInitializeOnce: true,
+  });
+  await page.goto("/files");
+  await page.getByRole("button", { name: "Create my Files space" }).click();
+  await expect(page.getByText(/Current versions were refreshed/)).toBeVisible();
+  await page.getByRole("button", { name: "Create my Files space" }).click();
+  await expect(
+    page.getByRole("heading", {
+      name: "Everything your team needs—without hunting for it.",
+    }),
+  ).toBeVisible();
+
+  expect(captures.initializationRequests).toHaveLength(2);
+  expect(captures.initializationRequests[0]).toEqual(
+    expect.objectContaining({
+      body: expect.objectContaining({ expectedVersion: 0 }),
+      ifMatch: "",
+      idempotencyKey: expect.any(String),
+    }),
+  );
+  expect(captures.initializationRequests[1]).toEqual(
+    expect.objectContaining({
+      body: expect.objectContaining({ expectedVersion: 10 }),
+      ifMatch: '"workspace-10"',
+      idempotencyKey: expect.any(String),
+    }),
+  );
+  expect(captures.initializationRequests[0].idempotencyKey).not.toBe(
+    captures.initializationRequests[1].idempotencyKey,
+  );
+});
+
+test("root and child folders use the exact target fence and stale roots retry safely", async ({
+  page,
+  context,
+}) => {
+  await seedSession(page);
+  const captures = await mockFiles(page, { staleFolderCreateOnce: true });
+  await page.goto("/files");
+  await page.getByRole("button", { name: "New root folder" }).click();
+  await page.getByLabel("Folder name").fill("Campaign compliance");
+  await page.getByRole("button", { name: "Create folder" }).click();
+  await expect(page.getByText(/Current versions were refreshed/)).toBeVisible();
+  await expect(page.locator(".files-busy")).toHaveCount(0);
+  await page.getByLabel("Folder name").fill("Campaign compliance");
+  await page.getByLabel("Folder name").press("Enter");
+  await expect.poll(() => captures.folderCreates.length).toBe(2);
+  expect(captures.folderCreates[0]).toEqual(
+    expect.objectContaining({
+      body: expect.objectContaining({ expectedVersion: 9 }),
+      ifMatch: '"workspace-9"',
+      idempotencyKey: expect.any(String),
+    }),
+  );
+  expect(captures.folderCreates[1]).toEqual(
+    expect.objectContaining({
+      body: expect.objectContaining({ expectedVersion: 10 }),
+      ifMatch: '"workspace-10"',
+      idempotencyKey: expect.any(String),
+    }),
+  );
+  expect(captures.folderCreates[0].idempotencyKey).not.toBe(
+    captures.folderCreates[1].idempotencyKey,
+  );
+
+  const childPage = await context.newPage();
+  await seedSession(childPage);
+  const childCaptures = await mockFiles(childPage);
+  await childPage.goto("/files/folders/folder-1");
+  await childPage.getByRole("button", { name: "New subfolder" }).click();
+  await childPage.getByLabel("Folder name").fill("Precinct contacts");
+  await childPage.getByRole("button", { name: "Create subfolder" }).click();
+  await expect.poll(() => childCaptures.folderCreates.length).toBe(1);
+  expect(childCaptures.folderCreates[0]).toEqual(
+    expect.objectContaining({
+      body: expect.objectContaining({
+        parentFolderId: "folder-1",
+        expectedVersion: 3,
+      }),
+      ifMatch: '"folder-3"',
+      idempotencyKey: expect.any(String),
+    }),
+  );
+});
+
+test("proposal resubmit and withdraw preserve exact proposal and folder fences", async ({
+  page,
+}) => {
+  await seedSession(page);
+  const changedProposal = {
+    proposalId: "proposal-1",
+    title: "Clarify event image name",
+    description: "Use a clearer public-facing name.",
+    status: "changes_requested",
+    version: 3,
+    etag: '"proposal-3"',
+    submittedByUserId: "user-1",
+    operations: [
+      { type: "rename", assetId: "asset-1", name: "FL03 families.jpg" },
+    ],
+    createdBy: { displayName: "Media Manager" },
+  };
+  const captures = await mockFiles(page, { proposals: [changedProposal] });
+  await page.goto("/files/folders/folder-1?tab=proposals");
+  await page.getByRole("button", { name: "Revise & resubmit" }).click();
+  await page
+    .getByLabel("Revised explanation")
+    .fill("The requested name now follows the campaign accessibility guide.");
+  await page.getByRole("button", { name: "Return to review" }).click();
+  expect(captures.proposalResubmissions[0]).toEqual({
+    body: {
+      title: "Clarify event image name",
+      description:
+        "The requested name now follows the campaign accessibility guide.",
+      operations: [
+        { type: "rename", assetId: "asset-1", name: "FL03 families.jpg" },
+      ],
+      expectedVersion: 3,
+      expectedFolderVersion: 3,
+    },
+    idempotencyKey: expect.any(String),
+    ifMatch: '"proposal-3"',
+  });
+
+  await page.getByRole("button", { name: "Withdraw" }).click();
+  await page.getByRole("button", { name: "Withdraw proposal" }).click();
+  expect(captures.proposalWithdrawals[0]).toEqual({
+    body: { expectedVersion: 3 },
+    idempotencyKey: expect.any(String),
+    ifMatch: '"proposal-3"',
+  });
+});
+
+test("asset listings resolve exact-version previews in memory and purge them on 403", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    Reflect.deleteProperty(window, "IntersectionObserver");
+  });
+  await seedSession(page);
+  const captures = await mockFiles(page, {
+    previewExpiresInSeconds: 1,
+    previewForbiddenAfter: 2,
+  });
+  await page.goto("/files/folders/folder-1");
+  await expect.poll(() => captures.previews.length).toBe(2);
+  expect(
+    captures.requests.filter(({ path }) => path.endsWith("/preview")),
+  ).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        path: "/api/files/assets/asset-1/versions/asset-version-1/preview",
+      }),
+      expect.objectContaining({
+        path: "/api/files/assets/asset-2/versions/asset-version-2/preview",
+      }),
+    ]),
+  );
+  await expect(
+    page.getByText("Watermarked preview · online only"),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(() =>
+      `${Object.values(localStorage).join(" ")} ${Object.values(sessionStorage).join(" ")}`.includes(
+        "signed-preview",
+      ),
+    ),
+  ).toBe(false);
+
+  await expect.poll(() => captures.previews.length).toBeGreaterThan(2);
+  await expect(page.locator('img[src*="signed-preview"]')).toHaveCount(0);
+  expect(
+    await page.evaluate(() =>
+      `${Object.values(localStorage).join(" ")} ${Object.values(sessionStorage).join(" ")}`.includes(
+        "signed-preview",
+      ),
+    ),
+  ).toBe(false);
+});
+
+test("host references stay feature-gated and reject invalid query tuples", async ({
+  page,
+}) => {
+  await seedSession(page);
+  const captures = await mockFiles(page);
+  await page.goto(
+    "/files?referenceType=event_recap&hostSourceType=calendar&hostSourceId=calendar-1&hostResourceType=event&hostResourceId=event-1&hostResourceVersion=8",
+  );
+  await expect(
+    page.getByRole("button", { name: "Attach a Files folder" }),
+  ).toHaveCount(0);
+  expect(
+    captures.requests.some(({ path }) =>
+      path.startsWith("/api/files/host-references"),
+    ),
+  ).toBe(false);
+
+  const enabled = workspace();
+  enabled.featureFlags.hostReferencesEnabled = true;
+  const invalidPage = await page.context().newPage();
+  await seedSession(invalidPage);
+  const invalidCaptures = await mockFiles(invalidPage, { workspace: enabled });
+  await invalidPage.goto(
+    "/files?referenceType=event_recap&hostSourceType=messaging&hostSourceId=calendar-1&hostResourceType=event&hostResourceId=event-1&hostResourceVersion=not-a-number",
+  );
+  await expect(
+    invalidPage.getByRole("button", { name: "Attach a Files folder" }),
+  ).toHaveCount(0);
+  expect(
+    invalidCaptures.requests.some(({ path }) =>
+      path.startsWith("/api/files/host-references"),
+    ),
+  ).toBe(false);
+});
+
+test("host picker keeps authorized cross-workspace choices and supports safe list and revoke", async ({
+  page,
+}) => {
+  await seedSession(page);
+  const enabled = workspace();
+  enabled.featureFlags.hostReferencesEnabled = true;
+  const otherWorkspaceId = "files:v1:organization:state-party";
+  const otherWorkspace = workspace({
+    principal: {
+      type: "organization",
+      sourceType: "organization",
+      id: "state-party",
+      displayName: "Florida State Party",
+    },
+  });
+  otherWorkspace.featureFlags.hostReferencesEnabled = true;
+  const captures = await mockFiles(page, {
+    workspace: enabled,
+    workspaces: [enabled, otherWorkspace],
+    hostPickerItems: [
+      {
+        folderId: "folder-1",
+        name: "Campaign media",
+        breadcrumb: "Media / Events",
+        filesWorkspaceId: enabled.filesWorkspaceId,
+        principal: enabled.principal,
+        authorizationRoot: "organization",
+        restriction: "standard",
+        version: 3,
+        etag: '"folder-3"',
+        capabilities: { canView: true, canLinkHostReference: true },
+        allowedRelationKeys: ["supporting_material"],
+        allowedPurposeKeys: ["research"],
+      },
+      {
+        folderId: "party-folder",
+        name: "State party event media",
+        breadcrumb: "Campaigns / 2026 / Event media",
+        filesWorkspaceId: otherWorkspaceId,
+        principal: {
+          type: "organization",
+          id: "state-party",
+          displayName: "Florida State Party",
+        },
+        authorizationRoot: "organization",
+        restriction: "standard",
+        version: 6,
+        etag: '"party-folder-6"',
+        capabilities: { canView: true, canLinkHostReference: true },
+        allowedRelationKeys: ["supporting_material"],
+        allowedPurposeKeys: ["research"],
+      },
+      {
+        folderId: "alias-only-folder",
+        name: "Unsafe alias result",
+        filesWorkspaceId: "files:v1:organization:unsafe",
+        authorizationRoot: "organization",
+        version: 1,
+        etag: '"unsafe-1"',
+        capabilities: { canView: true, canReference: true },
+      },
+      {
+        folderId: "stale-folder",
+        name: "Stale result",
+        filesWorkspaceId: "files:v1:organization:stale",
+        authorizationRoot: "organization",
+        status: "stale",
+        version: 1,
+        etag: '"stale-1"',
+        capabilities: { canView: true, canLinkHostReference: true },
+      },
+    ],
+  });
+  await page.goto(
+    "/files?referenceType=event_recap&hostSourceType=calendar&hostSourceId=calendar-1&hostResourceType=event&hostResourceId=event-1&hostResourceVersion=8",
+  );
+  await page.getByRole("button", { name: "Attach a Files folder" }).click();
+  await expect(
+    page.getByText(/Forward Florida · organization · Media/),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/Florida State Party · organization · Campaigns/),
+  ).toBeVisible();
+  await expect(page.getByText("Unsafe alias result")).toHaveCount(0);
+  await expect(page.getByText("Stale result")).toHaveCount(0);
+  await page.getByText("State party event media").click();
+  await page.getByLabel("Relationship").selectOption("supporting_material");
+  await page.getByLabel("Purpose").selectOption("research");
+  await page.getByRole("button", { name: "Attach folder" }).click();
+  expect(captures.hostReferences[0]).toEqual({
+    body: expect.objectContaining({
+      referenceType: "event_recap",
+      host: {
+        sourceType: "calendar",
+        sourceId: "calendar-1",
+        resourceType: "event",
+        resourceId: "event-1",
+        resourceVersion: 8,
+      },
+      files: {
+        filesWorkspaceId: otherWorkspaceId,
+        folderId: "party-folder",
+      },
+      relationType: "supporting_material",
+      purposeKey: "research",
+      expectedFolderVersion: 6,
+      expectedHostVersion: 8,
+    }),
+    idempotencyKey: expect.any(String),
+    ifMatch: '"party-folder-6"',
+  });
+  await expect(
+    page.getByText("supporting material", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Open linked item" }),
+  ).toHaveAttribute("href", "/files/references/host-reference-1");
+  await page.getByRole("button", { name: "Revoke link" }).click();
+  await page.getByLabel("Reason").fill("The event recap is complete.");
+  await page.getByRole("button", { name: "Revoke link" }).last().click();
+  expect(captures.hostReferences[1]).toEqual({
+    path: "/api/files/host-references/host-reference-1/revoke",
+    body: {
+      reason: "The event recap is complete.",
+      expectedVersion: 1,
+      expectedHostVersion: 8,
+    },
+    idempotencyKey: expect.any(String),
+    ifMatch: '"host-reference-1"',
+  });
+  await expect(page.getByText(/revoked/)).toBeVisible();
+});
+
+test("direct host-reference detail is eligible-workspace scoped, keyboard navigable, and mobile safe", async ({
+  page,
+}) => {
+  await seedSession(page);
+  const enabled = workspace();
+  enabled.featureFlags.hostReferencesEnabled = true;
+  const envelope = {
+    hostReference: {
+      hostReferenceId: "host-reference-direct",
+      referenceType: "event_recap",
+      host: {
+        sourceType: "calendar",
+        sourceId: "calendar-1",
+        resourceType: "event",
+        resourceId: "event-1",
+        resourceVersion: 8,
+      },
+      files: {
+        filesWorkspaceId: enabled.filesWorkspaceId,
+        folderId: "folder-1",
+      },
+      relationType: "supporting_material",
+      purposeKey: "media",
+      status: "active",
+      version: 2,
+      fileName: "never-render-secret.jpg",
+      previewUrl: "https://private.invalid/signed-secret",
+      deepLink: {
+        route: "/files/references/host-reference-direct",
+        params: { hostReferenceId: "host-reference-direct" },
+      },
+    },
+    revision: 2,
+    etag: '"host-reference-direct-2"',
+  };
+  await mockFiles(page, { workspace: enabled, hostReferenceItems: [envelope] });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/files/references/host-reference-direct");
+  await expect(
+    page.getByRole("heading", { name: "Linked Files material" }),
+  ).toBeVisible();
+  await expect(page.getByText("never-render-secret.jpg")).toHaveCount(0);
+  await expect(page.locator('[src*="private.invalid"]')).toHaveCount(0);
+  const back = page.getByRole("button", { name: "Back to Files" });
+  await back.focus();
+  await expect(back).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(
+    page.getByRole("heading", {
+      name: "Everything your team needs—without hunting for it.",
+    }),
+  ).toBeVisible();
+  await page.goBack();
+  await expect(
+    page.getByRole("heading", { name: "Linked Files material" }),
+  ).toBeVisible();
+});
+
+test("direct host-reference detail fails closed for an ineligible workspace", async ({
+  page,
+}) => {
+  await seedSession(page);
+  const enabled = workspace();
+  enabled.featureFlags.hostReferencesEnabled = true;
+  await mockFiles(page, {
+    workspace: enabled,
+    hostReferenceItems: [
+      {
+        hostReference: {
+          hostReferenceId: "host-reference-foreign",
+          referenceType: "event_recap",
+          host: {
+            sourceType: "calendar",
+            sourceId: "calendar-foreign",
+            resourceType: "event",
+            resourceId: "event-secret",
+            resourceVersion: 2,
+          },
+          files: {
+            filesWorkspaceId: "files:v1:organization:not-eligible",
+            folderId: "secret-folder",
+          },
+          relationType: "opposition_research",
+          purposeKey: "secret-purpose",
+          status: "active",
+          version: 1,
+        },
+        revision: 1,
+        etag: '"foreign-1"',
+      },
+    ],
+  });
+  await page.goto("/files/references/host-reference-foreign");
+  await expect(
+    page.getByRole("heading", { name: "Files reference unavailable" }),
+  ).toBeVisible();
+  await expect(page.getByText("opposition research")).toHaveCount(0);
+  await expect(page.getByText("secret purpose")).toHaveCount(0);
 });

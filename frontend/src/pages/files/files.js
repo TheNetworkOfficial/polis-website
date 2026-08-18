@@ -29,6 +29,20 @@ const STORED_LAYOUT_KEY = "polisFilesLayout.v1";
 const STORED_UPLOADS_KEY = "polisFilesUploads.v1";
 const UPLOAD_SCAN_POLL_LIMIT = 8;
 const UPLOAD_SCAN_POLL_BASE_MS = 750;
+const EDITION_MATERIALIZATION_POLL_LIMIT = 30;
+const EDITION_MATERIALIZATION_POLL_BASE_MS = 500;
+const EDITION_MATERIALIZATION_POLL_MAX_MS = 5_000;
+const HOST_REFERENCE_TUPLES = new Map([
+  ["event_recap", ["calendar", "event"]],
+  ["message_attachment", ["messaging", "message"]],
+  ["mission_artifact", ["missions", "mission"]],
+  ["field_brief", ["missions", "field_brief"]],
+  ["governance_reference", ["governance", "constitution_version"]],
+  ["profile_brand", ["organization", "organization_profile"]],
+  ["district_intelligence", ["candidate_onboarding", "district_intelligence"]],
+  ["restricted_import", ["files_transfer", "restricted_import_request"]],
+  ["restricted_export", ["files_transfer", "restricted_export_request"]],
+]);
 const VIEW_PATHS = new Map([
   ["recent", "recent"],
   ["shared", "shared_with_me"],
@@ -79,6 +93,17 @@ const state = {
   toast: null,
   busyAction: "",
   mutationKeys: new Map(),
+  previewEntries: new Map(),
+  previewRequests: new Map(),
+  previewExpiryTimers: new Map(),
+  previewObserver: null,
+  previewGeneration: 0,
+  previewAccessDenied: false,
+  hostReferenceContext: parseHostReferenceContext(),
+  hostReferences: [],
+  hostReferencesStatus: "idle",
+  hostReferenceDetail: null,
+  editionMaterialization: null,
   postDraft: { open: false, description: "", usages: new Map() },
 };
 
@@ -87,6 +112,8 @@ const api = new FilesApi({
   getSession: () => state.session,
 });
 let shareSearchTimer = null;
+let editionMaterializationTimer = null;
+let editionMaterializationGeneration = 0;
 
 function readStorage(key) {
   try {
@@ -115,6 +142,37 @@ function escapeHtml(value) {
 
 function normalizeString(value) {
   return value === undefined || value === null ? "" : String(value).trim();
+}
+
+function parseHostReferenceContext() {
+  const query = new URLSearchParams(window.location.search);
+  const context = {
+    referenceType: normalizeString(query.get("referenceType")).toLowerCase(),
+    hostSourceType: normalizeString(query.get("hostSourceType")).toLowerCase(),
+    hostSourceId: normalizeString(query.get("hostSourceId")),
+    hostResourceType: normalizeString(
+      query.get("hostResourceType"),
+    ).toLowerCase(),
+    hostResourceId: normalizeString(query.get("hostResourceId")),
+    hostResourceVersion: Number(query.get("hostResourceVersion")),
+  };
+  const safeIdentifier = (value) =>
+    Boolean(
+      value && value.length <= 200 && /^[a-zA-Z0-9_.:@/-]+$/u.test(value),
+    );
+  const tuple = HOST_REFERENCE_TUPLES.get(context.referenceType);
+  if (
+    !tuple ||
+    tuple[0] !== context.hostSourceType ||
+    tuple[1] !== context.hostResourceType ||
+    !safeIdentifier(context.hostSourceId) ||
+    !safeIdentifier(context.hostResourceId) ||
+    !Number.isSafeInteger(context.hostResourceVersion) ||
+    context.hostResourceVersion < 1
+  ) {
+    return null;
+  }
+  return context;
 }
 
 function firstArray(payload, keys) {
@@ -206,6 +264,14 @@ function parseRoute() {
         : "current",
     };
   }
+  if (segments[1] === "references" && segments[2]) {
+    return {
+      kind: "reference",
+      key: "reference",
+      hostReferenceId: decodeURIComponent(segments[2]),
+      tab: "current",
+    };
+  }
   const key = VIEW_PATHS.has(segments[1]) ? segments[1] : "home";
   return { kind: "view", key, tab: "current" };
 }
@@ -218,10 +284,93 @@ function routeTitle() {
     review: "Needs review",
     recommended: "Recommended",
     uploads: "Uploads",
+    reference: "Files reference",
   };
   return state.route.kind === "folder"
     ? entityName(state.folder, "Folder")
     : labels[state.route.key];
+}
+
+function authorizationRootOf(
+  descriptor = state.workspace || state.workspaceDescriptor,
+) {
+  const explicit = normalizeString(descriptor?.activeAuthorizationRoot);
+  if (["campaign", "official_office", "organization"].includes(explicit)) {
+    return explicit;
+  }
+  const principal = descriptor?.principal || {};
+  const sourceType = normalizeString(
+    principal.sourceType || principal.type,
+  ).toLowerCase();
+  if (["official", "elected_official"].includes(sourceType)) {
+    return "official_office";
+  }
+  if (["candidate", "campaign", "political_account"].includes(sourceType)) {
+    return "campaign";
+  }
+  return sourceType === "organization" ? "organization" : "";
+}
+
+function activeWorkspaceSetup(
+  workspace = state.workspace,
+  descriptor = state.workspaceDescriptor,
+) {
+  const rootKey = authorizationRootOf(workspace || descriptor);
+  const byRoot = workspace?.setupByRoot || descriptor?.setupByRoot || {};
+  if (rootKey && Object.prototype.hasOwnProperty.call(byRoot, rootKey)) {
+    return byRoot[rootKey] || {};
+  }
+  if (Object.keys(byRoot).length) return {};
+  return workspace?.setup || descriptor?.setup || {};
+}
+
+function activeRolePurposeMappings(settings = state.workspace?.settings || {}) {
+  const rootKey = authorizationRootOf();
+  const byRoot = settings?.rolePurposeMappingsByRoot || {};
+  if (rootKey && Object.prototype.hasOwnProperty.call(byRoot, rootKey)) {
+    return byRoot[rootKey] || {};
+  }
+  if (Object.keys(byRoot).length) return {};
+  return settings?.rolePurposeMappings || {};
+}
+
+function activeGovernanceAuthority() {
+  const rootKey = authorizationRootOf();
+  const authority = state.workspace?.governanceAuthority;
+  if (
+    !rootKey ||
+    !authority ||
+    normalizeString(authority.authorizationRoot) !== rootKey
+  ) {
+    return null;
+  }
+  const expectedRoleId = normalizeString(
+    state.workspace?.governanceAuthorityRoleIds?.[rootKey],
+  );
+  const expectedRevision = normalizeString(
+    state.workspace?.governanceAuthorityRevisions?.[rootKey],
+  );
+  if (
+    (expectedRoleId && normalizeString(authority.roleId) !== expectedRoleId) ||
+    (expectedRevision &&
+      normalizeString(authority.revision) !== expectedRevision)
+  ) {
+    return null;
+  }
+  return authority;
+}
+
+function workspaceSelectionKey(descriptor) {
+  const principal = descriptor?.principal || {};
+  const sourceType = normalizeString(principal.sourceType || principal.type);
+  const sourceId = normalizeString(
+    sourceType === "official" ? principal.sourceId : principal.id,
+  );
+  return [
+    normalizeString(descriptor?.filesWorkspaceId),
+    authorizationRootOf(descriptor),
+    `${sourceType}:${sourceId}`,
+  ].join("|");
 }
 
 function principalOf(descriptor = state.workspaceDescriptor) {
@@ -260,6 +409,22 @@ function workspaceFlags() {
     state.workspace?.featureFlags ||
     state.workspaceDescriptor?.featureFlags ||
     {}
+  );
+}
+
+function hostReferencesEnabled() {
+  return Boolean(
+    workspaceFlags().hostReferencesEnabled === true &&
+      state.hostReferenceContext,
+  );
+}
+
+function hostReferenceEligibleWorkspaces() {
+  return state.workspaces.filter(
+    (workspace) =>
+      isFilesWorkspaceAccessible(workspace) &&
+      workspace?.featureFlags?.hostReferencesEnabled === true &&
+      normalizeString(workspace?.filesWorkspaceId),
   );
 }
 
@@ -405,6 +570,93 @@ function normalizeWorkspacePayload(payload) {
   return payload?.workspace || payload;
 }
 
+function resourceRevision(entity, { allowZero = false } = {}) {
+  const raw = entity?.revision ?? entity?.version;
+  const revision = Number(raw);
+  return Number.isSafeInteger(revision) && revision >= (allowZero ? 0 : 1)
+    ? revision
+    : null;
+}
+
+function requireResourceRevision(entity, label, options = {}) {
+  const revision = resourceRevision(entity, options);
+  if (revision === null) {
+    setToast(
+      `${label} is missing current version information. Refresh Files before changing it.`,
+      "error",
+    );
+  }
+  return revision;
+}
+
+function assertResourceRevision(entity, label, options = {}) {
+  const revision = resourceRevision(entity, options);
+  if (revision === null) {
+    throw new FilesApiError(
+      `${label} is missing current version information. Refresh Files before changing it.`,
+      { code: "expected_version_required" },
+    );
+  }
+  return revision;
+}
+
+function resourceEtag(entity) {
+  return normalizeString(entity?.etag);
+}
+
+function mutationOptions(actionKey, entity, revision) {
+  const etag = resourceEtag(entity, revision);
+  return {
+    idempotencyKey: actionKey,
+    ...(etag ? { headers: { "If-Match": etag } } : {}),
+  };
+}
+
+function isRevisionConflict(error) {
+  return [409, 412, 428].includes(Number(error?.status || 0));
+}
+
+async function refreshWorkspaceFence() {
+  const principal = principalOf();
+  if (!principal.type || !principal.id) return;
+  const payload = await api.getWorkspace(principal.type, principal.id);
+  state.workspace = normalizeWorkspacePayload(payload);
+  state.workspaceDescriptor = {
+    ...state.workspaceDescriptor,
+    ...state.workspace,
+    principal: {
+      ...(state.workspaceDescriptor?.principal || {}),
+      ...(state.workspace?.principal || {}),
+    },
+  };
+}
+
+async function refreshFolderFence() {
+  const folderId = entityId(state.folder);
+  if (!folderId) return;
+  const payload = await api.getFolder(folderId);
+  const folder = payload?.folder || payload;
+  state.folder = {
+    ...state.folder,
+    ...folder,
+    ...(payload?.access ? { access: payload.access } : {}),
+    revision: payload?.revision ?? folder?.revision,
+    version: payload?.version ?? folder?.version,
+    etag: payload?.etag || folder?.etag || "",
+  };
+}
+
+async function refreshFenceAfterConflict(scope) {
+  try {
+    if (scope === "workspace") await refreshWorkspaceFence();
+    if (scope === "folder") await refreshFolderFence();
+  } catch {
+    // The original mutation error remains the actionable message. A normal
+    // page refresh will retry the authenticated read if this refresh also fails.
+  }
+  return "Files changed while this action was open. Current versions were refreshed; review and try again.";
+}
+
 async function bootstrap() {
   render();
   try {
@@ -412,6 +664,8 @@ async function bootstrap() {
     state.session = await restoreSharedFeedSession(authConfig);
     if (!state.session) {
       purgeUploadCheckpoints();
+      purgePreviewEntries();
+      clearEditionMaterialization();
       state.status = "signed-out";
       render();
       return;
@@ -440,11 +694,18 @@ async function bootstrap() {
     }
     const preferredId = readStorage(STORED_WORKSPACE_KEY);
     const preferred =
-      state.workspaces.find((item) => item.filesWorkspaceId === preferredId) ||
-      state.workspaces[0];
+      state.workspaces.find(
+        (item) =>
+          workspaceSelectionKey(item) === preferredId ||
+          item.filesWorkspaceId === preferredId,
+      ) || state.workspaces[0];
     await selectWorkspace(preferred, { preserveRoute: true });
   } catch (error) {
-    if ([401, 403].includes(error?.status)) purgeUploadCheckpoints();
+    if ([401, 403].includes(error?.status)) {
+      purgeUploadCheckpoints();
+      purgePreviewEntries();
+      clearEditionMaterialization();
+    }
     state.status = "error";
     state.error = error?.message || "Polis Files could not be opened.";
     render();
@@ -452,6 +713,9 @@ async function bootstrap() {
 }
 
 async function selectWorkspace(descriptor, { preserveRoute = false } = {}) {
+  purgePreviewEntries();
+  clearEditionMaterialization();
+  state.previewAccessDenied = false;
   state.workspaceDescriptor = descriptor;
   state.status = "loading-workspace";
   state.folder = null;
@@ -463,10 +727,23 @@ async function selectWorkspace(descriptor, { preserveRoute = false } = {}) {
     throw new FilesApiError("This workspace is missing its owner.");
   const payload = await api.getWorkspace(principal.type, principal.id);
   state.workspace = normalizeWorkspacePayload(payload);
-  state.workspaceDescriptor = { ...descriptor, ...state.workspace };
+  state.workspaceDescriptor = {
+    ...descriptor,
+    ...state.workspace,
+    principal: {
+      ...(descriptor?.principal || {}),
+      ...(state.workspace?.principal || {}),
+      ...(descriptor?.principal?.sourceType
+        ? {
+            sourceType: descriptor.principal.sourceType,
+            sourceId: descriptor.principal.sourceId,
+          }
+        : {}),
+    },
+  };
   writeStorage(
     STORED_WORKSPACE_KEY,
-    state.workspace.filesWorkspaceId || descriptor.filesWorkspaceId || "",
+    workspaceSelectionKey(state.workspaceDescriptor),
   );
   if (!hasFilesEntitlement(state.workspace)) {
     state.status = "disabled";
@@ -480,7 +757,7 @@ async function selectWorkspace(descriptor, { preserveRoute = false } = {}) {
     return;
   }
   state.status = "ready";
-  const setup = state.workspace.setup || descriptor.setup || {};
+  const setup = activeWorkspaceSetup(state.workspace, descriptor);
   if (!setup.initialized) {
     await openSetup();
     return;
@@ -489,7 +766,11 @@ async function selectWorkspace(descriptor, { preserveRoute = false } = {}) {
     window.history.pushState({}, "", "/files");
     state.route = parseRoute();
   }
+  const resumeMaterialization = resumeWorkspaceEditionMaterialization();
   await loadRoute();
+  if (resumeMaterialization) {
+    scheduleEditionMaterializationPoll({ immediate: true });
+  }
 }
 
 async function loadRoute() {
@@ -501,6 +782,8 @@ async function loadRoute() {
   try {
     if (state.route.kind === "folder") {
       await loadFolder(state.route.folderId, state.route.tab);
+    } else if (state.route.kind === "reference") {
+      await loadHostReferenceDetail(state.route.hostReferenceId);
     } else if (state.route.key === "recommended") {
       await loadSuggestions();
       state.items = [];
@@ -528,6 +811,7 @@ async function loadRoute() {
       if (state.route.key === "review") await loadIncomingGrantRequests();
       else state.incomingGrantRequests = [];
     }
+    if (state.route.kind !== "reference") await loadHostReferences();
     state.contentStatus = "ready";
   } catch (error) {
     state.contentStatus = "error";
@@ -558,8 +842,9 @@ async function loadFolder(folderId, tab) {
   state.folder = {
     ...folder,
     ...(folderPayload?.access ? { access: folderPayload.access } : {}),
-    version: folderPayload?.version || folder?.version,
-    revision: folderPayload?.revision || folder?.revision,
+    version: folderPayload?.version ?? folder?.version,
+    revision: folderPayload?.revision ?? folder?.revision,
+    etag: folderPayload?.etag || folder?.etag || "",
   };
   const tasks = [api.listAssets(folderId), api.listEditions(folderId)];
   if (tab === "proposals") tasks.push(api.listProposals(folderId));
@@ -618,6 +903,177 @@ async function loadSuggestions({ quiet = false } = {}) {
   }
 }
 
+function hostReferenceFromEnvelope(value) {
+  const reference = value?.hostReference;
+  if (!reference || !value?.etag) return null;
+  return {
+    ...reference,
+    revision: value?.revision,
+    version: reference?.version ?? value?.revision,
+    etag: normalizeString(value.etag),
+  };
+}
+
+function hostReferenceHasCanonicalTuple(reference) {
+  const host = reference?.host || {};
+  const tuple = HOST_REFERENCE_TUPLES.get(
+    normalizeString(reference?.referenceType),
+  );
+  return Boolean(
+    tuple &&
+      tuple[0] === normalizeString(host.sourceType) &&
+      tuple[1] === normalizeString(host.resourceType) &&
+      normalizeString(host.sourceId) &&
+      normalizeString(host.resourceId) &&
+      Number.isSafeInteger(Number(host.resourceVersion)) &&
+      Number(host.resourceVersion) > 0,
+  );
+}
+
+function hostReferenceMatchesContext(reference) {
+  const context = state.hostReferenceContext;
+  const host = reference?.host || {};
+  return Boolean(
+    context &&
+      hostReferenceHasCanonicalTuple(reference) &&
+      normalizeString(reference?.referenceType) === context.referenceType &&
+      normalizeString(host.sourceType) === context.hostSourceType &&
+      normalizeString(host.sourceId) === context.hostSourceId &&
+      normalizeString(host.resourceType) === context.hostResourceType &&
+      normalizeString(host.resourceId) === context.hostResourceId &&
+      Number(host.resourceVersion) === context.hostResourceVersion &&
+      normalizeString(reference?.hostReferenceId) &&
+      resourceRevision(reference) !== null &&
+      ["active", "revoked"].includes(normalizeString(reference?.status)),
+  );
+}
+
+async function loadHostReferenceDetail(hostReferenceId) {
+  state.hostReferenceDetail = null;
+  const eligibleWorkspaceIds = new Set(
+    hostReferenceEligibleWorkspaces().map((workspace) =>
+      normalizeString(workspace.filesWorkspaceId),
+    ),
+  );
+  if (!eligibleWorkspaceIds.size) {
+    throw new FilesApiError("This Files reference is unavailable.", {
+      status: 404,
+      code: "host_reference_not_found",
+    });
+  }
+  let payload;
+  try {
+    payload = await api.getHostReference(hostReferenceId);
+  } catch (error) {
+    if ([403, 404].includes(error?.status)) {
+      throw new FilesApiError("This Files reference is unavailable.", {
+        status: 404,
+        code: "host_reference_not_found",
+      });
+    }
+    throw error;
+  }
+  const reference = hostReferenceFromEnvelope(payload);
+  const referenceWorkspaceId = normalizeString(
+    reference?.files?.filesWorkspaceId,
+  );
+  if (
+    !reference ||
+    normalizeString(reference.hostReferenceId) !== hostReferenceId ||
+    !hostReferenceHasCanonicalTuple(reference) ||
+    !eligibleWorkspaceIds.has(referenceWorkspaceId) ||
+    resourceRevision(reference) === null ||
+    !["active", "revoked"].includes(normalizeString(reference.status))
+  ) {
+    throw new FilesApiError("This Files reference is unavailable.", {
+      status: 404,
+      code: "host_reference_not_found",
+    });
+  }
+  state.hostReferenceDetail = reference;
+}
+
+async function loadHostReferences() {
+  if (!hostReferencesEnabled()) {
+    state.hostReferences = [];
+    state.hostReferencesStatus = "idle";
+    return;
+  }
+  const context = state.hostReferenceContext;
+  state.hostReferencesStatus = "loading";
+  try {
+    const payload = await api.listHostReferences({
+      referenceType: context.referenceType,
+      hostSourceType: context.hostSourceType,
+      hostSourceId: context.hostSourceId,
+      hostResourceType: context.hostResourceType,
+      hostResourceId: context.hostResourceId,
+      hostResourceVersion: context.hostResourceVersion,
+      limit: 100,
+    });
+    state.hostReferences = firstArray(payload, ["items"])
+      .map(hostReferenceFromEnvelope)
+      .filter(Boolean)
+      .filter(hostReferenceMatchesContext);
+    state.hostReferencesStatus = "ready";
+  } catch {
+    state.hostReferences = [];
+    state.hostReferencesStatus = "error";
+  }
+}
+
+function safeHostReferenceDeepLink(reference) {
+  const route = normalizeString(reference?.deepLink?.route);
+  if (!route.startsWith("/") || route.startsWith("//")) return "";
+  let resolved = route;
+  Object.entries(reference?.deepLink?.params || {}).forEach(([key, value]) => {
+    if (/^[a-zA-Z][a-zA-Z0-9_]*$/u.test(key) && normalizeString(value)) {
+      resolved = resolved.replaceAll(`:${key}`, encodeURIComponent(value));
+    }
+  });
+  if (/:\w+/u.test(resolved)) return "";
+  let url;
+  try {
+    url = new URL(resolved, window.location.origin);
+  } catch {
+    return "";
+  }
+  if (url.origin !== window.location.origin) return "";
+  const segments = url.pathname.split("/").filter(Boolean);
+  if (
+    segments.length === 3 &&
+    segments[0] === "files" &&
+    segments[1] === "references" &&
+    segments[2] === reference.hostReferenceId
+  ) {
+    return `${url.pathname}${url.search}${url.hash}`;
+  }
+  const sourceId = normalizeString(reference?.host?.sourceId);
+  if (
+    reference.referenceType === "profile_brand" &&
+    segments.length === 4 &&
+    segments[0] === "coalitions" &&
+    segments[1] === sourceId &&
+    segments[2] === "admin" &&
+    segments[3] === "edit"
+  ) {
+    return url.pathname;
+  }
+  if (
+    reference.referenceType === "governance_reference" &&
+    segments[0] === "organizations" &&
+    segments[1] === sourceId &&
+    segments[2] === "governance" &&
+    (segments.length === 3 ||
+      (segments.length === 5 &&
+        segments[3] === "constitutions" &&
+        segments[4] === normalizeString(reference?.host?.resourceId)))
+  ) {
+    return url.pathname;
+  }
+  return "";
+}
+
 function navigate(path) {
   window.history.pushState({}, "", path);
   state.route = parseRoute();
@@ -648,9 +1104,7 @@ function renderStatusPage(kind, title, body) {
 }
 
 function renderWorkspaceSwitcher() {
-  const activeId =
-    state.workspace?.filesWorkspaceId ||
-    state.workspaceDescriptor?.filesWorkspaceId;
+  const activeId = workspaceSelectionKey(state.workspaceDescriptor);
   return `<label class="files-workspace-switcher">
     <span class="sr-only">Files workspace</span>
     <span class="files-workspace-switcher__mark">${escapeHtml(initials(workspaceLabel(state.workspaceDescriptor)))}</span>
@@ -658,7 +1112,7 @@ function renderWorkspaceSwitcher() {
       ${state.workspaces
         .map(
           (workspace) =>
-            `<option value="${escapeHtml(workspace.filesWorkspaceId)}" ${workspace.filesWorkspaceId === activeId ? "selected" : ""}>${escapeHtml(workspaceLabel(workspace))}</option>`,
+            `<option value="${escapeHtml(workspaceSelectionKey(workspace))}" ${workspaceSelectionKey(workspace) === activeId ? "selected" : ""}>${escapeHtml(workspaceLabel(workspace))}${authorizationRootOf(workspace) === "official_office" ? " · Official office" : authorizationRootOf(workspace) === "campaign" ? " · Campaign" : ""}</option>`,
         )
         .join("")}
     </select>
@@ -673,9 +1127,19 @@ function navItem({ path, key, label, iconName, badge = 0 }) {
 }
 
 function workspaceRoots() {
-  return firstArray(state.workspace, ["roots"]).length
+  const roots = firstArray(state.workspace, ["roots"]).length
     ? state.workspace.roots
     : firstArray(state.workspaceDescriptor, ["roots"]);
+  const activeRoot = authorizationRootOf();
+  const scopedRoots = roots.filter(
+    (folder) => normalizeString(folder?.authorizationRoot) === activeRoot,
+  );
+  return scopedRoots.length ||
+    roots.every((folder) => !folder?.authorizationRoot)
+    ? scopedRoots.length
+      ? scopedRoots
+      : roots
+    : [];
 }
 
 function renderSidebar() {
@@ -728,11 +1192,54 @@ function renderHeader() {
     <div class="files-header__mobile-brand"><img src="${polisLogoUrl}" alt="Polis" />${renderWorkspaceSwitcher()}</div>
     <div class="files-header__title"><p class="files-eyebrow">${escapeHtml(workspaceLabel(state.workspaceDescriptor))}</p><h1>${escapeHtml(routeTitle())}</h1></div>
     <div class="files-header__actions">
+      ${hostReferencesEnabled() ? `<button class="files-button files-button--secondary" data-action="open-host-reference">${icon("folder")}Attach a Files folder</button>` : ""}
       ${selected && postProvenanceEnabled() ? `<button class="files-button files-button--secondary" data-action="open-post">${icon("post")}Create post <span>${selected}</span></button>` : ""}
       ${canOpenUpload() ? `<button class="files-button files-button--primary" data-action="open-upload">${icon("upload")}${currentUploadIntent() === "proposal" ? "Upload for review" : "Upload"}</button>` : ""}
       <button class="files-avatar" data-action="open-settings" aria-label="Open Files settings">${escapeHtml(initials(state.user?.name || state.user?.email))}</button>
     </div>
   </header>`;
+}
+
+function renderHostReferencesPanel() {
+  if (!hostReferencesEnabled()) return "";
+  if (state.hostReferencesStatus === "loading") {
+    return '<section class="files-host-references" aria-busy="true"><p>Loading linked Files folders…</p></section>';
+  }
+  if (state.hostReferencesStatus === "error") {
+    return '<section class="files-host-references files-host-references--error"><p>Linked Files folders could not be loaded. No references are shown until authorization is confirmed.</p></section>';
+  }
+  if (!state.hostReferences.length) return "";
+  return `<section class="files-host-references" aria-label="Files folders attached to this Polis item"><div><p class="files-eyebrow">Attached to this ${escapeHtml(state.hostReferenceContext.hostResourceType)}</p><h2>Linked Files folders</h2></div><div class="files-host-references__list">${state.hostReferences
+    .map((reference) => {
+      const deepLink = safeHostReferenceDeepLink(reference);
+      const active = normalizeString(reference.status) === "active";
+      const relation = normalizeString(reference.relationType).replace(
+        /_/gu,
+        " ",
+      );
+      const purpose = normalizeString(reference.purposeKey).replace(/_/gu, " ");
+      return `<article class="files-host-reference"><div>${icon("folder")}<span><strong>${escapeHtml(relation || "Files folder")}</strong><small>${escapeHtml([purpose, active ? "active" : "revoked"].filter(Boolean).join(" · "))}</small></span></div><div>${deepLink ? `<a class="files-link-button" href="${escapeHtml(deepLink)}">Open linked item</a>` : ""}${active ? `<button class="files-link-button files-link-button--danger" data-action="revoke-host-reference" data-id="${escapeHtml(reference.hostReferenceId)}">Revoke link</button>` : ""}</div></article>`;
+    })
+    .join("")}</div></section>`;
+}
+
+function renderHostReferenceDetail() {
+  if (state.contentStatus === "error" || !state.hostReferenceDetail) {
+    return `<section class="files-page files-reference-detail"><button class="files-link-button" data-nav="/files">← Back to Files</button>${renderEmpty("Files reference unavailable", "It may have been revoked, moved outside your authorized workspaces, or is no longer available.")}</section>`;
+  }
+  const reference = state.hostReferenceDetail;
+  const workspace = hostReferenceEligibleWorkspaces().find(
+    (item) =>
+      normalizeString(item.filesWorkspaceId) ===
+      normalizeString(reference.files?.filesWorkspaceId),
+  );
+  const relation = normalizeString(reference.relationType).replace(/_/gu, " ");
+  const purpose = normalizeString(reference.purposeKey).replace(/_/gu, " ");
+  const resourceType = normalizeString(reference.host?.resourceType).replace(
+    /_/gu,
+    " ",
+  );
+  return `<section class="files-page files-reference-detail" aria-labelledby="files-reference-title"><button class="files-link-button" data-nav="/files">← Back to Files</button><div class="files-reference-detail__card"><div class="files-folder-hero__icon">${icon("folder")}</div><div><p class="files-eyebrow">Version-fenced Files reference</p><h2 id="files-reference-title">Linked Files material</h2><p>${escapeHtml([relation || "supporting material", purpose, resourceType].filter(Boolean).join(" · "))}</p><small>${escapeHtml(workspaceLabel(workspace))} · ${normalizeString(reference.status) === "active" ? "Active" : "Revoked"}</small></div></div><p class="files-form-note">This page confirms the revocable relationship only. File names, signed preview URLs, and folder contents remain inside their normal Files permissions.</p></section>`;
 }
 
 function renderToolbar({ count = state.items.length } = {}) {
@@ -821,12 +1328,179 @@ function usageBadges(item) {
     .join("")}</div>`;
 }
 
+function assetPreviewIdentity(item) {
+  const assetId = entityId(item);
+  const revisionId = normalizeString(
+    item?.sourceAssetVersionId ||
+      item?.assetVersionId ||
+      item?.revisionId ||
+      item?.currentRevisionId,
+  );
+  return assetId && revisionId
+    ? { assetId, revisionId, key: `${assetId}:${revisionId}` }
+    : null;
+}
+
+function safePreviewUrl(value) {
+  try {
+    const url = new URL(normalizeString(value), window.location.origin);
+    const localHttp =
+      url.protocol === "http:" &&
+      (url.origin === window.location.origin ||
+        ["127.0.0.1", "localhost"].includes(url.hostname));
+    return url.protocol === "https:" || localHttp ? url.href : "";
+  } catch {
+    return "";
+  }
+}
+
+function purgePreviewEntries() {
+  state.previewGeneration += 1;
+  state.previewObserver?.disconnect();
+  state.previewObserver = null;
+  state.previewExpiryTimers.forEach((timer) => window.clearTimeout(timer));
+  state.previewExpiryTimers.clear();
+  state.previewEntries.clear();
+  state.previewRequests.clear();
+}
+
+function clearEditionMaterialization() {
+  editionMaterializationGeneration += 1;
+  if (editionMaterializationTimer) {
+    window.clearTimeout(editionMaterializationTimer);
+    editionMaterializationTimer = null;
+  }
+  state.editionMaterialization = null;
+}
+
+function schedulePreviewExpiry(key, entry, delay) {
+  const existing = state.previewExpiryTimers.get(key);
+  if (existing) window.clearTimeout(existing);
+  const timer = window.setTimeout(() => {
+    state.previewExpiryTimers.delete(key);
+    if (state.previewEntries.get(key) === entry) {
+      state.previewEntries.delete(key);
+      render();
+    }
+  }, delay);
+  state.previewExpiryTimers.set(key, timer);
+}
+
+async function loadAssetPreview(assetId, revisionId) {
+  const key = `${assetId}:${revisionId}`;
+  const current = state.previewEntries.get(key);
+  if (current && current.expiresAt > Date.now()) return current;
+  if (state.previewRequests.has(key)) return state.previewRequests.get(key);
+  const generation = state.previewGeneration;
+  const request = (async () => {
+    try {
+      const payload = await api.getAssetPreview(assetId, revisionId);
+      const expiresInSeconds = Number(payload?.expiresInSeconds);
+      const url = safePreviewUrl(payload?.url);
+      const contentType = normalizeString(payload?.contentType).toLowerCase();
+      if (
+        normalizeString(payload?.assetId) !== assetId ||
+        normalizeString(payload?.revisionId) !== revisionId ||
+        !url ||
+        !Number.isFinite(expiresInSeconds) ||
+        expiresInSeconds <= 0 ||
+        expiresInSeconds > 300 ||
+        payload?.cachePolicy !== "no-store" ||
+        payload?.offlineAvailable !== false ||
+        !/^(image|video)\//u.test(contentType)
+      ) {
+        throw new FilesApiError("Preview response was not safe to display.", {
+          code: "preview_contract_invalid",
+        });
+      }
+      if (generation !== state.previewGeneration) return null;
+      const lifetime = Math.max(1_000, (expiresInSeconds - 5) * 1_000);
+      const entry = {
+        url,
+        expiresAt: Date.now() + lifetime,
+        watermarked: payload.watermarked === true,
+        contentType,
+      };
+      state.previewEntries.set(key, entry);
+      schedulePreviewExpiry(key, entry, lifetime);
+      render();
+      return entry;
+    } catch (error) {
+      if ([401, 403].includes(error?.status)) {
+        state.previewAccessDenied = true;
+        purgePreviewEntries();
+        render();
+      } else if (generation === state.previewGeneration) {
+        const retryDelay = error?.status === 409 ? 10_000 : 30_000;
+        const entry = {
+          unavailable: true,
+          processing: error?.status === 409,
+          expiresAt: Date.now() + retryDelay,
+        };
+        state.previewEntries.set(key, entry);
+        schedulePreviewExpiry(key, entry, retryDelay);
+        render();
+      }
+      return null;
+    } finally {
+      if (generation === state.previewGeneration) {
+        state.previewRequests.delete(key);
+      }
+    }
+  })();
+  state.previewRequests.set(key, request);
+  return request;
+}
+
+function observePreviewTargets() {
+  state.previewObserver?.disconnect();
+  if (state.previewAccessDenied) return;
+  const targets = Array.from(root.querySelectorAll("[data-preview-asset]"));
+  if (!targets.length) return;
+  const loadTarget = (target) => {
+    const assetId = normalizeString(target.dataset.previewAsset);
+    const revisionId = normalizeString(target.dataset.previewRevision);
+    if (assetId && revisionId) loadAssetPreview(assetId, revisionId);
+  };
+  if (!("IntersectionObserver" in window)) {
+    targets.forEach(loadTarget);
+    return;
+  }
+  state.previewObserver = new IntersectionObserver(
+    (entries, observer) => {
+      entries
+        .filter((entry) => entry.isIntersecting)
+        .forEach((entry) => {
+          observer.unobserve(entry.target);
+          loadTarget(entry.target);
+        });
+    },
+    { rootMargin: "160px" },
+  );
+  targets.forEach((target) => state.previewObserver.observe(target));
+}
+
 function itemThumbnail(item) {
   if (isFolder(item))
     return `<div class="files-item__thumb files-item__thumb--folder">${icon("folder")}</div>`;
-  const preview = normalizeString(item?.thumbnailUrl || item?.previewUrl);
-  if (preview && isMedia(item)) {
-    return `<div class="files-item__thumb"><img src="${escapeHtml(preview)}" alt="" loading="lazy" /></div>`;
+  const identity = assetPreviewIdentity(item);
+  const preview = identity ? state.previewEntries.get(identity.key) : null;
+  if (preview?.url && preview.expiresAt > Date.now() && isMedia(item)) {
+    const media = preview.contentType.startsWith("video/")
+      ? `<video src="${escapeHtml(preview.url)}" muted playsinline preload="metadata" aria-hidden="true"></video>`
+      : `<img src="${escapeHtml(preview.url)}" alt="" loading="lazy" referrerpolicy="no-referrer" />`;
+    const previewLabel = `${preview.watermarked ? "Watermarked preview · " : "Preview · "}online only`;
+    return `<div class="files-item__thumb files-item__thumb--preview ${preview.watermarked ? "is-watermarked" : ""}" title="${escapeHtml(previewLabel)}">${media}<span class="files-preview-state">${escapeHtml(previewLabel)}</span></div>`;
+  }
+  if (identity && isMedia(item) && assetIsReady(item)) {
+    const stateLabel = preview?.processing
+      ? "Preview processing"
+      : preview?.unavailable
+        ? "Preview unavailable"
+        : "Loading preview";
+    const mediaType = normalizeString(item?.mediaType).toLowerCase();
+    const mimeType = normalizeString(item?.mimeType || item?.contentType);
+    return `<div class="files-item__thumb files-item__thumb--file" data-preview-asset="${escapeHtml(identity.assetId)}" data-preview-revision="${escapeHtml(identity.revisionId)}">${icon(mediaType === "video" || mimeType.startsWith("video/") ? "video" : "image")}<span class="sr-only">${stateLabel}</span></div>`;
   }
   const mime = normalizeString(item?.mimeType || item?.contentType);
   return `<div class="files-item__thumb files-item__thumb--file">${icon(mime.startsWith("video/") ? "video" : mime.startsWith("image/") ? "image" : "file")}</div>`;
@@ -972,17 +1646,79 @@ function renderIncomingGrantRequests() {
 function renderFolderTabs() {
   const tabs = [
     ["current", "Current"],
-    ["proposals", "Proposals"],
+    ["proposals", "Proposed changes"],
     ["history", "History"],
-    ["access", "Access"],
+    ["access", "Access & automations"],
   ];
-  return `<nav class="files-tabs" aria-label="Folder sections">${tabs.map(([key, label]) => `<button data-folder-tab="${key}" class="${state.route.tab === key ? "is-active" : ""}" ${state.route.tab === key ? 'aria-current="page"' : ""}>${label}${key === "proposals" && state.folderData.proposals.filter((item) => ["pending", "open"].includes(item.status)).length ? `<span>${state.folderData.proposals.length}</span>` : ""}</button>`).join("")}</nav>`;
+  const pendingProposalCount = state.folderData.proposals.filter(
+    proposalIsPendingReview,
+  ).length;
+  return `<nav class="files-tabs" aria-label="Folder sections">${tabs.map(([key, label]) => `<button data-folder-tab="${key}" class="${state.route.tab === key ? "is-active" : ""}" ${state.route.tab === key ? 'aria-current="page"' : ""}>${label}${key === "proposals" && pendingProposalCount ? `<span>${pendingProposalCount}</span>` : ""}</button>`).join("")}</nav>`;
+}
+
+function activeEditionMaterialization() {
+  const tracker = state.editionMaterialization;
+  return tracker?.workspaceWide === true ||
+    tracker?.folderId === entityId(state.folder)
+    ? tracker
+    : null;
+}
+
+function renderEditionMaterializationStatus() {
+  const tracker = activeEditionMaterialization();
+  if (!tracker) return "";
+  const materialization = tracker.materialization || {};
+  const status = normalizeString(materialization.status || "pending");
+  const progress = materialization.progress || {};
+  const restoring = materialization.mode === "restore";
+  if (status === "failed") {
+    return `<div class="files-edition-job files-edition-job--error" role="alert">${icon("review")}<div><strong>${restoring ? "Version restore could not finish" : "Version archive could not finish"}</strong><span>No partial edition was exposed. ${escapeHtml(normalizeString(materialization.failureCode).replace(/_/gu, " ") || "Refresh Files and try again.")}</span></div><button class="files-link-button" data-action="dismiss-edition-materialization">Dismiss</button></div>`;
+  }
+  const phase = status.replace(/_/gu, " ");
+  const counts = [
+    Number(progress.sourceAssetCount) > 0
+      ? `${Number(progress.sourceAssetCount)} source item${Number(progress.sourceAssetCount) === 1 ? "" : "s"}`
+      : "",
+    Number(progress.affectedFolderCount) > 0
+      ? `${Number(progress.affectedFolderCount)} affected folder${Number(progress.affectedFolderCount) === 1 ? "" : "s"}`
+      : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  return `<div class="files-edition-job" role="status" aria-live="polite">${icon("archive")}<div><strong>${restoring ? "Restoring this edition as Current" : "Archiving the current version"}</strong><span>${escapeHtml(phase)}${counts ? ` · ${escapeHtml(counts)}` : ""}. Current remains all-old or all-new while Polis prepares the change.</span></div>${tracker.pollingStopped ? '<button class="files-link-button" data-action="refresh-edition-materialization">Check status</button>' : '<span class="files-edition-job__pulse" aria-hidden="true"></span>'}</div>`;
 }
 
 function renderEditionRail() {
   const editions = state.folderData.editions;
   if (!editions.length) return "";
-  return `<aside class="files-editions"><div class="files-editions__heading"><div><p class="files-eyebrow">Versions</p><h3>Folder editions</h3></div>${can("canManage", "files_manage") ? '<button class="files-editions__new" data-action="new-edition">Start new edition</button>' : ""}</div>${editions.map((edition) => `<article class="files-edition ${edition?.status === "current" || edition?.isCurrent ? "is-current" : ""}"><div><strong>${escapeHtml(entityName(edition, "Edition"))}</strong><span>${escapeHtml(edition?.status || (edition?.isCurrent ? "current" : "archived"))} · ${escapeHtml(formatDate(edition?.activatedAt || edition?.createdAt))}</span></div>${edition?.isCurrent || edition?.status === "current" ? '<span class="files-state-pill files-state-pill--current">Current</span>' : can("canManage", "files_manage") ? `<button class="files-link-button" data-edition-action="activate" data-id="${escapeHtml(entityId(edition))}">Make current</button>` : ""}</article>`).join("")}</aside>`;
+  const materialization = activeEditionMaterialization();
+  const locked = Boolean(
+    materialization &&
+      !["complete", "failed"].includes(
+        normalizeString(materialization.materialization?.status),
+      ),
+  );
+  return `<aside class="files-editions">${renderEditionMaterializationStatus()}<div class="files-editions__heading"><div><p class="files-eyebrow">Versions</p><h3>Folder editions</h3></div>${can("canManage", "files_manage") ? `<button class="files-editions__new" data-action="new-edition" ${locked ? "disabled" : ""}>Start a new edition</button>` : ""}</div>${editions
+    .map((edition) => {
+      const current = editionIsCurrent(edition);
+      const stateLabel = current
+        ? "current"
+        : normalizeString(edition?.state || edition?.status || "archived");
+      return `<article class="files-edition ${current ? "is-current" : ""}"><div><strong>${escapeHtml(entityName(edition, "Edition"))}</strong><span>${escapeHtml(stateLabel)} · ${escapeHtml(formatDate(edition?.activatedAt || edition?.createdAt))}</span></div>${current ? `<div class="files-edition__actions"><span class="files-state-pill files-state-pill--current">Current</span>${can("canManage", "files_manage") ? `<button class="files-link-button files-link-button--danger" data-edition-action="archive" data-id="${escapeHtml(entityId(edition))}" ${locked ? "disabled" : ""}>Archive current version</button>` : ""}</div>` : can("canManage", "files_manage") ? `<button class="files-link-button" data-edition-action="restore" data-id="${escapeHtml(entityId(edition))}" ${locked ? "disabled" : ""}>Restore as Current</button>` : ""}</article>`;
+    })
+    .join("")}</aside>`;
+}
+
+function editionIsCurrent(edition) {
+  const editionId = entityId(edition);
+  return Boolean(
+    editionId &&
+      (editionId === normalizeString(state.folder?.currentEditionId) ||
+        edition?.isCurrent === true ||
+        ["current", "active"].includes(
+          normalizeString(edition?.state || edition?.status),
+        )),
+  );
 }
 
 function renderCurrentTab() {
@@ -990,12 +1726,60 @@ function renderCurrentTab() {
 }
 
 function proposalStatus(proposal) {
-  return normalizeString(proposal?.status || "pending").replace(/_/gu, " ");
+  return normalizeString(proposal?.status || "pending_review").replace(
+    /_/gu,
+    " ",
+  );
+}
+
+function proposalIsPendingReview(proposal) {
+  return ["pending_review", "pending", "open"].includes(
+    normalizeString(proposal?.status),
+  );
+}
+
+function proposalActorActions(proposal) {
+  const status = normalizeString(proposal?.status);
+  const submittedBy = normalizeString(
+    proposal?.submittedByUserId ||
+      proposal?.createdByUserId ||
+      proposal?.createdBy?.userId,
+  );
+  const actorOwnsProposal = Boolean(
+    submittedBy && submittedBy === normalizeString(state.user?.userId),
+  );
+  const proposalCapabilities = proposal?.capabilities || {};
+  return {
+    canResubmit:
+      status === "changes_requested" &&
+      (proposalCapabilities.canResubmit === true || actorOwnsProposal),
+    canWithdraw:
+      ["pending_review", "changes_requested"].includes(status) &&
+      (proposalCapabilities.canWithdraw === true || actorOwnsProposal),
+  };
 }
 
 function renderProposalsTab() {
   const proposals = state.folderData.proposals;
-  return `<div class="files-review-layout"><div><div class="files-tab-intro"><div><p class="files-eyebrow">Safe collaboration</p><h3>Suggested changes</h3><p>Review additions, replacements, and deletions before they become current.</p></div>${can("canPropose", "files_propose") ? '<button class="files-button files-button--secondary" data-action="new-proposal">Suggest change</button>' : ""}</div>${proposals.length ? `<div class="files-proposals">${proposals.map((proposal) => `<article class="files-proposal"><div class="files-proposal__status"><span class="files-state-pill">${escapeHtml(proposalStatus(proposal))}</span><span>${escapeHtml(formatDate(proposal?.createdAt, { withTime: true }))}</span></div><h4>${escapeHtml(entityName(proposal, "Proposed change"))}</h4><p>${escapeHtml(proposal?.summary || proposal?.description || "Review the proposed folder change.")}</p><div class="files-proposal__author"><span>${escapeHtml(initials(entityName(proposal?.createdBy || proposal?.author, "Team member")))}</span><div><strong>${escapeHtml(entityName(proposal?.createdBy || proposal?.author, "Team member"))}</strong><small>Proposed this change</small></div></div>${["pending", "open"].includes(normalizeString(proposal?.status || "pending")) && can("canReview", "files_review") ? `<div class="files-proposal__actions"><button class="files-button files-button--primary" data-proposal-decision="approve" data-id="${escapeHtml(entityId(proposal))}" data-version="${escapeHtml(proposal?.version || proposal?.revision || "")}">Approve & merge</button><button class="files-button files-button--secondary" data-proposal-decision="request_changes" data-id="${escapeHtml(entityId(proposal))}" data-version="${escapeHtml(proposal?.version || proposal?.revision || "")}">Request changes</button><button class="files-button files-button--danger" data-proposal-decision="reject" data-id="${escapeHtml(entityId(proposal))}" data-version="${escapeHtml(proposal?.version || proposal?.revision || "")}">Refuse</button></div>` : ""}</article>`).join("")}</div>` : renderEmpty("No proposed changes", "Suggestions from contributors will appear here for review.")}</div><aside class="files-review-explainer"><p class="files-eyebrow">How review works</p><ol><li>A contributor suggests an addition, change, or deletion.</li><li>An authorized folder manager can approve, request changes, or refuse it.</li><li>Only approval merges it into Current; every decision remains in history.</li></ol></aside></div>`;
+  return `<div class="files-review-layout"><div><div class="files-tab-intro"><div><p class="files-eyebrow">Safe collaboration</p><h3>Proposed changes</h3><p>Review additions, replacements, and deletions before they become current.</p></div>${can("canPropose", "files_propose") ? '<button class="files-button files-button--secondary" data-action="new-proposal">Suggest change</button>' : ""}</div>${
+    proposals.length
+      ? `<div class="files-proposals">${proposals
+          .map((proposal) => {
+            const actorActions = proposalActorActions(proposal);
+            const reviewActions =
+              proposalIsPendingReview(proposal) &&
+              can("canReview", "files_review")
+                ? `<button class="files-button files-button--primary" data-proposal-decision="approve" data-id="${escapeHtml(entityId(proposal))}">Approve & merge</button><button class="files-button files-button--secondary" data-proposal-decision="request_changes" data-id="${escapeHtml(entityId(proposal))}">Request changes</button><button class="files-button files-button--danger" data-proposal-decision="reject" data-id="${escapeHtml(entityId(proposal))}">Refuse</button>`
+                : "";
+            const submitterActions = `${actorActions.canResubmit ? `<button class="files-button files-button--secondary" data-proposal-action="resubmit" data-id="${escapeHtml(entityId(proposal))}">Revise & resubmit</button>` : ""}${actorActions.canWithdraw ? `<button class="files-button files-button--ghost" data-proposal-action="withdraw" data-id="${escapeHtml(entityId(proposal))}">Withdraw</button>` : ""}`;
+            return `<article class="files-proposal"><div class="files-proposal__status"><span class="files-state-pill">${escapeHtml(proposalStatus(proposal))}</span><span>${escapeHtml(formatDate(proposal?.createdAt, { withTime: true }))}</span></div><h4>${escapeHtml(entityName(proposal, "Proposed change"))}</h4><p>${escapeHtml(proposal?.summary || proposal?.description || "Review the proposed folder change.")}</p><div class="files-proposal__author"><span>${escapeHtml(initials(entityName(proposal?.createdBy || proposal?.author, "Team member")))}</span><div><strong>${escapeHtml(entityName(proposal?.createdBy || proposal?.author, "Team member"))}</strong><small>Proposed this change</small></div></div>${reviewActions || submitterActions ? `<div class="files-proposal__actions">${reviewActions}${submitterActions}</div>` : ""}</article>`;
+          })
+          .join("")}</div>`
+      : renderEmpty(
+          "No proposed changes",
+          "Suggestions from contributors will appear here for review.",
+        )
+  }</div><aside class="files-review-explainer"><p class="files-eyebrow">How review works</p><ol><li>A contributor suggests an addition, change, or deletion.</li><li>An authorized folder manager can approve, request changes, or refuse it.</li><li>Only approval merges it into Current; every decision remains in history.</li></ol></aside></div>`;
 }
 
 function renderHistoryTab() {
@@ -1030,6 +1814,13 @@ function renderRestrictedProgress(grant) {
 
 function renderAccessTab() {
   const grants = state.folderData.grants;
+  const authority = activeGovernanceAuthority();
+  const rootLabel =
+    authorizationRootOf() === "official_office"
+      ? "Official Office"
+      : authorizationRootOf() === "campaign"
+        ? "Campaign"
+        : "Organization";
   return `<div class="files-access-layout"><div><div class="files-tab-intro"><div><p class="files-eyebrow">Revocable by design</p><h3>Who has access</h3><p>Dynamic role shares follow Polis membership. Restricted shares require an explicitly approved person.</p></div>${can("canShare", "files_share") ? '<button class="files-button files-button--secondary" data-action="new-share">Share access</button>' : ""}</div>${
     grants.length
       ? `<div class="files-grants">${grants
@@ -1040,8 +1831,7 @@ function renderAccessTab() {
               grant?.status === "requested";
             const restricted =
               grant?.restriction === "restricted" || grant?.restricted;
-            const expectedVersion =
-              grant?.version || grant?.revision || grant?.etag || "";
+            const expectedVersion = grant?.version || grant?.revision || "";
             return `<article class="files-grant"><span class="files-grant__avatar">${escapeHtml(initials(entityName(subject, "Access")))}</span><div><strong>${escapeHtml(entityName(subject, "Access grant"))}</strong><p>${(grant?.recipientRoleIds || []).length ? "Dynamic role · membership changes automatically" : restricted ? "Restricted named-person access" : "Named access"}</p><small>${escapeHtml((grant?.capabilities || grant?.permissions || []).map((item) => item.replace(/^files_/u, "")).join(" · ") || "view")}${grant?.expiresAt ? ` · expires ${escapeHtml(formatDate(grant.expiresAt))}` : ""}</small>${renderRestrictedProgress(grant)}</div><span class="files-state-pill ${pending ? "files-state-pill--pending" : "files-state-pill--current"}">${escapeHtml((grant?.status || "active").replace(/_/gu, " "))}</span><div class="files-grant__actions">${pending && restricted && can("canApproveRestricted", "files_restricted_approve") ? `<button class="files-link-button" data-grant-action="approve" data-id="${escapeHtml(entityId(grant))}" data-version="${escapeHtml(expectedVersion)}">Review approval</button>` : ""}${can("canShare", "files_share") ? `<button class="files-link-button files-link-button--danger" data-grant-action="revoke" data-id="${escapeHtml(entityId(grant))}" data-version="${escapeHtml(expectedVersion)}">Revoke</button>` : ""}</div></article>`;
           })
           .join("")}</div>`
@@ -1049,7 +1839,7 @@ function renderAccessTab() {
           "Only workspace members have access",
           "Add a role-based share or request restricted access for a named person.",
         )
-  }</div><aside class="files-access-note">${icon("shared")}<h4>Role shares stay in sync</h4><p>Share with a media, research, field, or custom Polis role. When membership changes, folder access changes with it—no manual cleanup.</p></aside></div>`;
+  }</div><aside class="files-access-note">${icon("shared")}<h4>Role shares stay in sync</h4><p>Share with a media, research, field, or custom Polis role. When membership changes, folder access changes with it—no manual cleanup.</p><p>Restricted governance approval is scoped to this ${rootLabel} root${authority?.actorIsCurrentAuthority === true ? "; you are a current authority for this root" : ""}.</p></aside></div>`;
 }
 
 function renderFolder() {
@@ -1058,6 +1848,13 @@ function renderFolder() {
   if (state.contentStatus === "error")
     return `<section class="files-page">${renderInlineError()}</section>`;
   const context = state.folder?.context || {};
+  const editionTracker = activeEditionMaterialization();
+  const editionLocked = Boolean(
+    editionTracker &&
+      !["complete", "failed"].includes(
+        normalizeString(editionTracker.materialization?.status),
+      ),
+  );
   const tabContent = {
     current: renderCurrentTab,
     proposals: renderProposalsTab,
@@ -1076,7 +1873,7 @@ function renderFolder() {
     .map((value) => `<span>${escapeHtml(value)}</span>`)
     .join(
       "",
-    )}</div><h2>${escapeHtml(entityName(state.folder, "Folder"))}</h2><p>${escapeHtml(state.folder?.description || "Current, governed information for authorized collaborators.")}</p></div><div class="files-folder-hero__actions">${can("canManage", "files_manage") && state.folder?.access?.shared !== true ? '<button class="files-button files-button--ghost" data-action="folder-settings">Folder settings</button><button class="files-button files-button--ghost" data-action="new-edition">Start new edition</button>' : ""}${can("canManage", "files_manage") && state.folder?.access?.shared !== true && state.folder?.status !== "archived" ? '<button class="files-button files-button--danger" data-action="archive-folder">Archive folder</button>' : ""}${canOpenUpload() ? `<button class="files-button files-button--primary" data-action="open-upload">${folderUploadIntent() === "proposal" ? "Upload for review" : "Upload"}</button>` : ""}</div></div></div>${renderFolderTabs()}<div class="files-folder-tab">${tabContent}</div></section>`;
+    )}</div><h2>${escapeHtml(entityName(state.folder, "Folder"))}</h2><p>${escapeHtml(state.folder?.description || "Current, governed information for authorized collaborators.")}</p></div><div class="files-folder-hero__actions">${can("canManage", "files_manage") && state.folder?.access?.shared !== true ? `<button class="files-button files-button--ghost" data-action="new-folder" ${editionLocked ? "disabled" : ""}>New subfolder</button><button class="files-button files-button--ghost" data-action="folder-settings" ${editionLocked ? "disabled" : ""}>Folder settings</button><button class="files-button files-button--ghost" data-action="new-edition" ${editionLocked ? "disabled" : ""}>Start a new edition</button>` : ""}${can("canManage", "files_manage") && state.folder?.access?.shared !== true && state.folder?.status !== "archived" ? `<button class="files-button files-button--danger" data-action="archive-folder" ${editionLocked ? "disabled" : ""}>Archive folder</button>` : ""}${canOpenUpload() ? `<button class="files-button files-button--primary" data-action="open-upload" ${editionLocked ? "disabled" : ""}>${folderUploadIntent() === "proposal" ? "Upload for review" : "Upload"}</button>` : ""}</div></div></div>${renderFolderTabs()}<div class="files-folder-tab">${tabContent}</div></section>`;
 }
 
 function renderUploadsPage() {
@@ -1143,14 +1940,19 @@ function renderModal() {
     settings: renderSettingsModal,
     "folder-settings": renderFolderSettingsModal,
     proposal: renderProposalModal,
+    "proposal-resubmit": renderResubmitProposalModal,
+    "proposal-withdraw": renderWithdrawProposalModal,
     edition: renderEditionModal,
+    "archive-edition": renderArchiveEditionModal,
+    "host-reference": renderHostReferenceModal,
+    "revoke-host-reference": renderRevokeHostReferenceModal,
     "suggestion-edit": renderSuggestionEditModal,
     "archive-folder": renderArchiveFolderModal,
     "confirm-decision": renderDecisionModal,
   }[state.modal.type]?.();
   if (!content) return "";
   const locked =
-    state.modal.type === "setup" && !(state.workspace?.setup || {}).initialized;
+    state.modal.type === "setup" && !activeWorkspaceSetup().initialized;
   return `<div class="files-modal-layer" role="presentation"><div class="files-modal-backdrop" ${locked ? "" : 'data-action="close-modal"'}></div><section class="files-modal files-modal--${escapeHtml(state.modal.type)}" role="dialog" aria-modal="true" aria-labelledby="files-modal-title">${!locked ? `<button class="files-modal__close" data-action="close-modal" aria-label="Close">${icon("close")}</button>` : ""}${content}</section></div>`;
 }
 
@@ -1202,7 +2004,8 @@ function renderNewFolderModal() {
     "AL AK AZ AR CA CO CT DE FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY DC".split(
       " ",
     );
-  return `<div class="files-modal__heading"><p class="files-eyebrow">Add structure</p><h2 id="files-modal-title">New folder</h2><p>Canonical election context lets Polis make accurate, explainable matches as boundaries and cycles change.</p></div><form data-form="new-folder"><div class="files-field"><label for="folder-name">Folder name</label><input id="folder-name" name="name" required maxlength="120" placeholder="Florida House District 3 research" autofocus /></div><div class="files-field"><label for="folder-description">What belongs here?</label><textarea id="folder-description" name="description" rows="3" maxlength="500" placeholder="Current district research, contacts, and field notes"></textarea></div><fieldset class="files-context-fields"><legend>Political context <span>(optional)</span></legend><div class="files-form-grid files-form-grid--three"><div class="files-field"><label for="folder-state">State</label><select id="folder-state" name="stateCode"><option value="">None</option>${stateCodes.map((code) => `<option value="${code}">${code}</option>`).join("")}</select></div><div class="files-field"><label for="folder-office">Office</label><select id="folder-office" name="office"><option value="">None</option><option value="us_house">U.S. House</option><option value="state_senate">State Senate</option><option value="state_house">State House</option><option value="statewide">Statewide</option><option value="county">County</option><option value="municipal">Municipal</option><option value="school_board">School board</option><option value="other">Other</option></select></div><div class="files-field"><label for="folder-district">District number</label><input id="folder-district" name="district" inputmode="numeric" placeholder="3" /></div></div><div class="files-form-grid files-form-grid--three"><div class="files-field"><label for="folder-cycle">Election cycle</label><input id="folder-cycle" name="cycle" inputmode="numeric" placeholder="2026" /></div><div class="files-field"><label for="folder-boundary">Boundary vintage</label><input id="folder-boundary" name="boundaryVintage" inputmode="numeric" placeholder="2022" /></div><div class="files-field"><label for="folder-effective-from">Effective from</label><input id="folder-effective-from" name="effectiveFrom" type="date" /></div></div><div class="files-field"><label for="folder-effective-to">Effective through <span>(if known)</span></label><input id="folder-effective-to" name="effectiveTo" type="date" /></div></fieldset><label class="files-check"><input type="checkbox" name="reviewRequired" checked /> Require approval before suggested changes become current</label><div class="files-modal__actions"><button class="files-button files-button--ghost" type="button" data-action="close-modal">Cancel</button><button class="files-button files-button--primary" type="submit">Create folder</button></div></form>`;
+  const parent = state.modal?.parentFolderId ? state.folder : null;
+  return `<div class="files-modal__heading"><p class="files-eyebrow">Add structure</p><h2 id="files-modal-title">New ${parent ? "subfolder" : "folder"}</h2><p>${parent ? `This folder will live inside ${escapeHtml(entityName(parent))}. ` : ""}Canonical election context lets Polis make accurate, explainable matches as boundaries and cycles change.</p></div><form data-form="new-folder"><div class="files-field"><label for="folder-name">Folder name</label><input id="folder-name" name="name" required maxlength="120" placeholder="Florida House District 3 research" autofocus /></div><div class="files-field"><label for="folder-description">What belongs here?</label><textarea id="folder-description" name="description" rows="3" maxlength="500" placeholder="Current district research, contacts, and field notes"></textarea></div><fieldset class="files-context-fields"><legend>Political context <span>(optional)</span></legend><div class="files-form-grid files-form-grid--three"><div class="files-field"><label for="folder-state">State</label><select id="folder-state" name="stateCode"><option value="">None</option>${stateCodes.map((code) => `<option value="${code}">${code}</option>`).join("")}</select></div><div class="files-field"><label for="folder-office">Office</label><select id="folder-office" name="office"><option value="">None</option><option value="us_house">U.S. House</option><option value="state_senate">State Senate</option><option value="state_house">State House</option><option value="statewide">Statewide</option><option value="county">County</option><option value="municipal">Municipal</option><option value="school_board">School board</option><option value="other">Other</option></select></div><div class="files-field"><label for="folder-district">District number</label><input id="folder-district" name="district" inputmode="numeric" placeholder="3" /></div></div><div class="files-form-grid files-form-grid--three"><div class="files-field"><label for="folder-cycle">Election cycle</label><input id="folder-cycle" name="cycle" inputmode="numeric" placeholder="2026" /></div><div class="files-field"><label for="folder-boundary">Boundary vintage</label><input id="folder-boundary" name="boundaryVintage" inputmode="numeric" placeholder="2022" /></div><div class="files-field"><label for="folder-effective-from">Effective from</label><input id="folder-effective-from" name="effectiveFrom" type="date" /></div></div><div class="files-field"><label for="folder-effective-to">Effective through <span>(if known)</span></label><input id="folder-effective-to" name="effectiveTo" type="date" /></div></fieldset><label class="files-check"><input type="checkbox" name="reviewRequired" checked /> Require approval before suggested changes become current</label><div class="files-modal__actions"><button class="files-button files-button--ghost" type="button" data-action="close-modal">Cancel</button><button class="files-button files-button--primary" type="submit">Create ${parent ? "subfolder" : "folder"}</button></div></form>`;
 }
 
 const SHARE_PURPOSE_OPTIONS = [
@@ -1371,6 +2174,20 @@ function renderProposalModal() {
   return `<div class="files-modal__heading"><p class="files-eyebrow">Suggest, then review</p><h2 id="files-modal-title">Propose a folder change</h2><p>An authorized reviewer decides whether this becomes part of Current.</p></div><form data-form="proposal"><div class="files-field"><label for="proposal-title">Short title</label><input id="proposal-title" name="title" required maxlength="140" placeholder="Replace 2024 precinct contact sheet" /></div><div class="files-field"><label for="proposal-description">Explain the change</label><textarea id="proposal-description" name="description" rows="5" required maxlength="1500" placeholder="What should change, and why is the new information current?"></textarea></div><div class="files-field"><label for="proposal-type">Change type</label><select id="proposal-type" name="operationType" data-action="proposal-operation"><option value="add" ${operationType === "add" ? "selected" : ""}>Add an asset</option><option value="replace" ${operationType === "replace" ? "selected" : ""}>Replace an asset</option><option value="rename" ${operationType === "rename" ? "selected" : ""}>Rename an asset</option><option value="move" ${operationType === "move" ? "selected" : ""}>Move an asset</option><option value="metadata" ${operationType === "metadata" ? "selected" : ""}>Update metadata</option><option value="delete" ${operationType === "delete" ? "selected" : ""}>Delete an asset</option></select></div>${targetField}${uploadedAssetField}${operationFields || ""}<div class="files-modal__actions"><button class="files-button files-button--ghost" type="button" data-action="close-modal">${uploadOperation ? "Close" : "Cancel"}</button>${uploadOperation ? "" : '<button class="files-button files-button--primary" type="submit">Submit for review</button>'}</div></form>`;
 }
 
+function renderResubmitProposalModal() {
+  const proposal = state.folderData.proposals.find(
+    (item) => entityId(item) === state.modal?.proposalId,
+  );
+  return `<div class="files-modal__heading"><p class="files-eyebrow">Address the review</p><h2 id="files-modal-title">Revise and resubmit</h2><p>Update the explanation, then return the same version-fenced change operations to review.</p></div><form data-form="proposal-resubmit"><div class="files-field"><label for="proposal-resubmit-title">Short title</label><input id="proposal-resubmit-title" name="title" required maxlength="140" value="${escapeHtml(entityName(proposal, "Proposed change"))}" /></div><div class="files-field"><label for="proposal-resubmit-description">Revised explanation</label><textarea id="proposal-resubmit-description" name="description" rows="5" required maxlength="1500">${escapeHtml(proposal?.description || proposal?.summary || "")}</textarea></div><p class="files-form-note">The proposed asset operations remain unchanged. Start a new proposal if the files or requested operation must change.</p><div class="files-modal__actions"><button class="files-button files-button--ghost" type="button" data-action="close-modal">Cancel</button><button class="files-button files-button--primary" type="submit">Return to review</button></div></form>`;
+}
+
+function renderWithdrawProposalModal() {
+  const proposal = state.folderData.proposals.find(
+    (item) => entityId(item) === state.modal?.proposalId,
+  );
+  return `<div class="files-modal__heading"><p class="files-eyebrow">Preserve the audit trail</p><h2 id="files-modal-title">Withdraw this proposed change?</h2><p>${escapeHtml(entityName(proposal, "This proposal"))} will leave the review queue but remain in folder history.</p></div><form data-form="proposal-withdraw"><div class="files-modal__actions"><button class="files-button files-button--ghost" type="button" data-action="close-modal">Keep in review</button><button class="files-button files-button--danger" type="submit">Withdraw proposal</button></div></form>`;
+}
+
 function renderEditionModal() {
   const context = state.folder?.context || {};
   const defaultType = context.boundaryVintage
@@ -1378,7 +2195,99 @@ function renderEditionModal() {
     : context.cycle
       ? "election_cycle"
       : "annual";
-  return `<div class="files-modal__heading"><p class="files-eyebrow">Preserve context over time</p><h2 id="files-modal-title">Create a new edition</h2><p>The current edition stays available until you deliberately activate the new one.</p></div><form data-form="edition"><div class="files-field"><label for="edition-label">Edition label</label><input id="edition-label" name="label" required placeholder="2028 cycle" /></div><div class="files-form-grid files-form-grid--three"><div class="files-field"><label for="edition-type">Edition type</label><select id="edition-type" name="type"><option value="annual" ${defaultType === "annual" ? "selected" : ""}>Annual</option><option value="election_cycle" ${defaultType === "election_cycle" ? "selected" : ""}>Election cycle</option><option value="boundary_vintage" ${defaultType === "boundary_vintage" ? "selected" : ""}>Boundary vintage</option><option value="custom">Custom</option></select></div><div class="files-field"><label for="edition-year">Effective year</label><input id="edition-year" name="effectiveYear" inputmode="numeric" placeholder="2028" /></div><div class="files-field"><label for="edition-cycle">Election cycle</label><input id="edition-cycle" name="cycle" inputmode="numeric" value="${escapeHtml(context.cycle || "")}" /></div></div><div class="files-field"><label for="edition-boundary">Boundary vintage</label><input id="edition-boundary" name="boundaryVintage" value="${escapeHtml(context.boundaryVintage || "")}" placeholder="2022" /></div><div class="files-form-grid"><div class="files-field"><label for="edition-effective-from">Effective from</label><input id="edition-effective-from" name="effectiveFrom" type="date" value="${escapeHtml(context.effectiveFrom || "")}" /></div><div class="files-field"><label for="edition-effective-to">Effective through</label><input id="edition-effective-to" name="effectiveTo" type="date" value="${escapeHtml(context.effectiveTo || "")}" /></div></div><div class="files-modal__actions"><button class="files-button files-button--ghost" type="button" data-action="close-modal">Cancel</button><button class="files-button files-button--primary" type="submit">Create edition</button></div></form>`;
+  const current = state.folderData.editions.find(editionIsCurrent);
+  return `<div class="files-modal__heading"><p class="files-eyebrow">Preserve context over time</p><h2 id="files-modal-title">Start a new edition</h2><p>${current ? "Polis will archive the current version and make the new edition current in one audited step." : "Polis will create and activate this as the folder’s current edition."}</p></div><form data-form="edition"><div class="files-field"><label for="edition-label">Edition label</label><input id="edition-label" name="label" required placeholder="2028 cycle" /></div><div class="files-form-grid files-form-grid--three"><div class="files-field"><label for="edition-type">Edition type</label><select id="edition-type" name="type"><option value="annual" ${defaultType === "annual" ? "selected" : ""}>Annual</option><option value="election_cycle" ${defaultType === "election_cycle" ? "selected" : ""}>Election cycle</option><option value="boundary_vintage" ${defaultType === "boundary_vintage" ? "selected" : ""}>Boundary vintage</option><option value="custom">Custom</option></select></div><div class="files-field"><label for="edition-year">Effective year</label><input id="edition-year" name="effectiveYear" inputmode="numeric" placeholder="2028" /></div><div class="files-field"><label for="edition-cycle">Election cycle</label><input id="edition-cycle" name="cycle" inputmode="numeric" value="${escapeHtml(context.cycle || "")}" /></div></div><div class="files-field"><label for="edition-boundary">Boundary vintage</label><input id="edition-boundary" name="boundaryVintage" value="${escapeHtml(context.boundaryVintage || "")}" placeholder="2022" /></div><div class="files-form-grid"><div class="files-field"><label for="edition-effective-from">Effective from</label><input id="edition-effective-from" name="effectiveFrom" type="date" value="${escapeHtml(context.effectiveFrom || "")}" /></div><div class="files-field"><label for="edition-effective-to">Effective through</label><input id="edition-effective-to" name="effectiveTo" type="date" value="${escapeHtml(context.effectiveTo || "")}" /></div></div>${current ? '<p class="files-form-note">The archived version remains available in edition history and is never deleted.</p>' : ""}<div class="files-modal__actions"><button class="files-button files-button--ghost" type="button" data-action="close-modal">Cancel</button><button class="files-button files-button--primary" type="submit">Start new current edition</button></div></form>`;
+}
+
+function renderArchiveEditionModal() {
+  const edition = state.folderData.editions.find(
+    (item) => entityId(item) === state.modal?.editionId,
+  );
+  return `<div class="files-modal__heading"><p class="files-eyebrow">Preserve, don’t delete</p><h2 id="files-modal-title">Archive current version?</h2><p>${escapeHtml(entityName(edition, "This edition"))} will remain in version history. This folder will have no Current edition until you start a new edition or restore an archived one.</p></div><form data-form="archive-edition"><div class="files-modal__actions"><button class="files-button files-button--ghost" type="button" data-action="close-modal">Keep current</button><button class="files-button files-button--danger" type="submit">Archive current version</button></div></form>`;
+}
+
+function renderRevokeHostReferenceModal() {
+  const reference = state.hostReferences.find(
+    (item) => item.hostReferenceId === state.modal?.hostReferenceId,
+  );
+  return `<div class="files-modal__heading"><p class="files-eyebrow">Revocable by design</p><h2 id="files-modal-title">Revoke this Files link?</h2><p>The folder and its history remain intact. This Polis item will stop carrying the reference.</p></div><form data-form="revoke-host-reference"><div class="files-field"><label for="host-revoke-reason">Reason</label><textarea id="host-revoke-reason" name="reason" rows="3" required placeholder="Why this link is no longer current"></textarea></div><p class="files-form-note">${escapeHtml(normalizeString(reference?.relationType).replace(/_/gu, " ") || "Linked folder")}</p><div class="files-modal__actions"><button class="files-button files-button--ghost" type="button" data-action="close-modal">Keep link</button><button class="files-button files-button--danger" type="submit">Revoke link</button></div></form>`;
+}
+
+function hostPickerOption(option, kind) {
+  if (typeof option === "string") return { key: option, label: option };
+  const key = normalizeString(
+    option?.key ||
+      option?.value ||
+      (kind === "relation" ? option?.relationType : option?.purposeKey),
+  );
+  return key
+    ? { key, label: normalizeString(option?.label || option?.name || key) }
+    : null;
+}
+
+function hostFolderCanAttach(item) {
+  const capabilities = item?.capabilities || {};
+  const referenceType = state.hostReferenceContext?.referenceType;
+  const restriction = normalizeString(item?.restriction).toLowerCase();
+  const restricted = restriction && restriction !== "standard";
+  const status = normalizeString(item?.status);
+  return Boolean(
+    entityId(item) &&
+      normalizeString(item?.filesWorkspaceId) &&
+      normalizeString(item?.authorizationRoot) &&
+      resourceRevision(item) !== null &&
+      normalizeString(item?.etag) &&
+      (!status || status === "active") &&
+      capabilities.canView === true &&
+      capabilities.canLinkHostReference === true &&
+      (referenceType === "restricted_import"
+        ? restricted && capabilities.canImportHostReference === true
+        : referenceType === "restricted_export"
+          ? restricted &&
+            capabilities.canExportHostReference === true &&
+            capabilities.canDownloadRestricted === true
+          : HOST_REFERENCE_TUPLES.has(referenceType)),
+  );
+}
+
+function hostFolderBreadcrumb(item) {
+  const breadcrumb = item?.breadcrumb;
+  const path = Array.isArray(breadcrumb)
+    ? breadcrumb
+        .map((entry) => entityName(entry, ""))
+        .filter(Boolean)
+        .join(" / ")
+    : normalizeString(breadcrumb);
+  const principal = entityName(item?.principal, "Files workspace");
+  const root = normalizeString(item?.authorizationRoot).replace(/_/gu, " ");
+  return [principal, root, path].filter(Boolean).join(" · ");
+}
+
+function selectedHostFolder() {
+  return (state.modal?.items || []).find(
+    (item) => entityId(item) === state.modal?.selectedFolderId,
+  );
+}
+
+function renderHostReferenceModal() {
+  const modal = state.modal || {};
+  const selected = selectedHostFolder();
+  const relationAllowlist = new Set(selected?.allowedRelationKeys || []);
+  const purposeAllowlist = new Set(selected?.allowedPurposeKeys || []);
+  const relations = firstArray(modal.referenceOptions, ["relations"])
+    .map((option) => hostPickerOption(option, "relation"))
+    .filter(
+      (option) =>
+        option &&
+        (!relationAllowlist.size || relationAllowlist.has(option.key)),
+    );
+  const purposes = firstArray(modal.referenceOptions, ["purposes"])
+    .map((option) => hostPickerOption(option, "purpose"))
+    .filter(
+      (option) =>
+        option && (!purposeAllowlist.size || purposeAllowlist.has(option.key)),
+    );
+  return `<div class="files-modal__heading"><p class="files-eyebrow">Connect Files to Polis</p><h2 id="files-modal-title">Attach a Files folder</h2><p>Choose an authorized folder for this ${escapeHtml(state.hostReferenceContext?.hostResourceType || "Polis item")}. The reference stays version-fenced and can be revoked.</p></div><form data-form="host-reference">${modal.loading ? '<div class="files-host-picker" aria-busy="true"><p>Loading authorized folders…</p></div>' : modal.error ? `<div class="files-empty files-empty--error"><p>${escapeHtml(modal.error)}</p></div>` : `<fieldset class="files-host-picker"><legend>Authorized folders across your workspaces</legend>${(modal.items || []).map((item) => `<label class="files-host-folder ${entityId(item) === modal.selectedFolderId ? "is-selected" : ""}"><input type="radio" name="folderId" value="${escapeHtml(entityId(item))}" data-action="host-folder" ${entityId(item) === modal.selectedFolderId ? "checked" : ""}/><span>${icon("folder")}</span><span><strong>${escapeHtml(entityName(item, "Folder"))}</strong><small>${escapeHtml(hostFolderBreadcrumb(item))}</small></span></label>`).join("") || "<p>No authorized folders can be attached to this item.</p>"}</fieldset>`}${selected ? `<div class="files-form-grid"><div class="files-field"><label for="host-relation">Relationship</label><select id="host-relation" name="relationType" required><option value="">Choose a relationship</option>${relations.map((option) => `<option value="${escapeHtml(option.key)}">${escapeHtml(option.label)}</option>`).join("")}</select></div>${purposes.length ? `<div class="files-field"><label for="host-purpose">Purpose</label><select id="host-purpose" name="purposeKey" required><option value="">Choose a purpose</option>${purposes.map((option) => `<option value="${escapeHtml(option.key)}">${escapeHtml(option.label)}</option>`).join("")}</select></div>` : ""}</div>` : ""}<div class="files-modal__actions"><button class="files-button files-button--ghost" type="button" data-action="close-modal">Cancel</button><button class="files-button files-button--primary" type="submit" ${selected && relations.length && purposes.length ? "" : "disabled"}>Attach folder</button></div></form>`;
 }
 
 function renderSuggestionEditModal() {
@@ -1443,10 +2352,12 @@ function renderApp() {
   const mainContent =
     state.route.kind === "folder"
       ? renderFolder()
-      : state.route.key === "home"
-        ? renderHome()
-        : renderView();
-  return `<div class="files-shell">${renderSidebar()}<div class="files-main">${renderHeader()}<main class="files-content" id="files-content">${mainContent}</main></div>${renderMobileNav()}${renderModal()}${renderPostDrawer()}${state.toast ? `<div class="files-toast files-toast--${escapeHtml(state.toast.tone)}" role="status">${state.toast.tone === "success" ? icon("check") : icon("file")}<span>${escapeHtml(state.toast.message)}</span></div>` : ""}${state.busyAction ? '<div class="files-busy" role="status"><span></span><span class="sr-only">Working…</span></div>' : ""}</div>`;
+      : state.route.kind === "reference"
+        ? renderHostReferenceDetail()
+        : state.route.key === "home"
+          ? renderHome()
+          : renderView();
+  return `<div class="files-shell">${renderSidebar()}<div class="files-main">${renderHeader()}<main class="files-content" id="files-content">${renderHostReferencesPanel()}${mainContent}</main></div>${renderMobileNav()}${renderModal()}${renderPostDrawer()}${state.toast ? `<div class="files-toast files-toast--${escapeHtml(state.toast.tone)}" role="status">${state.toast.tone === "success" ? icon("check") : icon("file")}<span>${escapeHtml(state.toast.message)}</span></div>` : ""}${state.busyAction ? '<div class="files-busy" role="status"><span></span><span class="sr-only">Working…</span></div>' : ""}</div>`;
 }
 
 function render() {
@@ -1479,6 +2390,7 @@ function render() {
     return;
   }
   root.innerHTML = renderApp();
+  window.requestAnimationFrame(observePreviewTargets);
   const activeLayer = state.modal
     ? root.querySelector(".files-modal")
     : state.postDraft.open
@@ -1514,7 +2426,12 @@ async function openSetup() {
   render();
 }
 
-async function withBusy(key, operation, successMessage = "") {
+async function withBusy(
+  key,
+  operation,
+  successMessage = "",
+  { onError = null } = {},
+) {
   if (state.busyAction) return;
   state.busyAction = key;
   const actionKey =
@@ -1529,7 +2446,23 @@ async function withBusy(key, operation, successMessage = "") {
     if (successMessage) setToast(successMessage);
     return result;
   } catch (error) {
-    setToast(error?.message || "That action could not be completed.", "error");
+    if (Number(error?.status || 0) >= 400 && Number(error?.status || 0) < 500) {
+      // A server-rejected request was not committed. A corrected retry must use
+      // a new logical key because the body/version fingerprint will differ.
+      state.mutationKeys.delete(key);
+    }
+    const message = onError ? await onError(error) : "";
+    const materializationLockMessage =
+      error?.code === "files_materialization_in_progress"
+        ? "An edition change is being prepared. Current remains consistent; wait for it to finish before changing this workspace."
+        : "";
+    setToast(
+      message ||
+        materializationLockMessage ||
+        error?.message ||
+        "That action could not be completed.",
+      "error",
+    );
     return null;
   } finally {
     state.busyAction = "";
@@ -1598,7 +2531,27 @@ async function handleClick(event) {
       type: "confirm-decision",
       proposalId: proposal.dataset.id,
       decision: proposal.dataset.proposalDecision,
-      expectedVersion: proposal.dataset.version || undefined,
+    };
+    render();
+    return;
+  }
+  const proposalAction = event.target.closest("[data-proposal-action]");
+  if (proposalAction) {
+    const proposalId = normalizeString(proposalAction.dataset.id);
+    const proposalEntity = state.folderData.proposals.find(
+      (item) => entityId(item) === proposalId,
+    );
+    const actorActions = proposalActorActions(proposalEntity);
+    const action = proposalAction.dataset.proposalAction;
+    if (
+      (action === "resubmit" && !actorActions.canResubmit) ||
+      (action === "withdraw" && !actorActions.canWithdraw)
+    ) {
+      return;
+    }
+    state.modal = {
+      type: action === "resubmit" ? "proposal-resubmit" : "proposal-withdraw",
+      proposalId,
     };
     render();
     return;
@@ -1608,22 +2561,25 @@ async function handleClick(event) {
     await respondToGrantRequest(
       incomingGrant.dataset.id,
       incomingGrant.dataset.grantRequestAction,
-      incomingGrant.dataset.version,
     );
     return;
   }
   const grant = event.target.closest("[data-grant-action]");
   if (grant) {
-    await changeGrant(
-      grant.dataset.id,
-      grant.dataset.grantAction,
-      grant.dataset.version,
-    );
+    await changeGrant(grant.dataset.id, grant.dataset.grantAction);
     return;
   }
   const edition = event.target.closest("[data-edition-action]");
   if (edition) {
-    await changeEdition(edition.dataset.id, edition.dataset.editionAction);
+    if (edition.dataset.editionAction === "archive") {
+      state.modal = {
+        type: "archive-edition",
+        editionId: edition.dataset.id,
+      };
+      render();
+    } else {
+      await restoreEditionAsCurrent(edition.dataset.id);
+    }
     return;
   }
   const uploadAction = event.target.closest("[data-upload-action]");
@@ -1648,6 +2604,16 @@ async function handleClick(event) {
   }
   if (action === "retry") bootstrap();
   if (action === "reload-view") loadRoute();
+  if (action === "refresh-edition-materialization") {
+    scheduleEditionMaterializationPoll({
+      immediate: true,
+      resetAttempts: true,
+    });
+  }
+  if (action === "dismiss-edition-materialization") {
+    clearEditionMaterialization();
+    render();
+  }
   if (action === "close-modal") {
     state.modal = null;
     render();
@@ -1673,7 +2639,11 @@ async function handleClick(event) {
   }
   if (action === "bulk-download") await downloadSelectedAssets();
   if (action === "new-folder") {
-    state.modal = { type: "new-folder" };
+    state.modal = {
+      type: "new-folder",
+      parentFolderId:
+        state.route.kind === "folder" ? entityId(state.folder) : "",
+    };
     render();
   }
   if (action === "open-upload") {
@@ -1697,6 +2667,29 @@ async function handleClick(event) {
   }
   if (action === "open-settings") {
     state.modal = { type: "settings" };
+    render();
+  }
+  if (action === "open-host-reference") {
+    if (!hostReferencesEnabled()) return;
+    state.modal = {
+      type: "host-reference",
+      loading: true,
+      items: [],
+      referenceOptions: {},
+      selectedFolderId: "",
+    };
+    render();
+    await loadHostReferencePicker();
+  }
+  if (action === "revoke-host-reference") {
+    const hostReferenceId = normalizeString(
+      event.target.closest("[data-id]")?.dataset.id,
+    );
+    const reference = state.hostReferences.find(
+      (item) => item.hostReferenceId === hostReferenceId,
+    );
+    if (!reference || normalizeString(reference.status) !== "active") return;
+    state.modal = { type: "revoke-host-reference", hostReferenceId };
     render();
   }
   if (action === "folder-settings") {
@@ -1740,7 +2733,7 @@ async function handleClick(event) {
 async function handleChange(event) {
   if (event.target.matches('[data-action="switch-workspace"]')) {
     const selected = state.workspaces.find(
-      (item) => item.filesWorkspaceId === event.target.value,
+      (item) => workspaceSelectionKey(item) === event.target.value,
     );
     if (selected) await selectWorkspace(selected);
   }
@@ -1837,6 +2830,10 @@ async function handleChange(event) {
     };
     render();
   }
+  if (event.target.matches('[data-action="host-folder"]')) {
+    state.modal.selectedFolderId = event.target.value;
+    render();
+  }
   if (event.target.matches('input[name="presetKey"]')) {
     state.modal.presetKey = event.target.value;
     render();
@@ -1872,15 +2869,34 @@ async function handleSubmit(event) {
   if (name === "settings") await submitSettings(data);
   if (name === "folder-settings") await submitFolderSettings(data);
   if (name === "proposal") await submitProposal(data);
+  if (name === "proposal-resubmit") await submitProposalResubmission(data);
+  if (name === "proposal-withdraw") await submitProposalWithdrawal();
   if (name === "proposal-decision") await submitProposalDecision(data);
   if (name === "edition") await submitEdition(data);
+  if (name === "archive-edition") await submitArchiveEdition();
   if (name === "suggestion-edit") await submitSuggestionEdit(data);
   if (name === "archive-folder") await submitArchiveFolder(data);
+  if (name === "host-reference") await submitHostReference(data);
+  if (name === "revoke-host-reference") await submitRevokeHostReference(data);
   if (name === "post-draft") await submitPostDraft(data);
 }
 
 async function submitSetup(data, intent) {
   const principal = principalOf();
+  const workspaceRevision = requireResourceRevision(
+    state.workspace,
+    "This Files workspace",
+    { allowZero: true },
+  );
+  if (workspaceRevision === null) return;
+  const rootKey = authorizationRootOf();
+  if (!rootKey) {
+    setToast(
+      "This Files authorization scope is unavailable. Refresh and try again.",
+      "error",
+    );
+    return;
+  }
   const presetKey =
     intent === "skip"
       ? "blank"
@@ -1893,6 +2909,7 @@ async function submitSetup(data, intent) {
         principal.id,
         {
           presetKey,
+          expectedVersion: workspaceRevision,
           settings: {
             version: 1,
             defaultView: "my_files",
@@ -1914,17 +2931,26 @@ async function submitSetup(data, intent) {
               automations: true,
             },
             rolePurposeMappings: {},
+            rolePurposeMappingsByRoot: { [rootKey]: {} },
           },
         },
-        { idempotencyKey: actionKey },
+        mutationOptions(actionKey, state.workspace, workspaceRevision),
       ),
     "Files is ready.",
+    {
+      onError: (error) =>
+        isRevisionConflict(error) ? refreshFenceAfterConflict("workspace") : "",
+    },
   );
   if (!result) return;
   state.modal = null;
-  state.workspace = normalizeWorkspacePayload(result) || {
+  state.workspace = result?.workspace || {
     ...state.workspace,
     setup: { initialized: true, presetKey },
+    setupByRoot: {
+      ...(state.workspace?.setupByRoot || {}),
+      ...(rootKey ? { [rootKey]: { initialized: true, presetKey } } : {}),
+    },
   };
   const refreshed = await api.getWorkspace(principal.type, principal.id);
   state.workspace = normalizeWorkspacePayload(refreshed);
@@ -1933,6 +2959,11 @@ async function submitSetup(data, intent) {
 
 async function submitNewFolder(data) {
   const principal = principalOf();
+  const parentFolderId = normalizeString(state.modal?.parentFolderId);
+  const target = parentFolderId ? state.folder : state.workspace;
+  const targetLabel = parentFolderId ? "The parent folder" : "This workspace";
+  const targetRevision = requireResourceRevision(target, targetLabel);
+  if (targetRevision === null) return;
   const result = await withBusy(
     "folder",
     (actionKey) =>
@@ -1942,6 +2973,7 @@ async function submitNewFolder(data) {
         {
           name: normalizeString(data.get("name")),
           description: normalizeString(data.get("description")),
+          ...(parentFolderId ? { parentFolderId } : {}),
           context: {
             countryCode: "US",
             stateCode: normalizeString(data.get("stateCode")),
@@ -1953,10 +2985,17 @@ async function submitNewFolder(data) {
             effectiveTo: normalizeString(data.get("effectiveTo")),
           },
           reviewRequired: data.has("reviewRequired"),
+          expectedVersion: targetRevision,
         },
-        { idempotencyKey: actionKey },
+        mutationOptions(actionKey, target, targetRevision),
       ),
     "Folder created.",
+    {
+      onError: (error) =>
+        isRevisionConflict(error)
+          ? refreshFenceAfterConflict(parentFolderId ? "folder" : "workspace")
+          : "",
+    },
   );
   if (!result) return;
   state.modal = null;
@@ -1967,6 +3006,8 @@ async function submitNewFolder(data) {
 }
 
 async function submitShare(data) {
+  const folderRevision = requireResourceRevision(state.folder, "This folder");
+  if (folderRevision === null) return;
   const subjectType = normalizeString(data.get("subjectType"));
   const restricted = subjectType === "restricted_user";
   const selectedTargetValue = normalizeString(data.get("targetPrincipal"));
@@ -2052,13 +3093,13 @@ async function submitShare(data) {
     expiresAt: restricted ? expiresAt : null,
     allowDownload: restricted && data.has("allowDownload"),
     restriction: restricted ? "restricted" : "standard",
-    expectedVersion: state.folder?.version,
+    expectedVersion: folderRevision,
   };
   const result = await withBusy(
     "share",
     (actionKey) =>
       api.createGrant(entityId(state.folder), grant, {
-        idempotencyKey: actionKey,
+        ...mutationOptions(actionKey, state.folder, folderRevision),
       }),
     restricted
       ? "Restricted access entered two-person review."
@@ -2119,7 +3160,10 @@ async function loadShareAccessOptions(query = "") {
     state.modal.roles = firstArray(payload, ["roles"]);
     state.modal.members = firstArray(payload, ["members"]);
     state.modal.rolePurposeMappings =
-      payload?.rolePurposeMappings || payload?.purposeMappings || [];
+      payload?.rolePurposeMappingsByRoot?.[authorizationRootOf()] ||
+      payload?.rolePurposeMappings ||
+      payload?.purposeMappings ||
+      [];
     state.modal.restrictedRequirements = payload?.restrictedRequirements || {};
     if (!state.modal.audiencePurposeKey) {
       state.modal.audiencePurposeKey = state.modal.roles
@@ -2142,6 +3186,170 @@ async function loadShareAccessOptions(query = "") {
   }
 }
 
+async function loadHostReferencePicker() {
+  if (state.modal?.type !== "host-reference" || !hostReferencesEnabled()) {
+    return;
+  }
+  const context = state.hostReferenceContext;
+  try {
+    const payload = await api.getHostReferenceFolderPicker({
+      referenceType: context.referenceType,
+      hostSourceType: context.hostSourceType,
+      hostSourceId: context.hostSourceId,
+      hostResourceType: context.hostResourceType,
+      hostResourceId: context.hostResourceId,
+      hostResourceVersion: context.hostResourceVersion,
+      limit: 100,
+    });
+    if (state.modal?.type !== "host-reference") return;
+    const referenceOptions = payload?.referenceOptions || {};
+    if (
+      normalizeString(referenceOptions.scope) !== "folder" ||
+      normalizeString(referenceOptions.referenceType) !==
+        context.referenceType ||
+      !firstArray(referenceOptions, ["relations"]).length
+    ) {
+      throw new FilesApiError(
+        "The server did not authorize relationship options for this Polis item.",
+        { code: "host_reference_options_invalid" },
+      );
+    }
+    state.modal.items = firstArray(payload, ["items"]).filter(
+      hostFolderCanAttach,
+    );
+    state.modal.referenceOptions = referenceOptions;
+    state.modal.selectedFolderId = entityId(state.modal.items[0]);
+    state.modal.loading = false;
+    state.modal.error = "";
+  } catch (error) {
+    if (state.modal?.type !== "host-reference") return;
+    state.modal.loading = false;
+    state.modal.error =
+      error?.message || "Authorized folders could not be loaded.";
+  }
+  render();
+}
+
+async function submitHostReference(data) {
+  if (!hostReferencesEnabled()) return;
+  const context = state.hostReferenceContext;
+  const folder = selectedHostFolder();
+  if (!folder || !hostFolderCanAttach(folder)) {
+    setToast("Choose an authorized Files folder.", "error");
+    return;
+  }
+  const relationType = normalizeString(data.get("relationType"));
+  const purposeKey = normalizeString(data.get("purposeKey"));
+  const relationKeys = new Set(
+    firstArray(state.modal?.referenceOptions, ["relations"])
+      .map((option) => hostPickerOption(option, "relation")?.key)
+      .filter(Boolean),
+  );
+  const purposeKeys = new Set(
+    firstArray(state.modal?.referenceOptions, ["purposes"])
+      .map((option) => hostPickerOption(option, "purpose")?.key)
+      .filter(Boolean),
+  );
+  const allowedRelations = new Set(folder.allowedRelationKeys || relationKeys);
+  const allowedPurposes = new Set(folder.allowedPurposeKeys || purposeKeys);
+  if (
+    !relationType ||
+    !purposeKey ||
+    !relationKeys.has(relationType) ||
+    !purposeKeys.has(purposeKey) ||
+    !allowedRelations.has(relationType) ||
+    !allowedPurposes.has(purposeKey)
+  ) {
+    setToast("Choose an allowed relationship and purpose.", "error");
+    return;
+  }
+  const restriction = normalizeString(folder.restriction);
+  const folderRevision = requireResourceRevision(
+    folder,
+    "The selected Files folder",
+  );
+  if (folderRevision === null || !normalizeString(folder.etag)) {
+    setToast(
+      "The selected folder is missing its current version tag. Refresh the picker and try again.",
+      "error",
+    );
+    return;
+  }
+  const result = await withBusy("host-reference", (actionKey) =>
+    api.createHostReference(
+      {
+        referenceType: context.referenceType,
+        host: {
+          sourceType: context.hostSourceType,
+          sourceId: context.hostSourceId,
+          resourceType: context.hostResourceType,
+          resourceId: context.hostResourceId,
+          resourceVersion: context.hostResourceVersion,
+        },
+        files: {
+          filesWorkspaceId: folder.filesWorkspaceId,
+          folderId: entityId(folder),
+        },
+        relationType,
+        purposeKey,
+        ...(restriction ? { restriction } : {}),
+        expectedFolderVersion: folderRevision,
+        expectedHostVersion: context.hostResourceVersion,
+      },
+      mutationOptions(actionKey, folder, folderRevision),
+    ),
+  );
+  if (!result) return;
+  if (!normalizeString(result?.hostReference?.hostReferenceId)) {
+    setToast("Polis did not confirm the folder attachment.", "error");
+    return;
+  }
+  state.modal = null;
+  setToast("Files folder attached with revocable, version-fenced access.");
+  await loadHostReferences();
+}
+
+async function submitRevokeHostReference(data) {
+  if (!hostReferencesEnabled()) return;
+  const reference = state.hostReferences.find(
+    (item) => item.hostReferenceId === state.modal?.hostReferenceId,
+  );
+  if (!reference || !hostReferenceMatchesContext(reference)) {
+    setToast(
+      "This Files link is no longer available. Refresh and try again.",
+      "error",
+    );
+    return;
+  }
+  const referenceRevision = requireResourceRevision(
+    reference,
+    "This Files link",
+  );
+  if (referenceRevision === null) return;
+  const reason = normalizeString(data.get("reason"));
+  if (!reason) {
+    setToast("Add a reason before revoking this link.", "error");
+    return;
+  }
+  const result = await withBusy(
+    `host-reference:${reference.hostReferenceId}:revoke`,
+    (actionKey) =>
+      api.revokeHostReference(
+        reference.hostReferenceId,
+        {
+          reason,
+          expectedVersion: referenceRevision,
+          expectedHostVersion: state.hostReferenceContext.hostResourceVersion,
+        },
+        mutationOptions(actionKey, reference, referenceRevision),
+      ),
+    "Files link revoked.",
+  );
+  if (!result) return;
+  state.modal = null;
+  await loadHostReferences();
+}
+
 function settingsFromData(data, { folder = false } = {}) {
   if (folder && data.has("inheritWorkspace")) {
     return { inheritWorkspace: true };
@@ -2158,6 +3366,8 @@ function settingsFromData(data, { folder = false } = {}) {
     },
   };
   if (folder) return { inheritWorkspace: false, ...updated };
+  const rootKey = authorizationRootOf();
+  const rolePurposeMappings = activeRolePurposeMappings(current);
   return {
     version: Number(current.version || 1),
     defaultView: normalizeString(current.defaultView) || "my_files",
@@ -2179,12 +3389,20 @@ function settingsFromData(data, { folder = false } = {}) {
       reviews: current.notifications?.reviews !== false,
       automations: data.has("uploadNotificationsEnabled"),
     },
-    rolePurposeMappings: current.rolePurposeMappings || {},
+    rolePurposeMappings,
+    ...(rootKey
+      ? { rolePurposeMappingsByRoot: { [rootKey]: rolePurposeMappings } }
+      : {}),
   };
 }
 
 async function submitSettings(data) {
   const principal = principalOf();
+  const workspaceRevision = requireResourceRevision(
+    state.workspace,
+    "This Files workspace",
+  );
+  if (workspaceRevision === null) return;
   const result = await withBusy(
     "settings",
     (actionKey) =>
@@ -2193,22 +3411,27 @@ async function submitSettings(data) {
         principal.id,
         {
           settings: settingsFromData(data),
-          expectedVersion:
-            state.workspace?.settingsVersion ||
-            state.workspace?.revision ||
-            state.workspace?.version ||
-            state.workspace?.etag,
+          expectedVersion: workspaceRevision,
         },
-        { idempotencyKey: actionKey },
+        mutationOptions(actionKey, state.workspace, workspaceRevision),
       ),
     "Files settings saved.",
+    {
+      onError: (error) =>
+        isRevisionConflict(error) ? refreshFenceAfterConflict("workspace") : "",
+    },
   );
   if (!result) return;
   state.workspace.settings = result.settings || settingsFromData(data);
+  state.workspace.revision = result.revision ?? state.workspace.revision;
+  state.workspace.version = result.revision ?? state.workspace.version;
+  state.workspace.etag = result.etag || state.workspace.etag;
   state.modal = null;
 }
 
 async function submitFolderSettings(data) {
+  const folderRevision = requireResourceRevision(state.folder, "This folder");
+  if (folderRevision === null) return;
   const settings = settingsFromData(data, { folder: true });
   if (folderIsRestricted() && settings.suggestions) {
     settings.suggestions.aiAssistance = false;
@@ -2223,16 +3446,93 @@ async function submitFolderSettings(data) {
           name: normalizeString(data.get("name")),
           reviewRequired: data.has("reviewRequired"),
           settings,
-          expectedVersion: state.folder?.version || state.folder?.revision,
+          expectedVersion: folderRevision,
         },
-        { idempotencyKey: actionKey },
+        mutationOptions(actionKey, state.folder, folderRevision),
       ),
     "Folder settings saved.",
+    {
+      onError: (error) =>
+        isRevisionConflict(error) ? refreshFenceAfterConflict("folder") : "",
+    },
   );
   if (!result) return;
   state.folder = result.folder || result;
   state.modal = null;
   await loadRoute();
+}
+
+function destinationFolderIds(operations = []) {
+  return [
+    ...new Set(
+      operations
+        .filter((operation) => normalizeString(operation?.type) === "move")
+        .map((operation) => normalizeString(operation?.destinationFolderId))
+        .filter(Boolean),
+    ),
+  ];
+}
+
+function exactDestinationFolderVersions(proposal) {
+  const ids = destinationFolderIds(proposal?.operations || []);
+  if (!ids.length) return {};
+  const stored = proposal?.destinationFolderVersions || {};
+  const result = {};
+  for (const id of ids) {
+    const revision = resourceRevision({ version: stored[id] });
+    if (revision === null) {
+      setToast(
+        "A destination folder changed or is missing its current version. Refresh the proposal before reviewing it.",
+        "error",
+      );
+      return null;
+    }
+    result[id] = revision;
+  }
+  return result;
+}
+
+async function destinationFenceForCreate(folderId) {
+  if (!folderId) return null;
+  if (folderId === entityId(state.folder)) {
+    const revision = requireResourceRevision(
+      state.folder,
+      "The destination folder",
+    );
+    return revision === null ? null : { folder: state.folder, revision };
+  }
+  try {
+    const payload = await api.getFolder(folderId);
+    const folder = {
+      ...(payload?.folder || payload),
+      version: payload?.version ?? payload?.folder?.version,
+      revision: payload?.revision ?? payload?.folder?.revision,
+      etag: payload?.etag || payload?.folder?.etag || "",
+    };
+    const revision = requireResourceRevision(folder, "The destination folder");
+    const sourceWorkspaceId = normalizeString(state.folder?.filesWorkspaceId);
+    const destinationWorkspaceId = normalizeString(folder?.filesWorkspaceId);
+    const sourceRoot = normalizeString(state.folder?.authorizationRoot);
+    const destinationRoot = normalizeString(folder?.authorizationRoot);
+    if (
+      revision === null ||
+      (sourceWorkspaceId && destinationWorkspaceId !== sourceWorkspaceId) ||
+      (sourceRoot && destinationRoot !== sourceRoot)
+    ) {
+      setToast(
+        "Choose an authorized destination in this Files workspace and authorization scope.",
+        "error",
+      );
+      return null;
+    }
+    return { folder, revision };
+  } catch (error) {
+    setToast(
+      error?.message || "The destination folder could not be verified.",
+      "error",
+    );
+    return null;
+  }
 }
 
 async function submitProposal(data) {
@@ -2279,6 +3579,18 @@ async function submitProposal(data) {
     setToast("Complete the selected change before submitting it.", "error");
     return;
   }
+  const folderRevision = requireResourceRevision(state.folder, "This folder");
+  if (folderRevision === null) return;
+  let expectedDestinationFolderVersions = {};
+  if (operation.type === "move") {
+    const destination = await destinationFenceForCreate(
+      operation.destinationFolderId,
+    );
+    if (!destination) return;
+    expectedDestinationFolderVersions = {
+      [operation.destinationFolderId]: destination.revision,
+    };
+  }
   const result = await withBusy(
     "proposal",
     (actionKey) =>
@@ -2288,11 +3600,98 @@ async function submitProposal(data) {
           title: normalizeString(data.get("title")),
           description: normalizeString(data.get("description")),
           operations: [operation],
-          expectedVersion: state.folder?.version || state.folder?.revision,
+          expectedVersion: folderRevision,
+          ...(Object.keys(expectedDestinationFolderVersions).length
+            ? { expectedDestinationFolderVersions }
+            : {}),
         },
-        { idempotencyKey: actionKey },
+        mutationOptions(actionKey, state.folder, folderRevision),
       ),
     "Change submitted for review.",
+    {
+      onError: (error) =>
+        isRevisionConflict(error) ? refreshFenceAfterConflict("folder") : "",
+    },
+  );
+  if (!result) return;
+  state.modal = null;
+  await loadRoute();
+}
+
+async function submitProposalResubmission(data) {
+  const proposal = state.folderData.proposals.find(
+    (item) => entityId(item) === state.modal?.proposalId,
+  );
+  if (!proposalActorActions(proposal).canResubmit) return;
+  const proposalRevision = requireResourceRevision(
+    proposal,
+    "This proposed change",
+  );
+  const folderRevision = requireResourceRevision(state.folder, "This folder");
+  const expectedDestinationFolderVersions =
+    exactDestinationFolderVersions(proposal);
+  const operations = firstArray(proposal, ["operations"]);
+  if (
+    proposalRevision === null ||
+    folderRevision === null ||
+    expectedDestinationFolderVersions === null
+  ) {
+    return;
+  }
+  if (!operations.length) {
+    setToast(
+      "This proposal is missing its version-fenced change operations. Refresh before resubmitting.",
+      "error",
+    );
+    return;
+  }
+  const result = await withBusy(
+    `proposal:${entityId(proposal)}:resubmit`,
+    (actionKey) =>
+      api.resubmitProposal(
+        entityId(proposal),
+        {
+          title: normalizeString(data.get("title")),
+          description: normalizeString(data.get("description")),
+          operations,
+          expectedVersion: proposalRevision,
+          expectedFolderVersion: folderRevision,
+          ...(Object.keys(expectedDestinationFolderVersions).length
+            ? { expectedDestinationFolderVersions }
+            : {}),
+        },
+        mutationOptions(actionKey, proposal, proposalRevision),
+      ),
+    "Proposed change returned to review.",
+    {
+      onError: (error) =>
+        isRevisionConflict(error) ? refreshFenceAfterConflict("folder") : "",
+    },
+  );
+  if (!result) return;
+  state.modal = null;
+  await loadRoute();
+}
+
+async function submitProposalWithdrawal() {
+  const proposal = state.folderData.proposals.find(
+    (item) => entityId(item) === state.modal?.proposalId,
+  );
+  if (!proposalActorActions(proposal).canWithdraw) return;
+  const proposalRevision = requireResourceRevision(
+    proposal,
+    "This proposed change",
+  );
+  if (proposalRevision === null) return;
+  const result = await withBusy(
+    `proposal:${entityId(proposal)}:withdraw`,
+    (actionKey) =>
+      api.withdrawProposal(
+        entityId(proposal),
+        { expectedVersion: proposalRevision },
+        mutationOptions(actionKey, proposal, proposalRevision),
+      ),
+    "Proposed change withdrawn from review.",
   );
   if (!result) return;
   state.modal = null;
@@ -2301,6 +3700,23 @@ async function submitProposal(data) {
 
 async function submitProposalDecision(data) {
   const modal = state.modal;
+  const proposal = state.folderData.proposals.find(
+    (item) => entityId(item) === modal?.proposalId,
+  );
+  const proposalRevision = requireResourceRevision(
+    proposal,
+    "This proposed change",
+  );
+  const folderRevision = requireResourceRevision(state.folder, "This folder");
+  const expectedDestinationFolderVersions =
+    exactDestinationFolderVersions(proposal);
+  if (
+    proposalRevision === null ||
+    folderRevision === null ||
+    expectedDestinationFolderVersions === null
+  ) {
+    return;
+  }
   const result = await withBusy(
     "review",
     (actionKey) =>
@@ -2309,44 +3725,361 @@ async function submitProposalDecision(data) {
         {
           decision: modal.decision,
           reason: normalizeString(data.get("reason")),
-          expectedVersion: modal.expectedVersion,
+          expectedVersion: proposalRevision,
+          expectedFolderVersion: folderRevision,
+          ...(Object.keys(expectedDestinationFolderVersions).length
+            ? { expectedDestinationFolderVersions }
+            : {}),
         },
-        { idempotencyKey: actionKey },
+        mutationOptions(actionKey, proposal, proposalRevision),
       ),
     modal.decision === "approve"
       ? "Proposal approved and merged."
       : modal.decision === "request_changes"
         ? "Changes requested from the contributor."
         : "Proposal refused.",
+    {
+      onError: (error) =>
+        isRevisionConflict(error) ? refreshFenceAfterConflict("folder") : "",
+    },
   );
   if (!result) return;
   state.modal = null;
   await loadRoute();
 }
 
+function normalizedEditionMaterialization(payload) {
+  const materialization = payload?.materialization || payload;
+  const materializationId = normalizeString(materialization?.materializationId);
+  const status = normalizeString(materialization?.status);
+  const mode = normalizeString(materialization?.mode);
+  if (
+    !/^[a-zA-Z0-9_-]{1,200}$/u.test(materializationId) ||
+    !["restore", "archive"].includes(mode) ||
+    !["pending", "applying", "consolidating", "complete", "failed"].includes(
+      status,
+    ) ||
+    resourceRevision(materialization) === null
+  ) {
+    throw new FilesApiError(
+      "Polis returned an invalid edition preparation status. Refresh Files before changing versions.",
+      { code: "edition_materialization_contract_invalid" },
+    );
+  }
+  return {
+    ...materialization,
+    materializationId,
+    status,
+    mode,
+    revision: payload?.revision ?? materialization.revision,
+    version:
+      materialization.version ?? payload?.revision ?? materialization.revision,
+    etag: normalizeString(payload?.etag || materialization.etag),
+  };
+}
+
+function resumeWorkspaceEditionMaterialization() {
+  const active = state.workspace?.activeMaterialization;
+  if (!active || !can("canManage", "files_manage")) return false;
+  let materialization;
+  try {
+    materialization = normalizedEditionMaterialization(active);
+  } catch {
+    // Workspace summaries are actor-scoped. A malformed or unexpectedly broad
+    // projection is ignored rather than probing its manager-only status route.
+    return false;
+  }
+  if (materialization.status === "complete") return false;
+  state.editionMaterialization = {
+    folderId: state.route.kind === "folder" ? state.route.folderId : "",
+    workspaceWide: true,
+    materialization,
+    completeMessage:
+      materialization.mode === "restore"
+        ? "Edition restore completed with its versioned contents."
+        : "Current version archived and preserved in history.",
+    attempt: 0,
+    pollingStopped: materialization.status === "failed",
+  };
+  return materialization.status !== "failed";
+}
+
+function editionMaterializationMessage(error) {
+  if (error?.code === "files_materialization_in_progress") {
+    return "Another edition change is already being prepared. Current remains consistent; check its status before trying again.";
+  }
+  return isRevisionConflict(error) ? refreshFenceAfterConflict("folder") : "";
+}
+
+function beginEditionMaterialization(payload, { folderId, completeMessage }) {
+  if (payload?.accepted !== true) {
+    throw new FilesApiError(
+      "Polis did not confirm that this edition change was queued.",
+      { code: "edition_materialization_not_accepted" },
+    );
+  }
+  const materialization = normalizedEditionMaterialization(payload);
+  editionMaterializationGeneration += 1;
+  if (editionMaterializationTimer) {
+    window.clearTimeout(editionMaterializationTimer);
+    editionMaterializationTimer = null;
+  }
+  state.editionMaterialization = {
+    folderId,
+    workspaceWide: true,
+    materialization,
+    completeMessage,
+    attempt: 0,
+    pollingStopped: false,
+  };
+  render();
+  scheduleEditionMaterializationPoll();
+}
+
+function scheduleEditionMaterializationPoll({
+  immediate = false,
+  resetAttempts = false,
+} = {}) {
+  const tracker = state.editionMaterialization;
+  const materializationId = normalizeString(
+    tracker?.materialization?.materializationId,
+  );
+  if (!tracker || !materializationId) return;
+  if (editionMaterializationTimer) {
+    window.clearTimeout(editionMaterializationTimer);
+    editionMaterializationTimer = null;
+  }
+  if (resetAttempts) tracker.attempt = 0;
+  tracker.pollingStopped = false;
+  if (tracker.attempt >= EDITION_MATERIALIZATION_POLL_LIMIT) {
+    tracker.pollingStopped = true;
+    render();
+    return;
+  }
+  const generation = editionMaterializationGeneration;
+  const delay = immediate
+    ? 0
+    : Math.min(
+        EDITION_MATERIALIZATION_POLL_BASE_MS * 2 ** tracker.attempt,
+        EDITION_MATERIALIZATION_POLL_MAX_MS,
+      );
+  editionMaterializationTimer = window.setTimeout(async () => {
+    editionMaterializationTimer = null;
+    try {
+      const payload = await api.getEditionMaterialization(materializationId);
+      if (generation !== editionMaterializationGeneration) return;
+      const materialization = normalizedEditionMaterialization(payload);
+      if (materialization.materializationId !== materializationId) {
+        throw new FilesApiError("Edition status did not match this request.", {
+          code: "edition_materialization_mismatch",
+        });
+      }
+      tracker.materialization = materialization;
+      tracker.attempt += 1;
+      if (materialization.status === "complete") {
+        const message = tracker.completeMessage;
+        clearEditionMaterialization();
+        await loadRoute();
+        setToast(message);
+        return;
+      }
+      if (materialization.status === "failed") {
+        render();
+        return;
+      }
+      render();
+      scheduleEditionMaterializationPoll();
+    } catch (error) {
+      if (generation !== editionMaterializationGeneration) return;
+      if ([401, 403, 404].includes(Number(error?.status || 0))) {
+        clearEditionMaterialization();
+        setToast(
+          "Edition status is no longer available to this account. No partial version is shown.",
+          "error",
+        );
+        return;
+      }
+      tracker.attempt += 1;
+      if (tracker.attempt >= EDITION_MATERIALIZATION_POLL_LIMIT) {
+        tracker.pollingStopped = true;
+        render();
+        return;
+      }
+      scheduleEditionMaterializationPoll();
+    }
+  }, delay);
+}
+
+async function restoreEditionAsCurrent(id) {
+  if (activeEditionMaterialization()) return;
+  const edition = state.folderData.editions.find(
+    (item) => entityId(item) === id,
+  );
+  if (!edition || editionIsCurrent(edition)) return;
+  const editionRevision = requireResourceRevision(
+    edition,
+    "The archived edition",
+  );
+  const folderRevision = requireResourceRevision(state.folder, "This folder");
+  const currentEditionId = normalizeString(state.folder?.currentEditionId);
+  const current = state.folderData.editions.find(
+    (item) => entityId(item) === currentEditionId || editionIsCurrent(item),
+  );
+  if (currentEditionId && currentEditionId !== id && !current) {
+    setToast(
+      "The current edition version is missing. Refresh Files before restoring another edition.",
+      "error",
+    );
+    return;
+  }
+  const currentRevision =
+    current && entityId(current) !== id
+      ? requireResourceRevision(current, "The current edition")
+      : null;
+  if (
+    editionRevision === null ||
+    folderRevision === null ||
+    (current && entityId(current) !== id && currentRevision === null)
+  ) {
+    return;
+  }
+  const result = await withBusy(
+    `edition:${id}:restore`,
+    (actionKey) =>
+      api.restoreEdition(
+        id,
+        {
+          expectedVersion: editionRevision,
+          expectedFolderVersion: folderRevision,
+          ...(current && entityId(current) !== id
+            ? {
+                archiveCurrent: true,
+                expectedCurrentEditionVersion: currentRevision,
+              }
+            : {}),
+        },
+        mutationOptions(actionKey, edition, editionRevision),
+      ),
+    "",
+    { onError: editionMaterializationMessage },
+  );
+  if (!result) return;
+  try {
+    beginEditionMaterialization(result, {
+      folderId: entityId(state.folder),
+      completeMessage:
+        "Archived edition restored as Current with its versioned contents.",
+    });
+  } catch (error) {
+    setToast(error.message, "error");
+  }
+}
+
 async function submitEdition(data) {
+  const current = state.folderData.editions.find(editionIsCurrent);
+  const folderRevision = requireResourceRevision(state.folder, "This folder");
+  const currentRevision = current
+    ? requireResourceRevision(current, "The current edition")
+    : null;
+  if (folderRevision === null || (current && currentRevision === null)) return;
+  const optionalInteger = (name) => {
+    const value = normalizeString(data.get(name));
+    return value && /^\d{4}$/u.test(value) ? Number(value) : undefined;
+  };
+  const optionalText = (name) => {
+    const value = normalizeString(data.get(name));
+    return value || undefined;
+  };
   const result = await withBusy(
     "edition",
     (actionKey) =>
-      api.createEdition(
+      api.startEdition(
         entityId(state.folder),
         {
           label: normalizeString(data.get("label")),
           type: normalizeString(data.get("type")),
-          effectiveYear: normalizeString(data.get("effectiveYear")) || null,
-          cycle: normalizeString(data.get("cycle")) || null,
-          boundaryVintage: normalizeString(data.get("boundaryVintage")) || null,
-          effectiveFrom: normalizeString(data.get("effectiveFrom")) || null,
-          effectiveTo: normalizeString(data.get("effectiveTo")) || null,
-          expectedVersion: state.folder?.version || state.folder?.revision,
+          ...(optionalInteger("effectiveYear") !== undefined
+            ? { effectiveYear: optionalInteger("effectiveYear") }
+            : {}),
+          ...(optionalInteger("cycle") !== undefined
+            ? { cycle: optionalInteger("cycle") }
+            : {}),
+          ...(optionalText("boundaryVintage")
+            ? { boundaryVintage: optionalText("boundaryVintage") }
+            : {}),
+          ...(optionalText("effectiveFrom")
+            ? { effectiveFrom: optionalText("effectiveFrom") }
+            : {}),
+          ...(optionalText("effectiveTo")
+            ? { effectiveTo: optionalText("effectiveTo") }
+            : {}),
+          archiveCurrent: true,
+          expectedVersion: folderRevision,
+          ...(current
+            ? { expectedCurrentEditionVersion: currentRevision }
+            : {}),
         },
-        { idempotencyKey: actionKey },
+        mutationOptions(actionKey, state.folder, folderRevision),
       ),
-    "New edition created.",
+    "New current edition started; the prior version remains archived.",
+    {
+      onError: (error) =>
+        isRevisionConflict(error) ? refreshFenceAfterConflict("folder") : "",
+    },
   );
   if (!result) return;
   state.modal = null;
   await loadRoute();
+}
+
+async function submitArchiveEdition() {
+  const id = normalizeString(state.modal?.editionId);
+  const edition = state.folderData.editions.find(
+    (item) => entityId(item) === id,
+  );
+  const currentEditionId = normalizeString(state.folder?.currentEditionId);
+  if (
+    !edition ||
+    (currentEditionId ? currentEditionId !== id : !editionIsCurrent(edition))
+  ) {
+    setToast(
+      "Only the folder’s current edition can use Archive current version. Refresh Files and review the edition history.",
+      "error",
+    );
+    return;
+  }
+  const editionRevision = requireResourceRevision(
+    edition,
+    "The current edition",
+  );
+  const folderRevision = requireResourceRevision(state.folder, "This folder");
+  if (editionRevision === null || folderRevision === null) return;
+  const result = await withBusy(
+    `edition:${id}:archive`,
+    (actionKey) =>
+      api.archiveEdition(
+        id,
+        {
+          expectedVersion: editionRevision,
+          expectedFolderVersion: folderRevision,
+        },
+        mutationOptions(actionKey, edition, editionRevision),
+      ),
+    "",
+    {
+      onError: editionMaterializationMessage,
+    },
+  );
+  if (!result) return;
+  state.modal = null;
+  try {
+    beginEditionMaterialization(result, {
+      folderId: entityId(state.folder),
+      completeMessage: "Current version archived and preserved in history.",
+    });
+  } catch (error) {
+    setToast(error.message, "error");
+  }
 }
 
 async function submitSuggestionEdit(data) {
@@ -2354,6 +4087,11 @@ async function submitSuggestionEdit(data) {
     (item) => entityId(item) === state.modal?.suggestionId,
   );
   const existingRecommendation = suggestion?.recommendation || {};
+  const suggestionRevision = requireResourceRevision(
+    suggestion,
+    "This recommendation",
+  );
+  if (suggestionRevision === null) return;
   const assetIds = firstArray(existingRecommendation, ["assetIds"])
     .map(normalizeString)
     .filter(Boolean)
@@ -2369,14 +4107,14 @@ async function submitSuggestionEdit(data) {
         entityId(suggestion),
         "edit",
         {
-          expectedVersion: suggestion?.version || suggestion?.revision,
+          expectedVersion: suggestionRevision,
           recommendation: {
             caption: normalizeString(data.get("caption")),
             ...(assetIds.length ? { assetIds } : {}),
             scheduledFor,
           },
         },
-        { idempotencyKey: actionKey },
+        mutationOptions(actionKey, suggestion, suggestionRevision),
       ),
     "Edited recommendation accepted.",
   );
@@ -2388,6 +4126,8 @@ async function submitSuggestionEdit(data) {
 }
 
 async function submitArchiveFolder(data) {
+  const folderRevision = requireResourceRevision(state.folder, "This folder");
+  if (folderRevision === null) return;
   const result = await withBusy(
     "archive-folder",
     (actionKey) =>
@@ -2395,11 +4135,15 @@ async function submitArchiveFolder(data) {
         entityId(state.folder),
         {
           reason: normalizeString(data.get("reason")),
-          expectedVersion: state.folder?.version || state.folder?.revision,
+          expectedVersion: folderRevision,
         },
-        { idempotencyKey: actionKey },
+        mutationOptions(actionKey, state.folder, folderRevision),
       ),
     "Folder archived with its history preserved.",
+    {
+      onError: (error) =>
+        isRevisionConflict(error) ? refreshFenceAfterConflict("folder") : "",
+    },
   );
   if (!result) return;
   state.modal = null;
@@ -2447,6 +4191,17 @@ async function submitPostDraft(data) {
     );
     return;
   }
+  const folderRevision = requireResourceRevision(state.folder, "This folder");
+  if (folderRevision === null) return;
+  const expectedAssetVersions = {};
+  for (const item of selected) {
+    const revision = requireResourceRevision(
+      item,
+      entityName(item, "This media item"),
+    );
+    if (revision === null) return;
+    expectedAssetVersions[entityId(item)] = revision;
+  }
   const result = await withBusy(
     "post",
     (actionKey) =>
@@ -2455,6 +4210,8 @@ async function submitPostDraft(data) {
           filesWorkspaceId: state.workspace.filesWorkspaceId,
           folderId: entityId(state.folder),
           description: normalizeString(data.get("description")),
+          expectedFolderVersion: folderRevision,
+          expectedAssetVersions,
           mediaItems: selected.map((item, order) => {
             const sourceAssetVersionId =
               item.sourceAssetVersionId ||
@@ -2479,9 +4236,13 @@ async function submitPostDraft(data) {
             };
           }),
         },
-        { idempotencyKey: actionKey },
+        mutationOptions(actionKey, state.folder, folderRevision),
       ),
     "Post draft created with Files provenance.",
+    {
+      onError: (error) =>
+        isRevisionConflict(error) ? refreshFenceAfterConflict("folder") : "",
+    },
   );
   if (!result) return;
   state.postDraft.open = false;
@@ -2497,6 +4258,11 @@ async function actOnSuggestion(id, action) {
     render();
     return;
   }
+  const suggestionRevision = requireResourceRevision(
+    suggestion,
+    "This recommendation",
+  );
+  if (suggestionRevision === null) return;
   if (action === "disable") {
     if (!can("canManageAutomations", "files_automations_manage")) {
       setToast(
@@ -2514,10 +4280,10 @@ async function actOnSuggestion(id, action) {
           id,
           "disable",
           {
-            expectedVersion: suggestion?.version || suggestion?.revision,
+            expectedVersion: suggestionRevision,
             scope: "folder",
           },
-          { idempotencyKey: actionKey },
+          mutationOptions(actionKey, suggestion, suggestionRevision),
         ),
       aiGenerated
         ? "AI assistance disabled."
@@ -2539,10 +4305,10 @@ async function actOnSuggestion(id, action) {
         id,
         action,
         {
-          expectedVersion: suggestion?.version || suggestion?.revision,
+          expectedVersion: suggestionRevision,
           ...(action === "snooze" ? { snoozedUntil } : {}),
         },
-        { idempotencyKey: actionKey },
+        mutationOptions(actionKey, suggestion, suggestionRevision),
       ),
     action === "accept"
       ? "Recommendation accepted."
@@ -2588,23 +4354,32 @@ async function downloadSelectedAssets() {
   );
 }
 
-async function changeGrant(id, action, expectedVersion) {
+async function changeGrant(id, action) {
+  const grant = state.folderData.grants.find((item) => entityId(item) === id);
+  const expectedVersion = requireResourceRevision(grant, "This access grant");
+  if (expectedVersion === null) return;
   const result = await withBusy(
     `grant:${id}:${action}`,
     (actionKey) =>
       api.changeGrant(
         id,
         action,
-        { expectedVersion: expectedVersion || undefined },
-        { idempotencyKey: actionKey },
+        { expectedVersion },
+        mutationOptions(actionKey, grant, expectedVersion),
       ),
     action === "approve" ? "Restricted access approved." : "Access revoked.",
   );
   if (result) await loadRoute();
 }
 
-async function respondToGrantRequest(id, action, expectedVersion) {
+async function respondToGrantRequest(id, action) {
   if (!id || !["accept", "decline"].includes(action)) return;
+  const request = state.incomingGrantRequests.find(
+    (item) => normalizeString(item?.grantId || item?.grant?.grantId) === id,
+  );
+  const grant = request?.grant || request;
+  const expectedVersion = requireResourceRevision(grant, "This access request");
+  if (expectedVersion === null) return;
   const result = await withBusy(
     `incoming-grant:${id}:${action}`,
     (actionKey) =>
@@ -2612,12 +4387,12 @@ async function respondToGrantRequest(id, action, expectedVersion) {
         id,
         action,
         {
-          expectedVersion: expectedVersion || undefined,
+          expectedVersion,
           ...(action === "decline"
             ? { reason: "Declined by the named recipient" }
             : {}),
         },
-        { idempotencyKey: actionKey },
+        mutationOptions(actionKey, grant, expectedVersion),
       ),
     action === "accept"
       ? "Restricted folder access accepted."
@@ -2636,24 +4411,6 @@ async function respondToGrantRequest(id, action, expectedVersion) {
   }
 }
 
-async function changeEdition(id, action) {
-  const edition = state.folderData.editions.find(
-    (item) => entityId(item) === id,
-  );
-  const result = await withBusy(
-    `edition:${id}:${action}`,
-    (actionKey) =>
-      api.changeEdition(
-        id,
-        action,
-        { expectedVersion: edition?.version || edition?.revision },
-        { idempotencyKey: actionKey },
-      ),
-    "Current edition updated.",
-  );
-  if (result) await loadRoute();
-}
-
 function addUploads(fileList, { intent = "", proposal = null } = {}) {
   const folderId =
     state.modal?.folderId ||
@@ -2663,6 +4420,15 @@ function addUploads(fileList, { intent = "", proposal = null } = {}) {
     setToast("Choose or create a destination folder first.", "error");
     return false;
   }
+  const folderResource =
+    entityId(state.folder) === folderId
+      ? state.folder
+      : workspaceRoots().find((item) => entityId(item) === folderId);
+  const folderVersion = requireResourceRevision(
+    folderResource,
+    "The upload folder",
+  );
+  if (folderVersion === null) return false;
   const resolvedIntent =
     normalizeString(intent) ||
     (state.folder && entityId(state.folder) === folderId
@@ -2681,6 +4447,8 @@ function addUploads(fileList, { intent = "", proposal = null } = {}) {
     id: window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`,
     file,
     folderId,
+    folderVersion,
+    folderEtag: resourceEtag(folderResource, folderVersion),
     intent: resolvedIntent,
     proposal:
       resolvedIntent === "proposal"
@@ -2731,6 +4499,8 @@ function persistUploadCheckpoints() {
     .map((item) => ({
       id: item.id,
       folderId: item.folderId,
+      folderVersion: item.folderVersion,
+      folderEtag: item.folderEtag || "",
       userId,
       sessionId: item.sessionId || "",
       sessionVersion: item.sessionVersion,
@@ -3011,6 +4781,10 @@ async function startUpload(item) {
       }
     }
     if (!item.sessionId) {
+      const uploadFolderRevision = assertResourceRevision(
+        { version: item.folderVersion },
+        "The upload folder",
+      );
       session = normalizedUploadSession(
         await api.createUploadSession(
           item.folderId,
@@ -3024,9 +4798,14 @@ async function startUpload(item) {
             ...(item.intent === "proposal" && item.proposal
               ? { proposal: item.proposal }
               : {}),
-            expectedVersion: state.folder?.version || state.folder?.revision,
+            expectedVersion: uploadFolderRevision,
           },
-          { idempotencyKey: item.id },
+          {
+            idempotencyKey: item.id,
+            ...(item.folderEtag
+              ? { headers: { "If-Match": item.folderEtag } }
+              : {}),
+          },
         ),
       );
     }
@@ -3093,9 +4872,16 @@ async function startUpload(item) {
             partNumber,
             checksumSha256,
           })),
-          expectedVersion: item.sessionVersion,
+          expectedVersion: assertResourceRevision(
+            { version: item.sessionVersion },
+            "The upload session",
+          ),
         },
-        { idempotencyKey: `${item.id}:presign:${partNumbers.join("-")}` },
+        mutationOptions(
+          `${item.id}:presign:${partNumbers.join("-")}`,
+          { version: item.sessionVersion },
+          item.sessionVersion,
+        ),
       );
       assertUploadTransferActive(item, controller.signal);
       const inFlight = new Map();
@@ -3140,9 +4926,16 @@ async function startUpload(item) {
         item.sessionId,
         {
           parts: uploadedParts,
-          expectedVersion: item.sessionVersion,
+          expectedVersion: assertResourceRevision(
+            { version: item.sessionVersion },
+            "The upload session",
+          ),
         },
-        { idempotencyKey: `${item.id}:checkpoint:${partNumbers.join("-")}` },
+        mutationOptions(
+          `${item.id}:checkpoint:${partNumbers.join("-")}`,
+          { version: item.sessionVersion },
+          item.sessionVersion,
+        ),
       );
       item.sessionVersion =
         normalizedUploadSession(checkpoint)?.version ||
@@ -3173,9 +4966,16 @@ async function startUpload(item) {
         ),
         checksumSha256: item.checksumSha256,
         idempotencyKey: `${item.id}:complete`,
-        expectedVersion: item.sessionVersion,
+        expectedVersion: assertResourceRevision(
+          { version: item.sessionVersion },
+          "The upload session",
+        ),
       },
-      { idempotencyKey: `${item.id}:complete` },
+      mutationOptions(
+        `${item.id}:complete`,
+        { version: item.sessionVersion },
+        item.sessionVersion,
+      ),
     );
     assertUploadTransferActive(item, controller.signal);
     item.progress = 1;
@@ -3217,13 +5017,21 @@ async function abortUploadSession(item) {
   if (!item.abortPromise) {
     item.abortPromise = (async () => {
       try {
+        const sessionRevision = assertResourceRevision(
+          { version: item.sessionVersion },
+          "The upload session",
+        );
         await api.abortUpload(
           item.sessionId,
           {
-            expectedVersion: item.sessionVersion,
+            expectedVersion: sessionRevision,
             idempotencyKey: `${item.id}:abort`,
           },
-          { idempotencyKey: `${item.id}:abort` },
+          mutationOptions(
+            `${item.id}:abort`,
+            { version: sessionRevision },
+            sessionRevision,
+          ),
         );
       } catch {
         // The stable action key makes a later canonical abort safe to retry.
@@ -3275,8 +5083,7 @@ function handleDrop(event) {
 
 function handleKeydown(event) {
   const lockedSetup =
-    state.modal?.type === "setup" &&
-    !(state.workspace?.setup || {}).initialized;
+    state.modal?.type === "setup" && !activeWorkspaceSetup().initialized;
   if (event.key === "Escape") {
     if (state.modal && !lockedSetup) {
       event.preventDefault();

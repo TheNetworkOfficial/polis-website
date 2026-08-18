@@ -13,10 +13,37 @@ function encodeSegment(value) {
 }
 
 function mutationHeaders(headers = {}, stableIdempotencyKey = "") {
-  const idempotencyKey = stableIdempotencyKey || window.crypto?.randomUUID?.();
-  return idempotencyKey
-    ? { ...headers, "Idempotency-Key": idempotencyKey }
-    : headers;
+  return { ...headers, "Idempotency-Key": stableIdempotencyKey };
+}
+
+function hasExpectedRevision(body) {
+  return Object.entries(body || {}).some(
+    ([key, value]) =>
+      /^expected(?:[A-Z][A-Za-z0-9]*)?Version(?:s)?$/u.test(key) &&
+      value !== undefined &&
+      value !== null &&
+      value !== "",
+  );
+}
+
+/**
+ * Files mutations are optimistic and replay-safe by contract. Keeping the
+ * assertion at the transport boundary prevents a sparse projection from ever
+ * becoming an unfenced write, even if a caller forgets its local preflight.
+ */
+export function assertFilesMutationContract({ body, idempotencyKey }) {
+  if (!String(idempotencyKey || body?.idempotencyKey || "").trim()) {
+    throw new FilesApiError(
+      "This Files action is missing its retry key. Refresh and try again.",
+      { code: "idempotency_key_required" },
+    );
+  }
+  if (!hasExpectedRevision(body)) {
+    throw new FilesApiError(
+      "This Files action is missing current version information. Refresh and try again.",
+      { code: "expected_version_required" },
+    );
+  }
 }
 
 export class FilesApiError extends Error {
@@ -49,7 +76,14 @@ export class FilesApi {
 
   async request(
     path,
-    { method = "GET", body, headers = {}, signal, idempotencyKey = "" } = {},
+    {
+      method = "GET",
+      body,
+      headers = {},
+      signal,
+      cache,
+      idempotencyKey = "",
+    } = {},
   ) {
     const session = this.getSession?.();
     const hasBody = body !== undefined;
@@ -57,17 +91,25 @@ export class FilesApi {
       session,
       hasBody ? { "Content-Type": JSON_CONTENT_TYPE, ...headers } : headers,
     );
+    const normalizedMethod = String(method || "GET").toUpperCase();
+    const mutation = !["GET", "HEAD", "OPTIONS"].includes(normalizedMethod);
+    const stableIdempotencyKey = String(
+      idempotencyKey || body?.idempotencyKey || "",
+    ).trim();
+    if (mutation) {
+      assertFilesMutationContract({
+        body,
+        idempotencyKey: stableIdempotencyKey,
+      });
+    }
     const response = await fetch(this.resolve(path), {
-      method,
-      headers:
-        method === "GET"
-          ? requestHeaders
-          : mutationHeaders(
-              requestHeaders,
-              idempotencyKey || body?.idempotencyKey || "",
-            ),
+      method: normalizedMethod,
+      headers: !mutation
+        ? requestHeaders
+        : mutationHeaders(requestHeaders, stableIdempotencyKey),
       body: hasBody ? JSON.stringify(body) : undefined,
       signal,
+      ...(cache ? { cache } : {}),
     });
     const contentType = response.headers.get("content-type") || "";
     const payload = contentType.includes(JSON_CONTENT_TYPE)
@@ -214,6 +256,14 @@ export class FilesApi {
     );
   }
 
+  resubmitProposal(proposalId, input, options = {}) {
+    return this.request(`/api/files/proposals/${encodeSegment(proposalId)}`, {
+      method: "PATCH",
+      body: input,
+      ...options,
+    });
+  }
+
   withdrawProposal(proposalId, input = {}, options = {}) {
     return this.request(
       `/api/files/proposals/${encodeSegment(proposalId)}/withdraw`,
@@ -240,10 +290,31 @@ export class FilesApi {
     );
   }
 
-  changeEdition(editionId, action, input = {}, options = {}) {
+  startEdition(folderId, input, options = {}) {
     return this.request(
-      `/api/files/editions/${encodeSegment(editionId)}/${encodeSegment(action)}`,
+      `/api/files/folders/${encodeSegment(folderId)}/editions/start`,
       { method: "POST", body: input, ...options },
+    );
+  }
+
+  archiveEdition(editionId, input, options = {}) {
+    return this.request(
+      `/api/files/editions/${encodeSegment(editionId)}/archive`,
+      { method: "POST", body: input, ...options },
+    );
+  }
+
+  restoreEdition(editionId, input, options = {}) {
+    return this.request(
+      `/api/files/editions/${encodeSegment(editionId)}/restore`,
+      { method: "POST", body: input, ...options },
+    );
+  }
+
+  getEditionMaterialization(materializationId) {
+    return this.request(
+      `/api/files/edition-materializations/${encodeSegment(materializationId)}`,
+      { cache: "no-store" },
     );
   }
 
@@ -372,6 +443,16 @@ export class FilesApi {
     return this.request(`/api/files/assets/${encodeSegment(assetId)}/usage`);
   }
 
+  getAssetPreview(assetId, sourceAssetVersionId = "") {
+    const versionPath = sourceAssetVersionId
+      ? `/versions/${encodeSegment(sourceAssetVersionId)}`
+      : "";
+    return this.request(
+      `/api/files/assets/${encodeSegment(assetId)}${versionPath}/preview`,
+      { cache: "no-store" },
+    );
+  }
+
   getAssetDownload(assetId) {
     return this.request(`/api/files/assets/${encodeSegment(assetId)}/download`);
   }
@@ -382,6 +463,48 @@ export class FilesApi {
       body: input,
       ...options,
     });
+  }
+
+  listHostReferences(query = {}) {
+    const params = new URLSearchParams(query);
+    return this.request(
+      `/api/files/host-references${params.size ? `?${params}` : ""}`,
+    );
+  }
+
+  getHostReference(hostReferenceId) {
+    return this.request(
+      `/api/files/host-references/${encodeSegment(hostReferenceId)}`,
+    );
+  }
+
+  getHostReferenceFolderPicker(query = {}) {
+    const params = new URLSearchParams(query);
+    return this.request(
+      `/api/files/host-references/folder-picker${params.size ? `?${params}` : ""}`,
+    );
+  }
+
+  createHostReference(input, options = {}) {
+    return this.request("/api/files/host-references", {
+      method: "POST",
+      body: input,
+      ...options,
+    });
+  }
+
+  updateHostReference(hostReferenceId, input, options = {}) {
+    return this.request(
+      `/api/files/host-references/${encodeSegment(hostReferenceId)}`,
+      { method: "PATCH", body: input, ...options },
+    );
+  }
+
+  revokeHostReference(hostReferenceId, input, options = {}) {
+    return this.request(
+      `/api/files/host-references/${encodeSegment(hostReferenceId)}/revoke`,
+      { method: "POST", body: input, ...options },
+    );
   }
 }
 
