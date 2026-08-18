@@ -483,6 +483,12 @@ function postProvenanceEnabled() {
   );
 }
 
+function postDraftCreationEnabled() {
+  return Boolean(
+    capabilities().canCreatePostDraft === true && !folderIsRestricted(),
+  );
+}
+
 function folderUploadIntent(folder = state.folder) {
   const access = folder?.access;
   if (!access) {
@@ -1193,7 +1199,7 @@ function renderHeader() {
     <div class="files-header__title"><p class="files-eyebrow">${escapeHtml(workspaceLabel(state.workspaceDescriptor))}</p><h1>${escapeHtml(routeTitle())}</h1></div>
     <div class="files-header__actions">
       ${hostReferencesEnabled() ? `<button class="files-button files-button--secondary" data-action="open-host-reference">${icon("folder")}Attach a Files folder</button>` : ""}
-      ${selected && postProvenanceEnabled() ? `<button class="files-button files-button--secondary" data-action="open-post">${icon("post")}Create post <span>${selected}</span></button>` : ""}
+      ${selected && postDraftCreationEnabled() ? `<button class="files-button files-button--secondary" data-action="open-post">${icon("post")}Create post <span>${selected}</span></button>` : ""}
       ${canOpenUpload() ? `<button class="files-button files-button--primary" data-action="open-upload">${icon("upload")}${currentUploadIntent() === "proposal" ? "Upload for review" : "Upload"}</button>` : ""}
       <button class="files-avatar" data-action="open-settings" aria-label="Open Files settings">${escapeHtml(initials(state.user?.name || state.user?.email))}</button>
     </div>
@@ -2334,7 +2340,7 @@ function renderDecisionModal() {
 }
 
 function renderPostDrawer() {
-  if (!state.postDraft.open) return "";
+  if (!state.postDraft.open || !postDraftCreationEnabled()) return "";
   const selected = selectedAssets();
   return `<div class="files-drawer-layer"><div class="files-drawer-backdrop" data-action="close-post"></div><aside class="files-post-drawer" role="dialog" aria-modal="true" aria-labelledby="files-post-title"><header><div><p class="files-eyebrow">Files → Polis post · ${selected.length}/10</p><h2 id="files-post-title">Turn approved media into a post</h2></div><button data-action="close-post" aria-label="Close">${icon("close")}</button></header><form data-form="post-draft"><div class="files-post-carousel" aria-label="Selected media in post order">${selected.map((item, index) => `<article><span>${index + 1}</span>${itemThumbnail(item)}<strong>${escapeHtml(entityName(item))}</strong>${usageBadges(item)}<div class="files-post-order"><button type="button" data-post-move="back" data-id="${escapeHtml(entityId(item))}" ${index === 0 ? "disabled" : ""} aria-label="Move ${escapeHtml(entityName(item))} earlier">←</button><button type="button" data-post-move="forward" data-id="${escapeHtml(entityId(item))}" ${index === selected.length - 1 ? "disabled" : ""} aria-label="Move ${escapeHtml(entityName(item))} later">→</button></div><button type="button" data-select-asset="${escapeHtml(entityId(item))}" aria-label="Remove ${escapeHtml(entityName(item))}">${icon("close")}</button></article>`).join("")}</div><div class="files-field"><label for="post-description">Post idea or caption</label><textarea id="post-description" name="description" rows="5" placeholder="Share the story behind this moment…">${escapeHtml(state.postDraft.description)}</textarea></div><div class="files-post-note">${icon("post")}<p><strong>Provenance stays attached.</strong> Published, access-safe post links appear on media usage badges. Unpublished drafts are never exposed.</p></div><div class="files-modal__actions"><button class="files-button files-button--ghost" type="button" data-action="close-post">Keep browsing</button><button class="files-button files-button--primary" type="submit" ${selected.length ? "" : "disabled"}>Create post draft</button></div></form></aside></div>`;
 }
@@ -2716,8 +2722,11 @@ async function handleClick(event) {
     render();
   }
   if (action === "open-post") {
-    if (!postProvenanceEnabled()) {
-      setToast("This folder cannot be used to create Polis posts.", "error");
+    if (!postDraftCreationEnabled()) {
+      setToast(
+        "Your current Polis role cannot create posts from this Files folder.",
+        "error",
+      );
       return;
     }
     state.postDraft.open = true;
@@ -4151,8 +4160,11 @@ async function submitArchiveFolder(data) {
 }
 
 async function submitPostDraft(data) {
-  if (!postProvenanceEnabled()) {
-    setToast("This folder cannot be used to create Polis posts.", "error");
+  if (!postDraftCreationEnabled()) {
+    setToast(
+      "Your current Polis role cannot create posts from this Files folder.",
+      "error",
+    );
     return;
   }
   const selected = selectedAssets();

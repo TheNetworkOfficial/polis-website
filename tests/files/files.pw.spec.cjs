@@ -43,6 +43,7 @@ function workspace({ initialized = true, principal = null } = {}) {
       canManageAutomations: true,
       canApproveRestricted: true,
       canDownloadRestricted: true,
+      canCreatePostDraft: true,
     },
     featureFlags: {
       filesEnabled: true,
@@ -2014,6 +2015,50 @@ test("official workspace bootstrap uses the official source alias id", async ({
         path === "/api/files/workspaces/political_account/political-account-42",
     ),
   ).toBe(false);
+});
+
+test("Official Office Files-only staff need explicit post-draft eligibility", async ({
+  page,
+}) => {
+  await seedSession(page);
+  const officialWorkspace = workspace({
+    principal: {
+      type: "political_account",
+      id: "political-account-42",
+      sourceType: "official",
+      sourceId: "official-7",
+      displayName: "Mayor Jordan Lee",
+      jurisdiction: { stateCode: "FL", municipality: "Pensacola" },
+    },
+  });
+  delete officialWorkspace.capabilities.canCreatePostDraft;
+  const captures = await mockFiles(page, { workspace: officialWorkspace });
+
+  await page.goto("/files/folders/folder-1");
+  await expect(page.getByText("Florida State Party used this")).toBeVisible();
+  await page
+    .getByRole("button", { name: "Select Fourth of July crowd.jpg" })
+    .click();
+  await expect(page.getByRole("button", { name: /Create post/ })).toHaveCount(
+    0,
+  );
+
+  await page.locator("#files-app").evaluate((app) => {
+    const forgedAction = document.createElement("button");
+    forgedAction.dataset.action = "open-post";
+    forgedAction.textContent = "Forged create post action";
+    app.append(forgedAction);
+    forgedAction.click();
+  });
+  await expect(
+    page.getByText(
+      "Your current Polis role cannot create posts from this Files folder.",
+    ),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Turn approved media into a post" }),
+  ).toHaveCount(0);
+  expect(captures.posts).toHaveLength(0);
 });
 
 test("proposal uploads create exactly one server-owned replace proposal", async ({
