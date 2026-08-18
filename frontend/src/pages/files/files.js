@@ -1087,7 +1087,8 @@ function renderUploadsPage() {
 function renderUploadItem(item) {
   const file = item.file || item.fileMetadata || {};
   const type = normalizeString(file.type || file.contentType);
-  const waitingForFile = item.status === "paused" && !item.file;
+  const isPaused = item.status === "paused";
+  const waitingForFile = isPaused && !item.file;
   const status =
     item.status === "quarantined"
       ? item.error || "Quarantined · security review did not release this file"
@@ -1101,12 +1102,35 @@ function renderUploadItem(item) {
             ? item.error || "Uploaded · security scan in progress"
             : item.status === "hashing"
               ? "Preparing secure checksums"
-              : item.status === "queued"
-                ? "Waiting"
-                : waitingForFile
-                  ? "Choose the same file to resume"
-                  : `${Math.round(item.progress * 100)}% uploaded`;
-  return `<article class="files-upload-item files-upload-item--${escapeHtml(item.status)}"><div class="files-upload-item__icon">${icon(type.startsWith("image/") ? "image" : type.startsWith("video/") ? "video" : "file")}</div><div class="files-upload-item__body"><div><strong>${escapeHtml(file.name || file.fileName)}</strong><span>${escapeHtml(formatBytes(file.size))}</span></div><progress class="files-progress" aria-label="Upload progress" max="100" value="${Math.round(item.progress * 100)}">${Math.round(item.progress * 100)}%</progress><small>${escapeHtml(status)}</small></div><div class="files-upload-item__actions">${item.status === "uploading" || item.status === "hashing" ? `<button data-upload-action="cancel" data-id="${escapeHtml(item.id)}">Cancel</button>` : waitingForFile ? `<label class="files-upload-resume">Resume<input type="file" data-resume-upload="${escapeHtml(item.id)}" /></label>` : item.status === "error" && item.file ? `<button data-upload-action="retry" data-id="${escapeHtml(item.id)}">Retry</button>` : item.status === "complete" || item.status === "scanning" ? icon("check") : item.status === "quarantined" ? icon("review") : ""}</div></article>`;
+              : item.status === "pausing"
+                ? "Pausing safely…"
+                : item.status === "finalizing"
+                  ? "Verifying upload…"
+                  : item.status === "queued"
+                    ? "Waiting"
+                    : waitingForFile
+                      ? "Choose the same file to resume"
+                      : isPaused
+                        ? `Paused at ${Math.round(item.progress * 100)}%`
+                        : `${Math.round(item.progress * 100)}% uploaded`;
+  const active = item.status === "uploading" || item.status === "hashing";
+  const cancel = `<button data-upload-action="cancel" data-id="${escapeHtml(item.id)}">Cancel</button>`;
+  const actions = active
+    ? `<button data-upload-action="pause" data-id="${escapeHtml(item.id)}">Pause</button>${cancel}`
+    : waitingForFile
+      ? `<label class="files-upload-resume">Resume<input type="file" data-resume-upload="${escapeHtml(item.id)}" /></label>${cancel}`
+      : isPaused
+        ? `<button data-upload-action="resume" data-id="${escapeHtml(item.id)}">Resume</button>${cancel}`
+        : item.status === "pausing" || item.status === "finalizing"
+          ? cancel
+          : item.status === "error" && item.file
+            ? `<button data-upload-action="retry" data-id="${escapeHtml(item.id)}">Retry</button>`
+            : item.status === "complete" || item.status === "scanning"
+              ? icon("check")
+              : item.status === "quarantined"
+                ? icon("review")
+                : "";
+  return `<article class="files-upload-item files-upload-item--${escapeHtml(item.status)}"><div class="files-upload-item__icon">${icon(type.startsWith("image/") ? "image" : type.startsWith("video/") ? "video" : "file")}</div><div class="files-upload-item__body"><div><strong>${escapeHtml(file.name || file.fileName)}</strong><span>${escapeHtml(formatBytes(file.size))}</span></div><progress class="files-progress" aria-label="Upload progress" max="100" value="${Math.round(item.progress * 100)}">${Math.round(item.progress * 100)}%</progress><small>${escapeHtml(status)}</small></div><div class="files-upload-item__actions">${actions}</div></article>`;
 }
 
 function renderModal() {
@@ -1604,8 +1628,12 @@ async function handleClick(event) {
   }
   const uploadAction = event.target.closest("[data-upload-action]");
   if (uploadAction) {
+    if (uploadAction.dataset.uploadAction === "pause")
+      pauseUpload(uploadAction.dataset.id);
     if (uploadAction.dataset.uploadAction === "cancel")
       await cancelUpload(uploadAction.dataset.id);
+    if (uploadAction.dataset.uploadAction === "resume")
+      resumeUpload(uploadAction.dataset.id);
     if (uploadAction.dataset.uploadAction === "retry")
       retryUpload(uploadAction.dataset.id);
     return;
@@ -2711,6 +2739,7 @@ function persistUploadCheckpoints() {
       proposalId: item.proposalId || "",
       intent: item.intent || "commit",
       proposal: item.proposal || null,
+      status: item.status,
       scanPollAttempts: item.scanPollAttempts || 0,
       checksumSha256: item.checksumSha256 || "",
       partSize: item.partSize || 0,
@@ -2769,7 +2798,9 @@ function restoreUploadCheckpoints() {
     ? checkpoints.map((item) => ({
         ...item,
         file: null,
-        status: "paused",
+        status: ["scanning", "quarantined"].includes(item.status)
+          ? item.status
+          : "paused",
         error: "",
       }))
     : [];
@@ -2887,22 +2918,61 @@ function fileMatchesCheckpoint(file, metadata) {
   );
 }
 
-function resumeUpload(id, file) {
+function uploadAbortError(message) {
+  return new DOMException(message, "AbortError");
+}
+
+function assertUploadTransferActive(item, signal) {
+  if (signal?.aborted || item.pauseRequested || item.cancelRequested) {
+    throw signal?.reason instanceof Error
+      ? signal.reason
+      : uploadAbortError(
+          item.pauseRequested ? "Upload paused." : "Upload cancelled.",
+        );
+  }
+}
+
+/** Pausing stops only local work; the live multipart session stays resumable. */
+function pauseUpload(id) {
   const item = state.uploadQueue.find((entry) => entry.id === id);
-  if (!item || !file) return;
-  if (!fileMatchesCheckpoint(file, item.fileMetadata)) {
+  if (!item || !["hashing", "uploading"].includes(item.status)) return;
+  item.pauseRequested = true;
+  item.cancelRequested = false;
+  item.status = "pausing";
+  item.error = "";
+  persistUploadCheckpoints();
+  render();
+  const controller = state.uploadControllers.get(id);
+  if (controller) {
+    controller.abort(uploadAbortError("Upload paused."));
+  } else {
+    item.status = "paused";
+    persistUploadCheckpoints();
+    render();
+  }
+}
+
+function resumeUpload(id, file = null) {
+  const item = state.uploadQueue.find((entry) => entry.id === id);
+  const selectedFile = file || item?.file;
+  if (!item || !selectedFile || state.uploadControllers.has(id)) return;
+  if (!fileMatchesCheckpoint(selectedFile, item.fileMetadata)) {
     setToast(
       "Choose the original file with the same name, size, and modified date.",
       "error",
     );
     return;
   }
-  item.file = file;
+  item.file = selectedFile;
+  item.pauseRequested = false;
+  item.cancelRequested = false;
   startUpload(item);
 }
 
 async function startUpload(item) {
-  if (!item.file) return;
+  if (!item.file || state.uploadControllers.has(item.id)) return;
+  item.pauseRequested = false;
+  item.cancelRequested = false;
   item.status = "hashing";
   item.error = "";
   const controller = new AbortController();
@@ -2920,12 +2990,14 @@ async function startUpload(item) {
     // per-part checksums) without ever materializing the full file in memory.
     if (!item.checksumSha256) {
       item.checksumSha256 = await checksumBlob(item.file, {
+        signal: controller.signal,
         onProgress: (progress) => {
           item.hashProgress = progress;
           render();
         },
       });
     }
+    assertUploadTransferActive(item, controller.signal);
     let session;
     if (item.sessionId) {
       try {
@@ -2971,11 +3043,13 @@ async function startUpload(item) {
     item.totalParts = Number(
       session?.totalParts || Math.ceil(item.file.size / item.partSize),
     );
-    item.completedParts = firstArray(session, ["uploadedParts"]).length
+    item.completedParts = Array.isArray(session?.uploadedParts)
       ? session.uploadedParts
       : item.completedParts || [];
     if (!item.sessionId)
       throw new FilesApiError("The resumable upload session was incomplete.");
+    persistUploadCheckpoints();
+    assertUploadTransferActive(item, controller.signal);
     item.status = "uploading";
     persistUploadCheckpoints();
 
@@ -2989,6 +3063,7 @@ async function startUpload(item) {
       );
     item.progress = item.file.size ? completedBytes() / item.file.size : 0;
     for (let start = 1; start <= item.totalParts; start += 3) {
+      assertUploadTransferActive(item, controller.signal);
       const partNumbers = Array.from(
         { length: Math.min(3, item.totalParts - start + 1) },
         (_, index) => start + index,
@@ -3001,9 +3076,16 @@ async function startUpload(item) {
             offset,
             Math.min(offset + item.partSize, item.file.size),
           );
-          return { partNumber, blob, checksumSha256: await checksumBlob(blob) };
+          return {
+            partNumber,
+            blob,
+            checksumSha256: await checksumBlob(blob, {
+              signal: controller.signal,
+            }),
+          };
         }),
       );
+      assertUploadTransferActive(item, controller.signal);
       const signed = await api.presignUploadParts(
         item.sessionId,
         {
@@ -3015,6 +3097,7 @@ async function startUpload(item) {
         },
         { idempotencyKey: `${item.id}:presign:${partNumbers.join("-")}` },
       );
+      assertUploadTransferActive(item, controller.signal);
       const inFlight = new Map();
       const uploadedParts = await Promise.all(
         prepared.map(async (part) => {
@@ -3074,6 +3157,10 @@ async function startUpload(item) {
       item.progress = item.file.size ? completedBytes() / item.file.size : 1;
       persistUploadCheckpoints();
     }
+    assertUploadTransferActive(item, controller.signal);
+    item.status = "finalizing";
+    persistUploadCheckpoints();
+    render();
     const completion = await api.completeUpload(
       item.sessionId,
       {
@@ -3090,6 +3177,7 @@ async function startUpload(item) {
       },
       { idempotencyKey: `${item.id}:complete` },
     );
+    assertUploadTransferActive(item, controller.signal);
     item.progress = 1;
     applyUploadSessionState(item, normalizedUploadSession(completion));
     if (!item.status || item.status === "uploading") item.status = "scanning";
@@ -3103,11 +3191,20 @@ async function startUpload(item) {
     )
       await loadRoute();
   } catch (error) {
-    item.status = error?.name === "AbortError" ? "cancelled" : "error";
-    item.error =
-      error?.name === "AbortError"
+    const interrupted = error?.name === "AbortError";
+    if (interrupted && item.cancelRequested && item.sessionId) {
+      await abortUploadSession(item);
+    }
+    item.status = interrupted
+      ? item.cancelRequested
+        ? "cancelled"
+        : "paused"
+      : "error";
+    item.error = interrupted
+      ? item.cancelRequested
         ? "Cancelled"
-        : error?.message || "Upload failed";
+        : "Paused"
+      : error?.message || "Upload failed";
     persistUploadCheckpoints();
   } finally {
     state.uploadControllers.delete(item.id);
@@ -3115,27 +3212,37 @@ async function startUpload(item) {
   }
 }
 
+async function abortUploadSession(item) {
+  if (!item.sessionId) return;
+  if (!item.abortPromise) {
+    item.abortPromise = (async () => {
+      try {
+        await api.abortUpload(
+          item.sessionId,
+          {
+            expectedVersion: item.sessionVersion,
+            idempotencyKey: `${item.id}:abort`,
+          },
+          { idempotencyKey: `${item.id}:abort` },
+        );
+      } catch {
+        // The stable action key makes a later canonical abort safe to retry.
+      }
+    })();
+  }
+  await item.abortPromise;
+}
+
 async function cancelUpload(id) {
   const item = state.uploadQueue.find((entry) => entry.id === id);
   if (!item) return;
+  item.cancelRequested = true;
+  item.pauseRequested = false;
   const pollTimer = state.uploadPollTimers.get(id);
   if (pollTimer) window.clearTimeout(pollTimer);
   state.uploadPollTimers.delete(id);
-  state.uploadControllers.get(id)?.abort();
-  if (item.sessionId) {
-    try {
-      await api.abortUpload(
-        item.sessionId,
-        {
-          expectedVersion: item.sessionVersion,
-          idempotencyKey: `${item.id}:abort`,
-        },
-        { idempotencyKey: `${item.id}:abort` },
-      );
-    } catch {
-      // Local cancellation is immediate; server abort remains idempotent.
-    }
-  }
+  state.uploadControllers.get(id)?.abort(uploadAbortError("Upload cancelled."));
+  await abortUploadSession(item);
   item.status = "cancelled";
   item.error = "Cancelled";
   persistUploadCheckpoints();

@@ -247,6 +247,7 @@ async function mockFiles(page, overrides = {}) {
   let uploadStatusIndex = 0;
   let uploadIntent = "commit";
   let uploadProposal = null;
+  const signedUploadAttempts = new Map();
   const captures = {
     grants: [],
     proposals: [],
@@ -254,6 +255,8 @@ async function mockFiles(page, overrides = {}) {
     posts: [],
     uploads: [],
     uploadPartHeaders: [],
+    signedUploadParts: [],
+    uploadAborts: [],
     settings: [],
     suggestions: [],
     folders: [],
@@ -263,11 +266,26 @@ async function mockFiles(page, overrides = {}) {
     initializations: [],
     requests: [],
   };
-  await page.route("**/signed-upload/**", (route) => {
+  await page.route("**/signed-upload/**", async (route) => {
+    const partNumber = Number(
+      new URL(route.request().url()).pathname.split("-").at(-1),
+    );
+    const attempt = (signedUploadAttempts.get(partNumber) || 0) + 1;
+    signedUploadAttempts.set(partNumber, attempt);
     captures.uploadPartHeaders.push(route.request().headers());
+    captures.signedUploadParts.push({ partNumber, attempt });
+    if (overrides.onSignedUpload) {
+      const handled = await overrides.onSignedUpload({
+        route,
+        partNumber,
+        attempt,
+        captures,
+      });
+      if (handled) return;
+    }
     return route.fulfill({
       status: 200,
-      headers: { etag: '"part-etag-1"' },
+      headers: { etag: `"part-etag-${partNumber}"` },
       body: "",
     });
   });
@@ -574,8 +592,8 @@ async function mockFiles(page, overrides = {}) {
               ? { ...uploadProposal, proposalId: "proposal-upload-1" }
               : null,
           state: "uploading",
-          partSize: 5 * 1024 * 1024,
-          totalParts: 1,
+          partSize: overrides.uploadPartSize || 5 * 1024 * 1024,
+          totalParts: overrides.uploadTotalParts || 1,
           uploadedParts: [],
           version: 1,
         },
@@ -586,15 +604,13 @@ async function mockFiles(page, overrides = {}) {
       captures.uploads.push({ step: "presign", body, idempotencyKey });
       return json(route, {
         ok: true,
-        parts: [
-          {
-            partNumber: 1,
-            url: "http://127.0.0.1:9000/signed-upload/part-1",
-            requiredHeaders: {
-              "x-amz-checksum-sha256": body.parts[0].checksumSha256,
-            },
+        parts: body.parts.map((part) => ({
+          partNumber: part.partNumber,
+          url: `http://127.0.0.1:9000/signed-upload/part-${part.partNumber}`,
+          requiredHeaders: {
+            "x-amz-checksum-sha256": part.checksumSha256,
           },
-        ],
+        })),
       });
     }
     if (path === "/api/files/upload-sessions/upload-1/parts") {
@@ -604,6 +620,13 @@ async function mockFiles(page, overrides = {}) {
     if (path === "/api/files/upload-sessions/upload-1/complete") {
       captures.uploads.push({ step: "complete", body, idempotencyKey });
       return json(route, { ok: true, state: "scanning" }, 202);
+    }
+    if (
+      path === "/api/files/upload-sessions/upload-1/abort" &&
+      method === "POST"
+    ) {
+      captures.uploadAborts.push({ body, idempotencyKey });
+      return json(route, { ok: true, state: "aborted" });
     }
     if (path === "/api/files/upload-sessions/upload-1" && method === "GET") {
       const statuses = overrides.uploadStatuses || [{ state: "scanning" }];
@@ -977,6 +1000,195 @@ test("drag and drop uses bounded resumable multipart upload and enters scanning"
   expect(captures.uploadPartHeaders[0]["x-amz-checksum-sha256"]).toBe(
     captures.uploads[1].body.parts[0].checksumSha256,
   );
+});
+
+test("pause survives reload and resumes without reuploading completed parts", async ({
+  page,
+}) => {
+  await seedSession(page);
+  let releaseInterruptedPart;
+  const interruptedPart = new Promise((resolve) => {
+    releaseInterruptedPart = resolve;
+  });
+  const completedParts = [1, 2, 3].map((partNumber) => ({
+    partNumber,
+    etag: `"part-etag-${partNumber}"`,
+    checksumSha256: "server-reconciled-checksum",
+    size: 4,
+  }));
+  const captures = await mockFiles(page, {
+    uploadPartSize: 4,
+    uploadTotalParts: 4,
+    uploadStatuses: [
+      {
+        state: "uploading",
+        progress: 0.75,
+        bytesUploaded: 12,
+        uploadedParts: completedParts,
+      },
+      {
+        state: "uploading",
+        progress: 0.75,
+        bytesUploaded: 12,
+        uploadedParts: completedParts,
+      },
+      { state: "scanning", progress: 1, uploadedParts: completedParts },
+    ],
+    onSignedUpload: async ({ route, partNumber, attempt }) => {
+      if (partNumber !== 4 || attempt !== 1) return false;
+      await interruptedPart;
+      await route
+        .fulfill({
+          status: 200,
+          headers: { etag: '"part-etag-4"' },
+          body: "",
+        })
+        .catch(() => {});
+      return true;
+    },
+  });
+  const chooseCheckpointFile = (locator) =>
+    locator.evaluate((input) => {
+      const transfer = new DataTransfer();
+      transfer.items.add(
+        new File(["abcdefghijklmnop"], "resume.txt", {
+          type: "text/plain",
+          lastModified: 1_786_800_000_000,
+        }),
+      );
+      input.files = transfer.files;
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+  await page.goto("/files/uploads");
+  await page.getByRole("button", { name: "Add files" }).click();
+  await chooseCheckpointFile(page.locator('[data-action="pick-files"]'));
+  await expect
+    .poll(
+      () =>
+        captures.signedUploadParts.filter(({ partNumber }) => partNumber === 4)
+          .length,
+    )
+    .toBe(1);
+
+  await page
+    .locator(".files-modal")
+    .getByRole("button", { name: "Pause" })
+    .click();
+  await expect(page.getByText("Paused at 75%").first()).toBeVisible();
+  expect(captures.uploadAborts).toHaveLength(0);
+  const storedBeforeReload = await page.evaluate(() =>
+    JSON.parse(sessionStorage.getItem("polisFilesUploads.v1")),
+  );
+  expect(storedBeforeReload.items[0]).toEqual(
+    expect.objectContaining({
+      status: "paused",
+      sessionId: "upload-1",
+      progress: 0.75,
+    }),
+  );
+  expect(
+    storedBeforeReload.items[0].completedParts.map(
+      ({ partNumber, etag, size }) => ({ partNumber, etag, size }),
+    ),
+  ).toEqual(
+    completedParts.map(({ partNumber, etag, size }) => ({
+      partNumber,
+      etag,
+      size,
+    })),
+  );
+  releaseInterruptedPart();
+
+  await page.reload();
+  await expect(page.getByText("Choose the same file to resume")).toBeVisible();
+  await chooseCheckpointFile(page.locator("[data-resume-upload]"));
+  await expect
+    .poll(
+      () => captures.uploads.filter(({ step }) => step === "complete").length,
+    )
+    .toBe(1);
+  await expect(
+    page.getByText("Uploaded · security scan in progress").first(),
+  ).toBeVisible();
+
+  const presignedPartBatches = captures.uploads
+    .filter(({ step }) => step === "presign")
+    .map(({ body }) => body.parts.map(({ partNumber }) => partNumber));
+  expect(presignedPartBatches).toEqual([[1, 2, 3], [4], [4]]);
+  expect(
+    captures.signedUploadParts.filter(({ partNumber }) => partNumber <= 3),
+  ).toEqual([
+    { partNumber: 1, attempt: 1 },
+    { partNumber: 2, attempt: 1 },
+    { partNumber: 3, attempt: 1 },
+  ]);
+  expect(captures.uploads.at(-1).body.parts).toEqual([
+    ...completedParts.map(({ partNumber, etag, checksumSha256 }) => ({
+      partNumber,
+      etag,
+      checksumSha256,
+    })),
+    expect.objectContaining({ partNumber: 4, etag: '"part-etag-4"' }),
+  ]);
+});
+
+test("Cancel remains the canonical server abort after a local pause", async ({
+  page,
+}) => {
+  await seedSession(page);
+  let releaseUpload;
+  const uploadGate = new Promise((resolve) => {
+    releaseUpload = resolve;
+  });
+  const captures = await mockFiles(page, {
+    onSignedUpload: async ({ route, partNumber, attempt }) => {
+      if (partNumber !== 1 || attempt !== 1) return false;
+      await uploadGate;
+      await route
+        .fulfill({
+          status: 200,
+          headers: { etag: '"part-etag-1"' },
+          body: "",
+        })
+        .catch(() => {});
+      return true;
+    },
+  });
+
+  await page.goto("/files/uploads");
+  await page.getByRole("button", { name: "Add files" }).click();
+  await page.locator('[data-action="pick-files"]').evaluate((input) => {
+    const transfer = new DataTransfer();
+    transfer.items.add(
+      new File(["cancel me"], "cancel.txt", {
+        type: "text/plain",
+        lastModified: 1_786_800_000_000,
+      }),
+    );
+    input.files = transfer.files;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await expect.poll(() => captures.signedUploadParts.length).toBe(1);
+  const modal = page.locator(".files-modal");
+  await modal.getByRole("button", { name: "Pause" }).click();
+  await expect(modal.getByText(/Paused at/)).toBeVisible();
+  expect(captures.uploadAborts).toHaveLength(0);
+
+  await modal.getByRole("button", { name: "Cancel" }).click();
+  expect(captures.uploadAborts).toEqual([
+    {
+      body: {
+        expectedVersion: 1,
+        idempotencyKey: expect.any(String),
+      },
+      idempotencyKey: expect.any(String),
+    },
+  ]);
+  expect(captures.uploadAborts[0].idempotencyKey).toBe(
+    captures.uploadAborts[0].body.idempotencyKey,
+  );
+  releaseUpload();
 });
 
 test("setup presets keep rule prompts on and AI off by default", async ({

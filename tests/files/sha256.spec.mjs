@@ -43,3 +43,20 @@ test("incremental SHA-256 matches Node across many uneven chunks", async () => {
     "fixture should exercise incremental boundaries",
   );
 });
+
+test("incremental SHA-256 can pause between bounded chunks", async () => {
+  const controller = new AbortController();
+  const progress = [];
+  await assert.rejects(
+    checksumBlob(new Blob(["pause this checksum"]), {
+      chunkSize: 4,
+      signal: controller.signal,
+      onProgress: (value) => {
+        progress.push(value);
+        controller.abort(new DOMException("Paused.", "AbortError"));
+      },
+    }),
+    { name: "AbortError" },
+  );
+  assert.deepEqual(progress, [4 / 19]);
+});
