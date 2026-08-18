@@ -274,6 +274,16 @@ async function seedSession(
   );
 }
 
+async function appendForgedAiSetting(page, formName) {
+  await page.locator(`form[data-form="${formName}"]`).evaluate((form) => {
+    const input = document.createElement("input");
+    input.type = "hidden";
+    input.name = "aiSuggestionsEnabled";
+    input.value = "true";
+    form.append(input);
+  });
+}
+
 async function mockFiles(page, overrides = {}) {
   const currentWorkspace = overrides.workspace || workspace();
   const discoveredWorkspaces = overrides.workspaces || [currentWorkspace];
@@ -2040,6 +2050,95 @@ test("setup presets keep rule prompts on and AI off by default", async ({
     idempotencyKey: expect.any(String),
     ifMatch: "",
   });
+});
+
+test("AI controls stay hidden and forged values fail closed when the feature is disabled", async ({
+  page,
+}) => {
+  await seedSession(page);
+  const setupWorkspace = workspace({ initialized: false });
+  setupWorkspace.featureFlags.aiSuggestionsEnabled = false;
+  setupWorkspace.settings.suggestions.aiAssistance = true;
+  const setupCaptures = await mockFiles(page, { workspace: setupWorkspace });
+
+  await page.goto("/files");
+  await expect(page.getByLabel(/Optional AI caption/)).toHaveCount(0);
+  await expect(
+    page.locator('form[data-form="setup"] [name="aiSuggestionsEnabled"]'),
+  ).toHaveCount(0);
+  await appendForgedAiSetting(page, "setup");
+  await page.getByRole("button", { name: "Create my Files space" }).click();
+  expect(
+    setupCaptures.initializations[0].settings.suggestions.aiAssistance,
+  ).toBe(false);
+
+  const settingsPage = await page.context().newPage();
+  await seedSession(settingsPage);
+  const disabledWorkspace = workspace();
+  disabledWorkspace.featureFlags.aiSuggestionsEnabled = false;
+  disabledWorkspace.settings.suggestions.aiAssistance = true;
+  const disabledFolder = {
+    ...folder,
+    settings: {
+      inheritWorkspace: false,
+      suggestions: {
+        contextMatches: true,
+        socialPosts: true,
+        aiAssistance: true,
+      },
+      automations: { usageBadges: true },
+    },
+  };
+  const settingsCaptures = await mockFiles(settingsPage, {
+    workspace: disabledWorkspace,
+    folder: disabledFolder,
+  });
+
+  await settingsPage.goto("/files");
+  await settingsPage
+    .getByRole("button", { name: "Open Files settings" })
+    .click();
+  await expect(settingsPage.getByLabel(/^AI assistance/)).toHaveCount(0);
+  await expect(
+    settingsPage.locator(
+      'form[data-form="settings"] [name="aiSuggestionsEnabled"]',
+    ),
+  ).toHaveCount(0);
+  await appendForgedAiSetting(settingsPage, "settings");
+  await settingsPage.getByRole("button", { name: "Save settings" }).click();
+  expect(settingsCaptures.settings[0].settings.suggestions).toEqual({
+    contextMatches: true,
+    socialPosts: true,
+    duplicateMedia: true,
+    aiAssistance: false,
+  });
+
+  await settingsPage.goto("/files/folders/folder-1");
+  await settingsPage.getByRole("button", { name: "Folder settings" }).click();
+  await expect(settingsPage.getByLabel(/^AI suggestions/)).toHaveCount(0);
+  await expect(
+    settingsPage.locator(
+      'form[data-form="folder-settings"] [name="aiSuggestionsEnabled"]',
+    ),
+  ).toHaveCount(0);
+  await appendForgedAiSetting(settingsPage, "folder-settings");
+  const folderReload = settingsPage.waitForResponse(
+    (response) =>
+      response.request().method() === "GET" &&
+      new URL(response.url()).pathname === "/api/files/folders/folder-1/assets",
+  );
+  await settingsPage.getByRole("button", { name: "Save folder" }).click();
+  await folderReload;
+  expect(settingsCaptures.folders[0].settings).toEqual({
+    inheritWorkspace: false,
+    suggestions: {
+      contextMatches: true,
+      socialPosts: true,
+      aiAssistance: false,
+    },
+    automations: { usageBadges: true },
+  });
+  await settingsPage.close();
 });
 
 test("workspace settings preserve the canonical nested contract and revision", async ({
