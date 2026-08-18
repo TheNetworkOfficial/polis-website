@@ -1563,23 +1563,41 @@ function renderSuggestionCard(suggestion) {
   const percent = score > 0 ? Math.round(score <= 1 ? score * 100 : score) : 0;
   const aiGenerated =
     suggestion?.engine === "ai" || suggestion?.source === "ai";
-  const isPostPrompt = ["media_post", "event_media"].includes(suggestion?.type);
+  const isPostPrompt = isMediaPostPrompt(suggestion);
   const canDisable = can("canManageAutomations", "files_automations_manage");
   return `<article class="files-suggestion">
     <div class="files-suggestion__icon">${icon("spark")}</div>
     <div><p class="files-eyebrow">${escapeHtml(aiGenerated ? "Optional AI assistance" : isPostPrompt ? "Rule-based media prompt" : "Context match")}${percent ? ` · ${percent}% match` : ""}</p>
       <h3>${escapeHtml(entityName(suggestion, "Recommended share"))}</h3>
-      <p>${escapeHtml(suggestion?.explanation || suggestion?.reason || "Polis found a relevant folder for this workspace.")}</p>
+      <p>${escapeHtml(suggestion?.summary || suggestion?.explanation || suggestion?.reason || (isPostPrompt ? "Review the available media in Current before creating a Polis post." : "Polis found a relevant folder for this workspace."))}</p>
       ${context?.district || context?.election ? `<div class="files-context-chips"><span>${escapeHtml(context.district || "")}</span><span>${escapeHtml(context.election || "")}</span></div>` : ""}
     </div>
     <div class="files-suggestion__actions">
-      <button class="files-button files-button--primary" data-suggestion="accept" data-id="${escapeHtml(id)}">${isPostPrompt ? "Create draft" : "Review & share"}</button>
+      <button class="files-button files-button--primary" data-suggestion="accept" data-id="${escapeHtml(id)}">${isPostPrompt ? "Review media" : "Review & share"}</button>
       <button class="files-button files-button--secondary" data-suggestion="edit" data-id="${escapeHtml(id)}">Edit</button>
       <button class="files-button files-button--ghost" data-suggestion="snooze" data-id="${escapeHtml(id)}">Snooze</button>
       <button class="files-button files-button--ghost" data-suggestion="dismiss" data-id="${escapeHtml(id)}">Dismiss</button>
       ${canDisable ? `<button class="files-button files-button--ghost files-button--small" data-suggestion="disable" data-id="${escapeHtml(id)}">Disable these</button>` : ""}
     </div>
   </article>`;
+}
+
+function isMediaPostPrompt(suggestion) {
+  const suggestionType = normalizeString(
+    suggestion?.suggestionType,
+  ).toLowerCase();
+  const recommendedAction = normalizeString(
+    suggestion?.recommendedAction,
+  ).toLowerCase();
+  if (suggestionType || recommendedAction) {
+    return (
+      ["event_recap", "ready_for_media_team"].includes(suggestionType) &&
+      recommendedAction === "create_post_draft"
+    );
+  }
+  return ["media_post", "event_media"].includes(
+    normalizeString(suggestion?.type).toLowerCase(),
+  );
 }
 
 function isContextualSharePrompt(suggestion) {
@@ -4346,8 +4364,15 @@ async function actOnSuggestion(id, action) {
       result?.folder?.folderId ||
       suggestion?.folderId,
   );
-  if (action === "accept" && isContextualSharePrompt(suggestion) && folderId)
-    navigate(`/files/folders/${encodeURIComponent(folderId)}?tab=access`);
+  if (action === "accept" && folderId) {
+    if (isContextualSharePrompt(suggestion)) {
+      navigate(`/files/folders/${encodeURIComponent(folderId)}?tab=access`);
+      return;
+    }
+    if (isMediaPostPrompt(suggestion)) {
+      navigate(`/files/folders/${encodeURIComponent(folderId)}?tab=current`);
+    }
+  }
 }
 
 async function downloadSelectedAssets() {
