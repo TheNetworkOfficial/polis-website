@@ -44,6 +44,10 @@ const frontendRouteRewrites = [
   [/^\/oauth\/complete(?:\/.*)?$/u, "oauth/complete/index.html"],
   [/^\/calendar-return(?:\/.*)?$/u, "calendar-return/index.html"],
   [
+    /^\/text-banking\/(?:billing(?:\/success)?|registration-payment(?:\/success)?)\/?$/u,
+    "text-banking/index.html",
+  ],
+  [
     /^\/settings\/voter-intelligence(?:\/.*)?$/u,
     "settings/voter-intelligence/index.html",
   ],

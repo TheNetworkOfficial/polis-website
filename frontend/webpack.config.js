@@ -872,6 +872,10 @@ const sharedAppRouteRewrites = [
   [/^\/social-return(?:\/.*)?$/u, "/social-return/index.html"],
   [/^\/oauth\/complete(?:\/.*)?$/u, "/oauth/complete/index.html"],
   [/^\/calendar-return(?:\/.*)?$/u, "/calendar-return/index.html"],
+  [
+    /^\/text-banking\/(?:billing(?:\/success)?|registration-payment(?:\/success)?)\/?$/u,
+    "/text-banking/index.html",
+  ],
   ...settingsSectionRouteRewrites,
   [/^\/settings\/voter-intelligence(?:\/.*)?$/u, "/settings/voter-intelligence/index.html"],
   [/^\/messages(?:\/.*)?$/u, "/messages/index.html"],
@@ -959,6 +963,8 @@ module.exports = {
     dataSafety: "./src/pages/data-safety/data-safety.js",
     childSafety: "./src/pages/child-safety/child-safety.js",
     deleteAccount: "./src/pages/delete-account/delete-account.js",
+    textBankingReturn:
+      "./src/pages/text-banking-return/text-banking-return.js",
     "shared-feed": "./src/pages/shared-feed/shared-feed.js",
     notFound: "./src/pages/404/404.js",
   },
@@ -1094,6 +1100,13 @@ module.exports = {
       template: "./src/pages/delete-account/delete-account.html",
       filename: "delete-account.html",
       chunks: ["main", "deleteAccount"],
+      favicon: "./src/assets/images/polis/Polis.png",
+    }),
+    new HtmlWebpackPlugin({
+      template: "./src/pages/text-banking-return/text-banking-return.html",
+      filename: "text-banking/index.html",
+      chunks: ["textBankingReturn"],
+      publicPath: "/",
       favicon: "./src/assets/images/polis/Polis.png",
     }),
     staticCtaInviteShell("cta-invite/index.html"),
