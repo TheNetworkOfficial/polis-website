@@ -3309,6 +3309,11 @@ function createOrganizationGovernancePageState(seed = {}) {
     selectedVote: seed.selectedVote || null,
     results: seed.results || null,
     paperRoster: seed.paperRoster || null,
+    paperRosterConsumedCursors: Array.isArray(seed.paperRosterConsumedCursors)
+      ? seed.paperRosterConsumedCursors
+      : [],
+    paperRosterLoadingMore: seed.paperRosterLoadingMore === true,
+    paperRosterPaginationError: normalizeString(seed.paperRosterPaginationError),
     auditCase: seed.auditCase || null,
     auditDelivery: seed.auditDelivery || null,
     auditDisclosure: seed.auditDisclosure || null,
@@ -3316,6 +3321,9 @@ function createOrganizationGovernancePageState(seed = {}) {
     loading: seed.loading === true,
     error: normalizeString(seed.error),
     actionPendingKey: normalizeString(seed.actionPendingKey),
+    loadRequestId: Number.isSafeInteger(seed.loadRequestId)
+      ? seed.loadRequestId
+      : 0,
   };
 }
 
@@ -26680,6 +26688,19 @@ function organizationGovernanceFindVote(page, voteId) {
   );
 }
 
+let organizationGovernanceLoadRequestId = 0;
+
+function organizationGovernanceRouteMatches({ organizationId, routeKind, voteId }) {
+  const route = getCurrentRoute();
+  const routeInfo = organizationGovernanceRouteForRoute(route);
+  return (
+    normalizeString(route?.routeKey) === ROUTE_KEY_ORGANIZATION_GOVERNANCE &&
+    currentOrganizationGovernanceId(route) === normalizeString(organizationId) &&
+    routeInfo.key === normalizeString(routeKind) &&
+    normalizeString(routeInfo.voteId) === normalizeString(voteId)
+  );
+}
+
 async function loadOrganizationGovernancePage({ refresh = false } = {}) {
   const route = getCurrentRoute();
   const routeInfo = organizationGovernanceRouteForRoute(route);
@@ -26694,8 +26715,28 @@ async function loadOrganizationGovernancePage({ refresh = false } = {}) {
     scheduleRender();
     return;
   }
+  const loadRequestId = ++organizationGovernanceLoadRequestId;
+  const routeIdentity = {
+    organizationId,
+    routeKind: routeInfo.key,
+    voteId: routeInfo.voteId,
+  };
+  const isCurrentRequest = () =>
+    state.pages.organizationGovernance?.loadRequestId === loadRequestId &&
+    organizationGovernanceRouteMatches(routeIdentity);
+  if (
+    page.organizationId !== organizationId ||
+    routeInfo.key !== "paper" ||
+    (page.paperRoster?.voteId && page.paperRoster.voteId !== routeInfo.voteId)
+  ) {
+    page.paperRoster = null;
+    page.paperRosterConsumedCursors = [];
+    page.paperRosterLoadingMore = false;
+    page.paperRosterPaginationError = "";
+  }
   page.organizationId = organizationId;
   page.routeKind = routeInfo.key;
+  page.loadRequestId = loadRequestId;
   page.loading = true;
   page.error = "";
   if (refresh) {
@@ -26722,6 +26763,7 @@ async function loadOrganizationGovernancePage({ refresh = false } = {}) {
       votesPromise,
       presetsPromise,
     ]);
+    if (!isCurrentRequest()) return;
     if (overviewPayload.__error && votesPayload.__error) {
       throw overviewPayload.__error;
     }
@@ -26743,6 +26785,7 @@ async function loadOrganizationGovernancePage({ refresh = false } = {}) {
         { auth: true },
       );
       selectedVote = normalizeOrganizationGovernanceVote(votePayload);
+      if (!isCurrentRequest()) return;
     }
     let results = null;
     let paperRoster = null;
@@ -26758,6 +26801,7 @@ async function loadOrganizationGovernancePage({ refresh = false } = {}) {
         { auth: true },
       );
       results = normalizeOrganizationGovernanceResults(resultsPayload);
+      if (!isCurrentRequest()) return;
     }
     if (
       routeInfo.key === "paper" &&
@@ -26775,6 +26819,7 @@ async function loadOrganizationGovernancePage({ refresh = false } = {}) {
         { auth: true },
       );
       paperRoster = normalizeOrganizationGovernancePaperRoster(rosterPayload);
+      if (!isCurrentRequest()) return;
     }
     const auditCaseId =
       routeInfo.auditCaseId ||
@@ -26788,7 +26833,9 @@ async function loadOrganizationGovernancePage({ refresh = false } = {}) {
         { auth: true },
       );
       auditCase = normalizeOrganizationGovernanceAuditCase(auditPayload);
+      if (!isCurrentRequest()) return;
     }
+    if (!isCurrentRequest()) return;
     state.pages.organizationGovernance = createOrganizationGovernancePageState({
       ...page,
       organizationId,
@@ -26799,6 +26846,9 @@ async function loadOrganizationGovernancePage({ refresh = false } = {}) {
       selectedVote,
       results,
       paperRoster,
+      paperRosterConsumedCursors: [],
+      paperRosterLoadingMore: false,
+      paperRosterPaginationError: "",
       auditCase,
       auditDelivery,
       auditDisclosure,
@@ -26810,8 +26860,10 @@ async function loadOrganizationGovernancePage({ refresh = false } = {}) {
             "Governance votes could not be loaded.",
           )
         : "",
+      loadRequestId,
     });
   } catch (error) {
+    if (!isCurrentRequest()) return;
     state.pages.organizationGovernance = createOrganizationGovernancePageState({
       ...page,
       organizationId,
@@ -26822,9 +26874,113 @@ async function loadOrganizationGovernancePage({ refresh = false } = {}) {
         error,
         "Organization Governance could not be loaded.",
       ),
+      loadRequestId,
     });
   } finally {
-    scheduleRender();
+    if (isCurrentRequest()) {
+      scheduleRender();
+    }
+  }
+}
+
+async function loadMoreOrganizationGovernancePaperRoster() {
+  const route = getCurrentRoute();
+  const routeInfo = organizationGovernanceRouteForRoute(route);
+  const organizationId = currentOrganizationGovernanceId(route);
+  const page = organizationGovernancePageState();
+  const roster = page.paperRoster;
+  const cursor = normalizeString(roster?.nextCursor);
+  const routeIdentity = {
+    organizationId,
+    routeKind: routeInfo.key,
+    voteId: routeInfo.voteId,
+  };
+  const loadRequestId = page.loadRequestId;
+  const isCurrentRequest = () =>
+    state.pages.organizationGovernance === page &&
+    page.loadRequestId === loadRequestId &&
+    organizationGovernanceRouteMatches(routeIdentity);
+  if (
+    routeInfo.key !== "paper" ||
+    !organizationId ||
+    !routeInfo.voteId ||
+    !roster ||
+    !cursor ||
+    page.loading ||
+    page.paperRosterLoadingMore
+  ) {
+    return false;
+  }
+
+  page.paperRosterLoadingMore = true;
+  page.paperRosterPaginationError = "";
+  scheduleRender();
+  try {
+    const rosterPayload = await fetchJson(
+      organizationGovernanceApiPathWithQuery(
+        organizationGovernanceApiPath(
+          organizationId,
+          `votes/${routeInfo.voteId}/paper-roster`,
+        ),
+        { limit: "100", cursor },
+      ),
+      { auth: true },
+    );
+    if (!isCurrentRequest()) return false;
+    const incoming = normalizeOrganizationGovernancePaperRoster(rosterPayload);
+    if (
+      (incoming.voteId && incoming.voteId !== routeInfo.voteId) ||
+      (roster.voteId && incoming.voteId && incoming.voteId !== roster.voteId) ||
+      (roster.voteVersion &&
+        incoming.voteVersion &&
+        roster.voteVersion !== incoming.voteVersion)
+    ) {
+      page.paperRoster = { ...roster, nextCursor: "" };
+      page.paperRosterPaginationError =
+        "The paper roster changed while loading. Refresh this page before continuing.";
+      return false;
+    }
+
+    const consumedCursors = new Set(page.paperRosterConsumedCursors);
+    consumedCursors.add(cursor);
+    const nextCursor = normalizeString(incoming.nextCursor);
+    const repeatedCursor = Boolean(nextCursor && consumedCursors.has(nextCursor));
+    const items = mergeOrganizationGovernancePaperRosterItems(
+      roster.items,
+      incoming.items,
+    );
+    page.paperRoster = {
+      ...roster,
+      ...incoming,
+      items,
+      nextCursor: repeatedCursor ? "" : nextCursor,
+      summary: {
+        ...readObjectPayload(roster.summary),
+        ...readObjectPayload(incoming.summary),
+        readyForPaperEntry: items.filter((item) => item.readyForPaperEntry).length,
+        readyForVerification: items.filter((item) => item.readyForVerification)
+          .length,
+        readyForVoidReview: items.filter((item) => item.readyForVoidReview).length,
+      },
+    };
+    page.paperRosterConsumedCursors = Array.from(consumedCursors);
+    if (repeatedCursor) {
+      page.paperRosterPaginationError =
+        "The paper roster returned a repeated page cursor. Refresh this page to retry safely.";
+    }
+    return true;
+  } catch (error) {
+    if (!isCurrentRequest()) return false;
+    page.paperRosterPaginationError = settingsErrorMessage(
+      error,
+      "More paper roster members could not be loaded.",
+    );
+    return false;
+  } finally {
+    if (isCurrentRequest()) {
+      page.paperRosterLoadingMore = false;
+      scheduleRender();
+    }
   }
 }
 
@@ -33368,7 +33524,9 @@ function normalizeOrganizationGovernancePaperMember(raw = {}) {
   const disposition = readObjectPayload(
     source.paperDisposition || source.disposition,
   );
-  const voidRequest = readObjectPayload(source.void || source.voidRequest);
+  const voidRequest = readObjectPayload(
+    ballot.void || source.void || source.voidRequest,
+  );
   return {
     canonicalMemberKey: normalizeString(
       source.canonicalMemberKey ||
@@ -33393,7 +33551,11 @@ function normalizeOrganizationGovernancePaperMember(raw = {}) {
       normalizeString(source.eligibilityStatus || source.eligibility)
         .toUpperCase() || "UNKNOWN",
     attendance:
-      normalizeString(source.attendance || source.attendanceStatus)
+      normalizeString(
+        readObjectPayload(source.attendance).status ||
+          source.attendanceStatus ||
+          (typeof source.attendance === "string" ? source.attendance : ""),
+      )
         .toUpperCase() || "UNKNOWN",
     ballotStatus:
       normalizeString(ballot.status || source.ballotStatus).toUpperCase(),
@@ -33444,6 +33606,42 @@ function normalizeOrganizationGovernancePaperRoster(raw = {}) {
     nextCursor: normalizeString(source.nextCursor || source.next_cursor),
     raw: source,
   };
+}
+
+function organizationGovernancePaperRosterMemberKey(member = {}) {
+  for (const field of [
+    "canonicalMemberKey",
+    "rosterMemberId",
+    "privatePaperBallotId",
+    "paperBallotId",
+  ]) {
+    const value = normalizeString(member[field]);
+    if (value) return `${field}:${value}`;
+  }
+  return "";
+}
+
+function mergeOrganizationGovernancePaperRosterItems(current = [], incoming = []) {
+  const merged = Array.isArray(current) ? [...current] : [];
+  const indexByKey = new Map();
+  merged.forEach((member, index) => {
+    const key = organizationGovernancePaperRosterMemberKey(member);
+    if (key && !indexByKey.has(key)) {
+      indexByKey.set(key, index);
+    }
+  });
+  (Array.isArray(incoming) ? incoming : []).forEach((member) => {
+    const key = organizationGovernancePaperRosterMemberKey(member);
+    if (key && indexByKey.has(key)) {
+      merged[indexByKey.get(key)] = member;
+      return;
+    }
+    if (key) {
+      indexByKey.set(key, merged.length);
+    }
+    merged.push(member);
+  });
+  return merged;
 }
 
 function normalizeOrganizationGovernanceAuditCase(raw = {}) {
@@ -61978,10 +62176,11 @@ function renderPostItem(item, index) {
   const mediaIndex = postMediaIndex(item);
   const mediaItem = mediaItems[mediaIndex] || mediaItems[0] || {};
   const presentation = mediaPresentation(mediaItem);
+  const legacyMediaFallback = mediaItem.publicDerivative ? {} : item;
   const mediaType = presentation.mediaType;
-  const imageSource = normalizeUrl(presentation.imageUrl || item.imageUrl);
-  const videoSource = normalizeUrl(presentation.videoUrl || item.videoUrl);
-  const mp4Source = normalizeUrl(presentation.mp4Url || item.mp4Url);
+  const imageSource = normalizeUrl(presentation.imageUrl || legacyMediaFallback.imageUrl);
+  const videoSource = normalizeUrl(presentation.videoUrl || legacyMediaFallback.videoUrl);
+  const mp4Source = normalizeUrl(presentation.mp4Url || legacyMediaFallback.mp4Url);
   const hasVideoMedia = mediaType === "video" && Boolean(videoSource || mp4Source);
   const videoKey = `${normalizeString(item.postId)}:${
     normalizeString(mediaItem.sourceAssetVersionId) ||
@@ -62006,7 +62205,7 @@ function renderPostItem(item, index) {
         playsinline
         loop
         preload="${index <= 1 ? "auto" : "metadata"}"
-        poster="${escapeHtml(upgradePosterUrl(presentation.posterUrl || item.posterUrl))}"
+        poster="${escapeHtml(upgradePosterUrl(presentation.posterUrl || legacyMediaFallback.posterUrl))}"
         aria-label="${escapeHtml(mediaItem.altText || item.previewTitle || item.caption || "Post video")}"
         data-video-post-id="${escapeHtml(item.postId)}"
         data-video-key="${escapeHtml(videoKey)}"
@@ -90654,7 +90853,7 @@ function renderOrganizationGovernancePaperRoster(page, routeInfo) {
           <h2>Paper roster</h2>
           <p>${escapeHtml(roster ? "Review ballot station status, verification, and correction actions." : "No paper roster payload was returned for this vote.")}</p>
         </div>
-        ${roster ? renderCoalitionGovernancePill(`${formatCount(roster.items.length)} member${roster.items.length === 1 ? "" : "s"}`, "good") : ""}
+        ${roster ? renderCoalitionGovernancePill(`${formatCount(roster.items.length)} member${roster.items.length === 1 ? "" : "s"} loaded`, "good") : ""}
       </div>
       ${
         roster
@@ -90690,7 +90889,17 @@ function renderOrganizationGovernancePaperRoster(page, routeInfo) {
                       .join("")
                   : `<div class="shared-page__empty">No roster members were returned.</div>`
               }
-            </div>`
+            </div>
+            ${
+              page.paperRosterPaginationError
+                ? `<div class="shared-page__error">${escapeHtml(page.paperRosterPaginationError)}</div>`
+                : ""
+            }
+            ${
+              roster.nextCursor
+                ? `<div class="shared-card__actions"><button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="organization-paper-roster-load-more"${disabledAttr(page.paperRosterLoadingMore || page.loading)}>${page.paperRosterLoadingMore ? "Loading..." : "Load more members"}</button></div>`
+                : ""
+            }`
           : `<div class="shared-page__empty">Open a paper-enabled vote or refresh this route.</div>`
       }
     </article>
@@ -126932,6 +127141,13 @@ async function handleRootClick(event) {
       target.getAttribute("data-paper-action"),
     ).catch(() => {
       showToast("Paper action failed.");
+    });
+    return;
+  }
+
+  if (action === "organization-paper-roster-load-more") {
+    loadMoreOrganizationGovernancePaperRoster().catch(() => {
+      showToast("More paper roster members could not be loaded.");
     });
     return;
   }

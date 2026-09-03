@@ -104,7 +104,7 @@ function feedItems() {
   ];
 }
 
-async function mockSharedFeed(page) {
+async function mockSharedFeed(page, items = feedItems()) {
   await page.addInitScript(() => {
     let runtimeConfig;
     Object.defineProperty(window, "__POLIS_WEB_APP__", {
@@ -139,7 +139,7 @@ async function mockSharedFeed(page) {
     route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ items: feedItems(), nextCursor: null }),
+      body: JSON.stringify({ items, nextCursor: null }),
     }),
   );
 }
@@ -173,7 +173,13 @@ test("ordered post media supports keyboard, mobile controls, and legacy fallback
     "aria-label",
     "Post media carousel, item 2 of 3",
   );
-  await expect(post.locator("video[data-video-key]")).toHaveCount(1);
+  const video = post.locator("video[data-video-key]");
+  await expect(video).toHaveCount(1);
+  await expect(video).toHaveAttribute("data-video-url", "");
+  await expect(video).toHaveAttribute("data-mp4-url", "/test-media/parade.mp4");
+  await expect
+    .poll(() => video.evaluate((element) => new URL(element.src).pathname))
+    .toBe("/test-media/parade.mp4");
 
   await carousel.press("End");
   await expect(post.getByAltText("Third photo")).toBeVisible();
@@ -193,6 +199,73 @@ test("ordered post media supports keyboard, mobile controls, and legacy fallback
       ),
     });
   }
+});
+
+test("canonical HLS and MP4 slides never inherit the first slide playback source", async ({
+  page,
+}) => {
+  const items = feedItems();
+  items[0].mediaItems = [
+    mediaItem(0, {
+      mediaType: "video",
+      publicDerivative: {
+        derivativeId: "hls-derivative",
+        url: "/test-media/first.m3u8",
+        status: "ready",
+      },
+    }),
+    mediaItem(1, {
+      mediaType: "video",
+      publicDerivative: {
+        derivativeId: "mp4-derivative",
+        url: "/test-media/second.mp4",
+        status: "ready",
+      },
+    }),
+  ];
+  items.push({
+    postId: "legacy-video",
+    displayName: "Legacy Video Author",
+    type: "video",
+    videoUrl: "/test-media/legacy.m3u8",
+    mp4Url: "/test-media/legacy.mp4",
+    posterUrl: "/test-media/legacy.png",
+  });
+  await mockSharedFeed(page, items);
+  await page.goto("/posts/carousel-post");
+  const post = page.locator('article[data-post-id="carousel-post"]');
+  const video = post.locator("video[data-video-key]");
+  await expect(video).toHaveAttribute(
+    "data-video-url",
+    "/test-media/first.m3u8",
+  );
+  await expect(video).toHaveAttribute("data-mp4-url", "");
+
+  await post.getByRole("button", { name: "Next media" }).click();
+  await expect(video).toHaveAttribute("data-video-url", "");
+  await expect(video).toHaveAttribute("data-mp4-url", "/test-media/second.mp4");
+  await expect
+    .poll(() => video.evaluate((element) => new URL(element.src).pathname))
+    .toBe("/test-media/second.mp4");
+  await post.getByRole("button", { name: "Previous media" }).click();
+  await expect(video).toHaveAttribute(
+    "data-video-url",
+    "/test-media/first.m3u8",
+  );
+  await expect(video).toHaveAttribute("data-mp4-url", "");
+
+  const legacyVideo = page.locator(
+    'article[data-post-id="legacy-video"] video',
+  );
+  await expect(legacyVideo).toHaveAttribute(
+    "data-video-url",
+    "/test-media/legacy.m3u8",
+  );
+  await expect(legacyVideo).toHaveAttribute(
+    "data-mp4-url",
+    "/test-media/legacy.mp4",
+  );
+  await expect(legacyVideo).toHaveAttribute("poster", "/test-media/legacy.png");
 });
 
 test("media provenance is visible and linked only with explicit server authority", async ({

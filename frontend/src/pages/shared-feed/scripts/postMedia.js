@@ -31,6 +31,20 @@ function mediaUrlValue(value) {
   }
 }
 
+function isHlsMediaUrl(value) {
+  const candidate = stringValue(value);
+  if (!candidate) {
+    return false;
+  }
+  try {
+    return /\.m3u8$/iu.test(
+      new URL(candidate, "https://polis.invalid").pathname,
+    );
+  } catch {
+    return false;
+  }
+}
+
 function readyPublicDerivative(raw = {}) {
   const derivative = objectValue(raw.publicDerivative || raw.public_derivative);
   if (stringValue(derivative.status).toLowerCase() !== "ready") {
@@ -163,11 +177,12 @@ export function mediaPresentation(item = {}) {
       durationMs: Number(media.durationMs) || null,
     };
   }
+  const derivativeIsHls = isHlsMediaUrl(url);
   return {
     mediaType,
     imageUrl: "",
-    videoUrl: url || stringValue(media.videoUrl),
-    mp4Url: stringValue(media.mp4Url),
+    videoUrl: url ? (derivativeIsHls ? url : "") : stringValue(media.videoUrl),
+    mp4Url: url ? (derivativeIsHls ? "" : url) : stringValue(media.mp4Url),
     posterUrl: thumbnailUrl || stringValue(media.posterUrl),
     playbackId: stringValue(media.playbackId),
     durationMs: Number(media.durationMs) || null,

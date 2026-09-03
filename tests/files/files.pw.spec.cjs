@@ -1248,6 +1248,94 @@ test("Files home is entitled, contextual, responsive, and supports list/grid", a
   ).toBeFocused();
 });
 
+test("workspace listings load later pages without duplicates", async ({
+  page,
+}) => {
+  await seedSession(page);
+  const requestedCursors = [];
+  await mockFiles(page, {
+    onRequest: async ({ route, url, path, method }) => {
+      if (!path.endsWith("/folders") || method !== "GET") return false;
+      const cursor = url.searchParams.get("cursor") || "";
+      requestedCursors.push(cursor);
+      const first = {
+        ...folder,
+        folderId: "page-folder-1",
+        name: "First page folder",
+      };
+      const second = {
+        ...folder,
+        folderId: "page-folder-2",
+        name: "Second page folder",
+      };
+      await json(
+        route,
+        cursor
+          ? { ok: true, folders: [first, second], nextCursor: null }
+          : { ok: true, folders: [first], nextCursor: "folders-page-2" },
+      );
+      return true;
+    },
+  });
+
+  await page.goto("/files");
+  await expect(
+    page.getByText("First page folder", { exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Load more" }).click();
+  await expect(
+    page.getByText("Second page folder", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("First page folder", { exact: true }),
+  ).toHaveCount(1);
+  expect(requestedCursors).toEqual(["", "folders-page-2"]);
+  await expect(page.getByRole("button", { name: "Load more" })).toHaveCount(0);
+});
+
+test("folder assets load later pages and discard a stale route response", async ({
+  page,
+}) => {
+  await seedSession(page);
+  let releaseSecondPage;
+  const secondPageGate = new Promise((resolve) => {
+    releaseSecondPage = resolve;
+  });
+  await mockFiles(page, {
+    onRequest: async ({ route, url, path, method }) => {
+      if (!path.endsWith("/assets") || method !== "GET") return false;
+      const cursor = url.searchParams.get("cursor") || "";
+      if (!cursor) {
+        await json(route, {
+          ok: true,
+          assets: [assets[0]],
+          nextCursor: "assets-page-2",
+        });
+      } else {
+        await secondPageGate;
+        await json(route, { ok: true, assets: [assets[1]], nextCursor: null });
+      }
+      return true;
+    },
+  });
+
+  await page.goto("/files/folders/folder-1");
+  await expect(page.getByText(assets[0].name, { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Load more" }).click();
+  await page.getByRole("button", { name: "Recent" }).click();
+  await expect(page).toHaveURL(/\/files\/recent$/u);
+  releaseSecondPage();
+  await expect(page.getByText(assets[1].name, { exact: true })).toHaveCount(0);
+
+  await page
+    .getByText("Florida House District 3", { exact: true })
+    .first()
+    .click();
+  await expect(page.getByText(assets[0].name, { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Load more" }).click();
+  await expect(page.getByText(assets[1].name, { exact: true })).toBeVisible();
+});
+
 test("accepting a contextual share prompt opens existing access review without granting", async ({
   page,
 }) => {
@@ -1821,6 +1909,85 @@ test("drag and drop uses bounded resumable multipart upload and enters scanning"
   expect(captures.uploadPartHeaders[0]["x-amz-checksum-sha256"]).toBe(
     captures.uploads[1].body.parts[0].checksumSha256,
   );
+});
+
+test("upload progress preserves active folder form values and focus", async ({
+  page,
+}) => {
+  await seedSession(page);
+  await page.addInitScript(() => {
+    const originalOpen = XMLHttpRequest.prototype.open;
+    const originalSend = XMLHttpRequest.prototype.send;
+    window.__filesUploadRequests = [];
+    XMLHttpRequest.prototype.open = function open(method, url, ...args) {
+      this.__filesUrl = String(url);
+      return originalOpen.call(this, method, url, ...args);
+    };
+    XMLHttpRequest.prototype.send = function send(...args) {
+      if (this.__filesUrl.includes("/signed-upload/")) {
+        window.__filesUploadRequests.push(this);
+      }
+      return originalSend.apply(this, args);
+    };
+  });
+  let releaseUpload;
+  const uploadGate = new Promise((resolve) => {
+    releaseUpload = resolve;
+  });
+  const captures = await mockFiles(page, {
+    onSignedUpload: async ({ route, partNumber, attempt }) => {
+      if (partNumber !== 1 || attempt !== 1) return false;
+      await uploadGate;
+      await route.fulfill({
+        status: 200,
+        headers: { etag: '"part-etag-1"' },
+        body: "",
+      });
+      return true;
+    },
+  });
+
+  await page.goto("/files");
+  await page.getByRole("button", { name: "Upload", exact: true }).click();
+  await page.locator('[data-action="pick-files"]').setInputFiles({
+    name: "background.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("background progress"),
+  });
+  await expect.poll(() => captures.signedUploadParts.length).toBe(1);
+  await page.getByRole("button", { name: "Close", exact: true }).last().click();
+  await page.getByRole("button", { name: "New folder" }).click();
+  await page.getByLabel("Folder name").fill("Keep this folder name");
+  await page.getByLabel("What belongs here?").fill("Keep this description");
+  await page.getByLabel("What belongs here?").focus();
+
+  await page.evaluate(() => {
+    const xhr = window.__filesUploadRequests[0];
+    xhr.upload.dispatchEvent(
+      new ProgressEvent("progress", {
+        lengthComputable: true,
+        loaded: 7,
+        total: 19,
+      }),
+    );
+  });
+  await expect(page.getByLabel("Folder name")).toHaveValue(
+    "Keep this folder name",
+  );
+  await expect(page.getByLabel("What belongs here?")).toHaveValue(
+    "Keep this description",
+  );
+  await expect(page.getByLabel("What belongs here?")).toBeFocused();
+  releaseUpload();
+  await expect
+    .poll(
+      () => captures.uploads.filter(({ step }) => step === "complete").length,
+    )
+    .toBe(1);
+  await expect(page.getByLabel("What belongs here?")).toHaveValue(
+    "Keep this description",
+  );
+  await expect(page.getByLabel("What belongs here?")).toBeFocused();
 });
 
 test("pause survives reload and resumes without reuploading completed parts", async ({

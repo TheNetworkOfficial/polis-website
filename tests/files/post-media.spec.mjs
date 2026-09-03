@@ -94,6 +94,40 @@ test("canonical derivatives fail closed when unready, malformed, or unsafe", () 
   assert.deepEqual(media, []);
 });
 
+test("canonical video files use native playback while HLS playlists use the HLS slot", () => {
+  const [mp4, webm, hls] = [
+    "https://media.polis.test/video.mp4",
+    "https://media.polis.test/video.webm",
+    "https://media.polis.test/video.m3u8",
+  ].map((url, order) =>
+    normalizeOrderedPostMedia({
+      mediaItems: [
+        canonicalMedia(order, {
+          mediaType: "video",
+          publicDerivative: {
+            derivativeId: `video-derivative-${order}`,
+            provider: "s3",
+            url,
+            status: "ready",
+          },
+        }),
+      ],
+    }),
+  );
+
+  assert.deepEqual(
+    [mp4, webm, hls].map(([item]) => {
+      const presentation = mediaPresentation(item);
+      return [presentation.videoUrl, presentation.mp4Url];
+    }),
+    [
+      ["", "https://media.polis.test/video.mp4"],
+      ["", "https://media.polis.test/video.webm"],
+      ["https://media.polis.test/video.m3u8", ""],
+    ],
+  );
+});
+
 test("provenance requires explicit published visibility and safe link authority", () => {
   const badges = visibleMediaUsageBadges(
     {

@@ -74,6 +74,9 @@ const state = {
   sort: "updated_desc",
   items: [],
   cursor: "",
+  paginationLoading: false,
+  paginationError: "",
+  consumedCursors: new Set(),
   folder: null,
   folderData: {
     assets: [],
@@ -116,6 +119,7 @@ const api = new FilesApi({
 let shareSearchTimer = null;
 let editionMaterializationTimer = null;
 let editionMaterializationGeneration = 0;
+let routeLoadGeneration = 0;
 
 function readStorage(key) {
   try {
@@ -787,73 +791,177 @@ async function selectWorkspace(descriptor, { preserveRoute = false } = {}) {
   }
 }
 
-async function loadRoute() {
+function routeRequestKey() {
+  const principal = principalOf();
+  return JSON.stringify([
+    principal.type,
+    principal.id,
+    state.route,
+    state.search,
+    state.sort,
+  ]);
+}
+
+function routeRequestGuard() {
+  const generation = routeLoadGeneration;
+  const key = routeRequestKey();
+  return () =>
+    state.status === "ready" &&
+    generation === routeLoadGeneration &&
+    key === routeRequestKey();
+}
+
+function mergeListingItems(existing, incoming) {
+  const items = new Map();
+  for (const item of [...existing, ...incoming]) {
+    const id = entityId(item);
+    if (id)
+      items.set(
+        `${item.entityType || (item.assetId ? "asset" : "folder")}:${id}`,
+        item,
+      );
+  }
+  return [...items.values()];
+}
+
+async function loadMoreItems() {
+  if (
+    state.contentStatus !== "ready" ||
+    !state.cursor ||
+    state.paginationLoading
+  )
+    return;
+  const isCurrent = routeRequestGuard();
+  const cursor = state.cursor;
+  const folderId = state.route.kind === "folder" ? state.route.folderId : "";
+  const principal = principalOf();
+  state.paginationLoading = true;
+  state.paginationError = "";
+  render({ preserveLayers: true });
+  try {
+    const payload = folderId
+      ? await api.listAssets(folderId, { cursor })
+      : await api.listFolders(principal.type, principal.id, {
+          view:
+            state.route.key === "home"
+              ? "my_files"
+              : VIEW_PATHS.get(state.route.key),
+          search: state.search,
+          sort: state.sort,
+          cursor,
+        });
+    if (!isCurrent()) return;
+    const incoming = firstArray(payload, [
+      "items",
+      "folders",
+      "assets",
+      "results",
+    ]);
+    if (folderId)
+      state.folderData.assets = mergeListingItems(
+        state.folderData.assets,
+        incoming,
+      );
+    else state.items = mergeListingItems(state.items, incoming);
+    state.consumedCursors.add(cursor);
+    const nextCursor = normalizeString(payload?.nextCursor);
+    state.cursor = state.consumedCursors.has(nextCursor) ? "" : nextCursor;
+    if (nextCursor && !state.cursor) {
+      state.paginationError =
+        "Files returned a repeated page cursor. Refresh this view to load more safely.";
+    }
+  } catch (error) {
+    if (!isCurrent()) return;
+    state.paginationError =
+      error?.message || "More Files could not be loaded. Try again.";
+  } finally {
+    if (isCurrent()) {
+      state.paginationLoading = false;
+      render({ preserveLayers: true });
+    }
+  }
+}
+
+async function loadRoute({ preserveLayers = false } = {}) {
+  routeLoadGeneration += 1;
   if (state.status !== "ready") return;
+  const isCurrent = routeRequestGuard();
+  const route = { ...state.route };
   state.contentStatus = "loading";
   state.error = "";
   state.folder = null;
-  render();
+  state.cursor = "";
+  state.paginationLoading = false;
+  state.paginationError = "";
+  state.consumedCursors = new Set();
+  render({ preserveLayers });
   try {
-    if (state.route.kind === "folder") {
-      await loadFolder(state.route.folderId, state.route.tab);
-    } else if (state.route.kind === "reference") {
-      await loadHostReferenceDetail(state.route.hostReferenceId);
-    } else if (state.route.key === "recommended") {
-      await loadSuggestions();
+    if (route.kind === "folder") {
+      await loadFolder(route.folderId, route.tab, isCurrent);
+    } else if (route.kind === "reference") {
+      await loadHostReferenceDetail(route.hostReferenceId, isCurrent);
+    } else if (route.key === "recommended") {
+      await loadSuggestions({ isCurrent });
+      if (!isCurrent()) return;
       state.items = [];
-    } else if (state.route.key === "uploads") {
+    } else if (route.key === "uploads") {
       state.items = [];
     } else {
       const principal = principalOf();
       const view =
-        state.route.key === "home"
-          ? "my_files"
-          : VIEW_PATHS.get(state.route.key);
+        route.key === "home" ? "my_files" : VIEW_PATHS.get(route.key);
       const payload = await api.listFolders(principal.type, principal.id, {
         view,
         search: state.search,
         sort: state.sort,
       });
-      state.items = firstArray(payload, [
-        "items",
-        "folders",
-        "assets",
-        "results",
-      ]);
-      state.cursor = normalizeString(payload?.nextCursor || payload?.cursor);
-      if (state.route.key === "home") await loadSuggestions({ quiet: true });
-      if (state.route.key === "review") await loadIncomingGrantRequests();
+      if (!isCurrent()) return;
+      state.items = mergeListingItems(
+        [],
+        firstArray(payload, ["items", "folders", "assets", "results"]),
+      );
+      state.cursor = normalizeString(payload?.nextCursor);
+      if (route.key === "home")
+        await loadSuggestions({ quiet: true, isCurrent });
+      if (!isCurrent()) return;
+      if (route.key === "review") await loadIncomingGrantRequests(isCurrent);
       else state.incomingGrantRequests = [];
     }
-    if (state.route.kind !== "reference") await loadHostReferences();
+    if (!isCurrent()) return;
+    if (route.kind !== "reference") await loadHostReferences(isCurrent);
+    if (!isCurrent()) return;
     state.contentStatus = "ready";
   } catch (error) {
+    if (!isCurrent()) return;
     state.contentStatus = "error";
     state.error = error?.message || "This Files view could not be loaded.";
   }
-  render();
+  render({ preserveLayers });
 }
 
-async function loadIncomingGrantRequests() {
+async function loadIncomingGrantRequests(isCurrent = () => true) {
   try {
     const payload = await api.listGrantRequests({
       status: "pending_recipient_acceptance",
     });
+    if (!isCurrent()) return;
     state.incomingGrantRequests = firstArray(payload, [
       "grantRequests",
       "requests",
       "items",
     ]);
   } catch (error) {
+    if (!isCurrent()) return;
     if (![403, 404].includes(error?.status)) throw error;
     state.incomingGrantRequests = [];
   }
 }
 
-async function loadFolder(folderId, tab) {
+async function loadFolder(folderId, tab, isCurrent = () => true) {
   const folderPayload = await api.getFolder(folderId);
+  if (!isCurrent()) return;
   const folder = folderPayload?.folder || folderPayload;
-  state.folder = {
+  const nextFolder = {
     ...folder,
     ...(folderPayload?.access ? { access: folderPayload.access } : {}),
     version: folderPayload?.version ?? folder?.version,
@@ -865,11 +973,13 @@ async function loadFolder(folderId, tab) {
   if (tab === "history") tasks.push(api.listHistory(folderId));
   if (tab === "access") tasks.push(api.listGrants(folderId));
   const results = await Promise.all(tasks);
-  state.folderData.assets = firstArray(results[0], [
-    "assets",
-    "items",
-    "results",
-  ]);
+  if (!isCurrent()) return;
+  state.folder = nextFolder;
+  state.cursor = normalizeString(results[0]?.nextCursor);
+  state.folderData.assets = mergeListingItems(
+    [],
+    firstArray(results[0], ["assets", "items", "results"]),
+  );
   state.folderData.editions = firstArray(results[1], [
     "editions",
     "items",
@@ -900,18 +1010,20 @@ async function loadFolder(folderId, tab) {
   }
 }
 
-async function loadSuggestions({ quiet = false } = {}) {
+async function loadSuggestions({ quiet = false, isCurrent = () => true } = {}) {
   try {
     const principal = principalOf();
     const payload = await api.listSuggestions(principal.type, principal.id, {
       status: "pending",
     });
+    if (!isCurrent()) return;
     state.suggestions = firstArray(payload, [
       "suggestions",
       "items",
       "results",
     ]);
   } catch (error) {
+    if (!isCurrent()) return;
     if (!quiet) throw error;
     state.suggestions = [];
   }
@@ -962,7 +1074,10 @@ function hostReferenceMatchesContext(reference) {
   );
 }
 
-async function loadHostReferenceDetail(hostReferenceId) {
+async function loadHostReferenceDetail(
+  hostReferenceId,
+  isCurrent = () => true,
+) {
   state.hostReferenceDetail = null;
   const eligibleWorkspaceIds = new Set(
     hostReferenceEligibleWorkspaces().map((workspace) =>
@@ -1004,10 +1119,10 @@ async function loadHostReferenceDetail(hostReferenceId) {
       code: "host_reference_not_found",
     });
   }
-  state.hostReferenceDetail = reference;
+  if (isCurrent()) state.hostReferenceDetail = reference;
 }
 
-async function loadHostReferences() {
+async function loadHostReferences(isCurrent = () => true) {
   if (!hostReferencesEnabled()) {
     state.hostReferences = [];
     state.hostReferencesStatus = "idle";
@@ -1025,12 +1140,14 @@ async function loadHostReferences() {
       hostResourceVersion: context.hostResourceVersion,
       limit: 100,
     });
+    if (!isCurrent()) return;
     state.hostReferences = firstArray(payload, ["items"])
       .map(hostReferenceFromEnvelope)
       .filter(Boolean)
       .filter(hostReferenceMatchesContext);
     state.hostReferencesStatus = "ready";
   } catch {
+    if (!isCurrent()) return;
     state.hostReferences = [];
     state.hostReferencesStatus = "error";
   }
@@ -1546,8 +1663,24 @@ function renderItems(
 ) {
   if (state.contentStatus === "loading") return renderSkeletons();
   if (state.contentStatus === "error") return renderInlineError();
-  if (!items.length) return renderEmpty(emptyTitle, emptyBody);
-  return `<div class="files-items files-items--${state.layout}">${items.map(renderItem).join("")}</div>`;
+  const listing = items.length
+    ? `<div class="files-items files-items--${state.layout}">${items.map(renderItem).join("")}</div>`
+    : renderEmpty(emptyTitle, emptyBody);
+  if (!listingSupportsPagination()) return listing;
+  const pagination = state.paginationError
+    ? `<div class="files-pagination files-pagination--error" role="alert"><span>${escapeHtml(state.paginationError)}</span>${state.cursor ? '<button class="files-button files-button--secondary" data-action="load-more">Retry</button>' : ""}</div>`
+    : state.cursor
+      ? `<div class="files-pagination"><button class="files-button files-button--secondary" data-action="load-more" ${state.paginationLoading ? "disabled" : ""}>${state.paginationLoading ? "Loading more…" : "Load more"}</button></div>`
+      : "";
+  return `${listing}${pagination}`;
+}
+
+function listingSupportsPagination() {
+  if (state.route.kind === "folder") return state.route.tab === "current";
+  return (
+    state.route.kind === "view" &&
+    !["recommended", "uploads"].includes(state.route.key)
+  );
 }
 
 function renderSkeletons() {
@@ -1976,7 +2109,32 @@ function renderUploadItem(item) {
                 : item.status === "quarantined"
                   ? icon("review")
                   : "";
-  return `<article class="files-upload-item files-upload-item--${escapeHtml(item.status)}"><div class="files-upload-item__icon">${icon(type.startsWith("image/") ? "image" : type.startsWith("video/") ? "video" : "file")}</div><div class="files-upload-item__body"><div><strong>${escapeHtml(file.name || file.fileName)}</strong><span>${escapeHtml(formatBytes(file.size))}</span></div><progress class="files-progress" aria-label="Upload progress" max="100" value="${Math.round(item.progress * 100)}">${Math.round(item.progress * 100)}%</progress><small>${escapeHtml(status)}</small></div><div class="files-upload-item__actions">${actions}</div></article>`;
+  return `<article class="files-upload-item files-upload-item--${escapeHtml(item.status)}" data-upload-id="${escapeHtml(item.id)}"><div class="files-upload-item__icon">${icon(type.startsWith("image/") ? "image" : type.startsWith("video/") ? "video" : "file")}</div><div class="files-upload-item__body"><div><strong>${escapeHtml(file.name || file.fileName)}</strong><span>${escapeHtml(formatBytes(file.size))}</span></div><progress class="files-progress" aria-label="Upload progress" max="100" value="${Math.round(item.progress * 100)}">${Math.round(item.progress * 100)}%</progress><small>${escapeHtml(status)}</small></div><div class="files-upload-item__actions">${actions}</div></article>`;
+}
+
+function renderUploadProgress(item) {
+  if (!root || !item?.id) return;
+  const template = document.createElement("template");
+  template.innerHTML = renderUploadItem(item);
+  const next = template.content.firstElementChild;
+  root.querySelectorAll("[data-upload-id]").forEach((current) => {
+    if (current.dataset.uploadId !== item.id) return;
+    current.className = next.className;
+    const progress = current.querySelector("progress");
+    const nextProgress = next.querySelector("progress");
+    if (progress && nextProgress) {
+      progress.value = nextProgress.value;
+      progress.textContent = nextProgress.textContent;
+    }
+    const status = current.querySelector(".files-upload-item__body small");
+    const nextStatus = next.querySelector(".files-upload-item__body small");
+    if (status && nextStatus) status.textContent = nextStatus.textContent;
+    const actions = current.querySelector(".files-upload-item__actions");
+    const nextActions = next.querySelector(".files-upload-item__actions");
+    if (actions && nextActions && actions.innerHTML !== nextActions.innerHTML) {
+      actions.innerHTML = nextActions.innerHTML;
+    }
+  });
 }
 
 function renderModal() {
@@ -2431,7 +2589,7 @@ function renderApp() {
   return `<div class="files-shell">${renderSidebar()}<div class="files-main">${renderHeader()}<main class="files-content" id="files-content">${renderHostReferencesPanel()}${mainContent}</main></div>${renderMobileNav()}${renderModal()}${renderPostDrawer()}${state.toast ? `<div class="files-toast files-toast--${escapeHtml(state.toast.tone)}" role="status">${state.toast.tone === "success" ? icon("check") : icon("file")}<span>${escapeHtml(state.toast.message)}</span></div>` : ""}${state.busyAction ? '<div class="files-busy" role="status"><span></span><span class="sr-only">Working…</span></div>' : ""}</div>`;
 }
 
-function render() {
+function render({ preserveLayers = false } = {}) {
   if (!root) return;
   if (state.status === "booting" || state.status === "loading-workspace") {
     root.innerHTML = `<main class="files-boot" aria-busy="true" aria-live="polite"><img src="${polisLogoUrl}" alt="" /><p>${state.status === "booting" ? "Opening Polis Files…" : "Opening workspace…"}</p></main>`;
@@ -2460,7 +2618,25 @@ function render() {
     root.innerHTML = renderStatusPage(state.status, ...gates[state.status]);
     return;
   }
+  const preserved = preserveLayers
+    ? [
+        root.querySelector(".files-modal-layer"),
+        root.querySelector(".files-drawer-layer"),
+      ].filter(Boolean)
+    : [];
+  const focused =
+    preserveLayers &&
+    preserved.some((layer) => layer.contains(document.activeElement))
+      ? document.activeElement
+      : null;
   root.innerHTML = renderApp();
+  preserved.forEach((layer) => {
+    const selector = layer.matches(".files-modal-layer")
+      ? ".files-modal-layer"
+      : ".files-drawer-layer";
+    root.querySelector(selector)?.replaceWith(layer);
+  });
+  focused?.focus({ preventScroll: true });
   window.requestAnimationFrame(observePreviewTargets);
   const activeLayer = state.modal
     ? root.querySelector(".files-modal")
@@ -2675,6 +2851,7 @@ async function handleClick(event) {
   }
   if (action === "retry") bootstrap();
   if (action === "reload-view") loadRoute();
+  if (action === "load-more") await loadMoreItems();
   if (action === "refresh-edition-materialization") {
     scheduleEditionMaterializationPoll({
       immediate: true,
@@ -4884,7 +5061,7 @@ function scheduleUploadStatusPoll(item, { immediate = false } = {}) {
     item.error =
       "Security scan is still processing. Reopen Files later to refresh its status.";
     persistUploadCheckpoints();
-    render();
+    renderUploadProgress(item);
     return;
   }
   const delay = immediate
@@ -4913,7 +5090,7 @@ async function refreshUploadStatus(item, { schedule = false } = {}) {
     }
   }
   persistUploadCheckpoints();
-  render();
+  renderUploadProgress(item);
   if (schedule) scheduleUploadStatusPoll(item);
 }
 
@@ -5021,7 +5198,7 @@ async function runUpload(item) {
   item.error = "";
   const controller = new AbortController();
   state.uploadControllers.set(item.id, controller);
-  render();
+  renderUploadProgress(item);
   try {
     item.fileMetadata = {
       name: item.file.name,
@@ -5037,7 +5214,7 @@ async function runUpload(item) {
         signal: controller.signal,
         onProgress: (progress) => {
           item.hashProgress = progress;
-          render();
+          renderUploadProgress(item);
         },
       });
     }
@@ -5142,7 +5319,7 @@ async function runUpload(item) {
                     )) /
                   item.file.size
                 : 0;
-              render();
+              renderUploadProgress(item);
             },
           });
           return {
@@ -5184,7 +5361,7 @@ async function runUpload(item) {
     assertUploadTransferActive(item, controller.signal);
     item.status = "finalizing";
     persistUploadCheckpoints();
-    render();
+    renderUploadProgress(item);
     const completion = await api.completeUpload(
       item.sessionId,
       {
@@ -5220,7 +5397,7 @@ async function runUpload(item) {
       state.route.kind === "folder" &&
       entityId(state.folder) === item.folderId
     )
-      await loadRoute();
+      await loadRoute({ preserveLayers: true });
   } catch (error) {
     const interrupted = error?.name === "AbortError";
     if (item.cancelRequested) {
@@ -5232,7 +5409,7 @@ async function runUpload(item) {
     persistUploadCheckpoints();
   } finally {
     state.uploadControllers.delete(item.id);
-    render();
+    renderUploadProgress(item);
   }
 }
 
