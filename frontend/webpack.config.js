@@ -356,6 +356,12 @@ const settingsSectionShells = [
     "Reset passwords, configure authenticator MFA, and review account security options from the browser.",
   ),
   settingsSectionShell(
+    "/settings/account-security/governance-passkey",
+    "Account Passkey",
+    "Set up the account passkey used for Polis Governance.",
+    "Create the signed-in account confirmation used for sensitive Governance votes and meeting actions.",
+  ),
+  settingsSectionShell(
     "/settings/account-security/totp",
     "Authenticator App",
     "Configure authenticator MFA for Polis sign-in.",
