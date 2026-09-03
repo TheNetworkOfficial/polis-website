@@ -242,6 +242,28 @@ function staticCoalitionsShell(filename) {
   });
 }
 
+function staticOrganizationGovernanceShell(filename) {
+  return new HtmlWebpackPlugin({
+    templateContent: buildStaticSharedFeedShellHtml({
+      route: "/organizations/org/governance",
+      routeKey: "organization-governance",
+      routeParams: { organizationId: "org", governancePath: "" },
+      title: "Organization Governance | Polis",
+      description:
+        "Open organization Governance votes, paper rosters, results, and exceptional audit workflows in Polis.",
+      eyebrow: "Organization Governance",
+      headline: "Opening organization Governance",
+      supportingCopy:
+        "Review organization votes, paper ballot roster states, certified results, and receipt-scoped audit workflows from the browser.",
+      requiresAuth: true,
+    }),
+    filename,
+    chunks: ["shared-feed"],
+    publicPath: "/",
+    favicon: "./src/assets/images/polis/Polis.png",
+  });
+}
+
 function staticSharedAppShell(
   filename,
   {
@@ -880,6 +902,7 @@ const sharedAppRouteRewrites = [
   [/^\/settings\/voter-intelligence(?:\/.*)?$/u, "/settings/voter-intelligence/index.html"],
   [/^\/messages(?:\/.*)?$/u, "/messages/index.html"],
   [/^\/candidate-dashboard(?:\/.*)?$/u, "/candidate-dashboard/index.html"],
+  [/^\/organizations(?:\/.*)?$/u, "/organizations/index.html"],
   [/^\/coalitions(?:\/.*)?$/u, "/coalitions/index.html"],
   [/^\/cta-invite(?:\/.*)?$/u, "/cta-invite/index.html"],
   [/^\/petitions(?:\/.*)?$/u, "/petitions/index.html"],
@@ -1124,6 +1147,8 @@ module.exports = {
     staticMessagesShell("messages/index.html"),
     staticCandidateDashboardShell("candidate-dashboard.html"),
     staticCandidateDashboardShell("candidate-dashboard/index.html"),
+    staticOrganizationGovernanceShell("organizations.html"),
+    staticOrganizationGovernanceShell("organizations/index.html"),
     staticCoalitionsShell("coalitions.html"),
     staticCoalitionsShell("coalitions/index.html"),
     ...sharedAppShells.map((shell) =>
