@@ -797,7 +797,7 @@ async function mockFiles(page, overrides = {}) {
         {
           assetId,
           revisionId,
-          url: `http://127.0.0.1:9000/signed-preview/${encodeURIComponent(assetId)}/${encodeURIComponent(revisionId)}.png?signature=short-lived`,
+          url: `${url.origin}/signed-preview/${encodeURIComponent(assetId)}/${encodeURIComponent(revisionId)}.png?signature=short-lived`,
           expiresInSeconds: overrides.previewExpiresInSeconds || 300,
           cachePolicy: "no-store",
           offlineAvailable: false,
@@ -1101,7 +1101,7 @@ async function mockFiles(page, overrides = {}) {
         ok: true,
         parts: body.parts.map((part) => ({
           partNumber: part.partNumber,
-          url: `http://127.0.0.1:9000/signed-upload/part-${part.partNumber}`,
+          url: `${url.origin}/signed-upload/part-${part.partNumber}`,
           requiredHeaders: {
             "x-amz-checksum-sha256": part.checksumSha256,
           },
