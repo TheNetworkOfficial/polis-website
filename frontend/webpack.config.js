@@ -2,6 +2,7 @@ const HtmlWebpackPlugin = require("html-webpack-plugin");
 const MiniCssExtractPlugin = require("mini-css-extract-plugin");
 const { CleanWebpackPlugin } = require("clean-webpack-plugin");
 const webpack = require("webpack");
+const fs = require("fs");
 const path = require("path");
 const rootPackage = require("../package.json");
 const frontendPackage = require("./package.json");
@@ -25,6 +26,31 @@ const webAppInfo = {
   commit: webAppCommit ? webAppCommit.slice(0, 12) : "",
   builtAt: process.env.POLIS_WEB_BUILD_TIME || "",
 };
+
+class StaticTextAssetPlugin {
+  constructor({ sourcePath, filename }) {
+    this.sourcePath = sourcePath;
+    this.filename = filename;
+  }
+
+  apply(compiler) {
+    const pluginName = this.constructor.name;
+    compiler.hooks.thisCompilation.tap(pluginName, (compilation) => {
+      compilation.hooks.processAssets.tap(
+        {
+          name: pluginName,
+          stage: webpack.Compilation.PROCESS_ASSETS_STAGE_ADDITIONAL,
+        },
+        () => {
+          compilation.emitAsset(
+            this.filename,
+            new webpack.sources.RawSource(fs.readFileSync(this.sourcePath)),
+          );
+        },
+      );
+    });
+  }
+}
 
 function serializeInlineJson(value) {
   return JSON.stringify(value)
@@ -1048,6 +1074,10 @@ module.exports = {
   },
   plugins: [
     new CleanWebpackPlugin(),
+    new StaticTextAssetPlugin({
+      sourcePath: path.resolve(__dirname, "src/_redirects"),
+      filename: "_redirects",
+    }),
     new MiniCssExtractPlugin({
       filename: (pathData) =>
         pathData.chunk?.name === "shared-feed"
