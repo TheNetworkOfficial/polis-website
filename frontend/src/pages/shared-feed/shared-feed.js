@@ -3306,6 +3306,12 @@ function createOrganizationGovernancePageState(seed = {}) {
     overview: seed.overview || null,
     presets: Array.isArray(seed.presets) ? seed.presets : [],
     votes: Array.isArray(seed.votes) ? seed.votes : [],
+    votesNextCursor: normalizeString(seed.votesNextCursor),
+    votesConsumedCursors: Array.isArray(seed.votesConsumedCursors)
+      ? seed.votesConsumedCursors
+      : [],
+    votesLoadingMore: seed.votesLoadingMore === true,
+    votesPaginationError: normalizeString(seed.votesPaginationError),
     selectedVote: seed.selectedVote || null,
     results: seed.results || null,
     paperRoster: seed.paperRoster || null,
@@ -26724,6 +26730,15 @@ async function loadOrganizationGovernancePage({ refresh = false } = {}) {
   const isCurrentRequest = () =>
     state.pages.organizationGovernance?.loadRequestId === loadRequestId &&
     organizationGovernanceRouteMatches(routeIdentity);
+  if (page.organizationId !== organizationId) {
+    page.votes = [];
+    page.votesNextCursor = "";
+    page.votesConsumedCursors = [];
+    page.selectedVote = null;
+    page.loaded = false;
+  }
+  page.votesLoadingMore = false;
+  page.votesPaginationError = "";
   if (
     page.organizationId !== organizationId ||
     routeInfo.key !== "paper" ||
@@ -26843,6 +26858,12 @@ async function loadOrganizationGovernancePage({ refresh = false } = {}) {
       overview: overviewPayload.__error ? page.overview : overviewPayload,
       presets,
       votes,
+      votesNextCursor: votesPayload.__error
+        ? page.votesNextCursor
+        : normalizeString(votesPayload.nextCursor),
+      votesConsumedCursors: votesPayload.__error ? page.votesConsumedCursors : [],
+      votesLoadingMore: false,
+      votesPaginationError: "",
       selectedVote,
       results,
       paperRoster,
@@ -26878,6 +26899,91 @@ async function loadOrganizationGovernancePage({ refresh = false } = {}) {
     });
   } finally {
     if (isCurrentRequest()) {
+      scheduleRender();
+    }
+  }
+}
+
+/** Append cursor pages without replacing the versions already open in this view. */
+async function loadMoreOrganizationGovernanceVotes() {
+  const route = getCurrentRoute();
+  const routeInfo = organizationGovernanceRouteForRoute(route);
+  const organizationId = currentOrganizationGovernanceId(route);
+  const page = organizationGovernancePageState();
+  const cursor = normalizeString(page.votesNextCursor);
+  const routeIdentity = {
+    organizationId,
+    routeKind: routeInfo.key,
+    voteId: routeInfo.voteId,
+  };
+  const loadRequestId = page.loadRequestId;
+  const isCurrentRequest = () =>
+    state.pages.organizationGovernance === page &&
+    page.loadRequestId === loadRequestId &&
+    organizationGovernanceRouteMatches(routeIdentity);
+  if (
+    !organizationId ||
+    page.organizationId !== organizationId ||
+    !cursor ||
+    page.loading ||
+    page.votesLoadingMore ||
+    !isCurrentRequest()
+  ) {
+    return false;
+  }
+  page.votesLoadingMore = true;
+  page.votesPaginationError = "";
+  scheduleRender();
+  try {
+    const payload = await fetchJson(
+      organizationGovernanceApiPathWithQuery(
+        organizationGovernanceApiPath(organizationId, "votes"),
+        { limit: "100", cursor },
+      ),
+      { auth: true },
+    );
+    if (!isCurrentRequest()) return false;
+    const incoming = normalizeOrganizationGovernanceVotesPayload(payload);
+    if (
+      incoming.some(
+        (vote) => vote.organizationId && vote.organizationId !== organizationId,
+      )
+    ) {
+      throw new Error(
+        "The vote page belongs to a different organization. Refresh to retry safely.",
+      );
+    }
+    const byId = new Map(page.votes.map((vote) => [vote.voteId, vote]));
+    for (const vote of incoming) {
+      if (!byId.has(vote.voteId)) {
+        byId.set(
+          vote.voteId,
+          page.selectedVote?.voteId === vote.voteId ? page.selectedVote : vote,
+        );
+      }
+    }
+    const consumedCursors = new Set(page.votesConsumedCursors);
+    consumedCursors.add(cursor);
+    const nextCursor = normalizeString(payload.nextCursor);
+    const repeatedCursor = Boolean(nextCursor && consumedCursors.has(nextCursor));
+    page.votes = Array.from(byId.values());
+    page.votesNextCursor = repeatedCursor ? "" : nextCursor;
+    page.votesConsumedCursors = Array.from(consumedCursors);
+    if (repeatedCursor) {
+      page.votesPaginationError =
+        "The vote list returned a repeated page cursor. Refresh this page to retry safely.";
+    }
+    return true;
+  } catch (error) {
+    if (!isCurrentRequest()) return false;
+    page.votesPaginationError = settingsErrorMessage(
+      error,
+      "More Governance votes could not be loaded.",
+    );
+    return false;
+  } finally {
+    if (isCurrentRequest()) {
+      page.votesLoadingMore = false;
       scheduleRender();
     }
   }
@@ -90612,17 +90718,28 @@ function renderOrganizationGovernanceVoteCard(vote, page, { focused = false } = 
   </article>`;
 }
 
+function renderOrganizationGovernanceVotesPagination(page) {
+  if (!page.votesNextCursor && !page.votesPaginationError) return "";
+  return `<div class="shared-coalition-governance-actions">
+    <span role="status">${escapeHtml(`${formatCount(page.votes.length)} votes loaded.${page.votesNextCursor ? " More votes are available." : ""}`)}</span>
+    ${page.votesPaginationError ? `<div class="shared-page__error">${escapeHtml(page.votesPaginationError)}</div>` : ""}
+    ${page.votesNextCursor
+      ? `<button class="shared-feed-chip" type="button" data-action="organization-votes-load-more"${disabledAttr(page.loading || page.votesLoadingMore)}>${page.votesLoadingMore ? "Loading votes..." : "Load more votes"}</button>`
+      : `<button class="shared-feed-chip" type="button" data-action="refresh-current-route"${disabledAttr(page.loading)}>Refresh votes</button>`}
+  </div>`;
+}
+
 function renderOrganizationGovernanceVoteList(page, routeInfo) {
   const focusedVoteId = normalizeString(routeInfo.voteId);
   const votes = focusedVoteId
     ? page.votes.filter((vote) => vote.voteId !== focusedVoteId)
     : page.votes;
   if (!votes.length) {
-    return `<div class="shared-page__empty">${escapeHtml(focusedVoteId ? "No other organization votes are loaded." : "No organization Governance votes were returned.")}</div>`;
+    return `<div class="shared-page__empty">${escapeHtml(focusedVoteId ? "No other organization votes are loaded." : "No organization Governance votes were returned.")}</div>${renderOrganizationGovernanceVotesPagination(page)}`;
   }
   return `<div class="shared-coalition-governance-list shared-organization-governance-vote-list">
     ${votes.map((vote) => renderOrganizationGovernanceVoteCard(vote, page)).join("")}
-  </div>`;
+  </div>${renderOrganizationGovernanceVotesPagination(page)}`;
 }
 
 function renderOrganizationGovernanceVoteForm(page, { vote = null } = {}) {
@@ -90756,7 +90873,7 @@ function renderOrganizationGovernanceResultsPanel(page, routeInfo) {
 function renderOrganizationGovernancePaperVotePicker(page) {
   const paperVotes = page.votes.filter(organizationGovernancePaperRouteAvailable);
   if (!paperVotes.length) {
-    return `<article class="shared-coalition-panel"><div class="shared-page__empty">No open or reviewable vote currently allows paper ballots or aggregate floor counts.</div></article>`;
+    return `<article class="shared-coalition-panel"><div class="shared-page__empty">No loaded open or reviewable vote allows paper ballots or aggregate floor counts.</div>${renderOrganizationGovernanceVotesPagination(page)}</article>`;
   }
   return `<article class="shared-coalition-panel">
     <div class="shared-coalition-panel__header">
@@ -90768,6 +90885,7 @@ function renderOrganizationGovernancePaperVotePicker(page) {
     <div class="shared-coalition-governance-list shared-organization-governance-vote-list">
       ${paperVotes.map((vote) => renderOrganizationGovernanceVoteCard(vote, page)).join("")}
     </div>
+    ${renderOrganizationGovernanceVotesPagination(page)}
   </article>`;
 }
 
@@ -91126,7 +91244,7 @@ function renderOrganizationGovernancePage() {
         </div>
       </section>
       <div class="shared-coalition-metrics">
-        ${renderCoalitionMetric("Votes", formatCount(page.votes.length))}
+        ${renderCoalitionMetric("Votes loaded", formatCount(page.votes.length))}
         ${renderCoalitionMetric("Open", formatCount(openVotes), openVotes ? "cyan" : "")}
         ${renderCoalitionMetric("Paper", formatCount(paperVotes))}
         ${renderCoalitionMetric("Presets", formatCount(page.presets.length))}
@@ -127141,6 +127259,13 @@ async function handleRootClick(event) {
       target.getAttribute("data-paper-action"),
     ).catch(() => {
       showToast("Paper action failed.");
+    });
+    return;
+  }
+
+  if (action === "organization-votes-load-more") {
+    loadMoreOrganizationGovernanceVotes().catch(() => {
+      showToast("More Governance votes could not be loaded.");
     });
     return;
   }

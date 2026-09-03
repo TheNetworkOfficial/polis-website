@@ -72,6 +72,8 @@ const state = {
   layout: readStorage(STORED_LAYOUT_KEY) === "grid" ? "grid" : "list",
   search: "",
   sort: "updated_desc",
+  folderFilter: "",
+  folderSort: "updated_desc",
   items: [],
   cursor: "",
   paginationLoading: false,
@@ -85,6 +87,7 @@ const state = {
     grants: [],
     editions: [],
   },
+  folderPagination: {},
   suggestions: [],
   incomingGrantRequests: [],
   presets: [],
@@ -190,7 +193,8 @@ function firstArray(payload, keys) {
 
 function entityId(entity) {
   return normalizeString(
-    entity?.assetId ||
+    entity?.commitId ||
+      entity?.assetId ||
       entity?.proposalId ||
       entity?.grantId ||
       entity?.editionId ||
@@ -824,6 +828,86 @@ function mergeListingItems(existing, incoming) {
   return [...items.values()];
 }
 
+const folderCollections = {
+  editions: {
+    method: "listEditions",
+    keys: ["editions", "items", "results"],
+    tab: "current",
+  },
+  proposals: {
+    method: "listProposals",
+    keys: ["proposals", "items", "results"],
+    tab: "proposals",
+  },
+  history: {
+    method: "listHistory",
+    keys: ["commits", "history", "events", "items", "results"],
+    tab: "history",
+  },
+  grants: {
+    method: "listGrants",
+    keys: ["grants", "access", "items", "results"],
+    tab: "access",
+  },
+};
+
+function setFolderCollection(collection, payload) {
+  state.folderData[collection] = mergeListingItems(
+    [],
+    firstArray(payload, folderCollections[collection].keys),
+  );
+  state.folderPagination[collection] = {
+    cursor: normalizeString(payload?.nextCursor),
+    loading: false,
+    error: "",
+    consumed: new Set(),
+  };
+}
+
+async function loadMoreFolderCollection(collection) {
+  const config = folderCollections[collection];
+  const pagination = state.folderPagination[collection];
+  if (
+    !config ||
+    !pagination?.cursor ||
+    pagination.loading ||
+    state.contentStatus !== "ready" ||
+    state.route.kind !== "folder" ||
+    state.route.tab !== config.tab
+  )
+    return;
+  const isCurrent = routeRequestGuard();
+  const folderId = state.route.folderId;
+  const cursor = pagination.cursor;
+  pagination.loading = true;
+  pagination.error = "";
+  render({ preserveLayers: true });
+  try {
+    const payload = await api[config.method](folderId, { cursor });
+    if (!isCurrent()) return;
+    state.folderData[collection] = mergeListingItems(
+      state.folderData[collection],
+      firstArray(payload, config.keys),
+    );
+    pagination.consumed.add(cursor);
+    const nextCursor = normalizeString(payload?.nextCursor);
+    pagination.cursor = pagination.consumed.has(nextCursor) ? "" : nextCursor;
+    if (nextCursor && !pagination.cursor) {
+      pagination.error =
+        "Files returned a repeated page cursor. Refresh this view to load more safely.";
+    }
+  } catch (error) {
+    if (!isCurrent()) return;
+    pagination.error =
+      error?.message || "More records could not be loaded. Try again.";
+  } finally {
+    if (isCurrent()) {
+      pagination.loading = false;
+      render({ preserveLayers: true });
+    }
+  }
+}
+
 async function loadMoreItems() {
   if (
     state.contentStatus !== "ready" ||
@@ -894,6 +978,7 @@ async function loadRoute({ preserveLayers = false } = {}) {
   state.paginationLoading = false;
   state.paginationError = "";
   state.consumedCursors = new Set();
+  state.folderPagination = {};
   render({ preserveLayers });
   try {
     if (route.kind === "folder") {
@@ -980,34 +1065,13 @@ async function loadFolder(folderId, tab, isCurrent = () => true) {
     [],
     firstArray(results[0], ["assets", "items", "results"]),
   );
-  state.folderData.editions = firstArray(results[1], [
-    "editions",
-    "items",
-    "results",
-  ]);
-  if (tab === "proposals") {
-    state.folderData.proposals = firstArray(results[2], [
-      "proposals",
-      "items",
-      "results",
-    ]);
-  }
-  if (tab === "history") {
-    state.folderData.history = firstArray(results[2], [
-      "history",
-      "events",
-      "items",
-      "results",
-    ]);
-  }
-  if (tab === "access") {
-    state.folderData.grants = firstArray(results[2], [
-      "grants",
-      "access",
-      "items",
-      "results",
-    ]);
-  }
+  setFolderCollection("editions", results[1]);
+  const collection = {
+    proposals: "proposals",
+    history: "history",
+    access: "grants",
+  }[tab];
+  if (collection) setFolderCollection(collection, results[2]);
 }
 
 async function loadSuggestions({ quiet = false, isCurrent = () => true } = {}) {
@@ -1373,25 +1437,57 @@ function renderHostReferenceDetail() {
   return `<section class="files-page files-reference-detail" aria-labelledby="files-reference-title"><button class="files-link-button" data-nav="/files">← Back to Files</button><div class="files-reference-detail__card"><div class="files-folder-hero__icon">${icon("folder")}</div><div><p class="files-eyebrow">Version-fenced Files reference</p><h2 id="files-reference-title">Linked Files material</h2><p>${escapeHtml([relation || "supporting material", purpose, resourceType].filter(Boolean).join(" · "))}</p><small>${escapeHtml(workspaceLabel(workspace))} · ${normalizeString(reference.status) === "active" ? "Active" : "Revoked"}</small></div></div><p class="files-form-note">This page confirms the revocable relationship only. File names, signed preview URLs, and folder contents remain inside their normal Files permissions.</p></section>`;
 }
 
+function isCurrentFolderView() {
+  return state.route.kind === "folder" && state.route.tab === "current";
+}
+
+function visibleFolderAssets() {
+  const query = state.folderFilter.toLocaleLowerCase();
+  const items = state.folderData.assets.filter(
+    (item) => !query || entityName(item).toLocaleLowerCase().includes(query),
+  );
+  return items.sort((left, right) => {
+    if (state.folderSort === "name_asc") {
+      return (
+        entityName(left).localeCompare(entityName(right), undefined, {
+          sensitivity: "base",
+        }) || entityId(left).localeCompare(entityId(right))
+      );
+    }
+    const field =
+      state.folderSort === "created_desc" ? "createdAt" : "updatedAt";
+    const timestamp = (item) => {
+      const value = item[field] || item.createdAt || "";
+      return (typeof value === "number" ? value : Date.parse(value)) || 0;
+    };
+    return (
+      timestamp(right) - timestamp(left) ||
+      entityId(left).localeCompare(entityId(right))
+    );
+  });
+}
+
 function renderToolbar({ count = state.items.length } = {}) {
-  const selectable =
-    state.route.kind === "folder" && state.route.tab === "current"
-      ? state.folderData.assets.filter(isPostSelectableMedia)
-      : [];
+  const folderView = isCurrentFolderView();
+  const search = folderView ? state.folderFilter : state.search;
+  const sort = folderView ? state.folderSort : state.sort;
+  const selectable = folderView
+    ? visibleFolderAssets().filter(isPostSelectableMedia)
+    : [];
   const allSelected =
     selectable.length > 0 &&
     selectable.every((item) => state.selection.has(entityId(item)));
   return `<div class="files-toolbar">
     <form class="files-search" data-form="search" role="search">
-      ${icon("search")}<label class="sr-only" for="files-search-input">Search this view</label>
-      <input id="files-search-input" name="search" value="${escapeHtml(state.search)}" placeholder="Search names, context, or people" />
+      ${icon("search")}<label class="sr-only" for="files-search-input">${folderView ? "Filter loaded files" : "Search this view"}</label>
+      <input id="files-search-input" name="search" value="${escapeHtml(search)}" placeholder="${folderView ? "Filter loaded files by name" : "Search names, context, or people"}" />
     </form>
-    <span class="files-toolbar__count">${count} item${count === 1 ? "" : "s"}</span>
+    <span class="files-toolbar__count">${folderView ? `${count} shown · ${state.folderData.assets.length} loaded` : `${count} item${count === 1 ? "" : "s"}`}</span>
     ${selectable.length ? `<button class="files-toolbar__bulk" data-action="select-all" aria-pressed="${allSelected}">${allSelected ? "Clear selection" : "Select all media"}</button>${state.selection.size ? `<button class="files-toolbar__bulk" data-action="bulk-download">Download selected</button>` : ""}` : ""}
-    <label class="files-sort"><span class="sr-only">Sort</span><select data-action="sort">
-      <option value="updated_desc" ${state.sort === "updated_desc" ? "selected" : ""}>Last updated</option>
-      <option value="name_asc" ${state.sort === "name_asc" ? "selected" : ""}>Name</option>
-      <option value="created_desc" ${state.sort === "created_desc" ? "selected" : ""}>Newest</option>
+    <label class="files-sort"><span class="sr-only">${folderView ? "Sort loaded files" : "Sort"}</span><select data-action="sort">
+      <option value="updated_desc" ${sort === "updated_desc" ? "selected" : ""}>Last updated</option>
+      <option value="name_asc" ${sort === "name_asc" ? "selected" : ""}>Name</option>
+      <option value="created_desc" ${sort === "created_desc" ? "selected" : ""}>Newest</option>
     </select></label>
     <div class="files-layout-toggle" role="group" aria-label="Layout">
       <button data-layout="list" class="${state.layout === "list" ? "is-active" : ""}" aria-label="List view" aria-pressed="${state.layout === "list"}">${icon("list")}</button>
@@ -1511,7 +1607,7 @@ function schedulePreviewExpiry(key, entry, delay) {
     state.previewExpiryTimers.delete(key);
     if (state.previewEntries.get(key) === entry) {
       state.previewEntries.delete(key);
-      render();
+      refreshPreviewThumbnails();
     }
   }, delay);
   state.previewExpiryTimers.set(key, timer);
@@ -1554,13 +1650,14 @@ async function loadAssetPreview(assetId, revisionId) {
       };
       state.previewEntries.set(key, entry);
       schedulePreviewExpiry(key, entry, lifetime);
-      render();
+      refreshPreviewThumbnails();
       return entry;
     } catch (error) {
+      if (generation !== state.previewGeneration) return null;
       if ([401, 403].includes(error?.status)) {
         state.previewAccessDenied = true;
         purgePreviewEntries();
-        render();
+        refreshPreviewThumbnails();
       } else if (generation === state.previewGeneration) {
         const retryDelay = error?.status === 409 ? 10_000 : 30_000;
         const entry = {
@@ -1570,7 +1667,7 @@ async function loadAssetPreview(assetId, revisionId) {
         };
         state.previewEntries.set(key, entry);
         schedulePreviewExpiry(key, entry, retryDelay);
-        render();
+        refreshPreviewThumbnails();
       }
       return null;
     } finally {
@@ -1611,6 +1708,22 @@ function observePreviewTargets() {
   targets.forEach((target) => state.previewObserver.observe(target));
 }
 
+function refreshPreviewThumbnails() {
+  const byKey = new Map(
+    [...state.items, ...state.folderData.assets].map((item) => [
+      assetPreviewIdentity(item)?.key,
+      item,
+    ]),
+  );
+  for (const thumbnail of root.querySelectorAll("[data-preview-key]")) {
+    const item = byKey.get(thumbnail.dataset.previewKey);
+    thumbnail.outerHTML = item
+      ? itemThumbnail(item)
+      : `<div class="files-item__thumb files-item__thumb--file">${icon("file")}<span class="sr-only">Preview unavailable</span></div>`;
+  }
+  window.requestAnimationFrame(observePreviewTargets);
+}
+
 function itemThumbnail(item) {
   if (isFolder(item))
     return `<div class="files-item__thumb files-item__thumb--folder">${icon("folder")}</div>`;
@@ -1621,7 +1734,7 @@ function itemThumbnail(item) {
       ? `<video src="${escapeHtml(preview.url)}" muted playsinline preload="metadata" aria-hidden="true"></video>`
       : `<img src="${escapeHtml(preview.url)}" alt="" loading="lazy" referrerpolicy="no-referrer" />`;
     const previewLabel = `${preview.watermarked ? "Watermarked preview · " : "Preview · "}online only`;
-    return `<div class="files-item__thumb files-item__thumb--preview ${preview.watermarked ? "is-watermarked" : ""}" title="${escapeHtml(previewLabel)}">${media}<span class="files-preview-state">${escapeHtml(previewLabel)}</span></div>`;
+    return `<div class="files-item__thumb files-item__thumb--preview ${preview.watermarked ? "is-watermarked" : ""}" data-preview-key="${escapeHtml(identity.key)}" title="${escapeHtml(previewLabel)}">${media}<span class="files-preview-state">${escapeHtml(previewLabel)}</span></div>`;
   }
   if (identity && isMedia(item) && assetIsReady(item)) {
     const stateLabel = preview?.processing
@@ -1631,7 +1744,7 @@ function itemThumbnail(item) {
         : "Loading preview";
     const mediaType = normalizeString(item?.mediaType).toLowerCase();
     const mimeType = normalizeString(item?.mimeType || item?.contentType);
-    return `<div class="files-item__thumb files-item__thumb--file" data-preview-asset="${escapeHtml(identity.assetId)}" data-preview-revision="${escapeHtml(identity.revisionId)}">${icon(mediaType === "video" || mimeType.startsWith("video/") ? "video" : "image")}<span class="sr-only">${stateLabel}</span></div>`;
+    return `<div class="files-item__thumb files-item__thumb--file" data-preview-key="${escapeHtml(identity.key)}" data-preview-asset="${escapeHtml(identity.assetId)}" data-preview-revision="${escapeHtml(identity.revisionId)}">${icon(mediaType === "video" || mimeType.startsWith("video/") ? "video" : "image")}<span class="sr-only">${stateLabel}</span></div>`;
   }
   const mime = normalizeString(item?.mimeType || item?.contentType);
   return `<div class="files-item__thumb files-item__thumb--file">${icon(mime.startsWith("video/") ? "video" : mime.startsWith("image/") ? "image" : "file")}</div>`;
@@ -1681,6 +1794,15 @@ function listingSupportsPagination() {
     state.route.kind === "view" &&
     !["recommended", "uploads"].includes(state.route.key)
   );
+}
+
+function renderFolderCollectionPagination(collection) {
+  const pagination = state.folderPagination[collection];
+  if (!pagination || (!pagination.cursor && !pagination.error)) return "";
+  const button = pagination.cursor
+    ? `<button class="files-button files-button--secondary" data-action="load-folder-page" data-collection="${collection}" ${pagination.loading ? "disabled" : ""}>${pagination.loading ? "Loading more…" : pagination.error ? `Retry ${collection}` : `Load more ${collection}`}</button>`
+    : '<button class="files-button files-button--secondary" data-action="reload-view">Refresh view</button>';
+  return `<div class="files-pagination ${pagination.error ? "files-pagination--error" : ""}" ${pagination.error ? 'role="alert"' : ""}>${pagination.error ? `<span>${escapeHtml(pagination.error)}</span>` : ""}${button}</div>`;
 }
 
 function renderSkeletons() {
@@ -1863,7 +1985,12 @@ function renderEditionMaterializationStatus() {
 
 function renderEditionRail() {
   const editions = state.folderData.editions;
-  if (!editions.length) return "";
+  if (
+    !editions.length &&
+    !state.folderPagination.editions?.cursor &&
+    !state.folderPagination.editions?.error
+  )
+    return "";
   const materialization = activeEditionMaterialization();
   const locked = Boolean(
     materialization &&
@@ -1879,7 +2006,7 @@ function renderEditionRail() {
         : normalizeString(edition?.state || edition?.status || "archived");
       return `<article class="files-edition ${current ? "is-current" : ""}"><div><strong>${escapeHtml(entityName(edition, "Edition"))}</strong><span>${escapeHtml(stateLabel)} · ${escapeHtml(formatDate(edition?.activatedAt || edition?.createdAt))}</span></div>${current ? `<div class="files-edition__actions"><span class="files-state-pill files-state-pill--current">Current</span>${can("canManage", "files_manage") ? `<button class="files-link-button files-link-button--danger" data-edition-action="archive" data-id="${escapeHtml(entityId(edition))}" ${locked ? "disabled" : ""}>Archive current version</button>` : ""}</div>` : can("canManage", "files_manage") ? `<button class="files-link-button" data-edition-action="restore" data-id="${escapeHtml(entityId(edition))}" ${locked ? "disabled" : ""}>Restore as Current</button>` : ""}</article>`;
     })
-    .join("")}</aside>`;
+    .join("")}${renderFolderCollectionPagination("editions")}</aside>`;
 }
 
 function editionIsCurrent(edition) {
@@ -1895,7 +2022,11 @@ function editionIsCurrent(edition) {
 }
 
 function renderCurrentTab() {
-  return `<div class="files-folder-columns"><div><div class="files-current-banner">${icon("check")}<div><strong>Current, approved material</strong><span>People with shared access see this edition. Proposed changes stay separate until reviewed.</span></div></div>${renderToolbar({ count: state.folderData.assets.length })}${renderItems(state.folderData.assets, "This edition is empty", folderUploadIntent() === "proposal" ? "Upload material for review; it stays outside Current until approved." : folderUploadIntent() === "commit" ? "Upload approved material, or propose an addition if this folder is review-gated." : "Approved files will appear here.")}</div>${renderEditionRail()}</div>`;
+  const items = visibleFolderAssets();
+  const partialHint = state.cursor
+    ? '<p class="files-form-note">More files are available. Filtering and sorting apply only to loaded files; load more to include later pages.</p>'
+    : "";
+  return `<div class="files-folder-columns"><div><div class="files-current-banner">${icon("check")}<div><strong>Current, approved material</strong><span>People with shared access see this edition. Proposed changes stay separate until reviewed.</span></div></div>${renderToolbar({ count: items.length })}${partialHint}${renderItems(items, state.folderFilter ? "No loaded files match" : "This edition is empty", state.folderFilter ? "Change the filter or load more files to continue looking." : folderUploadIntent() === "proposal" ? "Upload material for review; it stays outside Current until approved." : folderUploadIntent() === "commit" ? "Upload approved material, or propose an addition if this folder is review-gated." : "Approved files will appear here.")}</div>${renderEditionRail()}</div>`;
 }
 
 function proposalStatus(proposal) {
@@ -1957,7 +2088,7 @@ function renderProposalsTab() {
 
 function renderHistoryTab() {
   const events = state.folderData.history;
-  return `<div class="files-tab-intro"><div><p class="files-eyebrow">Audit trail</p><h3>Folder history</h3><p>See who changed, reviewed, shared, or archived information over time.</p></div></div>${events.length ? `<ol class="files-history">${events.map((event) => `<li><span class="files-history__dot"></span><div><strong>${escapeHtml(entityName(event, event?.action || "Folder updated"))}</strong><p>${escapeHtml(event?.description || event?.summary || "")}</p><small>${escapeHtml(entityName(event?.actor, "Polis"))} · ${escapeHtml(formatDate(event?.createdAt, { withTime: true }))}</small></div></li>`).join("")}</ol>` : renderEmpty("No history yet", "Folder events will form a durable audit trail here.")}`;
+  return `<div class="files-tab-intro"><div><p class="files-eyebrow">Audit trail</p><h3>Folder history</h3><p>See who changed, reviewed, shared, or archived information over time.</p></div></div>${events.length ? `<ol class="files-history">${events.map((event) => `<li><span class="files-history__dot"></span><div><strong>${escapeHtml(entityName(event, event?.message || event?.action || "Folder updated"))}</strong><p>${escapeHtml(event?.description || event?.summary || "")}</p><small>${escapeHtml(entityName(event?.actor, "Polis"))} · ${escapeHtml(formatDate(event?.createdAt, { withTime: true }))}</small></div></li>`).join("")}</ol>` : renderEmpty("No history yet", "Folder events will form a durable audit trail here.")}`;
 }
 
 function grantSubject(grant) {
@@ -2030,9 +2161,12 @@ function renderFolder() {
   );
   const tabContent = {
     current: renderCurrentTab,
-    proposals: renderProposalsTab,
-    history: renderHistoryTab,
-    access: renderAccessTab,
+    proposals: () =>
+      renderProposalsTab() + renderFolderCollectionPagination("proposals"),
+    history: () =>
+      renderHistoryTab() + renderFolderCollectionPagination("history"),
+    access: () =>
+      renderAccessTab() + renderFolderCollectionPagination("grants"),
   }[state.route.tab]();
   return `<section class="files-page files-page--folder"><div class="files-folder-hero"><button class="files-back" data-nav="/files">← All files</button><div class="files-folder-hero__row"><div class="files-folder-hero__icon">${icon("folder")}</div><div><div class="files-context-chips">${[
     context?.stateCode,
@@ -2852,6 +2986,11 @@ async function handleClick(event) {
   if (action === "retry") bootstrap();
   if (action === "reload-view") loadRoute();
   if (action === "load-more") await loadMoreItems();
+  if (action === "load-folder-page") {
+    await loadMoreFolderCollection(
+      event.target.closest("[data-collection]")?.dataset.collection,
+    );
+  }
   if (action === "refresh-edition-materialization") {
     scheduleEditionMaterializationPoll({
       immediate: true,
@@ -2867,7 +3006,7 @@ async function handleClick(event) {
     render();
   }
   if (action === "select-all") {
-    const mediaIds = state.folderData.assets
+    const mediaIds = visibleFolderAssets()
       .filter(isPostSelectableMedia)
       .map(entityId);
     const allSelected =
@@ -2989,8 +3128,13 @@ async function handleChange(event) {
     if (selected) await selectWorkspace(selected);
   }
   if (event.target.matches('[data-action="sort"]')) {
-    state.sort = event.target.value;
-    await loadRoute();
+    if (isCurrentFolderView()) {
+      state.folderSort = event.target.value;
+      render({ preserveLayers: true });
+    } else {
+      state.sort = event.target.value;
+      await loadRoute();
+    }
   }
   if (event.target.matches('[data-action="upload-folder"]'))
     state.modal.folderId = event.target.value;
@@ -3111,8 +3255,13 @@ async function handleSubmit(event) {
   const data = new FormData(form);
   const name = form.dataset.form;
   if (name === "search") {
-    state.search = normalizeString(data.get("search"));
-    await loadRoute();
+    if (isCurrentFolderView()) {
+      state.folderFilter = normalizeString(data.get("search"));
+      render({ preserveLayers: true });
+    } else {
+      state.search = normalizeString(data.get("search"));
+      await loadRoute();
+    }
   }
   if (name === "setup") await submitSetup(data, event.submitter?.value);
   if (name === "new-folder") await submitNewFolder(data);

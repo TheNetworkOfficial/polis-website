@@ -975,6 +975,9 @@ async function mockFiles(page, overrides = {}) {
         ],
       });
     }
+    if (path.endsWith("/history") && method === "GET") {
+      return json(route, { ok: true, commits: [], nextCursor: null });
+    }
     if (path.endsWith("/proposals") && method === "POST") {
       captures.proposalCreates.push(body);
       return json(route, {
@@ -1334,6 +1337,402 @@ test("folder assets load later pages and discard a stale route response", async 
   await expect(page.getByText(assets[0].name, { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Load more" }).click();
   await expect(page.getByText(assets[1].name, { exact: true })).toBeVisible();
+});
+
+test("folder filtering and sorting apply only to loaded authorized files without restarting pagination", async ({
+  page,
+}) => {
+  await seedSession(page);
+  const requests = [];
+  const alpha = {
+    ...assets[0],
+    assetId: "alpha",
+    name: "Alpha match.jpg",
+    updatedAt: "2026-01-01T00:00:00Z",
+  };
+  const zulu = {
+    ...assets[1],
+    assetId: "zulu",
+    name: "Zulu match.jpg",
+    updatedAt: "2026-03-01T00:00:00Z",
+  };
+  const beta = {
+    ...assets[0],
+    assetId: "beta",
+    name: "Beta later.jpg",
+    updatedAt: Date.parse("2026-02-01T00:00:00Z"),
+  };
+  let releasePage;
+  const gate = new Promise((resolve) => {
+    releasePage = resolve;
+  });
+  await mockFiles(page, {
+    onRequest: async ({ route, url, path, method }) => {
+      if (!path.endsWith("/assets") || method !== "GET") return false;
+      const cursor = url.searchParams.get("cursor") || "";
+      requests.push(Object.fromEntries(url.searchParams));
+      if (cursor) await gate;
+      await json(route, {
+        assets: cursor ? [alpha, beta] : [zulu, alpha],
+        nextCursor: cursor ? null : "later",
+      });
+      return true;
+    },
+  });
+  await page.goto("/files/folders/folder-1");
+  await expect(page.getByText("2 shown · 2 loaded")).toBeVisible();
+  await expect(
+    page.getByText(/Filtering and sorting apply only to loaded files/u),
+  ).toBeVisible();
+  await page.getByLabel("Filter loaded files").fill("later");
+  await page.getByLabel("Filter loaded files").press("Enter");
+  await expect(page.getByText("No loaded files match")).toBeVisible();
+  await page.getByRole("button", { name: "Load more", exact: true }).click();
+  await expect.poll(() => requests.length).toBe(2);
+  await page.getByLabel("Filter loaded files").fill("match");
+  await page.getByLabel("Filter loaded files").press("Enter");
+  await page.getByLabel("Sort loaded files").selectOption("name_asc");
+  releasePage();
+  await expect(page.getByText("2 shown · 3 loaded")).toBeVisible();
+  await expect(
+    page.locator(".files-items .files-item__body strong"),
+  ).toHaveText(["Alpha match.jpg", "Zulu match.jpg"]);
+  await page.getByLabel("Filter loaded files").fill("");
+  await page.getByLabel("Filter loaded files").press("Enter");
+  await expect(
+    page.locator(".files-items .files-item__body strong"),
+  ).toHaveText(["Alpha match.jpg", "Beta later.jpg", "Zulu match.jpg"]);
+  await page.getByLabel("Sort loaded files").selectOption("updated_desc");
+  await expect(
+    page.locator(".files-items .files-item__body strong"),
+  ).toHaveText(["Zulu match.jpg", "Beta later.jpg", "Alpha match.jpg"]);
+  expect(requests).toEqual([{}, { cursor: "later" }]);
+  await page.getByRole("button", { name: "Recent", exact: true }).click();
+  await expect(page.getByLabel("Search this view")).toHaveValue("");
+});
+
+const paginatedFolderCollections = [
+  {
+    collection: "editions",
+    tab: "current",
+    envelope: "editions",
+    make: (id) => ({
+      editionId: id,
+      folderId: "folder-1",
+      name: id,
+      state: "archived",
+      version: 2,
+    }),
+  },
+  {
+    collection: "proposals",
+    tab: "proposals",
+    envelope: "proposals",
+    make: (id) => ({
+      proposalId: id,
+      folderId: "folder-1",
+      title: id,
+      status: "pending_review",
+      version: 2,
+      etag: '"2"',
+    }),
+  },
+  {
+    collection: "history",
+    tab: "history",
+    envelope: "commits",
+    make: (id) => ({
+      commitId: id,
+      folderId: "folder-1",
+      proposalId: "same-proposal-across-history",
+      message: id,
+      createdAt: "2026-09-01T00:00:00Z",
+    }),
+  },
+  {
+    collection: "grants",
+    tab: "access",
+    envelope: "grants",
+    make: (id) => ({
+      grantId: id,
+      folderId: "folder-1",
+      recipientPrincipal: { displayName: id },
+      status: "active",
+      version: 2,
+    }),
+  },
+];
+
+for (const { collection, tab, envelope, make } of paginatedFolderCollections) {
+  test(`${collection} pagination handles empty pages, retry, deduplication and cursor cycles`, async ({
+    page,
+  }) => {
+    await seedSession(page);
+    const cursors = [];
+    let failOnce = true;
+    const captures = await mockFiles(page, {
+      onRequest: async ({ route, url, path, method }) => {
+        if (!path.endsWith(`/${collection}`) || method !== "GET") return false;
+        const cursor = url.searchParams.get("cursor") || "";
+        cursors.push(cursor);
+        if (cursor && failOnce) {
+          failOnce = false;
+          await json(route, { message: "Page temporarily unavailable" }, 503);
+        } else {
+          const items = !cursor
+            ? []
+            : cursor === "second"
+              ? [make(`${collection}-one`)]
+              : [make(`${collection}-one`), make(`${collection}-two`)];
+          await json(route, {
+            [envelope]: items,
+            nextCursor: !cursor ? "second" : "third",
+          });
+        }
+        return true;
+      },
+    });
+    await page.goto(`/files/folders/folder-1?tab=${tab}`);
+    await page
+      .getByRole("button", { name: `Load more ${collection}`, exact: true })
+      .click();
+    await page
+      .getByRole("button", { name: `Retry ${collection}`, exact: true })
+      .click();
+    await expect(
+      page.getByText(`${collection}-one`, { exact: true }),
+    ).toBeVisible();
+    await page
+      .getByRole("button", { name: `Load more ${collection}`, exact: true })
+      .click();
+    await expect(
+      page.getByText(`${collection}-two`, { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByText(`${collection}-one`, { exact: true }),
+    ).toHaveCount(1);
+    await expect(
+      page.getByText(/Files returned a repeated page cursor/u),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", {
+        name: `Load more ${collection}`,
+        exact: true,
+      }),
+    ).toHaveCount(0);
+    expect(cursors).toEqual(["", "second", "second", "third"]);
+    expect(captures.requests.filter(({ method }) => method !== "GET")).toEqual(
+      [],
+    );
+  });
+
+  test(`${collection} pagination discards an old tab response`, async ({
+    page,
+  }) => {
+    await seedSession(page);
+    let releasePage;
+    let continuationStarted = false;
+    let continuationFinished = false;
+    const gate = new Promise((resolve) => {
+      releasePage = resolve;
+    });
+    await mockFiles(page, {
+      onRequest: async ({ route, url, path, method }) => {
+        if (!path.endsWith(`/${collection}`) || method !== "GET") return false;
+        const cursor = url.searchParams.get("cursor") || "";
+        if (cursor) {
+          continuationStarted = true;
+          await gate;
+        }
+        await json(route, {
+          [envelope]: [
+            make(
+              cursor ? "Stale collection record" : "Fresh collection record",
+            ),
+          ],
+          nextCursor: cursor ? null : "later",
+        });
+        if (cursor) continuationFinished = true;
+        return true;
+      },
+    });
+    await page.goto(`/files/folders/folder-1?tab=${tab}`);
+    await page
+      .getByRole("button", { name: `Load more ${collection}`, exact: true })
+      .click();
+    await expect.poll(() => continuationStarted).toBe(true);
+    await page
+      .locator(
+        `[data-folder-tab="${tab === "history" ? "proposals" : "history"}"]`,
+      )
+      .click();
+    await expect(
+      page.locator('.files-tabs [aria-current="page"]'),
+    ).not.toHaveAttribute("data-folder-tab", tab);
+    releasePage();
+    await expect.poll(() => continuationFinished).toBe(true);
+    await expect(
+      page.getByText("Stale collection record", { exact: true }),
+    ).toHaveCount(0);
+  });
+}
+
+for (const layer of ["new-folder", "folder-settings", "post-drawer"]) {
+  test(`lazy previews preserve ${layer} input and focus`, async ({ page }) => {
+    await page.addInitScript(() => {
+      Reflect.deleteProperty(window, "IntersectionObserver");
+    });
+    await seedSession(page);
+    let releasePreview;
+    let previewStarted = false;
+    const gate = new Promise((resolve) => {
+      releasePreview = resolve;
+    });
+    await mockFiles(page, {
+      assets: [assets[0]],
+      onRequest: async ({ path }) => {
+        if (!path.endsWith("/preview")) return false;
+        previewStarted = true;
+        await gate;
+        return false;
+      },
+    });
+    await page.goto("/files/folders/folder-1");
+    await expect.poll(() => previewStarted).toBe(true);
+    let input;
+    if (layer === "new-folder") {
+      await page
+        .getByRole("button", { name: "New subfolder", exact: true })
+        .click();
+      input = page.getByLabel("What belongs here?");
+    } else if (layer === "folder-settings") {
+      await page
+        .getByRole("button", { name: "Folder settings", exact: true })
+        .click();
+      input = page.getByLabel("Folder name");
+    } else {
+      await page
+        .getByRole("button", { name: `Select ${assets[0].name}`, exact: true })
+        .click();
+      await page.getByRole("button", { name: /Create post/u }).click();
+      input = page.getByLabel("Post idea or caption");
+    }
+    await input.fill("Keep this unfinished draft");
+    await input.focus();
+    await input.evaluate((node) => {
+      window.__filesDraftInput = node;
+    });
+    releasePreview();
+    await expect(
+      page.locator(".files-content .files-item__thumb--preview"),
+    ).toHaveCount(1);
+    await expect(input).toHaveValue("Keep this unfinished draft");
+    await expect(input).toBeFocused();
+    expect(
+      await input.evaluate((node) => node === window.__filesDraftInput),
+    ).toBe(true);
+    if (layer === "post-drawer")
+      await expect(
+        page.locator(".files-post-drawer .files-item__thumb--preview"),
+      ).toHaveCount(1);
+  });
+}
+
+test("preview expiry and denied refresh remove drawer thumbnails without erasing the draft", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    Reflect.deleteProperty(window, "IntersectionObserver");
+  });
+  await page.clock.install();
+  await seedSession(page);
+  await mockFiles(page, {
+    assets: [assets[0]],
+    previewExpiresInSeconds: 6,
+    previewForbiddenAfter: 1,
+  });
+  await page.goto("/files/folders/folder-1");
+  await expect(
+    page.locator(".files-content .files-item__thumb--preview"),
+  ).toHaveCount(1);
+  await page
+    .getByRole("button", { name: `Select ${assets[0].name}`, exact: true })
+    .click();
+  await page.getByRole("button", { name: /Create post/u }).click();
+  const input = page.getByLabel("Post idea or caption");
+  await input.fill("Preserve the caption after access expires");
+  await input.focus();
+  await page.clock.runFor(1100);
+  await expect(page.locator(".files-item__thumb--preview")).toHaveCount(0);
+  await expect(input).toHaveValue("Preserve the caption after access expires");
+  await expect(input).toBeFocused();
+});
+
+test("old-revision drawer thumbnails clear on expiry after a continuation replaces the asset", async ({
+  page,
+}) => {
+  await page.clock.install();
+  await page.addInitScript(() => {
+    Reflect.deleteProperty(window, "IntersectionObserver");
+  });
+  await seedSession(page);
+  let releasePage;
+  let continuationStarted = false;
+  const gate = new Promise((resolve) => {
+    releasePage = resolve;
+  });
+  await mockFiles(page, {
+    previewExpiresInSeconds: 10,
+    onRequest: async ({ route, url, path, method }) => {
+      if (path.endsWith("/preview") && path.includes("revision-new")) {
+        // The replacement revision is not preview-ready yet; old URLs must still disappear.
+        await json(route, { error: "preview_processing" }, 409);
+        return true;
+      }
+      if (!path.endsWith("/assets") || method !== "GET") return false;
+      const cursor = url.searchParams.get("cursor") || "";
+      if (cursor) {
+        continuationStarted = true;
+        await gate;
+      }
+      await json(route, {
+        assets: [
+          {
+            ...assets[0],
+            ...(cursor
+              ? { sourceAssetVersionId: "revision-new", version: 6 }
+              : {}),
+          },
+        ],
+        nextCursor: cursor ? null : "new-revision",
+      });
+      return true;
+    },
+  });
+  await page.goto("/files/folders/folder-1");
+  await expect(page.locator('img[src*="asset-version-1"]')).toHaveCount(1);
+  await page.getByRole("button", { name: "Load more", exact: true }).click();
+  await expect.poll(() => continuationStarted).toBe(true);
+  await page
+    .getByRole("button", { name: `Select ${assets[0].name}`, exact: true })
+    .click();
+  await page.getByRole("button", { name: /Create post/u }).click();
+  const input = page.getByLabel("Post idea or caption");
+  await input.fill("Keep the draft while the asset revision changes");
+  await input.focus();
+  await expect(
+    page.locator('.files-post-drawer img[src*="asset-version-1"]'),
+  ).toHaveCount(1);
+  releasePage();
+  await expect(
+    page.getByRole("button", { name: "Load more", exact: true }),
+  ).toHaveCount(0);
+  await page.clock.runFor(5100);
+  await expect(page.locator('img[src*="asset-version-1"]')).toHaveCount(0);
+  await expect(input).toHaveValue(
+    "Keep the draft while the asset revision changes",
+  );
+  await expect(input).toBeFocused();
 });
 
 test("accepting a contextual share prompt opens existing access review without granting", async ({

@@ -275,8 +275,8 @@ export class FilesApi {
     );
   }
 
-  listEditions(folderId) {
-    return this.getFolderCollection(folderId, "editions");
+  listEditions(folderId, query) {
+    return this.getFolderCollection(folderId, "editions", query);
   }
 
   createEdition(folderId, input, options = {}) {
@@ -318,8 +318,8 @@ export class FilesApi {
     );
   }
 
-  listGrants(folderId) {
-    return this.getFolderCollection(folderId, "grants");
+  listGrants(folderId, query) {
+    return this.getFolderCollection(folderId, "grants", query);
   }
 
   listGrantRequests(query = {}) {
