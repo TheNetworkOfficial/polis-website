@@ -20309,7 +20309,10 @@ a {
 }
 
 :root[data-polis-theme-resolved="light"] .shared-coalition-workspace .shared-coalition-governance-results__metrics div,
+:root[data-polis-theme-resolved="light"] .shared-coalition-workspace .shared-coalition-governance-result-notice,
+:root[data-polis-theme-resolved="light"] .shared-coalition-workspace .shared-coalition-governance-stv-summary div,
 :root[data-polis-theme-resolved="light"] .shared-coalition-workspace .shared-coalition-governance-irv-round,
+:root[data-polis-theme-resolved="light"] .shared-coalition-workspace .shared-coalition-governance-stv-round,
 :root[data-polis-theme-resolved="light"] .shared-coalition-workspace .shared-coalition-governance-irv-round__tallies span {
   border-color: rgba(9, 18, 32, 0.1);
   background: rgba(9, 18, 32, 0.045);
@@ -24857,6 +24860,28 @@ a {
   background: rgb(var(--polis-primary-rgb) / 0.055);
 }
 
+.shared-coalition-governance-result-notice {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid rgb(var(--polis-accent-rgb) / 0.24);
+  border-radius: 16px;
+  background: rgb(var(--polis-accent-rgb) / 0.08);
+  display: grid;
+  gap: 5px;
+}
+
+.shared-coalition-governance-result-notice strong {
+  color: var(--sf-ink);
+  font-size: 0.92rem;
+}
+
+.shared-coalition-governance-result-notice p {
+  margin: 0;
+  color: var(--sf-muted);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
 .shared-coalition-governance-results__top {
   display: flex;
   flex-wrap: wrap;
@@ -24927,12 +24952,56 @@ a {
   gap: 10px;
 }
 
+.shared-coalition-governance-stv {
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.shared-coalition-governance-stv-summary {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.shared-coalition-governance-stv-summary div {
+  min-width: 0;
+  padding: 11px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.04);
+  display: grid;
+  gap: 4px;
+}
+
+.shared-coalition-governance-stv-summary strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--sf-ink);
+  font-size: 0.96rem;
+}
+
+.shared-coalition-governance-stv-rounds {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.shared-coalition-governance-stv-rounds h3 {
+  margin: 0;
+  color: var(--sf-ink);
+  font-family: var(--sf-font-display);
+  font-size: 1rem;
+}
+
 .shared-coalition-governance-irv-rounds {
   display: grid;
   gap: 8px;
 }
 
-.shared-coalition-governance-irv-round {
+.shared-coalition-governance-irv-round,
+.shared-coalition-governance-stv-round {
   min-width: 0;
   padding: 12px;
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -24991,6 +25060,11 @@ a {
   font-weight: 950;
 }
 
+.shared-organization-governance-floor-form {
+  margin-top: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 @media (max-width: 1200px) {
   .shared-coalition-governance-grid,
   .shared-coalition-governance-speaker-summary,
@@ -25027,6 +25101,8 @@ a {
   .shared-coalition-governance-form,
   .shared-coalition-governance-proposal-type-grid,
   .shared-coalition-governance-rule-grid,
+  .shared-coalition-governance-stv-summary,
+  .shared-organization-governance-floor-form,
   .shared-coalition-governance-vote-window {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -25100,6 +25176,160 @@ a {
     width: 100%;
     min-width: 0;
     justify-self: stretch;
+  }
+}
+
+.shared-organization-governance-route .shared-page__content {
+  gap: 18px;
+}
+
+.shared-organization-governance-hero .shared-coalition-avatar {
+  display: grid;
+  place-items: center;
+}
+
+.shared-organization-governance-hero .shared-coalition-avatar svg {
+  width: 32px;
+  height: 32px;
+  fill: currentColor;
+}
+
+.shared-organization-governance-command .shared-coalition-governance-command-card small {
+  line-height: 1.35;
+}
+
+.shared-organization-governance-tabs {
+  margin-top: 2px;
+}
+
+.shared-organization-governance-focus-stack {
+  min-width: 0;
+  display: grid;
+  gap: 14px;
+}
+
+.shared-organization-governance-vote.is-focused {
+  border-color: color-mix(in srgb, var(--sf-accent) 46%, rgba(255, 255, 255, 0.1));
+}
+
+.shared-organization-governance-form-panel,
+.shared-organization-governance-audit-form-panel,
+.shared-organization-governance-roster,
+.shared-organization-governance-placeholder {
+  min-width: 0;
+}
+
+.shared-organization-governance-check {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  flex-direction: row;
+  gap: 10px;
+}
+
+.shared-coalition-governance-stv-round p {
+  margin: 0;
+  color: var(--sf-muted);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.shared-organization-governance-check input {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  accent-color: var(--sf-accent);
+}
+
+.shared-organization-governance-check span {
+  color: var(--sf-ink);
+  font-size: 0.86rem;
+  font-weight: 900;
+  text-transform: none;
+}
+
+.shared-organization-governance-roster-list {
+  min-width: 0;
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.shared-organization-governance-roster-card {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--sf-panel-strong);
+  border-radius: 18px;
+  background: var(--sf-panel-soft);
+  display: grid;
+  gap: 12px;
+}
+
+.shared-organization-governance-roster-card h3,
+.shared-organization-governance-roster-card p {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.shared-organization-governance-roster-card h3 {
+  color: var(--sf-ink);
+  font-size: 1rem;
+  font-weight: 950;
+}
+
+.shared-organization-governance-roster-card p {
+  color: var(--sf-muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.shared-organization-governance-inline-empty {
+  padding: 10px;
+  text-align: left;
+}
+
+.shared-organization-governance-audit-output {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.shared-organization-governance-audit-output strong {
+  color: var(--sf-ink);
+  font-size: 0.82rem;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.shared-organization-governance-audit-output pre {
+  min-width: 0;
+  max-height: 320px;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid var(--sf-panel-strong);
+  border-radius: 14px;
+  background: var(--sf-panel-soft);
+  color: var(--sf-ink);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 760px) {
+  .shared-organization-governance-hero .shared-coalition-hero__identity {
+    align-items: flex-start;
+  }
+
+  .shared-organization-governance-route .shared-coalition-governance-vote-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .shared-organization-governance-route .shared-coalition-governance-vote-actions .shared-feed-chip {
+    justify-content: center;
+    width: 100%;
   }
 }
 
