@@ -14,6 +14,7 @@ import {
   getAuthenticatedUser,
   getSharedFeedAuthCapabilities,
   hasHostedSignInConfig,
+  registerSharedFeedGovernancePasskey,
   requestSharedFeedPasswordReset,
   resendSharedFeedSignUpCode,
   restoreSharedFeedSession,
@@ -5519,6 +5520,7 @@ function getSettingsDocumentTitle(route = state.route) {
     return "Settings";
   }
   const exactTitles = {
+    "account-security/governance-passkey": "Account Passkey",
     "account-security/totp": "Authenticator App",
     "candidate-access/name": "Candidate Access",
     "candidate-access/office": "Candidate Office",
@@ -46120,6 +46122,12 @@ function createSettingsAccountSecurityState() {
       notice: "",
       copied: false,
     },
+    passkey: {
+      registering: false,
+      registered: false,
+      error: "",
+      notice: "",
+    },
   };
 }
 
@@ -46241,6 +46249,11 @@ function getSettingsSectionConfig(sectionKey = getSettingsSection()) {
 function getSettingsHeaderConfig(sectionKey = getSettingsSection(), route = getCurrentRoute()) {
   const settingsPath = getSettingsRoutePath(route).replace(/\/$/u, "");
   const exactConfigs = {
+    "account-security/governance-passkey": {
+      label: "Account Passkey",
+      description:
+        "Set up the account passkey used for Governance votes and meetings.",
+    },
     "account-security/totp": {
       label: "Authenticator App",
       description: "Set up or verify authenticator MFA for account sign-in.",
@@ -59506,6 +59519,57 @@ async function verifySettingsTotpSetup(formData) {
     return false;
   } finally {
     totp.verifying = false;
+    scheduleRender();
+  }
+}
+
+function settingsGovernancePasskeyErrorMessage(error) {
+  const code = normalizeString(error?.errorCode || error?.payload?.error)
+    .toLowerCase();
+  if (code === "passkey_registration_cancelled" || code === "passkey_cancelled") {
+    return "Passkey setup was cancelled. No account passkey was added.";
+  }
+  if (code === "passkey_already_registered") {
+    return "This passkey is already registered to your Polis account.";
+  }
+  if (
+    code === "governance_access_token_unavailable" ||
+    code === "passkey_session_expired" ||
+    Number(error?.statusCode || error?.status || 0) === 401
+  ) {
+    return "Sign in again before setting up an account passkey.";
+  }
+  if (Number(error?.statusCode || error?.status || 0) >= 500) {
+    return "The account passkey service is temporarily unavailable. Try again shortly.";
+  }
+  return settingsErrorMessage(
+    error,
+    "Passkey setup could not be completed. Please try again.",
+  );
+}
+
+async function registerSettingsGovernancePasskey() {
+  const account = settingsAccountSecurity();
+  const passkey = account.passkey;
+  passkey.registering = true;
+  passkey.error = "";
+  passkey.notice = "";
+  scheduleRender();
+  try {
+    await registerSharedFeedGovernancePasskey(
+      state.auth.config,
+      state.auth.session,
+    );
+    passkey.registered = true;
+    passkey.notice =
+      "Account passkey ready. You can now return to your organization action.";
+    showToast("Account passkey ready.");
+  } catch (error) {
+    passkey.error = settingsGovernancePasskeyErrorMessage(error);
+    passkey.notice = "";
+    showToast(passkey.error);
+  } finally {
+    passkey.registering = false;
     scheduleRender();
   }
 }
@@ -114725,6 +114789,14 @@ function renderSettingsAccountSecurityHub() {
           <button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="/settings/account-security/totp">Set up MFA</button>
         </article>
         <article class="shared-settings-security-card">
+          <span>${renderIcon("shield")}</span>
+          <div>
+            <h3>Governance account passkey</h3>
+            <p>Set up the account confirmation used for sensitive votes and meetings.</p>
+          </div>
+          <button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="/settings/account-security/governance-passkey">Set up passkey</button>
+        </article>
+        <article class="shared-settings-security-card">
           <span>${renderIcon("messages")}</span>
           <div>
             <h3>Messaging Security Center</h3>
@@ -114823,13 +114895,89 @@ function renderSettingsAccountSecurityTotp() {
   </div>`;
 }
 
+function renderSettingsAccountSecurityGovernancePasskey() {
+  const account = settingsAccountSecurity();
+  const passkey = account.passkey;
+  const browserReady =
+    typeof window !== "undefined" &&
+    typeof navigator !== "undefined" &&
+    typeof window.PublicKeyCredential !== "undefined" &&
+    typeof navigator.credentials?.create === "function";
+  const actionDisabled = passkey.registering || !browserReady;
+  return `<div class="shared-settings-main shared-settings-security shared-settings-governance-passkey">
+    <section class="shared-settings-panel">
+      <div class="shared-settings-panel__header">
+        <div>
+          <h2>Set up your account passkey</h2>
+          <p>A passkey confirms that sensitive organization actions come from your signed-in Polis account.</p>
+        </div>
+        <button class="shared-feed-chip" data-action="navigate" data-route="/settings/account-security">Account security</button>
+      </div>
+      <div class="shared-settings-return">
+        <strong>Private and device protected</strong>
+        <span>Polis never receives your biometric or device PIN. Cancelling setup never completes the action.</span>
+      </div>
+      ${renderSettingsSecurityStatus(passkey)}
+      <div class="shared-settings-governance-passkey-status">
+        <span class="${browserReady ? "is-good" : "is-pending"}">
+          <small>Browser</small>
+          <strong>${browserReady ? "Passkeys available" : "Passkeys unavailable"}</strong>
+        </span>
+        <span class="${passkey.registered ? "is-good" : "is-pending"}">
+          <small>Account</small>
+          <strong>${passkey.registered ? "Passkey ready" : "Setup required"}</strong>
+        </span>
+      </div>
+      <div class="shared-settings-security-flow shared-settings-governance-passkey-flow">
+        <article class="shared-settings-security-step">
+          <strong>1</strong>
+          <div>
+            <h3>Start setup</h3>
+            <p>Polis requests a server-bound credential for this signed-in account.</p>
+          </div>
+        </article>
+        <article class="shared-settings-security-step">
+          <strong>2</strong>
+          <div>
+            <h3>Confirm on this device</h3>
+            <p>Your browser opens the trusted passkey screen for the current device or password manager.</p>
+          </div>
+        </article>
+        <article class="shared-settings-security-step">
+          <strong>3</strong>
+          <div>
+            <h3>Return to Governance</h3>
+            <p>After setup, votes and meeting check-ins can ask for this account confirmation.</p>
+          </div>
+        </article>
+      </div>
+      <div class="shared-settings-form-actions">
+        <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="settings-governance-passkey-register"${disabledAttr(actionDisabled)}>${
+          passkey.registering
+            ? "Opening passkey setup..."
+            : passkey.registered
+              ? "Add another account passkey"
+              : "Set up account passkey"
+        }</button>
+      </div>
+    </section>
+  </div>`;
+}
+
 function renderSettingsAccountSecurity() {
   const pathname =
     typeof window !== "undefined" ? normalizePathname(window.location.pathname) : "";
-  return getSettingsSubpath() === "totp" ||
-    pathname === "/settings/account-security/totp"
-    ? renderSettingsAccountSecurityTotp()
-    : renderSettingsAccountSecurityHub();
+  const subpath = getSettingsSubpath();
+  if (
+    subpath === "governance-passkey" ||
+    pathname === "/settings/account-security/governance-passkey"
+  ) {
+    return renderSettingsAccountSecurityGovernancePasskey();
+  }
+  if (subpath === "totp" || pathname === "/settings/account-security/totp") {
+    return renderSettingsAccountSecurityTotp();
+  }
+  return renderSettingsAccountSecurityHub();
 }
 
 function renderSettingsStatusPill(label, tone = "") {
@@ -124403,6 +124551,11 @@ async function handleRootClick(event) {
 
   if (action === "settings-totp-open") {
     openSettingsTotpSetupUri();
+    return;
+  }
+
+  if (action === "settings-governance-passkey-register") {
+    registerSettingsGovernancePasskey().catch(() => {});
     return;
   }
 

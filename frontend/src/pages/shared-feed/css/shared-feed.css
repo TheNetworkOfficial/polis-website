@@ -53825,6 +53825,50 @@ button.shared-profile-stat:focus-visible,
   justify-self: start;
 }
 
+.shared-settings-governance-passkey {
+  gap: 14px;
+}
+
+.shared-settings-governance-passkey-status {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.shared-settings-governance-passkey-status span {
+  min-width: 0;
+  padding: 13px;
+  border: 1px solid var(--sf-line);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.04);
+  display: grid;
+  gap: 5px;
+}
+
+.shared-settings-governance-passkey-status small {
+  color: var(--sf-muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.shared-settings-governance-passkey-status strong {
+  min-width: 0;
+  color: var(--sf-ink);
+  font-size: 0.98rem;
+  overflow-wrap: anywhere;
+}
+
+.shared-settings-governance-passkey-status .is-good {
+  border-color: rgba(56, 210, 157, 0.28);
+  background: rgba(56, 210, 157, 0.08);
+}
+
+.shared-settings-governance-passkey-status .is-pending {
+  border-color: rgba(255, 209, 102, 0.28);
+  background: rgba(255, 209, 102, 0.08);
+}
+
 .shared-settings-page .shared-feed-chip.is-danger {
   border-color: rgb(var(--polis-danger-rgb) / 0.32);
   background: rgb(var(--polis-danger-rgb) / 0.08);
@@ -57739,6 +57783,7 @@ button.shared-settings-district-person:focus-visible {
 :root[data-polis-theme-resolved="light"] .shared-settings-district-data-grid > div,
 :root[data-polis-theme-resolved="light"] .shared-settings-empty,
 :root[data-polis-theme-resolved="light"] .shared-settings-return,
+:root[data-polis-theme-resolved="light"] .shared-settings-governance-passkey-status span,
 :root[data-polis-theme-resolved="light"] .shared-candidate-access-step,
 :root[data-polis-theme-resolved="light"] .shared-candidate-access-step span,
 :root[data-polis-theme-resolved="light"] .shared-candidate-access-summary div {
@@ -57787,6 +57832,16 @@ button.shared-settings-district-person:focus-visible {
   border-color: rgb(var(--polis-success-rgb) / 0.24);
   background: rgb(var(--polis-success-rgb) / 0.08);
   color: var(--polis-success);
+}
+
+:root[data-polis-theme-resolved="light"] .shared-settings-governance-passkey-status .is-good {
+  border-color: rgba(13, 124, 102, 0.24);
+  background: rgba(13, 124, 102, 0.08);
+}
+
+:root[data-polis-theme-resolved="light"] .shared-settings-governance-passkey-status .is-pending {
+  border-color: rgba(180, 120, 0, 0.24);
+  background: rgba(180, 120, 0, 0.08);
 }
 
 :root[data-polis-theme-resolved="light"] .shared-settings-status-pill.is-pending {
@@ -65786,6 +65841,7 @@ button.shared-settings-district-person:focus-visible {
   .shared-settings-security-grid,
   .shared-settings-security-forms,
   .shared-settings-security-flow,
+  .shared-settings-governance-passkey-status,
   .shared-settings-security-recovery-map,
   .shared-settings-privacy-command,
   .shared-settings-privacy-command__metrics,
