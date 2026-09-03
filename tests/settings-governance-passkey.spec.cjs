@@ -147,6 +147,10 @@ async function routePasskeyApi(page, captures) {
       });
     }
 
+    if (path === "/api/files/workspaces" && request.method() === "GET") {
+      return json(route, { workspaces: [] });
+    }
+
     if (
       path === "/api/governance/passkeys/v1/registration/begin" &&
       request.method() === "POST"
