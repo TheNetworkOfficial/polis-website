@@ -495,6 +495,128 @@ test("every Files mutation carries a stable retry key and exact revision fences"
   }
 });
 
+test("request-scoped preparation freezes UI mutations without intercepting concurrent upload keys or reads", async () => {
+  const requests = [];
+  const preparedRequests = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, options = {}) => {
+    requests.push({ url: String(url), ...options });
+    return response();
+  };
+  try {
+    const api = new FilesApi({
+      apiBaseUrl: "https://api.polis.test",
+      getSession: () => null,
+    });
+    const prepareMutation = (request) => {
+      preparedRequests.push(structuredClone(request));
+      return {
+        ...request,
+        body: { ...request.body, reason: "Frozen note" },
+        headers: { "If-Match": '"frozen-version"' },
+        idempotencyKey: "ui-request-key",
+      };
+    };
+    await Promise.all([
+      api.archiveFolder(
+        "folder/a",
+        { expectedVersion: 3, reason: "Original note" },
+        { prepareMutation, headers: { "If-Match": '"original-version"' } },
+      ),
+      api.abortUpload(
+        "upload-1",
+        { expectedVersion: 4 },
+        { idempotencyKey: "upload-only-key" },
+      ),
+      api.request("/api/files/folders/folder-a", { prepareMutation }),
+    ]);
+    assert.equal(preparedRequests.length, 1);
+    assert.deepEqual(preparedRequests[0], {
+      path: "https://api.polis.test/api/files/folders/folder%2Fa/archive",
+      method: "POST",
+      body: { expectedVersion: 3, reason: "Original note" },
+      headers: { "If-Match": '"original-version"' },
+    });
+    const ui = requests.find((request) => request.url.endsWith("/archive"));
+    assert.deepEqual(JSON.parse(ui.body), {
+      expectedVersion: 3,
+      reason: "Frozen note",
+    });
+    assert.equal(ui.headers["If-Match"], '"frozen-version"');
+    assert.equal(ui.headers["Idempotency-Key"], "ui-request-key");
+    assert.equal(
+      requests.find((request) => request.url.endsWith("/abort")).headers[
+        "Idempotency-Key"
+      ],
+      "upload-only-key",
+    );
+    assert.equal(
+      requests.find((request) => request.method === "GET").headers[
+        "Idempotency-Key"
+      ],
+      undefined,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("unreadable mutation success receipts stay uncertain without changing read or error contracts", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    const api = new FilesApi({ getSession: () => null });
+    for (const fixture of [
+      { body: '{"ok":' },
+      { body: "null" },
+      { body: "[]" },
+      { body: '"ok"' },
+      { body: "{}" },
+      { body: "<html>Unavailable</html>", contentType: "text/html" },
+      { body: null, status: 204 },
+    ]) {
+      globalThis.fetch = async () =>
+        new Response(fixture.body, {
+          status: fixture.status || 200,
+          headers: {
+            "content-type": fixture.contentType || "application/json",
+          },
+        });
+      await assert.rejects(
+        api.archiveFolder(
+          "folder-1",
+          { expectedVersion: 3 },
+          { idempotencyKey: "unchanged-key" },
+        ),
+        (error) =>
+          error instanceof FilesApiError &&
+          error.code === "files_mutation_receipt_unconfirmed",
+      );
+    }
+    globalThis.fetch = async () =>
+      new Response('{"ok":', {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    assert.deepEqual(await api.getFolder("folder-1"), { ok: true });
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({ ok: false, error: "files_version_conflict" }),
+        { status: 409, headers: { "content-type": "application/json" } },
+      );
+    await assert.rejects(
+      api.archiveFolder(
+        "folder-1",
+        { expectedVersion: 3 },
+        { idempotencyKey: "unchanged-key" },
+      ),
+      (error) =>
+        error.status === 409 && error.code === "files_version_conflict",
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("the Files transport fails closed before fetch without a retry key or revision", async () => {
   let fetchCount = 0;
   const originalFetch = globalThis.fetch;

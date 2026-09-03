@@ -464,6 +464,7 @@ async function mockFiles(page, overrides = {}) {
           {
             ok: false,
             error: "files_version_conflict",
+            mutationNotCommitted: true,
             message: "Workspace changed",
           },
           409,
@@ -560,7 +561,7 @@ async function mockFiles(page, overrides = {}) {
         etag: '"host-reference-1"',
       };
       hostReferenceItems = [envelope, ...hostReferenceItems];
-      return json(route, envelope);
+      return json(route, { ok: true, ...envelope });
     }
     if (
       /^\/api\/files\/host-references\/[^/]+\/revoke$/u.test(path) &&
@@ -591,7 +592,7 @@ async function mockFiles(page, overrides = {}) {
           ? envelope
           : item,
       );
-      return json(route, envelope);
+      return json(route, { ok: true, ...envelope });
     }
     if (path.endsWith("/share-targets") && method === "GET") {
       return json(route, {
@@ -669,6 +670,7 @@ async function mockFiles(page, overrides = {}) {
           {
             ok: false,
             error: "files_version_conflict",
+            mutationNotCommitted: true,
             message: "Workspace changed",
           },
           409,
@@ -1168,6 +1170,472 @@ async function mockFiles(page, overrides = {}) {
   });
   return captures;
 }
+
+test("post captions survive carousel reorder and removal", async ({ page }) => {
+  await seedSession(page);
+  const captures = await mockFiles(page);
+  await page.goto("/files/folders/folder-1");
+  await page.getByRole("button", { name: "Select all media" }).click();
+  await page.getByRole("button", { name: /Create post/u }).click();
+  const caption = page.getByLabel("Post idea or caption");
+  await caption.fill("Keep the story I typed before changing the media.");
+  await page
+    .getByRole("button", { name: "Move Fourth of July crowd.jpg earlier" })
+    .click();
+  await expect(caption).toHaveValue(
+    "Keep the story I typed before changing the media.",
+  );
+  await page
+    .getByRole("button", { name: "Remove Fourth of July crowd.jpg" })
+    .click();
+  await expect(caption).toHaveValue(
+    "Keep the story I typed before changing the media.",
+  );
+  await page
+    .getByRole("button", { name: "Create post draft", exact: true })
+    .click();
+  await expect.poll(() => captures.posts.length).toBe(1);
+  expect(captures.posts[0].description).toBe(
+    "Keep the story I typed before changing the media.",
+  );
+  expect(captures.posts[0].mediaItems).toEqual([
+    expect.objectContaining({
+      assetId: "asset-2",
+      sourceAssetVersionId: "asset-version-2",
+      order: 0,
+    }),
+  ]);
+});
+
+test("post captions persist while browsing but clear after success or folder scope changes", async ({
+  page,
+}) => {
+  await seedSession(page);
+  const captures = await mockFiles(page);
+  await page.goto("/files/folders/folder-1");
+  await page.getByRole("button", { name: "Select all media" }).click();
+  await page.getByRole("button", { name: /Create post/u }).click();
+  await page
+    .getByLabel("Post idea or caption")
+    .fill("The first finished draft.");
+  await page.getByRole("button", { name: "Keep browsing" }).click();
+  await page.getByRole("button", { name: /Create post/u }).click();
+  await expect(page.getByLabel("Post idea or caption")).toHaveValue(
+    "The first finished draft.",
+  );
+  await page
+    .getByRole("button", { name: "Create post draft", exact: true })
+    .press("Enter");
+  await expect(page.locator(".files-post-drawer")).toHaveCount(0);
+  expect(captures.posts[0].description).toBe("The first finished draft.");
+  await page.getByRole("button", { name: "Select all media" }).click();
+  await page.getByRole("button", { name: /Create post/u }).click();
+  await expect(page.getByLabel("Post idea or caption")).toHaveValue("");
+  await page
+    .getByLabel("Post idea or caption")
+    .fill("Not for a different folder.");
+  await page.getByRole("button", { name: "Keep browsing" }).click();
+  await page.getByRole("button", { name: "Files home", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Open Florida House District 3", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Select all media" }).click();
+  await page.getByRole("button", { name: /Create post/u }).click();
+  await expect(page.getByLabel("Post idea or caption")).toHaveValue("");
+});
+
+test("selected post media keeps its reviewed immutable version when a later page replaces the asset", async ({
+  page,
+}) => {
+  await seedSession(page);
+  let releasePage;
+  const gate = new Promise((resolve) => {
+    releasePage = resolve;
+  });
+  const captures = await mockFiles(page, {
+    onRequest: async ({ route, path, method, url }) => {
+      if (!path.endsWith("/assets") || method !== "GET") return false;
+      const later = url.searchParams.has("cursor");
+      if (later) await gate;
+      await json(route, {
+        assets: [
+          {
+            ...assets[0],
+            ...(later
+              ? {
+                  sourceAssetVersionId: "replacement-version",
+                  version: 12,
+                  altText: "A different image",
+                }
+              : {}),
+          },
+        ],
+        nextCursor: later ? null : "replacement",
+      });
+      return true;
+    },
+  });
+  await page.goto("/files/folders/folder-1");
+  await page
+    .getByRole("button", { name: `Select ${assets[0].name}`, exact: true })
+    .click();
+  await page.getByRole("button", { name: "Load more", exact: true }).click();
+  await page.getByRole("button", { name: /Create post/u }).click();
+  await page
+    .getByLabel("Post idea or caption")
+    .fill("Only the image I reviewed.");
+  releasePage();
+  await expect(
+    page.getByRole("button", { name: "Load more", exact: true }),
+  ).toHaveCount(0);
+  await page
+    .getByRole("button", { name: "Create post draft", exact: true })
+    .click();
+  await expect.poll(() => captures.posts.length).toBe(1);
+  expect(captures.posts[0].expectedAssetVersions).toEqual({ "asset-1": 5 });
+  expect(captures.posts[0].mediaItems[0]).toEqual(
+    expect.objectContaining({
+      sourceAssetVersionId: "asset-version-1",
+      altText: assets[0].altText,
+      crop: assets[0].crop,
+    }),
+  );
+});
+
+test("ambiguous post mutations retain the exact key body and fence through subsequent rejection responses", async ({
+  page,
+}) => {
+  await seedSession(page);
+  const outcomes = [
+    { status: 409, error: "files_version_conflict" },
+    { network: true },
+    { invalidJson: true },
+    { invalidEnvelope: true },
+    { status: 409, error: "idempotency_request_in_progress" },
+    { status: 500, error: "internal_error" },
+    {
+      status: 503,
+      error: "files_mutation_result_unconfirmed",
+      mutationNotCommitted: false,
+    },
+    { status: 408, error: "request_timeout" },
+    { status: 425, error: "too_early" },
+    { status: 429, error: "rate_limited" },
+    { status: 401, error: "unauthorized" },
+    { status: 403, error: "forbidden" },
+    { status: 400, error: "invalid_request" },
+    { status: 409, error: "idempotency_request_mismatch" },
+    {
+      status: 409,
+      error: "files_version_conflict",
+      mutationNotCommitted: true,
+    },
+  ];
+  let attempts = 0;
+  let committed = false;
+  let businessWrites = 0;
+  const captures = await mockFiles(page, {
+    onRequest: async ({ route, path, method }) => {
+      if (path !== "/api/files/post-drafts" || method !== "POST") return false;
+      if (!committed) {
+        committed = true;
+        businessWrites += 1;
+      }
+      const outcome = outcomes[attempts++];
+      if (outcome?.network) await route.abort("failed");
+      else if (outcome?.invalidJson)
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: '{"ok":',
+        });
+      else if (outcome?.invalidEnvelope) await json(route, {});
+      else if (outcome)
+        await json(
+          route,
+          {
+            ok: false,
+            error: outcome.error,
+            mutationNotCommitted: outcome.mutationNotCommitted,
+          },
+          outcome.status,
+        );
+      else await json(route, { ok: true, draftId: "the-original-draft" });
+      return true;
+    },
+  });
+  await page.goto("/files/folders/folder-1");
+  await page.getByRole("button", { name: "Select all media" }).click();
+  await page.getByRole("button", { name: /Create post/u }).click();
+  await page
+    .getByLabel("Post idea or caption")
+    .fill("One draft, despite uncertain responses.");
+  const originalFolderReads = captures.requests.filter(
+    (request) =>
+      request.method === "GET" &&
+      request.path === "/api/files/folders/folder-1",
+  ).length;
+  for (let index = 0; index <= outcomes.length; index += 1) {
+    await page
+      .getByRole("button", { name: "Create post draft", exact: true })
+      .press("Enter");
+    await expect.poll(() => attempts).toBe(index + 1);
+    await expect(page.locator(".files-busy")).toHaveCount(0);
+    if (index === 0)
+      await expect(
+        page.getByText(/Retry this unchanged request to recover it/u),
+      ).toBeVisible();
+    if (index < outcomes.length)
+      await expect(page.getByLabel("Post idea or caption")).toHaveValue(
+        "One draft, despite uncertain responses.",
+      );
+  }
+  const requests = captures.requests.filter(
+    (request) => request.path === "/api/files/post-drafts",
+  );
+  expect(requests).toHaveLength(outcomes.length + 1);
+  for (const request of requests) expect(request).toEqual(requests[0]);
+  expect(requests[0].idempotencyKey).toBeTruthy();
+  expect(businessWrites).toBe(1);
+  expect(
+    captures.requests.filter(
+      (request) =>
+        request.method === "GET" &&
+        request.path === "/api/files/folders/folder-1",
+    ),
+  ).toHaveLength(originalFolderReads);
+});
+
+test("unresolved folder actions keep separate identities for edited bodies and different parents", async ({
+  page,
+}) => {
+  await seedSession(page);
+  const captures = await mockFiles(page, {
+    onRequest: async ({ route, path, method }) => {
+      if (!path.endsWith("/folders") || method !== "POST") return false;
+      await json(route, { ok: false, error: "temporarily_unavailable" }, 503);
+      return true;
+    },
+  });
+  await page.goto("/files");
+  await page.getByRole("button", { name: "New root folder" }).click();
+  for (const name of [
+    "Unresolved original",
+    "Different request",
+    "Unresolved original",
+  ]) {
+    await page.getByLabel("Folder name").fill(name);
+    await page
+      .getByRole("button", { name: "Create folder", exact: true })
+      .click();
+    await expect(page.locator(".files-busy")).toHaveCount(0);
+    await expect(page.getByLabel("Folder name")).toHaveValue(name);
+  }
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Open Florida House District 3", exact: true })
+    .click();
+  await page.getByRole("button", { name: "New subfolder" }).click();
+  await page.getByLabel("Folder name").fill("Unresolved original");
+  await page
+    .getByRole("button", { name: "Create subfolder", exact: true })
+    .click();
+  await expect(page.locator(".files-busy")).toHaveCount(0);
+  const requests = captures.requests.filter(
+    (request) => request.method === "POST" && request.path.endsWith("/folders"),
+  );
+  expect(requests).toHaveLength(4);
+  expect(requests[2]).toEqual(requests[0]);
+  expect(new Set(requests.map((request) => request.idempotencyKey)).size).toBe(
+    3,
+  );
+  expect(requests[3].body.parentFolderId).toBe("folder-1");
+  expect(requests[3].body.expectedVersion).toBe(3);
+});
+
+test("unresolved proposal reviews never reuse another resource's retry key", async ({
+  page,
+}) => {
+  await seedSession(page);
+  const proposals = ["proposal-a", "proposal-b"].map((proposalId) => ({
+    proposalId,
+    title: proposalId,
+    status: "pending_review",
+    version: 2,
+    etag: '"proposal-2"',
+  }));
+  const captures = await mockFiles(page, {
+    proposals,
+    onRequest: async ({ route, path, method }) => {
+      if (!path.endsWith("/approvals") || method !== "POST") return false;
+      await json(
+        route,
+        { ok: false, error: "idempotency_request_in_progress" },
+        409,
+      );
+      return true;
+    },
+  });
+  await page.goto("/files/folders/folder-1?tab=proposals");
+  for (const id of ["proposal-a", "proposal-b", "proposal-a"]) {
+    await page
+      .locator(`[data-proposal-decision="approve"][data-id="${id}"]`)
+      .click();
+    await page
+      .getByLabel(/Review note/u)
+      .fill("The same note on a distinct resource.");
+    await page
+      .locator('form[data-form="proposal-decision"]')
+      .getByRole("button", { name: "Approve & merge" })
+      .click();
+    await expect(page.locator(".files-busy")).toHaveCount(0);
+    await page.getByRole("button", { name: "Close", exact: true }).click();
+  }
+  const requests = captures.requests.filter(
+    (request) =>
+      request.method === "POST" && request.path.endsWith("/approvals"),
+  );
+  expect(requests).toHaveLength(3);
+  expect(requests[0].body).toEqual(requests[1].body);
+  expect(requests[0].path).not.toBe(requests[1].path);
+  expect(requests[0].idempotencyKey).not.toBe(requests[1].idempotencyKey);
+  expect(requests[2]).toEqual(requests[0]);
+});
+
+test("selected asset IDs remain scalar when opening a replacement proposal", async ({
+  page,
+}) => {
+  await seedSession(page);
+  await mockFiles(page);
+  await page.goto("/files/folders/folder-1");
+  await page
+    .getByRole("button", { name: "Select Parade clip.mp4", exact: true })
+    .click();
+  // Exercise the delegated proposal action with a selection already present.
+  await page.locator("#files-app").evaluate((app) => {
+    const button = document.createElement("button");
+    button.dataset.action = "new-proposal";
+    app.append(button);
+    button.click();
+  });
+  await page.getByLabel("Change type").selectOption("replace");
+  await expect(page.getByLabel("Current asset")).toHaveValue("asset-2");
+});
+
+test("unresolved snooze retries preserve the original generated time and request identity", async ({
+  page,
+}) => {
+  await page.clock.install();
+  await seedSession(page);
+  let attempts = 0;
+  const captures = await mockFiles(page, {
+    onRequest: async ({ route, path, method }) => {
+      if (!path.endsWith("/suggestion-1/snooze") || method !== "POST")
+        return false;
+      attempts += 1;
+      await json(
+        route,
+        attempts === 3
+          ? { ok: true }
+          : {
+              ok: false,
+              error:
+                attempts === 1
+                  ? "files_server_error"
+                  : "idempotency_request_in_progress",
+            },
+        attempts === 3 ? 200 : attempts === 1 ? 503 : 409,
+      );
+      return true;
+    },
+  });
+  await page.goto("/files");
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    await page
+      .locator('[data-suggestion="snooze"][data-id="suggestion-1"]')
+      .press("Enter");
+    await expect.poll(() => attempts).toBe(attempt);
+    await expect(page.locator(".files-busy")).toHaveCount(0);
+    await page.clock.fastForward(61_000);
+  }
+  const requests = captures.requests.filter((request) =>
+    request.path.endsWith("/suggestion-1/snooze"),
+  );
+  expect(requests).toHaveLength(3);
+  expect(requests[0].body.snoozedUntil).toBeTruthy();
+  expect(requests[1]).toEqual(requests[0]);
+  expect(requests[2]).toEqual(requests[0]);
+});
+
+test("Back and Forward clear cross-folder media captions and open action forms", async ({
+  page,
+}) => {
+  await seedSession(page);
+  const captures = await mockFiles(page, {
+    onRequest: async ({ route, path, method }) => {
+      if (path !== "/api/files/folders/folder-2/assets" || method !== "GET")
+        return false;
+      await json(route, {
+        ok: true,
+        assets: [
+          {
+            ...assets[0],
+            assetId: "asset-b",
+            folderId: "folder-2",
+            sourceAssetVersionId: "version-b",
+            name: "Folder B image.jpg",
+          },
+        ],
+      });
+      return true;
+    },
+  });
+  await page.goto("/files/folders/folder-1");
+  await page.getByRole("button", { name: "Field plans", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Select Folder B image.jpg", exact: true })
+    .click();
+  await page.getByRole("button", { name: /Create post/u }).click();
+  await page.getByLabel("Post idea or caption").fill("Only for folder B.");
+  await page.goBack();
+  await expect(
+    page.getByRole("heading", { name: "Florida House District 3", level: 1 }),
+  ).toBeVisible();
+  await expect(page.locator(".files-post-drawer")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Create post/u })).toHaveCount(
+    0,
+  );
+  await page.getByRole("button", { name: "Select all media" }).click();
+  await page.getByRole("button", { name: /Create post/u }).click();
+  await expect(page.getByLabel("Post idea or caption")).toHaveValue("");
+  await page.getByLabel("Post idea or caption").fill("Only for folder A.");
+  await page.goForward();
+  await expect(
+    page.getByRole("heading", { name: "Field plans", level: 1 }),
+  ).toBeVisible();
+  await expect(page.locator(".files-post-drawer")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Create post/u })).toHaveCount(
+    0,
+  );
+  await page.getByRole("button", { name: "Select all media" }).click();
+  await page.getByRole("button", { name: /Create post/u }).click();
+  await expect(page.getByLabel("Post idea or caption")).toHaveValue("");
+  await page
+    .getByRole("button", { name: "Create post draft", exact: true })
+    .press("Enter");
+  await expect.poll(() => captures.posts.length).toBe(1);
+  expect(captures.posts[0].folderId).toBe("folder-2");
+  expect(captures.posts[0].mediaItems.map((item) => item.assetId)).toEqual([
+    "asset-b",
+  ]);
+  await page.getByRole("button", { name: "New subfolder" }).click();
+  await page.getByLabel("Folder name").fill("A child of folder B, not A.");
+  await page.goBack();
+  await expect(
+    page.getByRole("heading", { name: "Florida House District 3", level: 1 }),
+  ).toBeVisible();
+  await expect(page.locator(".files-modal")).toHaveCount(0);
+});
 
 test("Files home is entitled, contextual, responsive, and supports list/grid", async ({
   page,

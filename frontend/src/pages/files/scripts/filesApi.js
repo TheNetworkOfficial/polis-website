@@ -83,16 +83,28 @@ export class FilesApi {
       signal,
       cache,
       idempotencyKey = "",
+      prepareMutation,
     } = {},
   ) {
+    const normalizedMethod = String(method || "GET").toUpperCase();
+    const mutation = !["GET", "HEAD", "OPTIONS"].includes(normalizedMethod);
+    if (mutation && prepareMutation) {
+      const prepared = prepareMutation({
+        path: this.resolve(path),
+        method: normalizedMethod,
+        body,
+        headers,
+      });
+      body = prepared.body;
+      headers = prepared.headers;
+      idempotencyKey = prepared.idempotencyKey;
+    }
     const session = this.getSession?.();
     const hasBody = body !== undefined;
     const requestHeaders = buildAuthorizedHeaders(
       session,
       hasBody ? { "Content-Type": JSON_CONTENT_TYPE, ...headers } : headers,
     );
-    const normalizedMethod = String(method || "GET").toUpperCase();
-    const mutation = !["GET", "HEAD", "OPTIONS"].includes(normalizedMethod);
     const stableIdempotencyKey = String(
       idempotencyKey || body?.idempotencyKey || "",
     ).trim();
@@ -125,6 +137,21 @@ export class FilesApi {
           code: payload?.error || payload?.code || "request_failed",
           payload,
         },
+      );
+    }
+    // Files mutations always return a JSON { ok: true, ... } receipt. A 2xx
+    // without a readable receipt is still uncertain, not a confirmed write.
+    // OPTIONS alone has a documented empty 204; reads keep their old behavior.
+    if (
+      mutation &&
+      (!payload ||
+        typeof payload !== "object" ||
+        Array.isArray(payload) ||
+        payload.ok !== true)
+    ) {
+      throw new FilesApiError(
+        "Files could not confirm the action. Retry without changing it to recover the original result.",
+        { status: response.status, code: "files_mutation_receipt_unconfirmed" },
       );
     }
     return payload || { ok: true };

@@ -91,7 +91,7 @@ const state = {
   suggestions: [],
   incomingGrantRequests: [],
   presets: [],
-  selection: new Set(),
+  selection: new Map(),
   uploadQueue: [],
   uploadControllers: new Map(),
   uploadRuns: new Map(),
@@ -101,6 +101,7 @@ const state = {
   toast: null,
   busyAction: "",
   mutationKeys: new Map(),
+  suggestionSnoozes: new Map(),
   previewEntries: new Map(),
   previewRequests: new Map(),
   previewExpiryTimers: new Map(),
@@ -577,13 +578,13 @@ function icon(name, className = "") {
   return `<svg class="files-icon ${className}" viewBox="0 0 24 24" aria-hidden="true">${paths[name] || paths.file}</svg>`;
 }
 
-function setToast(message, tone = "success") {
+function setToast(message, tone = "success", { preserveLayers = false } = {}) {
   state.toast = { message, tone };
-  render();
+  render({ preserveLayers });
   window.setTimeout(() => {
     if (state.toast?.message === message) {
       state.toast = null;
-      render();
+      render({ preserveLayers });
     }
   }, 4200);
 }
@@ -629,13 +630,46 @@ function resourceEtag(entity) {
 function mutationOptions(actionKey, entity, revision) {
   const etag = resourceEtag(entity, revision);
   return {
-    idempotencyKey: actionKey,
+    ...(typeof actionKey === "function"
+      ? { prepareMutation: actionKey }
+      : { idempotencyKey: actionKey }),
     ...(etag ? { headers: { "If-Match": etag } } : {}),
   };
 }
 
 function isRevisionConflict(error) {
-  return [409, 412, 428].includes(Number(error?.status || 0));
+  return (
+    !mutationFailureIsAmbiguous(error) &&
+    [409, 412, 428].includes(Number(error?.status || 0))
+  );
+}
+
+function mutationFailureIsAmbiguous(error) {
+  // Status alone is not evidence that the business write did not happen.
+  // Even a version conflict may come from post-commit receipt finalization.
+  // Refresh only when the server explicitly proves the mutation did not commit.
+  return !(
+    error?.code === "files_version_conflict" &&
+    error?.payload?.mutationNotCommitted === true
+  );
+}
+
+function canonicalRequest(value) {
+  if (Array.isArray(value)) return value.map(canonicalRequest);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.keys(value)
+      .sort()
+      .map((key) => [key, canonicalRequest(value[key])]),
+  );
+}
+
+function mutationScope() {
+  return {
+    userId: normalizeString(state.user?.userId),
+    filesWorkspaceId: normalizeString(state.workspace?.filesWorkspaceId),
+    principal: principalOf(),
+  };
 }
 
 async function refreshWorkspaceFence() {
@@ -743,6 +777,8 @@ async function selectWorkspace(descriptor, { preserveRoute = false } = {}) {
   state.folder = null;
   state.items = [];
   state.selection.clear();
+  state.postDraft.open = false;
+  state.postDraft.description = "";
   render();
   const principal = principalOf(descriptor);
   if (!principal.type || !principal.id)
@@ -1269,11 +1305,19 @@ function safeHostReferenceDeepLink(reference) {
   return "";
 }
 
-function navigate(path) {
-  window.history.pushState({}, "", path);
-  state.route = parseRoute();
+function transitionRoute(nextRoute) {
+  if (nextRoute.folderId !== state.route.folderId) {
+    state.postDraft.description = "";
+    state.modal = null;
+  }
+  state.route = nextRoute;
   state.selection.clear();
   state.postDraft.open = false;
+}
+
+function navigate(path) {
+  window.history.pushState({}, "", path);
+  transitionRoute(parseRoute());
   loadRoute();
 }
 
@@ -2703,12 +2747,15 @@ function renderPostDrawer() {
 }
 
 function selectedAssets() {
-  const byId = new Map(
-    state.folderData.assets.map((item) => [entityId(item), item]),
-  );
-  return Array.from(state.selection)
-    .map((id) => byId.get(id))
-    .filter(Boolean);
+  // Selection is the media/version the person actually reviewed, not a live
+  // lookup that can silently change when another listing page arrives.
+  return Array.from(state.selection.values());
+}
+
+function selectAsset(id) {
+  const asset = state.folderData.assets.find((item) => entityId(item) === id);
+  if (asset && isPostSelectableMedia(asset))
+    state.selection.set(id, JSON.parse(JSON.stringify(asset)));
 }
 
 function renderApp() {
@@ -2815,39 +2862,77 @@ async function withBusy(
 ) {
   if (state.busyAction) return;
   state.busyAction = key;
-  const actionKey =
-    state.mutationKeys.get(key) ||
-    window.crypto?.randomUUID?.() ||
-    `${Date.now()}-${Math.random()}`;
-  state.mutationKeys.set(key, actionKey);
-  render();
+  const attemptedRequests = new Set();
+  const context = mutationScope();
+  // This callback travels with this UI action only. Concurrent upload/session
+  // mutations retain their own explicit keys and never enter this cache.
+  const prepareMutation = (request) => {
+    const frozenRequest = JSON.parse(JSON.stringify(request));
+    const fingerprint = JSON.stringify(
+      canonicalRequest({ context, ...frozenRequest }),
+    );
+    let retained = state.mutationKeys.get(fingerprint);
+    if (!retained) {
+      retained = {
+        request: {
+          ...frozenRequest,
+          idempotencyKey:
+            window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`,
+        },
+        uncertain: false,
+      };
+      state.mutationKeys.set(fingerprint, retained);
+    }
+    attemptedRequests.add(fingerprint);
+    return JSON.parse(JSON.stringify(retained.request));
+  };
   try {
-    const result = await operation(actionKey);
-    state.mutationKeys.delete(key);
-    if (successMessage) setToast(successMessage);
+    // Capture the actual transport values synchronously, before rendering or
+    // yielding can change the form, current resource, or live version fence.
+    const pending = operation(prepareMutation);
+    render({ preserveLayers: true });
+    const result = await pending;
+    attemptedRequests.forEach((fingerprint) =>
+      state.mutationKeys.delete(fingerprint),
+    );
+    if (successMessage)
+      setToast(successMessage, "success", { preserveLayers: true });
     return result;
   } catch (error) {
-    if (Number(error?.status || 0) >= 400 && Number(error?.status || 0) < 500) {
-      // A server-rejected request was not committed. A corrected retry must use
-      // a new logical key because the body/version fingerprint will differ.
-      state.mutationKeys.delete(key);
-    }
-    const message = onError ? await onError(error) : "";
+    const previouslyUncertain = Array.from(attemptedRequests).some(
+      (fingerprint) => state.mutationKeys.get(fingerprint)?.uncertain,
+    );
+    attemptedRequests.forEach((fingerprint) => {
+      const retained = state.mutationKeys.get(fingerprint);
+      if (retained && mutationFailureIsAmbiguous(error))
+        retained.uncertain = true;
+    });
+    // Keep unresolved entries even after a later validation/auth failure. It
+    // cannot disprove that an earlier attempt committed. Only success clears
+    // that exact request; edited requests get independent identities.
+    const message = onError && !previouslyUncertain ? await onError(error) : "";
+    const uncertainVersionMessage =
+      error?.code === "files_version_conflict" &&
+      (previouslyUncertain || mutationFailureIsAmbiguous(error))
+        ? "Result unconfirmed. Retry this unchanged request to recover it. Review the current state before starting another action."
+        : "";
     const materializationLockMessage =
       error?.code === "files_materialization_in_progress"
         ? "An edition change is being prepared. Current remains consistent; wait for it to finish before changing this workspace."
         : "";
     setToast(
       message ||
+        uncertainVersionMessage ||
         materializationLockMessage ||
         error?.message ||
         "That action could not be completed.",
       "error",
+      { preserveLayers: true },
     );
     return null;
   } finally {
     state.busyAction = "";
-    render();
+    render({ preserveLayers: true });
   }
 }
 
@@ -2870,19 +2955,19 @@ async function handleClick(event) {
     else if (state.selection.size >= 10) {
       setToast("A Polis carousel can include up to 10 media items.", "error");
       return;
-    } else state.selection.add(id);
+    } else selectAsset(id);
     render();
     return;
   }
   const move = event.target.closest("[data-post-move]");
   if (move) {
-    const ids = Array.from(state.selection);
+    const ids = Array.from(state.selection.keys());
     const index = ids.indexOf(move.dataset.id);
     const targetIndex =
       move.dataset.postMove === "back" ? index - 1 : index + 1;
     if (index >= 0 && targetIndex >= 0 && targetIndex < ids.length) {
       [ids[index], ids[targetIndex]] = [ids[targetIndex], ids[index]];
-      state.selection = new Set(ids);
+      state.selection = new Map(ids.map((id) => [id, state.selection.get(id)]));
       render();
     }
     return;
@@ -3012,7 +3097,7 @@ async function handleClick(event) {
     const allSelected =
       mediaIds.length > 0 && mediaIds.every((id) => state.selection.has(id));
     if (allSelected) {
-      state.selection = new Set();
+      state.selection.clear();
       render();
     } else if (mediaIds.length > 10) {
       setToast(
@@ -3020,7 +3105,8 @@ async function handleClick(event) {
         "error",
       );
     } else {
-      state.selection = new Set(mediaIds);
+      state.selection.clear();
+      mediaIds.forEach(selectAsset);
       render();
     }
   }
@@ -3090,7 +3176,7 @@ async function handleClick(event) {
     state.modal = {
       type: "proposal",
       operationType: "add",
-      targetAssetId: Array.from(state.selection)[0] || "",
+      targetAssetId: Array.from(state.selection.keys())[0] || "",
     };
     render();
   }
@@ -3236,6 +3322,10 @@ async function handleChange(event) {
 }
 
 function handleInput(event) {
+  if (event.target.matches('[data-form="post-draft"] [name="description"]')) {
+    state.postDraft.description = event.target.value;
+    return;
+  }
   const kind = event.target.dataset.shareSearch;
   if (!kind || state.modal?.type !== "new-share") return;
   if (shareSearchTimer) window.clearTimeout(shareSearchTimer);
@@ -4651,7 +4741,9 @@ async function submitPostDraft(data) {
   );
   if (!result) return;
   state.postDraft.open = false;
+  state.postDraft.description = "";
   state.selection.clear();
+  render();
   const postPath = safePostPath(result.postPath, result.postId);
   if (postPath) window.location.assign(postPath);
 }
@@ -4700,9 +4792,16 @@ async function actOnSuggestion(id, action) {
     );
     return;
   }
-  const snoozedUntil = new Date(
-    Date.now() + 7 * 24 * 60 * 60 * 1000,
-  ).toISOString();
+  const snoozeKey = JSON.stringify({
+    ...mutationScope(),
+    suggestionId: id,
+    expectedVersion: suggestionRevision,
+  });
+  let snoozedUntil = state.suggestionSnoozes.get(snoozeKey);
+  if (action === "snooze" && !snoozedUntil) {
+    snoozedUntil = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    state.suggestionSnoozes.set(snoozeKey, snoozedUntil);
+  }
   const result = await withBusy(
     "suggestion",
     (actionKey) =>
@@ -4722,6 +4821,7 @@ async function actOnSuggestion(id, action) {
         : "Recommendation dismissed.",
   );
   if (!result) return;
+  if (action === "snooze") state.suggestionSnoozes.delete(snoozeKey);
   state.suggestions = state.suggestions.filter((item) => entityId(item) !== id);
   const folderId = normalizeString(
     result?.suggestion?.folderId ||
@@ -5783,7 +5883,7 @@ root?.addEventListener("dragover", handleDragOver);
 root?.addEventListener("dragleave", handleDragLeave);
 root?.addEventListener("drop", handleDrop);
 window.addEventListener("popstate", () => {
-  state.route = parseRoute();
+  transitionRoute(parseRoute());
   loadRoute();
 });
 
