@@ -19,8 +19,17 @@ test("Cloudflare Pages rewrites dynamic Files and Governance routes", () => {
     .filter(Boolean);
 
   assert.deepEqual(rules, [
-    "/files/* /files/index.html 200",
-    "/organizations/* /organizations/index.html 200",
-    "/posts/* /posts/index.html 200",
+    "/files/* /route-shells/files 200",
+    "/organizations/* /route-shells/organizations 200",
+    "/posts/* /route-shells/posts 200",
   ]);
+
+  const emittedHtml = new Set(
+    webpackConfig.plugins
+      .map((plugin) => plugin?.userOptions?.filename)
+      .filter(Boolean),
+  );
+  assert.ok(emittedHtml.has("route-shells/files.html"));
+  assert.ok(emittedHtml.has("route-shells/organizations.html"));
+  assert.ok(emittedHtml.has("route-shells/posts.html"));
 });

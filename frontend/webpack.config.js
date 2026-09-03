@@ -268,6 +268,16 @@ function staticCoalitionsShell(filename) {
   });
 }
 
+function staticFilesShell(filename) {
+  return new HtmlWebpackPlugin({
+    template: "./src/pages/files/files.html",
+    filename,
+    chunks: ["files"],
+    publicPath: "/",
+    favicon: "./src/assets/images/polis/Polis.png",
+  });
+}
+
 function staticOrganizationGovernanceShell(filename) {
   return new HtmlWebpackPlugin({
     templateContent: buildStaticSharedFeedShellHtml({
@@ -916,6 +926,13 @@ const sharedAppShells = [
   },
 ];
 
+const postsSharedAppShell = sharedAppShells.find(
+  (shell) => shell.route === "/posts",
+);
+if (!postsSharedAppShell) {
+  throw new Error("Missing the shared Posts shell configuration.");
+}
+
 const sharedAppRouteRewrites = [
   [/^\/auth\/signup\/email(?:\/.*)?$/u, "/auth/signup/email/index.html"],
   [/^\/auth\/signup\/password(?:\/.*)?$/u, "/auth/signup/password/index.html"],
@@ -1170,13 +1187,8 @@ module.exports = {
       publicPath: "/",
       favicon: "./src/assets/images/polis/Polis.png",
     }),
-    new HtmlWebpackPlugin({
-      template: "./src/pages/files/files.html",
-      filename: "files/index.html",
-      chunks: ["files"],
-      publicPath: "/",
-      favicon: "./src/assets/images/polis/Polis.png",
-    }),
+    staticFilesShell("files/index.html"),
+    staticFilesShell("route-shells/files.html"),
     staticCtaInviteShell("cta-invite/index.html"),
     staticSettingsVoterIntelligenceShell("settings/voter-intelligence/index.html"),
     staticMessagesShell("messages.html"),
@@ -1185,11 +1197,13 @@ module.exports = {
     staticCandidateDashboardShell("candidate-dashboard/index.html"),
     staticOrganizationGovernanceShell("organizations.html"),
     staticOrganizationGovernanceShell("organizations/index.html"),
+    staticOrganizationGovernanceShell("route-shells/organizations.html"),
     staticCoalitionsShell("coalitions.html"),
     staticCoalitionsShell("coalitions/index.html"),
     ...sharedAppShells.map((shell) =>
       staticSharedAppShell(shell.filename, shell),
     ),
+    staticSharedAppShell("route-shells/posts.html", postsSharedAppShell),
     new HtmlWebpackPlugin({
       template: "./src/pages/404/404.html",
       filename: "404.html",
