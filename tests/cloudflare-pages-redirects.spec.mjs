@@ -33,3 +33,39 @@ test("Cloudflare Pages rewrites dynamic Files and Governance routes", () => {
   assert.ok(emittedHtml.has("route-shells/organizations.html"));
   assert.ok(emittedHtml.has("route-shells/posts.html"));
 });
+
+test("Node and Lightsail route Files and organization Governance shells", () => {
+  const serverSource = readFileSync(
+    new URL("../backend/src/server.js", import.meta.url),
+    "utf8",
+  );
+  const publicServerSource = readFileSync(
+    new URL("../backend/src/publicServer.js", import.meta.url),
+    "utf8",
+  );
+  const nginxSource = readFileSync(
+    new URL(
+      "../deploy/lightsail/polis-website.nginx.conf.example",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  for (const source of [serverSource, publicServerSource]) {
+    assert.match(
+      source,
+      /\[\/\^\\\/files\(\?:\\\/\.\*\)\?\$\/u, "files\/index\.html"\]/u,
+    );
+    assert.match(
+      source,
+      /\[\/\^\\\/organizations\(\?:\\\/\.\*\)\?\$\/u, "organizations\/index\.html"\]/u,
+    );
+  }
+
+  const dynamicRouteLocation = nginxSource
+    .split(/\r?\n/u)
+    .find((line) => line.includes("location ~ ^/(account-deletion-requested"));
+  assert.ok(dynamicRouteLocation, "Lightsail dynamic-route proxy must exist");
+  assert.match(dynamicRouteLocation, /\|files\|/u);
+  assert.match(dynamicRouteLocation, /\|organizations\|/u);
+});

@@ -88,6 +88,8 @@ const state = {
   selection: new Set(),
   uploadQueue: [],
   uploadControllers: new Map(),
+  uploadRuns: new Map(),
+  uploadSessionCreations: new Map(),
   uploadPollTimers: new Map(),
   modal: null,
   toast: null,
@@ -1923,48 +1925,57 @@ function renderUploadItem(item) {
   const file = item.file || item.fileMetadata || {};
   const type = normalizeString(file.type || file.contentType);
   const isPaused = item.status === "paused";
+  const cancellationPending = item.status === "cancel_pending";
   const waitingForFile = isPaused && !item.file;
   const status =
     item.status === "quarantined"
       ? item.error || "Quarantined · security review did not release this file"
-      : item.status === "error"
-        ? item.error
-        : item.status === "complete"
-          ? item.intent === "proposal"
-            ? "Ready for proposal review"
-            : "Ready in Current"
-          : item.status === "scanning"
-            ? item.error || "Uploaded · security scan in progress"
-            : item.status === "hashing"
-              ? "Preparing secure checksums"
-              : item.status === "pausing"
-                ? "Pausing safely…"
-                : item.status === "finalizing"
-                  ? "Verifying upload…"
-                  : item.status === "queued"
-                    ? "Waiting"
-                    : waitingForFile
-                      ? "Choose the same file to resume"
-                      : isPaused
-                        ? `Paused at ${Math.round(item.progress * 100)}%`
-                        : `${Math.round(item.progress * 100)}% uploaded`;
+      : cancellationPending
+        ? item.error || "Cancellation is pending and will retry automatically."
+        : item.status === "cancelling"
+          ? "Cancelling securely…"
+          : item.status === "cancelled"
+            ? "Cancelled"
+            : item.status === "error"
+              ? item.error
+              : item.status === "complete"
+                ? item.intent === "proposal"
+                  ? "Ready for proposal review"
+                  : "Ready in Current"
+                : item.status === "scanning"
+                  ? item.error || "Uploaded · security scan in progress"
+                  : item.status === "hashing"
+                    ? "Preparing secure checksums"
+                    : item.status === "pausing"
+                      ? "Pausing safely…"
+                      : item.status === "finalizing"
+                        ? "Verifying upload…"
+                        : item.status === "queued"
+                          ? "Waiting"
+                          : waitingForFile
+                            ? "Choose the same file to resume"
+                            : isPaused
+                              ? `Paused at ${Math.round(item.progress * 100)}%`
+                              : `${Math.round(item.progress * 100)}% uploaded`;
   const active = item.status === "uploading" || item.status === "hashing";
   const cancel = `<button data-upload-action="cancel" data-id="${escapeHtml(item.id)}">Cancel</button>`;
-  const actions = active
-    ? `<button data-upload-action="pause" data-id="${escapeHtml(item.id)}">Pause</button>${cancel}`
-    : waitingForFile
-      ? `<label class="files-upload-resume">Resume<input type="file" data-resume-upload="${escapeHtml(item.id)}" /></label>${cancel}`
-      : isPaused
-        ? `<button data-upload-action="resume" data-id="${escapeHtml(item.id)}">Resume</button>${cancel}`
-        : item.status === "pausing" || item.status === "finalizing"
-          ? cancel
-          : item.status === "error" && item.file
-            ? `<button data-upload-action="retry" data-id="${escapeHtml(item.id)}">Retry</button>`
-            : item.status === "complete" || item.status === "scanning"
-              ? icon("check")
-              : item.status === "quarantined"
-                ? icon("review")
-                : "";
+  const actions = cancellationPending
+    ? `<button data-upload-action="cancel" data-id="${escapeHtml(item.id)}">Retry cancellation</button>`
+    : active
+      ? `<button data-upload-action="pause" data-id="${escapeHtml(item.id)}">Pause</button>${cancel}`
+      : waitingForFile
+        ? `<label class="files-upload-resume">Resume<input type="file" data-resume-upload="${escapeHtml(item.id)}" /></label>${cancel}`
+        : isPaused
+          ? `<button data-upload-action="resume" data-id="${escapeHtml(item.id)}">Resume</button>${cancel}`
+          : item.status === "pausing" || item.status === "finalizing"
+            ? cancel
+            : item.status === "error" && item.file
+              ? `<button data-upload-action="retry" data-id="${escapeHtml(item.id)}">Retry</button>`
+              : item.status === "complete" || item.status === "scanning"
+                ? icon("check")
+                : item.status === "quarantined"
+                  ? icon("review")
+                  : "";
   return `<article class="files-upload-item files-upload-item--${escapeHtml(item.status)}"><div class="files-upload-item__icon">${icon(type.startsWith("image/") ? "image" : type.startsWith("video/") ? "video" : "file")}</div><div class="files-upload-item__body"><div><strong>${escapeHtml(file.name || file.fileName)}</strong><span>${escapeHtml(formatBytes(file.size))}</span></div><progress class="files-progress" aria-label="Upload progress" max="100" value="${Math.round(item.progress * 100)}">${Math.round(item.progress * 100)}%</progress><small>${escapeHtml(status)}</small></div><div class="files-upload-item__actions">${actions}</div></article>`;
 }
 
@@ -4568,6 +4579,149 @@ function uploadPartTarget(payload, partNumber) {
   );
 }
 
+function uploadSessionFileMetadata(item) {
+  const file = item.file || item.fileMetadata || {};
+  return {
+    name: normalizeString(file.name || file.fileName),
+    size: Number(file.size),
+    type:
+      normalizeString(file.type || file.contentType) ||
+      "application/octet-stream",
+  };
+}
+
+function rememberUploadSession(item, session) {
+  const file = uploadSessionFileMetadata(item);
+  const sessionId = normalizeString(session?.uploadSessionId || session?.id);
+  if (!sessionId) {
+    throw new FilesApiError("The resumable upload session was incomplete.");
+  }
+  const knownSessionId = normalizeString(item.sessionId);
+  if (knownSessionId && sessionId !== knownSessionId) {
+    throw new FilesApiError("The resumable upload session did not match.", {
+      code: "upload_session_identity_mismatch",
+    });
+  }
+  item.sessionId = sessionId;
+  item.sessionVersion = session?.version;
+  item.assetId = normalizeString(session?.assetId || item.assetId);
+  item.revisionId = normalizeString(session?.revisionId || item.revisionId);
+  item.proposalId = uploadProposalId(session, item.proposalId);
+  item.intent = normalizeString(session?.intent || item.intent) || "commit";
+  item.proposal = session?.proposal || item.proposal || null;
+  item.partSize = Number(session?.partSize || item.partSize || 5 * 1024 * 1024);
+  item.totalParts = Number(
+    session?.totalParts ||
+      item.totalParts ||
+      Math.ceil(file.size / item.partSize),
+  );
+  item.completedParts = Array.isArray(session?.uploadedParts)
+    ? session.uploadedParts
+    : item.completedParts || [];
+  item.sessionCreationStarted = false;
+}
+
+function uploadSessionCreationWasDefinitivelyRejected(
+  error,
+  { recoveryAttempt = false } = {},
+) {
+  if (recoveryAttempt) return false;
+  const status = Number(error?.status);
+  if (!Number.isInteger(status) || status < 400 || status >= 500) return false;
+  if ([401, 403, 408, 425, 429].includes(status)) return false;
+  // Only explicit pre-create validation failures prove the first request did
+  // not create a session. Generic conflicts can occur after a commit, while
+  // replay, authorization, throttling, and timeout failures are inconclusive.
+  return new Set([
+    "folder_not_found",
+    "files_workspace_not_initialized",
+    "invalid_file_name",
+    "invalid_content_type",
+    "unsafe_upload_type",
+    "invalid_upload_size",
+    "invalid_checksum_sha256",
+    "invalid_upload_intent",
+    "invalid_upload_part_count",
+    "invalid_proposal_action",
+    "proposal_target_asset_required",
+    "proposal_target_asset_invalid",
+    "files_quota_exceeded",
+    "expected_version_required",
+    "missing_idempotency_key",
+    "idempotency_key_required",
+  ]).has(normalizeString(error?.code));
+}
+
+async function createOrRecoverUploadSession(item) {
+  const activeCreation = state.uploadSessionCreations.get(item.id);
+  if (activeCreation) return activeCreation;
+  const recoveryAttempt = item.sessionCreationStarted === true;
+  const file = uploadSessionFileMetadata(item);
+  if (
+    !file.name ||
+    !Number.isFinite(file.size) ||
+    file.size < 0 ||
+    !normalizeString(item.checksumSha256)
+  ) {
+    throw new FilesApiError(
+      "The pending upload session cannot be recovered without its file metadata and checksum.",
+    );
+  }
+  const uploadFolderRevision = assertResourceRevision(
+    { version: item.folderVersion },
+    "The upload folder",
+  );
+  item.sessionCreationStarted = true;
+  persistUploadCheckpoints();
+  const creation = (async () => {
+    try {
+      const session = normalizedUploadSession(
+        await api.createUploadSession(
+          item.folderId,
+          {
+            fileName: file.name,
+            contentType: file.type,
+            size: file.size,
+            checksumSha256: item.checksumSha256,
+            idempotencyKey: item.id,
+            intent: item.intent || "commit",
+            ...(item.intent === "proposal" && item.proposal
+              ? { proposal: item.proposal }
+              : {}),
+            expectedVersion: uploadFolderRevision,
+          },
+          {
+            idempotencyKey: item.id,
+            ...(item.folderEtag
+              ? { headers: { "If-Match": item.folderEtag } }
+              : {}),
+          },
+        ),
+      );
+      rememberUploadSession(item, session);
+      persistUploadCheckpoints();
+      return session;
+    } catch (error) {
+      if (
+        !item.sessionId &&
+        uploadSessionCreationWasDefinitivelyRejected(error, { recoveryAttempt })
+      ) {
+        item.sessionCreationStarted = false;
+        persistUploadCheckpoints();
+      }
+      throw error;
+    }
+  })();
+  state.uploadSessionCreations.set(item.id, creation);
+  try {
+    return await creation;
+  } finally {
+    if (state.uploadSessionCreations.get(item.id) === creation) {
+      state.uploadSessionCreations.delete(item.id);
+    }
+  }
+}
+
 function persistUploadCheckpoints() {
   const userId = normalizeString(state.user?.userId);
   if (!userId) {
@@ -4596,6 +4750,8 @@ function persistUploadCheckpoints() {
       totalParts: item.totalParts || 0,
       completedParts: item.completedParts || [],
       progress: item.progress || 0,
+      cancelRequested: item.cancelRequested === true,
+      sessionCreationStarted: item.sessionCreationStarted === true,
       fileMetadata:
         item.fileMetadata ||
         (item.file
@@ -4645,14 +4801,25 @@ function restoreUploadCheckpoints() {
   }
   const checkpoints = Array.isArray(payload.items) ? payload.items : [];
   state.uploadQueue = Array.isArray(checkpoints)
-    ? checkpoints.map((item) => ({
-        ...item,
-        file: null,
-        status: ["scanning", "quarantined"].includes(item.status)
-          ? item.status
-          : "paused",
-        error: "",
-      }))
+    ? checkpoints.map((item) => {
+        const cancelRequested =
+          item.cancelRequested === true ||
+          ["cancelling", "cancel_pending"].includes(item.status);
+        return {
+          ...item,
+          file: null,
+          cancelRequested,
+          sessionCreationStarted: item.sessionCreationStarted === true,
+          status: cancelRequested
+            ? "cancel_pending"
+            : ["scanning", "quarantined"].includes(item.status)
+              ? item.status
+              : "paused",
+          error: cancelRequested
+            ? "Cancellation is pending and will retry automatically."
+            : "",
+        };
+      })
     : [];
 }
 
@@ -4751,7 +4918,15 @@ async function refreshUploadStatus(item, { schedule = false } = {}) {
 }
 
 async function reconcileUploadCheckpoints() {
-  await Promise.all(state.uploadQueue.map((item) => refreshUploadStatus(item)));
+  await Promise.all(
+    state.uploadQueue.map(async (item) => {
+      if (item.cancelRequested) {
+        applyUploadAbortResult(item, await abortUploadSession(item));
+        return;
+      }
+      await refreshUploadStatus(item);
+    }),
+  );
   state.uploadQueue
     .filter((item) => item.status === "scanning")
     .forEach((item) => scheduleUploadStatusPoll(item));
@@ -4819,8 +4994,27 @@ function resumeUpload(id, file = null) {
   startUpload(item);
 }
 
-async function startUpload(item) {
-  if (!item.file || state.uploadControllers.has(item.id)) return;
+function startUpload(item) {
+  if (
+    !item?.file ||
+    state.uploadControllers.has(item.id) ||
+    state.uploadRuns.has(item.id)
+  ) {
+    return null;
+  }
+  const run = runUpload(item);
+  state.uploadRuns.set(item.id, run);
+  run
+    .finally(() => {
+      if (state.uploadRuns.get(item.id) === run) {
+        state.uploadRuns.delete(item.id);
+      }
+    })
+    .catch(() => {});
+  return run;
+}
+
+async function runUpload(item) {
   item.pauseRequested = false;
   item.cancelRequested = false;
   item.status = "hashing";
@@ -4861,52 +5055,9 @@ async function startUpload(item) {
       }
     }
     if (!item.sessionId) {
-      const uploadFolderRevision = assertResourceRevision(
-        { version: item.folderVersion },
-        "The upload folder",
-      );
-      session = normalizedUploadSession(
-        await api.createUploadSession(
-          item.folderId,
-          {
-            fileName: item.file.name,
-            contentType: item.file.type || "application/octet-stream",
-            size: item.file.size,
-            checksumSha256: item.checksumSha256,
-            idempotencyKey: item.id,
-            intent: item.intent || "commit",
-            ...(item.intent === "proposal" && item.proposal
-              ? { proposal: item.proposal }
-              : {}),
-            expectedVersion: uploadFolderRevision,
-          },
-          {
-            idempotencyKey: item.id,
-            ...(item.folderEtag
-              ? { headers: { "If-Match": item.folderEtag } }
-              : {}),
-          },
-        ),
-      );
+      session = await createOrRecoverUploadSession(item);
     }
-    item.sessionId = normalizeString(session?.uploadSessionId || session?.id);
-    item.sessionVersion = session?.version;
-    item.assetId = normalizeString(session?.assetId || item.assetId);
-    item.revisionId = normalizeString(session?.revisionId || item.revisionId);
-    item.proposalId = uploadProposalId(session, item.proposalId);
-    item.intent = normalizeString(session?.intent || item.intent) || "commit";
-    item.proposal = session?.proposal || item.proposal || null;
-    item.partSize = Number(
-      session?.partSize || item.partSize || 5 * 1024 * 1024,
-    );
-    item.totalParts = Number(
-      session?.totalParts || Math.ceil(item.file.size / item.partSize),
-    );
-    item.completedParts = Array.isArray(session?.uploadedParts)
-      ? session.uploadedParts
-      : item.completedParts || [];
-    if (!item.sessionId)
-      throw new FilesApiError("The resumable upload session was incomplete.");
+    rememberUploadSession(item, session);
     persistUploadCheckpoints();
     assertUploadTransferActive(item, controller.signal);
     item.status = "uploading";
@@ -5072,19 +5223,12 @@ async function startUpload(item) {
       await loadRoute();
   } catch (error) {
     const interrupted = error?.name === "AbortError";
-    if (interrupted && item.cancelRequested && item.sessionId) {
-      await abortUploadSession(item);
+    if (item.cancelRequested) {
+      applyUploadAbortResult(item, await abortUploadSession(item));
+    } else {
+      item.status = interrupted ? "paused" : "error";
+      item.error = interrupted ? "Paused" : error?.message || "Upload failed";
     }
-    item.status = interrupted
-      ? item.cancelRequested
-        ? "cancelled"
-        : "paused"
-      : "error";
-    item.error = interrupted
-      ? item.cancelRequested
-        ? "Cancelled"
-        : "Paused"
-      : error?.message || "Upload failed";
     persistUploadCheckpoints();
   } finally {
     state.uploadControllers.delete(item.id);
@@ -5092,33 +5236,129 @@ async function startUpload(item) {
   }
 }
 
+function uploadAbortActionKey(item, sessionRevision) {
+  return `${item.id}:abort:v${sessionRevision}`;
+}
+
+async function reconcileUploadSessionBeforeAbort(item) {
+  try {
+    const session = normalizedUploadSession(
+      await api.getUploadSession(item.sessionId),
+    );
+    rememberUploadSession(item, session);
+    persistUploadCheckpoints();
+    const sessionState = normalizeString(session?.state).toLowerCase();
+    if (["aborted", "expired", "failed"].includes(sessionState)) {
+      return { aborted: true };
+    }
+    if (!sessionState || sessionState === "uploading") {
+      return { ready: true };
+    }
+    if (
+      [
+        "uploaded",
+        "scanning",
+        "ready",
+        "complete",
+        "completed",
+        "quarantined",
+      ].includes(sessionState)
+    ) {
+      applyUploadSessionState(item, session);
+      return { cancellationSuperseded: true, sessionState };
+    }
+    return {
+      aborted: false,
+      error: new FilesApiError(
+        `The upload reached ${sessionState} before cancellation could be confirmed.`,
+        { code: "upload_session_not_abortable" },
+      ),
+    };
+  } catch (error) {
+    if ([404, 410].includes(Number(error?.status))) {
+      return { aborted: true };
+    }
+    return { aborted: false, error };
+  }
+}
+
+async function attemptUploadSessionAbort(item) {
+  const sessionRevision = assertResourceRevision(
+    { version: item.sessionVersion },
+    "The upload session",
+  );
+  const actionKey = uploadAbortActionKey(item, sessionRevision);
+  await api.abortUpload(
+    item.sessionId,
+    {
+      expectedVersion: sessionRevision,
+      idempotencyKey: actionKey,
+    },
+    mutationOptions(actionKey, { version: sessionRevision }, sessionRevision),
+  );
+  return { aborted: true };
+}
+
 async function abortUploadSession(item) {
-  if (!item.sessionId) return;
   if (!item.abortPromise) {
     item.abortPromise = (async () => {
       try {
-        const sessionRevision = assertResourceRevision(
-          { version: item.sessionVersion },
-          "The upload session",
-        );
-        await api.abortUpload(
-          item.sessionId,
-          {
-            expectedVersion: sessionRevision,
-            idempotencyKey: `${item.id}:abort`,
-          },
-          mutationOptions(
-            `${item.id}:abort`,
-            { version: sessionRevision },
-            sessionRevision,
-          ),
-        );
-      } catch {
-        // The stable action key makes a later canonical abort safe to retry.
+        if (
+          !item.sessionId &&
+          (item.sessionCreationStarted ||
+            state.uploadSessionCreations.has(item.id))
+        ) {
+          try {
+            await createOrRecoverUploadSession(item);
+          } catch (error) {
+            if (!item.sessionId && item.sessionCreationStarted === false) {
+              return { aborted: true };
+            }
+            throw error;
+          }
+        }
+        if (!item.sessionId) return { aborted: true };
+        const reconciled = await reconcileUploadSessionBeforeAbort(item);
+        if (!reconciled.ready) return reconciled;
+        try {
+          return await attemptUploadSessionAbort(item);
+        } catch (error) {
+          if (error?.code !== "files_version_conflict") throw error;
+          const reconciled = await reconcileUploadSessionBeforeAbort(item);
+          if (!reconciled.ready) return reconciled;
+          return await attemptUploadSessionAbort(item);
+        }
+      } catch (error) {
+        return { aborted: false, error };
       }
     })();
   }
-  await item.abortPromise;
+  const abortPromise = item.abortPromise;
+  const result = await abortPromise;
+  if (item.abortPromise === abortPromise) item.abortPromise = null;
+  return result;
+}
+
+function applyUploadAbortResult(item, result) {
+  item.pauseRequested = false;
+  if (result.cancellationSuperseded) {
+    item.cancelRequested = false;
+    if (item.status === "scanning") {
+      item.error =
+        "Upload completed before cancellation · security scan in progress";
+      scheduleUploadStatusPoll(item);
+    }
+    return;
+  }
+  item.cancelRequested = true;
+  if (result.aborted) {
+    item.status = "cancelled";
+    item.error = "Cancelled";
+    return;
+  }
+  item.status = "cancel_pending";
+  item.error =
+    "Cancellation could not reach the server. It will retry when Files reloads, or you can retry now.";
 }
 
 async function cancelUpload(id) {
@@ -5129,10 +5369,21 @@ async function cancelUpload(id) {
   const pollTimer = state.uploadPollTimers.get(id);
   if (pollTimer) window.clearTimeout(pollTimer);
   state.uploadPollTimers.delete(id);
+  item.status = "cancelling";
+  item.error = "";
+  persistUploadCheckpoints();
+  render();
+  const activeRun = state.uploadRuns.get(id);
   state.uploadControllers.get(id)?.abort(uploadAbortError("Upload cancelled."));
-  await abortUploadSession(item);
-  item.status = "cancelled";
-  item.error = "Cancelled";
+  if (activeRun) {
+    await activeRun;
+    if (
+      !item.cancelRequested ||
+      ["cancelled", "cancel_pending"].includes(item.status)
+    )
+      return;
+  }
+  applyUploadAbortResult(item, await abortUploadSession(item));
   persistUploadCheckpoints();
   render();
 }

@@ -26830,15 +26830,68 @@ async function loadOrganizationGovernancePage({ refresh = false } = {}) {
 
 function organizationGovernanceVoteOptionsFromForm(formData) {
   const raw = normalizeString(formData.get("options"));
-  return raw
+  const labels = raw
     .split(/\r?\n/gu)
     .map((entry) => normalizeString(entry).replace(/^[-*]\s*/u, ""))
     .filter(Boolean)
-    .slice(0, 20)
-    .map((label, index) => ({
-      optionId: `option-${index + 1}`,
-      label,
-    }));
+    .slice(0, 20);
+  let originalOptions = [];
+  try {
+    const parsed = JSON.parse(String(formData.get("originalOptions") || "[]"));
+    if (Array.isArray(parsed)) {
+      originalOptions = parsed
+        .map((option) => ({
+          optionId: normalizeString(option?.optionId || option?.id),
+          label: normalizeString(option?.label || option?.title),
+        }))
+        .filter((option) => option.optionId && option.label);
+    }
+  } catch {
+    originalOptions = [];
+  }
+  const changed =
+    labels.length !== originalOptions.length ||
+    labels.some((label, index) => label !== originalOptions[index]?.label);
+  if (!changed) return { changed: false, options: originalOptions };
+
+  const byLabel = new Map();
+  originalOptions.forEach((option) => {
+    const matches = byLabel.get(option.label) || [];
+    matches.push(option);
+    byLabel.set(option.label, matches);
+  });
+  const usedIds = new Set();
+  const assignedIds = labels.map((label) => {
+    const exact = (byLabel.get(label) || []).find(
+      (option) => !usedIds.has(option.optionId),
+    );
+    if (!exact) return "";
+    usedIds.add(exact.optionId);
+    return exact.optionId;
+  });
+  assignedIds.forEach((optionId, index) => {
+    if (optionId) return;
+    const positional = originalOptions[index];
+    if (!positional || usedIds.has(positional.optionId)) return;
+    assignedIds[index] = positional.optionId;
+    usedIds.add(positional.optionId);
+  });
+  const originalIds = new Set(originalOptions.map((option) => option.optionId));
+  const nextGeneratedId = (index) => {
+    let suffix = index + 1;
+    let candidate = `option-${suffix}`;
+    while (usedIds.has(candidate) || originalIds.has(candidate)) {
+      suffix += 1;
+      candidate = `option-${suffix}`;
+    }
+    return candidate;
+  };
+  const options = labels.map((label, index) => {
+    const optionId = assignedIds[index] || nextGeneratedId(index);
+    usedIds.add(optionId);
+    return { optionId, label };
+  });
+  return { changed: true, options };
 }
 
 function organizationGovernanceVotePayloadFromForm(
@@ -26860,26 +26913,30 @@ function organizationGovernanceVotePayloadFromForm(
   if (create && !presetId) {
     throw new Error("Choose a vote preset.");
   }
-  const options = organizationGovernanceVoteOptionsFromForm(formData);
+  const optionState = organizationGovernanceVoteOptionsFromForm(formData);
   const expectedVersion =
     readOptionalGovernanceNumber(formData.get("expectedVersion")) || 0;
   return {
     expectedVersion,
     question,
-    ...(presetId ? { presetId } : {}),
-    ...(description
-      ? { description }
-      : create
-        ? {}
-        : { clearDescription: true }),
-    ...(sessionId ? { sessionId } : create ? {} : { clearSession: true }),
-    ...(options.length ? { options } : {}),
+    ...(create && presetId ? { presetId } : {}),
+    ...(create
+      ? description
+        ? { description }
+        : {}
+      : { description }),
+    ...(create ? (sessionId ? { sessionId } : {}) : { sessionId }),
+    ...(optionState.changed ? { options: optionState.options } : {}),
     rules: {
       ballotMethod,
       privacyMode,
-      paperAllowed: formData.has("paperAllowed"),
-      paperEvidenceRequired: formData.has("paperEvidenceRequired"),
-      remoteEnabled: formData.has("remoteEnabled"),
+      participation: {
+        remoteEnabled: formData.has("remoteEnabled"),
+      },
+      paper: {
+        allowed: formData.has("paperAllowed"),
+        evidenceRequired: formData.has("paperEvidenceRequired"),
+      },
     },
   };
 }
@@ -26900,7 +26957,7 @@ async function createOrganizationGovernanceVote(formData) {
     scheduleRender();
     return false;
   }
-  body.expectedVersion = organizationGovernancePolicyVersion(page);
+  body.expectedVersion = 0;
   page.actionPendingKey = "vote:create";
   page.error = "";
   scheduleRender();
@@ -33169,6 +33226,8 @@ function readOptionalGovernanceNumber(value) {
 
 function normalizeOrganizationGovernanceRules(raw = {}) {
   const source = readObjectPayload(raw);
+  const participation = readObjectPayload(source.participation);
+  const paper = readObjectPayload(source.paper);
   return {
     ballotMethod:
       normalizeString(
@@ -33181,18 +33240,23 @@ function normalizeOrganizationGovernanceRules(raw = {}) {
       normalizeString(source.privacyMode || source.privacy || source.mode)
         .toUpperCase() || "VISIBLE",
     paperAllowed: parseBoolean(
-      source.paperAllowed ??
+      paper.allowed ??
+        source.paperAllowed ??
         source.paperBallotsEnabled ??
         source.paperEnabled ??
         source.allowPaper,
       false,
     ),
     paperEvidenceRequired: parseBoolean(
-      source.paperEvidenceRequired ?? source.evidenceRequired,
+      paper.evidenceRequired ??
+        source.paperEvidenceRequired ??
+        source.evidenceRequired,
       false,
     ),
     remoteEnabled: parseBoolean(
-      source.remoteEnabled ?? source.remoteVotingEnabled,
+      participation.remoteEnabled ??
+        source.remoteEnabled ??
+        source.remoteVotingEnabled,
       true,
     ),
     resultsRelease:
@@ -33272,6 +33336,8 @@ function normalizeOrganizationGovernancePreset(raw = {}) {
       normalizeString(source.label || source.title || source.name) ||
       "Governance preset",
     description: normalizeString(source.description || source.summary),
+    available: source.available !== false,
+    unavailableReason: normalizeString(source.unavailableReason),
     rules: normalizeOrganizationGovernanceRules(source.rules || source),
     raw: source,
   };
@@ -90368,20 +90434,60 @@ function renderOrganizationGovernanceVoteForm(page, { vote = null } = {}) {
   const method = organizationGovernanceVoteMethod(vote);
   const privacyMode =
     normalizeString(vote?.rules?.privacyMode).toUpperCase() || "OPEN_ATTRIBUTED";
+  const privacyModes = Array.from(
+    new Set(
+      [
+        privacyMode,
+        "OPEN_ATTRIBUTED",
+        "SECRET_ADMIN_AUDITABLE",
+        "SEALED_AUDIT",
+      ].filter(Boolean),
+    ),
+  );
   const optionText = (vote?.options || [])
     .map((option) => option.label || option.optionId)
     .filter(Boolean)
     .join("\n");
-  const presetSelect = page.presets.length
-    ? `<label><span>Preset</span><select name="presetId"${disabledAttr(pending)}>
-        ${page.presets
+  const originalOptions = JSON.stringify(
+    (vote?.options || []).map((option) => ({
+      optionId: option.optionId,
+      label: option.label || option.optionId,
+    })),
+  );
+  const existingPresetId = normalizeString(
+    vote?.raw?.rules?.presetId ||
+      vote?.raw?.rules?.derivedFromPresetId ||
+      vote?.raw?.presetId,
+  );
+  const existingPresetLabel =
+    page.presets.find((preset) => preset.presetId === existingPresetId)?.label ||
+    existingPresetId ||
+    "Existing vote rules";
+  const availablePresets = page.presets.filter(
+    (preset) => preset.available !== false,
+  );
+  const ballotMethods = Array.from(
+    new Set(
+      [
+        method,
+        ...availablePresets.map((preset) => preset.rules?.ballotMethod),
+      ]
+        .map((value) => normalizeString(value).toUpperCase())
+        .filter(Boolean),
+    ),
+  );
+  const presetSelect = editing
+    ? `<label><span>Preset</span><input value="${escapeHtml(existingPresetLabel)}" disabled /></label>`
+    : availablePresets.length
+      ? `<label><span>Preset</span><select name="presetId"${disabledAttr(pending)}>
+        ${availablePresets
           .map(
             (preset, index) =>
               `<option value="${escapeHtml(preset.presetId)}"${index === 0 ? " selected" : ""}>${escapeHtml(preset.label)}</option>`,
           )
           .join("")}
       </select></label>`
-    : `<label><span>Preset id</span><input name="presetId" placeholder="constitution_ratification"${disabledAttr(pending || editing)}${editing ? "" : " required"} /></label>`;
+      : `<label><span>Preset id</span><input name="presetId" placeholder="constitution_ratification"${disabledAttr(pending)} required /></label>`;
   return `<article class="shared-coalition-panel shared-organization-governance-form-panel">
     <div class="shared-coalition-panel__header">
       <div>
@@ -90392,7 +90498,8 @@ function renderOrganizationGovernanceVoteForm(page, { vote = null } = {}) {
     </div>
     <form class="shared-coalition-governance-form shared-organization-governance-form" data-route-form="${editing ? "organization-governance-vote-update" : "organization-governance-vote-create"}">
       ${editing ? `<input type="hidden" name="voteId" value="${escapeHtml(vote.voteId)}" />` : ""}
-      <input type="hidden" name="expectedVersion" value="${escapeHtml(String(editing ? vote.voteVersion || 0 : organizationGovernancePolicyVersion(page)))}" />
+      <input type="hidden" name="expectedVersion" value="${escapeHtml(String(editing ? vote.voteVersion || 0 : 0))}" />
+      <input type="hidden" name="originalOptions" value="${escapeHtml(originalOptions)}" />
       <label class="is-wide"><span>Question</span><input name="question" value="${escapeHtml(vote?.question || vote?.title || "")}" placeholder="Authorize the annual operating plan?"${disabledAttr(pending)} required /></label>
       ${presetSelect}
       <label><span>Session id</span><input name="sessionId" value="${escapeHtml(vote?.sessionId || "")}" placeholder="Optional meeting session"${disabledAttr(pending)} /></label>
@@ -90404,10 +90511,10 @@ function renderOrganizationGovernanceVoteForm(page, { vote = null } = {}) {
         </div>
         <div class="shared-coalition-governance-rule-form-grid">
           <label><span>Ballot method</span><select name="ballotMethod"${disabledAttr(pending)}>
-            ${["YES_NO", "RANKED_CHOICE", "OPEN_ATTRIBUTED", "OBSERVED_DIVISION"].map((value) => `<option value="${escapeHtml(value)}"${value === method ? " selected" : ""}>${escapeHtml(humanizeLabel(value))}</option>`).join("")}
+            ${ballotMethods.map((value) => `<option value="${escapeHtml(value)}"${value === method ? " selected" : ""}>${escapeHtml(humanizeLabel(value))}</option>`).join("")}
           </select></label>
           <label><span>Privacy</span><select name="privacyMode"${disabledAttr(pending)}>
-            ${["OPEN_ATTRIBUTED", "SECRET_ADMIN_AUDITABLE", "SEALED_AUDIT"].map((value) => `<option value="${escapeHtml(value)}"${value === privacyMode ? " selected" : ""}>${escapeHtml(humanizeLabel(value))}</option>`).join("")}
+            ${privacyModes.map((value) => `<option value="${escapeHtml(value)}"${value === privacyMode ? " selected" : ""}>${escapeHtml(humanizeLabel(value))}</option>`).join("")}
           </select></label>
           <label class="shared-organization-governance-check"><input type="checkbox" name="remoteEnabled"${vote?.rules?.remoteEnabled === false ? "" : " checked"}${disabledAttr(pending)} /> <span>Remote voting</span></label>
           <label class="shared-organization-governance-check"><input type="checkbox" name="paperAllowed"${vote?.rules?.paperAllowed ? " checked" : ""}${disabledAttr(pending)} /> <span>Paper ballots</span></label>

@@ -308,6 +308,7 @@ async function mockFiles(page, overrides = {}) {
     currentMainOnly: false,
   };
   let uploadStatusIndex = 0;
+  let uploadAbortAttempts = 0;
   let uploadIntent = "commit";
   let uploadProposal = null;
   let editionMaterialization = currentWorkspace.activeMaterialization
@@ -1121,6 +1122,18 @@ async function mockFiles(page, overrides = {}) {
       method === "POST"
     ) {
       captures.uploadAborts.push({ body, idempotencyKey });
+      uploadAbortAttempts += 1;
+      if (uploadAbortAttempts <= Number(overrides.uploadAbortFailures || 0)) {
+        return json(
+          route,
+          {
+            ok: false,
+            error: "abort_unavailable",
+            message: "Upload cancellation is temporarily unavailable.",
+          },
+          503,
+        );
+      }
       return json(route, { ok: true, state: "aborted" });
     }
     if (path === "/api/files/upload-sessions/upload-1" && method === "GET") {
@@ -1950,6 +1963,7 @@ test("Cancel remains the canonical server abort after a local pause", async ({
     releaseUpload = resolve;
   });
   const captures = await mockFiles(page, {
+    uploadStatuses: [{ state: "uploading", version: 1, progress: 0 }],
     onSignedUpload: async ({ route, partNumber, attempt }) => {
       if (partNumber !== 1 || attempt !== 1) return false;
       await uploadGate;
@@ -1984,6 +1998,7 @@ test("Cancel remains the canonical server abort after a local pause", async ({
   expect(captures.uploadAborts).toHaveLength(0);
 
   await modal.getByRole("button", { name: "Cancel" }).click();
+  await expect.poll(() => captures.uploadAborts.length).toBe(1);
   expect(captures.uploadAborts).toEqual([
     {
       body: {
@@ -1996,8 +2011,766 @@ test("Cancel remains the canonical server abort after a local pause", async ({
   expect(captures.uploadAborts[0].idempotencyKey).toBe(
     captures.uploadAborts[0].body.idempotencyKey,
   );
+  const cancellationRequests = captures.requests.filter(({ path }) =>
+    path.startsWith("/api/files/upload-sessions/upload-1"),
+  );
+  expect(
+    cancellationRequests.slice(-2).map(({ method, path }) => [method, path]),
+  ).toEqual([
+    ["GET", "/api/files/upload-sessions/upload-1"],
+    ["POST", "/api/files/upload-sessions/upload-1/abort"],
+  ]);
   releaseUpload();
 });
+
+test("a failed upload abort keeps its checkpoint and retries on reload", async ({
+  page,
+}) => {
+  await seedSession(page);
+  let releaseUpload;
+  const uploadGate = new Promise((resolve) => {
+    releaseUpload = resolve;
+  });
+  const captures = await mockFiles(page, {
+    uploadAbortFailures: 1,
+    uploadStatuses: [{ state: "uploading", version: 1, progress: 0 }],
+    onSignedUpload: async ({ route, partNumber, attempt }) => {
+      if (partNumber !== 1 || attempt !== 1) return false;
+      await uploadGate;
+      await route
+        .fulfill({
+          status: 200,
+          headers: { etag: '"part-etag-1"' },
+          body: "",
+        })
+        .catch(() => {});
+      return true;
+    },
+  });
+
+  await page.goto("/files/uploads");
+  await page.getByRole("button", { name: "Add files" }).click();
+  await page.locator('[data-action="pick-files"]').evaluate((input) => {
+    const transfer = new DataTransfer();
+    transfer.items.add(
+      new File(["cancel and retry"], "retry-cancel.txt", {
+        type: "text/plain",
+        lastModified: 1_786_800_000_000,
+      }),
+    );
+    input.files = transfer.files;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await expect.poll(() => captures.signedUploadParts.length).toBe(1);
+  const modal = page.locator(".files-modal");
+  await modal.getByRole("button", { name: "Pause" }).click();
+  await expect(modal.getByText(/Paused at/)).toBeVisible();
+
+  await modal.getByRole("button", { name: "Cancel" }).click();
+  await expect(
+    modal.getByRole("button", { name: "Retry cancellation" }),
+  ).toBeVisible();
+  const pendingCheckpoint = await page.evaluate(() =>
+    JSON.parse(sessionStorage.getItem("polisFilesUploads.v1")),
+  );
+  expect(pendingCheckpoint.items).toEqual([
+    expect.objectContaining({
+      sessionId: "upload-1",
+      status: "cancel_pending",
+      cancelRequested: true,
+    }),
+  ]);
+  expect(captures.uploadAborts).toHaveLength(1);
+  releaseUpload();
+
+  await page.reload();
+  await expect.poll(() => captures.uploadAborts.length).toBe(2);
+  expect(captures.uploadAborts[1].idempotencyKey).toBe(
+    captures.uploadAborts[0].idempotencyKey,
+  );
+  expect(
+    await page.evaluate(() => sessionStorage.getItem("polisFilesUploads.v1")),
+  ).toBeNull();
+});
+
+for (const invalidSession of [
+  { name: "malformed JSON", body: '{"ok":true,"uploadSession":' },
+  { name: "missing session", body: JSON.stringify({ ok: true }) },
+  {
+    name: "missing identity",
+    body: JSON.stringify({ ok: true, uploadSession: { version: 99 } }),
+  },
+  {
+    name: "mismatched identity",
+    body: JSON.stringify({
+      ok: true,
+      uploadSession: { uploadSessionId: "upload-other", version: 99 },
+    }),
+  },
+]) {
+  test(`cancellation preserves known session after ${invalidSession.name} until canonical retry`, async ({
+    page,
+  }) => {
+    await seedSession(page);
+    let releaseUpload;
+    const uploadGate = new Promise((resolve) => {
+      releaseUpload = resolve;
+    });
+    let reconciliationCount = 0;
+    const captures = await mockFiles(page, {
+      uploadStatuses: [{ state: "uploading", version: 1, progress: 0 }],
+      onRequest: async ({ route, path, method }) => {
+        if (
+          path !== "/api/files/upload-sessions/upload-1" ||
+          method !== "GET"
+        ) {
+          return false;
+        }
+        reconciliationCount += 1;
+        if (reconciliationCount !== 1) return false;
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: invalidSession.body,
+        });
+        return true;
+      },
+      onSignedUpload: async ({ route, partNumber, attempt }) => {
+        if (partNumber !== 1 || attempt !== 1) return false;
+        await uploadGate;
+        await route
+          .fulfill({
+            status: 200,
+            headers: { etag: '"part-etag-1"' },
+            body: "",
+          })
+          .catch(() => {});
+        return true;
+      },
+    });
+
+    await page.goto("/files/uploads");
+    await page.getByRole("button", { name: "Add files" }).click();
+    await page.locator('[data-action="pick-files"]').evaluate((input) => {
+      const transfer = new DataTransfer();
+      transfer.items.add(
+        new File(["keep session identity"], "session-identity.txt", {
+          type: "text/plain",
+          lastModified: 1_786_800_000_000,
+        }),
+      );
+      input.files = transfer.files;
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await expect.poll(() => captures.signedUploadParts.length).toBe(1);
+    const modal = page.locator(".files-modal");
+    await modal.getByRole("button", { name: "Pause" }).click();
+    await expect(modal.getByText(/Paused at/)).toBeVisible();
+
+    await modal.getByRole("button", { name: "Cancel" }).click();
+    await expect(
+      modal.getByRole("button", { name: "Retry cancellation" }),
+    ).toBeVisible();
+    const pendingCheckpoint = await page.evaluate(() =>
+      JSON.parse(sessionStorage.getItem("polisFilesUploads.v1")),
+    );
+    expect(pendingCheckpoint.items).toEqual([
+      expect.objectContaining({
+        sessionId: "upload-1",
+        sessionVersion: 1,
+        status: "cancel_pending",
+        cancelRequested: true,
+      }),
+    ]);
+    expect(captures.uploadAborts).toHaveLength(0);
+
+    await modal.getByRole("button", { name: "Retry cancellation" }).click();
+    await expect.poll(() => captures.uploadAborts.length).toBe(1);
+    expect(captures.uploadAborts[0].body.expectedVersion).toBe(1);
+    expect(reconciliationCount).toBe(2);
+    expect(
+      captures.requests
+        .filter(({ path }) =>
+          path.startsWith("/api/files/upload-sessions/upload-"),
+        )
+        .slice(-3)
+        .map(({ method, path }) => [method, path]),
+    ).toEqual([
+      ["GET", "/api/files/upload-sessions/upload-1"],
+      ["GET", "/api/files/upload-sessions/upload-1"],
+      ["POST", "/api/files/upload-sessions/upload-1/abort"],
+    ]);
+    await expect
+      .poll(() =>
+        page.evaluate(() => sessionStorage.getItem("polisFilesUploads.v1")),
+      )
+      .toBeNull();
+    releaseUpload();
+  });
+}
+
+test("active cancellation waits for an in-flight checkpoint before aborting", async ({
+  page,
+}) => {
+  await seedSession(page);
+  let markCheckpointStarted;
+  let releaseCheckpoint;
+  const checkpointStarted = new Promise((resolve) => {
+    markCheckpointStarted = resolve;
+  });
+  const checkpointGate = new Promise((resolve) => {
+    releaseCheckpoint = resolve;
+  });
+  const captures = await mockFiles(page, {
+    onRequest: async ({ route, path, method }) => {
+      if (
+        path === "/api/files/upload-sessions/upload-1/parts" &&
+        method === "POST"
+      ) {
+        markCheckpointStarted();
+        await checkpointGate;
+        await json(route, {
+          ok: true,
+          uploadSession: { uploadSessionId: "upload-1", version: 2 },
+        });
+        return true;
+      }
+      if (path === "/api/files/upload-sessions/upload-1" && method === "GET") {
+        await json(route, {
+          ok: true,
+          uploadSession: {
+            uploadSessionId: "upload-1",
+            assetId: "asset-upload-1",
+            revisionId: "asset-upload-version-1",
+            state: "uploading",
+            version: 2,
+          },
+        });
+        return true;
+      }
+      return false;
+    },
+  });
+
+  await page.goto("/files/uploads");
+  await page.getByRole("button", { name: "Add files" }).click();
+  await page.locator('[data-action="pick-files"]').evaluate((input) => {
+    const transfer = new DataTransfer();
+    transfer.items.add(
+      new File(["checkpoint race"], "checkpoint-race.txt", {
+        type: "text/plain",
+        lastModified: 1_786_800_100_000,
+      }),
+    );
+    input.files = transfer.files;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await checkpointStarted;
+
+  const modal = page.locator(".files-modal");
+  await modal.getByRole("button", { name: "Cancel" }).click();
+  await expect(modal.getByText(/Cancelling securely/u)).toBeVisible();
+  expect(captures.uploadAborts).toHaveLength(0);
+  expect(
+    captures.requests.filter(
+      ({ path, method }) =>
+        path === "/api/files/upload-sessions/upload-1" && method === "GET",
+    ),
+  ).toHaveLength(0);
+
+  releaseCheckpoint();
+  await expect(modal.getByText("Cancelled", { exact: true })).toBeVisible();
+
+  const abortRequests = captures.requests.filter(
+    ({ path, method }) =>
+      path === "/api/files/upload-sessions/upload-1/abort" && method === "POST",
+  );
+  expect(abortRequests.map(({ body }) => body.expectedVersion)).toEqual([2]);
+  expect(abortRequests[0].idempotencyKey).toMatch(/:abort:v2$/u);
+  expect(
+    await page.evaluate(() => sessionStorage.getItem("polisFilesUploads.v1")),
+  ).toBeNull();
+});
+
+test("cancellation waits for an in-flight session creation before confirming abort", async ({
+  page,
+}) => {
+  await seedSession(page);
+  let markCreationStarted;
+  let releaseCreation;
+  const creationStarted = new Promise((resolve) => {
+    markCreationStarted = resolve;
+  });
+  const creationGate = new Promise((resolve) => {
+    releaseCreation = resolve;
+  });
+  const captures = await mockFiles(page, {
+    uploadStatuses: [{ state: "uploading", version: 1, progress: 0 }],
+    onRequest: async ({ route, path, method }) => {
+      if (path.endsWith("/upload-sessions") && method === "POST") {
+        markCreationStarted();
+        await creationGate;
+        await json(route, {
+          ok: true,
+          uploadSession: {
+            uploadSessionId: "upload-1",
+            assetId: "asset-upload-1",
+            revisionId: "asset-upload-version-1",
+            state: "uploading",
+            partSize: 5 * 1024 * 1024,
+            totalParts: 1,
+            uploadedParts: [],
+            version: 1,
+          },
+        });
+        return true;
+      }
+      return false;
+    },
+  });
+
+  await page.goto("/files/uploads");
+  await page.getByRole("button", { name: "Add files" }).click();
+  await page.locator('[data-action="pick-files"]').evaluate((input) => {
+    const transfer = new DataTransfer();
+    transfer.items.add(
+      new File(["creation race"], "creation-race.txt", {
+        type: "text/plain",
+        lastModified: 1_786_800_200_000,
+      }),
+    );
+    input.files = transfer.files;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await creationStarted;
+
+  const modal = page.locator(".files-modal");
+  await modal.getByRole("button", { name: "Cancel" }).click();
+  await expect(modal.getByText(/Cancelling securely/u)).toBeVisible();
+  const pendingCheckpoint = await page.evaluate(() =>
+    JSON.parse(sessionStorage.getItem("polisFilesUploads.v1")),
+  );
+  expect(pendingCheckpoint.items).toEqual([
+    expect.objectContaining({
+      sessionId: "",
+      status: "cancelling",
+      cancelRequested: true,
+      sessionCreationStarted: true,
+    }),
+  ]);
+  expect(captures.uploadAborts).toHaveLength(0);
+
+  releaseCreation();
+  await expect(modal.getByText("Cancelled", { exact: true })).toBeVisible();
+  await expect.poll(() => captures.uploadAborts.length).toBe(1);
+  expect(captures.uploadAborts[0].body.expectedVersion).toBe(1);
+  expect(captures.uploadAborts[0].idempotencyKey).toMatch(/:abort:v1$/u);
+  const sessionRequests = captures.requests.filter(({ path }) =>
+    path.startsWith("/api/files/upload-sessions/upload-1"),
+  );
+  const createIndex = captures.requests.findIndex(({ path }) =>
+    path.endsWith("/upload-sessions"),
+  );
+  const reconcileIndex = captures.requests.findIndex(
+    ({ path, method }) =>
+      path === "/api/files/upload-sessions/upload-1" && method === "GET",
+  );
+  const abortIndex = captures.requests.findIndex(({ path }) =>
+    path.endsWith("/abort"),
+  );
+  expect(sessionRequests.some(({ method }) => method === "GET")).toBe(true);
+  expect(reconcileIndex).toBeGreaterThan(createIndex);
+  expect(abortIndex).toBeGreaterThan(reconcileIndex);
+  expect(
+    await page.evaluate(() => sessionStorage.getItem("polisFilesUploads.v1")),
+  ).toBeNull();
+});
+
+test("a definite pre-create 409 confirms cancellation locally", async ({
+  page,
+}) => {
+  await seedSession(page);
+  let markCreationStarted;
+  let releaseCreation;
+  const creationStarted = new Promise((resolve) => {
+    markCreationStarted = resolve;
+  });
+  const creationGate = new Promise((resolve) => {
+    releaseCreation = resolve;
+  });
+  const captures = await mockFiles(page, {
+    onRequest: async ({ route, path, method }) => {
+      if (path.endsWith("/upload-sessions") && method === "POST") {
+        markCreationStarted();
+        await creationGate;
+        await json(
+          route,
+          {
+            ok: false,
+            error: "files_workspace_not_initialized",
+          },
+          409,
+        );
+        return true;
+      }
+      return false;
+    },
+  });
+
+  await page.goto("/files/uploads");
+  await page.getByRole("button", { name: "Add files" }).click();
+  await page.locator('[data-action="pick-files"]').evaluate((input) => {
+    const transfer = new DataTransfer();
+    transfer.items.add(
+      new File(["rejected creation"], "rejected-creation.txt", {
+        type: "text/plain",
+        lastModified: 1_786_800_250_000,
+      }),
+    );
+    input.files = transfer.files;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await creationStarted;
+
+  const modal = page.locator(".files-modal");
+  await modal.getByRole("button", { name: "Cancel" }).click();
+  await expect(modal.getByText(/Cancelling securely/u)).toBeVisible();
+  releaseCreation();
+
+  await expect(modal.getByText("Cancelled", { exact: true })).toBeVisible();
+  const createRequests = captures.requests.filter(
+    ({ path, method }) =>
+      path.endsWith("/upload-sessions") && method === "POST",
+  );
+  expect(createRequests).toHaveLength(1);
+  expect(createRequests[0].idempotencyKey).toBe(
+    createRequests[0].body.idempotencyKey,
+  );
+  expect(captures.uploadAborts).toHaveLength(0);
+  expect(
+    await page.evaluate(() => sessionStorage.getItem("polisFilesUploads.v1")),
+  ).toBeNull();
+});
+
+test("an ambiguous creation failure replays the stable create before abort", async ({
+  page,
+}) => {
+  await seedSession(page);
+  let markCreationStarted;
+  let releaseCreation;
+  let creationAttempts = 0;
+  const creationStarted = new Promise((resolve) => {
+    markCreationStarted = resolve;
+  });
+  const creationGate = new Promise((resolve) => {
+    releaseCreation = resolve;
+  });
+  const captures = await mockFiles(page, {
+    uploadStatuses: [{ state: "uploading", version: 1, progress: 0 }],
+    onRequest: async ({ route, path, method }) => {
+      if (path.endsWith("/upload-sessions") && method === "POST") {
+        creationAttempts += 1;
+        if (creationAttempts === 1) {
+          markCreationStarted();
+          await creationGate;
+          await json(
+            route,
+            {
+              ok: false,
+              error: "upload_session_unavailable",
+              message: "The upload session response was interrupted.",
+            },
+            503,
+          );
+          return true;
+        }
+      }
+      return false;
+    },
+  });
+
+  await page.goto("/files/uploads");
+  await page.getByRole("button", { name: "Add files" }).click();
+  await page.locator('[data-action="pick-files"]').evaluate((input) => {
+    const transfer = new DataTransfer();
+    transfer.items.add(
+      new File(["ambiguous creation"], "ambiguous-creation.txt", {
+        type: "text/plain",
+        lastModified: 1_786_800_275_000,
+      }),
+    );
+    input.files = transfer.files;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await creationStarted;
+
+  const modal = page.locator(".files-modal");
+  await modal.getByRole("button", { name: "Cancel" }).click();
+  await expect(modal.getByText(/Cancelling securely/u)).toBeVisible();
+  releaseCreation();
+
+  await expect(modal.getByText("Cancelled", { exact: true })).toBeVisible();
+  const createRequests = captures.requests.filter(
+    ({ path, method }) =>
+      path.endsWith("/upload-sessions") && method === "POST",
+  );
+  expect(createRequests).toHaveLength(2);
+  expect(createRequests[1].idempotencyKey).toBe(
+    createRequests[0].idempotencyKey,
+  );
+  expect(createRequests[1].body.idempotencyKey).toBe(
+    createRequests[0].body.idempotencyKey,
+  );
+  expect(captures.uploadAborts).toHaveLength(1);
+  expect(
+    await page.evaluate(() => sessionStorage.getItem("polisFilesUploads.v1")),
+  ).toBeNull();
+});
+
+for (const replayFailure of [
+  { status: 409, code: "idempotency_request_in_progress" },
+  { status: 409, code: "idempotency_request_mismatch" },
+  { status: 401, code: "unauthorized" },
+  { status: 403, code: "files_permission_denied" },
+  { status: 408, code: "request_timeout" },
+  { status: 429, code: "files_monthly_ingress_exceeded" },
+  { status: 409, code: "files_version_conflict" },
+  { status: 409, code: "files_workspace_not_initialized" },
+]) {
+  test(`lost create response survives ${replayFailure.code} until recovery and abort`, async ({
+    page,
+  }) => {
+    await seedSession(page);
+    let markCreationStarted;
+    let releaseCreation;
+    let creationAttempts = 0;
+    let originalFinished = false;
+    const creationStarted = new Promise((resolve) => {
+      markCreationStarted = resolve;
+    });
+    const creationGate = new Promise((resolve) => {
+      releaseCreation = resolve;
+    });
+    const captures = await mockFiles(page, {
+      uploadStatuses: [{ state: "uploading", version: 1, progress: 0 }],
+      onRequest: async ({ route, path, method }) => {
+        if (!path.endsWith("/upload-sessions") || method !== "POST") {
+          return false;
+        }
+        creationAttempts += 1;
+        if (creationAttempts === 1) {
+          markCreationStarted();
+          await creationGate;
+          await route.abort("connectionreset");
+          return true;
+        }
+        if (!originalFinished) {
+          // The API returns 409 while the original idempotency claim is still
+          // in progress; other replay failures also cannot undo that request.
+          await json(
+            route,
+            { ok: false, error: replayFailure.code },
+            replayFailure.status,
+          );
+          return true;
+        }
+        // Once the original commits, the same key returns its saved receipt.
+        await json(
+          route,
+          {
+            ok: true,
+            uploadSession: {
+              uploadSessionId: "upload-1",
+              assetId: "asset-upload-1",
+              revisionId: "asset-upload-version-1",
+              state: "uploading",
+              partSize: 5 * 1024 * 1024,
+              totalParts: 1,
+              uploadedParts: [],
+              version: 1,
+            },
+          },
+          200,
+          { "Idempotency-Replayed": "true" },
+        );
+        return true;
+      },
+    });
+
+    await page.goto("/files/uploads");
+    await page.getByRole("button", { name: "Add files" }).click();
+    await page.locator('[data-action="pick-files"]').evaluate((input) => {
+      const transfer = new DataTransfer();
+      transfer.items.add(
+        new File(["lost creation response"], "lost-creation-response.txt", {
+          type: "text/plain",
+          lastModified: 1_786_800_290_000,
+        }),
+      );
+      input.files = transfer.files;
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await creationStarted;
+
+    const modal = page.locator(".files-modal");
+    await modal.getByRole("button", { name: "Cancel" }).click();
+    await expect(modal.getByText(/Cancelling securely/u)).toBeVisible();
+    releaseCreation();
+
+    await expect(
+      modal.getByRole("button", { name: "Retry cancellation" }),
+    ).toBeVisible();
+    const pendingCheckpoint = await page.evaluate(() =>
+      JSON.parse(sessionStorage.getItem("polisFilesUploads.v1")),
+    );
+    expect(pendingCheckpoint.items).toEqual([
+      expect.objectContaining({
+        sessionId: "",
+        status: "cancel_pending",
+        cancelRequested: true,
+        sessionCreationStarted: true,
+      }),
+    ]);
+    expect(creationAttempts).toBe(2);
+    expect(captures.uploadAborts).toHaveLength(0);
+
+    originalFinished = true;
+    await page.reload();
+    await expect.poll(() => captures.uploadAborts.length).toBe(1);
+    const createRequests = captures.requests.filter(
+      ({ path, method }) =>
+        path.endsWith("/upload-sessions") && method === "POST",
+    );
+    expect(createRequests).toHaveLength(3);
+    for (const replay of createRequests.slice(1)) {
+      expect(replay.body).toEqual(createRequests[0].body);
+      expect(replay.idempotencyKey).toBe(createRequests[0].idempotencyKey);
+      expect(replay.ifMatch).toBe(createRequests[0].ifMatch);
+    }
+    expect(captures.uploadAborts[0].body.expectedVersion).toBe(1);
+    expect(
+      await page.evaluate(() => sessionStorage.getItem("polisFilesUploads.v1")),
+    ).toBeNull();
+  });
+}
+
+for (const completionState of ["scanning", "ready"]) {
+  test(`cancellation yields to an in-flight completion that reaches ${completionState}`, async ({
+    page,
+  }) => {
+    await seedSession(page);
+    let markCompletionStarted;
+    let releaseCompletion;
+    const completionStarted = new Promise((resolve) => {
+      markCompletionStarted = resolve;
+    });
+    const completionGate = new Promise((resolve) => {
+      releaseCompletion = resolve;
+    });
+    const captures = await mockFiles(page, {
+      onRequest: async ({ route, path, method }) => {
+        if (
+          path === "/api/files/upload-sessions/upload-1/complete" &&
+          method === "POST"
+        ) {
+          markCompletionStarted();
+          await completionGate;
+          await json(
+            route,
+            {
+              ok: true,
+              uploadSession: {
+                uploadSessionId: "upload-1",
+                state: completionState,
+                version: 3,
+              },
+            },
+            202,
+          );
+          return true;
+        }
+        if (
+          path === "/api/files/upload-sessions/upload-1" &&
+          method === "GET"
+        ) {
+          await json(route, {
+            ok: true,
+            uploadSession: {
+              uploadSessionId: "upload-1",
+              assetId: "asset-upload-1",
+              revisionId: "asset-upload-version-1",
+              state: completionState,
+              version: 3,
+              progress: 1,
+            },
+          });
+          return true;
+        }
+        return false;
+      },
+    });
+
+    await page.goto("/files/uploads");
+    await page.getByRole("button", { name: "Add files" }).click();
+    await page.locator('[data-action="pick-files"]').evaluate((input) => {
+      const transfer = new DataTransfer();
+      transfer.items.add(
+        new File(["completion race"], "completion-race.txt", {
+          type: "text/plain",
+          lastModified: 1_786_800_300_000,
+        }),
+      );
+      input.files = transfer.files;
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await completionStarted;
+
+    const modal = page.locator(".files-modal");
+    await modal.getByRole("button", { name: "Cancel" }).click();
+    await expect(modal.getByText(/Cancelling securely/u)).toBeVisible();
+    expect(captures.uploadAborts).toHaveLength(0);
+
+    releaseCompletion();
+    await expect(
+      modal.getByText(
+        completionState === "scanning"
+          ? "Upload completed before cancellation · security scan in progress"
+          : "Ready in Current",
+        { exact: true },
+      ),
+    ).toBeVisible();
+    await expect(
+      modal.getByRole("button", { name: "Retry cancellation" }),
+    ).toHaveCount(0);
+    expect(captures.uploadAborts).toHaveLength(0);
+    const storedCheckpoint = await page.evaluate(() =>
+      sessionStorage.getItem("polisFilesUploads.v1"),
+    );
+    if (completionState === "scanning") {
+      expect(JSON.parse(storedCheckpoint).items).toEqual([
+        expect.objectContaining({
+          sessionId: "upload-1",
+          status: "scanning",
+          cancelRequested: false,
+        }),
+      ]);
+    } else {
+      expect(storedCheckpoint).toBeNull();
+    }
+    const sessionRequests = captures.requests.filter(({ path }) =>
+      path.startsWith("/api/files/upload-sessions/upload-1"),
+    );
+    const completeIndex = sessionRequests.findIndex(({ path }) =>
+      path.endsWith("/complete"),
+    );
+    const reconcileIndex = sessionRequests.findIndex(
+      ({ path, method }) =>
+        path === "/api/files/upload-sessions/upload-1" && method === "GET",
+    );
+    expect(completeIndex).toBeGreaterThanOrEqual(0);
+    expect(reconcileIndex).toBeGreaterThan(completeIndex);
+  });
+}
 
 test("setup presets keep rule prompts on and AI off by default", async ({
   page,
@@ -2185,6 +2958,29 @@ test("workspace settings preserve the canonical nested contract and revision", a
     body: captures.settings[0],
     idempotencyKey: expect.any(String),
     ifMatch: '"workspace-9"',
+  });
+});
+
+test("workspace settings submit only the active authorization root", async ({
+  page,
+}) => {
+  await seedSession(page);
+  const multiRootWorkspace = workspace();
+  multiRootWorkspace.settings.rolePurposeMappingsByRoot = {
+    organization: { media: ["organization-media"] },
+    campaign: { media: ["campaign-media"] },
+    official_office: { governance: ["official-governance"] },
+  };
+  multiRootWorkspace.settings.rolePurposeMappings =
+    multiRootWorkspace.settings.rolePurposeMappingsByRoot.organization;
+  const captures = await mockFiles(page, { workspace: multiRootWorkspace });
+
+  await page.goto("/files");
+  await page.getByRole("button", { name: "Open Files settings" }).click();
+  await page.getByRole("button", { name: "Save settings" }).click();
+
+  expect(captures.settings[0].settings.rolePurposeMappingsByRoot).toEqual({
+    organization: { media: ["organization-media"] },
   });
 });
 
