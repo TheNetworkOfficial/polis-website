@@ -4,6 +4,9 @@
   "description": "Website and supporting services for polisapp.io",
   "scripts": {
     "test": "echo \"No tests yet\"",
+    "test:files:unit": "node --test tests/cloudflare-pages-redirects.spec.mjs tests/files/sha256.spec.mjs tests/files/entitlement.spec.mjs tests/files/post-media.spec.mjs tests/files/files-api-mutations.spec.mjs",
+    "test:files:e2e": "playwright test --config=playwright.config.cjs",
+    "test:files": "npm run test:files:unit && npm run test:files:e2e",
     "start:frontend": "npm start --prefix frontend",
     "start:backend": "npm start --prefix backend",
     "build:frontend": "npm run build --prefix frontend",

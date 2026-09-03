@@ -10,6 +10,10 @@ const OAUTH_STATE_STORAGE_KEY = "sharedFeedOauthState.v1";
 const OAUTH_VERIFIER_STORAGE_KEY = "sharedFeedOauthVerifier.v1";
 const POST_AUTH_PATH_STORAGE_KEY = "sharedFeedPostAuthPath.v1";
 const SESSION_REFRESH_LEEWAY_MS = 60 * 1000;
+const GOVERNANCE_PASSKEY_REGISTRATION_BEGIN_PATH =
+  "/api/governance/passkeys/v1/registration/begin";
+const GOVERNANCE_PASSKEY_REGISTRATION_COMPLETE_PATH =
+  "/api/governance/passkeys/v1/registration/complete";
 
 export class SharedFeedAuthError extends Error {
   constructor(
@@ -52,6 +56,33 @@ function bytesToBase64Url(bytes) {
     binary += String.fromCharCode(byte);
   }
   return toBase64Url(binary);
+}
+
+function base64UrlToBytes(value) {
+  const normalized = normalizeString(value);
+  if (!/^[A-Za-z0-9_-]+$/u.test(normalized)) {
+    throw new SharedFeedAuthError("The passkey service returned unsafe data.", {
+      errorCode: "passkey_registration_options_invalid",
+    });
+  }
+  const padded = normalized
+    .replace(/-/g, "+")
+    .replace(/_/g, "/")
+    .padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
+}
+
+function base64UrlToArrayBuffer(value) {
+  return base64UrlToBytes(value).buffer;
+}
+
+function arrayBufferToBase64Url(value) {
+  return bytesToBase64Url(new Uint8Array(value || new ArrayBuffer(0)));
 }
 
 function createRandomToken(length = 48) {
@@ -1070,6 +1101,214 @@ export async function verifySharedFeedTotpSetup(
     status: normalizeString(payload?.Status) || "SUCCESS",
     setupSession: normalizeString(payload?.Session),
   };
+}
+
+async function postGovernancePasskeyJson(
+  config = {},
+  path,
+  { accessToken = "", body = {} } = {},
+) {
+  const response = await fetch(buildApiUrl(config, path), {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body || {}),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new SharedFeedAuthError(
+      normalizeString(payload?.message) ||
+        "Account passkey verification failed.",
+      {
+        statusCode: response.status,
+        errorCode: normalizeString(payload?.error) || "passkey_failed",
+        payload,
+      },
+    );
+  }
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new SharedFeedAuthError(
+      "The passkey service returned an invalid response.",
+      {
+        statusCode: response.status,
+        errorCode: "invalid_passkey_response",
+      },
+    );
+  }
+  return payload;
+}
+
+function buildPublicKeyCredentialCreationOptions(rawOptions = {}) {
+  const options =
+    rawOptions && typeof rawOptions === "object" ? rawOptions : {};
+  const user = options.user && typeof options.user === "object"
+    ? options.user
+    : {};
+  return {
+    ...options,
+    challenge: base64UrlToArrayBuffer(options.challenge),
+    user: {
+      ...user,
+      id: base64UrlToArrayBuffer(user.id),
+    },
+    excludeCredentials: Array.isArray(options.excludeCredentials)
+      ? options.excludeCredentials.map((credential) => ({
+          ...credential,
+          id: base64UrlToArrayBuffer(credential?.id),
+        }))
+      : undefined,
+  };
+}
+
+function serializePublicKeyCredentialRegistration(credential) {
+  const response = credential?.response;
+  if (
+    !credential?.rawId ||
+    !response?.clientDataJSON ||
+    !response?.attestationObject
+  ) {
+    throw new SharedFeedAuthError(
+      "The device returned an invalid passkey registration response.",
+      {
+        errorCode: "passkey_registration_response_invalid",
+      },
+    );
+  }
+  const rawId = arrayBufferToBase64Url(credential.rawId);
+  const payload = {
+    id: rawId,
+    rawId,
+    type: credential.type || "public-key",
+    response: {
+      clientDataJSON: arrayBufferToBase64Url(response.clientDataJSON),
+      attestationObject: arrayBufferToBase64Url(response.attestationObject),
+    },
+    clientExtensionResults:
+      typeof credential.getClientExtensionResults === "function"
+        ? credential.getClientExtensionResults()
+        : {},
+  };
+  if (typeof response.getTransports === "function") {
+    payload.response.transports = response.getTransports();
+  }
+  return JSON.stringify(payload);
+}
+
+function mapGovernancePasskeyCreateError(error) {
+  const name = normalizeString(error?.name);
+  if (name === "NotAllowedError" || name === "AbortError") {
+    return new SharedFeedAuthError(
+      "Passkey setup was cancelled. No account passkey was added.",
+      {
+        errorCode: "passkey_registration_cancelled",
+      },
+    );
+  }
+  if (name === "InvalidStateError") {
+    return new SharedFeedAuthError(
+      "This passkey is already registered to your Polis account.",
+      {
+        errorCode: "passkey_already_registered",
+      },
+    );
+  }
+  if (name === "SecurityError") {
+    return new SharedFeedAuthError(
+      "This browser is not associated with the Polis passkey domain.",
+      {
+        errorCode: "passkey_domain_not_associated",
+      },
+    );
+  }
+  if (name === "NotSupportedError") {
+    return new SharedFeedAuthError(
+      "This browser cannot create a Polis account passkey.",
+      {
+        errorCode: "passkey_device_not_supported",
+      },
+    );
+  }
+  return new SharedFeedAuthError(
+    normalizeString(error?.message) ||
+      "Passkey setup could not be completed. Please try again.",
+    {
+      errorCode: "passkey_registration_failed",
+    },
+  );
+}
+
+export async function registerSharedFeedGovernancePasskey(
+  config = {},
+  session = null,
+) {
+  const accessToken = requireAccessToken(
+    session,
+    "Governance account passkey setup",
+  );
+  if (
+    typeof window === "undefined" ||
+    typeof navigator === "undefined" ||
+    typeof window.PublicKeyCredential === "undefined" ||
+    typeof navigator.credentials?.create !== "function"
+  ) {
+    throw new SharedFeedAuthError(
+      "This browser cannot create a Polis account passkey.",
+      {
+        errorCode: "passkey_device_not_supported",
+      },
+    );
+  }
+
+  const begin = await postGovernancePasskeyJson(
+    config,
+    GOVERNANCE_PASSKEY_REGISTRATION_BEGIN_PATH,
+    { accessToken },
+  );
+  const creationOptions = begin.credentialCreationOptions;
+  if (
+    !creationOptions ||
+    typeof creationOptions !== "object" ||
+    Array.isArray(creationOptions)
+  ) {
+    throw new SharedFeedAuthError(
+      "The passkey service returned unsafe registration options.",
+      {
+        errorCode: "passkey_registration_options_invalid",
+      },
+    );
+  }
+
+  let credential;
+  try {
+    credential = await navigator.credentials.create({
+      publicKey: buildPublicKeyCredentialCreationOptions(creationOptions),
+    });
+  } catch (error) {
+    throw mapGovernancePasskeyCreateError(error);
+  }
+
+  const serializedCredential =
+    serializePublicKeyCredentialRegistration(credential);
+  const complete = await postGovernancePasskeyJson(
+    config,
+    GOVERNANCE_PASSKEY_REGISTRATION_COMPLETE_PATH,
+    {
+      accessToken,
+      body: { credential: serializedCredential },
+    },
+  );
+  if (complete.registered !== true) {
+    throw new SharedFeedAuthError(
+      "Polis could not confirm that the account passkey was saved.",
+      {
+        errorCode: "passkey_registration_not_confirmed",
+      },
+    );
+  }
+  return { registered: true };
 }
 
 export async function resendSharedFeedSignUpCode(

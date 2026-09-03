@@ -1,0 +1,3 @@
+/files/* /route-shells/files 200
+/organizations/* /route-shells/organizations 200
+/posts/* /route-shells/posts 200

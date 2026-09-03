@@ -14,6 +14,7 @@ import {
   getAuthenticatedUser,
   getSharedFeedAuthCapabilities,
   hasHostedSignInConfig,
+  registerSharedFeedGovernancePasskey,
   requestSharedFeedPasswordReset,
   resendSharedFeedSignUpCode,
   restoreSharedFeedSession,
@@ -29,6 +30,13 @@ import {
   createMessagingBrowserDevice,
   createMessagingSocketClient,
 } from "./scripts/webMessaging.js";
+import { isFilesWorkspaceAccessible } from "../files/scripts/filesEntitlements.js";
+import {
+  buildComposerMediaItems,
+  mediaPresentation,
+  normalizeOrderedPostMedia,
+  visibleMediaUsageBadges,
+} from "./scripts/postMedia.js";
 
 const runtimeConfig =
   window.__POLIS_WEB_APP__ || window.__POLIS_SHARED_FEED__ || {};
@@ -352,6 +360,7 @@ const ROUTE_KEY_COALITION_START = "coalition-start";
 const ROUTE_KEY_COALITION_JOIN = "coalition-join";
 const ROUTE_KEY_COALITION_DETAIL = "coalition-detail";
 const ROUTE_KEY_COALITION_SECTION = "coalition-section";
+const ROUTE_KEY_ORGANIZATION_GOVERNANCE = "organization-governance";
 const ROUTE_KEY_MISSIONS = "missions";
 const ROUTE_KEY_MISSION_DETAIL = "mission-detail";
 const ROUTE_KEY_EVENTS = "events";
@@ -2678,6 +2687,11 @@ function parseRouteFromLocation(pathname = window.location.pathname) {
       ["voterMapSection"],
     ],
     [ROUTE_KEY_CANDIDATE_VOTER_MAP, /^\/candidate\/voter-map$/u, []],
+    [
+      ROUTE_KEY_ORGANIZATION_GOVERNANCE,
+      /^\/organizations\/([^/]+)\/governance(?:\/(.+))?$/u,
+      ["organizationId", "governancePath"],
+    ],
     [ROUTE_KEY_COALITION_START, /^\/coalitions\/start$/u, []],
     [ROUTE_KEY_COALITION_JOIN, /^\/coalitions\/join$/u, []],
     [
@@ -3282,6 +3296,40 @@ function createCoalitionGovernanceWorkspaceState() {
     loadingResultsByVoteId: {},
     error: "",
     actionPendingKey: "",
+  };
+}
+
+function createOrganizationGovernancePageState(seed = {}) {
+  return {
+    organizationId: normalizeString(seed.organizationId),
+    routeKind: normalizeString(seed.routeKind) || "overview",
+    overview: seed.overview || null,
+    presets: Array.isArray(seed.presets) ? seed.presets : [],
+    votes: Array.isArray(seed.votes) ? seed.votes : [],
+    votesNextCursor: normalizeString(seed.votesNextCursor),
+    votesConsumedCursors: Array.isArray(seed.votesConsumedCursors)
+      ? seed.votesConsumedCursors
+      : [],
+    votesLoadingMore: seed.votesLoadingMore === true,
+    votesPaginationError: normalizeString(seed.votesPaginationError),
+    selectedVote: seed.selectedVote || null,
+    results: seed.results || null,
+    paperRoster: seed.paperRoster || null,
+    paperRosterConsumedCursors: Array.isArray(seed.paperRosterConsumedCursors)
+      ? seed.paperRosterConsumedCursors
+      : [],
+    paperRosterLoadingMore: seed.paperRosterLoadingMore === true,
+    paperRosterPaginationError: normalizeString(seed.paperRosterPaginationError),
+    auditCase: seed.auditCase || null,
+    auditDelivery: seed.auditDelivery || null,
+    auditDisclosure: seed.auditDisclosure || null,
+    loaded: seed.loaded === true,
+    loading: seed.loading === true,
+    error: normalizeString(seed.error),
+    actionPendingKey: normalizeString(seed.actionPendingKey),
+    loadRequestId: Number.isSafeInteger(seed.loadRequestId)
+      ? seed.loadRequestId
+      : 0,
   };
 }
 
@@ -4432,11 +4480,16 @@ const state = {
     user: null,
     message: "",
   },
+  filesNavigation: {
+    loaded: false,
+    enabled: false,
+  },
   ui: {
     toast: "",
     authModal: null,
     routeAuth: createAuthRouteState(),
     expandedPostId: "",
+    postMediaIndexById: {},
     comments: {
       open: false,
       loading: false,
@@ -4613,6 +4666,7 @@ const state = {
         loaded: false,
       },
     },
+    organizationGovernance: createOrganizationGovernancePageState(),
     missions: {
       list: {
         ...createPagedState(),
@@ -5393,7 +5447,8 @@ function getRouteSection(route = state.route) {
     routeKey === ROUTE_KEY_COALITION_START ||
     routeKey === ROUTE_KEY_COALITION_JOIN ||
     routeKey === ROUTE_KEY_COALITION_DETAIL ||
-    routeKey === ROUTE_KEY_COALITION_SECTION
+    routeKey === ROUTE_KEY_COALITION_SECTION ||
+    routeKey === ROUTE_KEY_ORGANIZATION_GOVERNANCE
   ) {
     return "coalitions";
   }
@@ -5479,6 +5534,7 @@ function getSettingsDocumentTitle(route = state.route) {
     return "Settings";
   }
   const exactTitles = {
+    "account-security/governance-passkey": "Account Passkey",
     "account-security/totp": "Authenticator App",
     "candidate-access/name": "Candidate Access",
     "candidate-access/office": "Candidate Office",
@@ -5757,9 +5813,12 @@ function getRouteDocumentTitle(route = state.route) {
     routeKey === ROUTE_KEY_COALITION_START ||
     routeKey === ROUTE_KEY_COALITION_JOIN ||
     routeKey === ROUTE_KEY_COALITION_DETAIL ||
-    routeKey === ROUTE_KEY_COALITION_SECTION
+    routeKey === ROUTE_KEY_COALITION_SECTION ||
+    routeKey === ROUTE_KEY_ORGANIZATION_GOVERNANCE
   ) {
-    return `${getCoalitionDocumentTitle(route)} | Polis`;
+    return routeKey === ROUTE_KEY_ORGANIZATION_GOVERNANCE
+      ? "Organization Governance | Polis"
+      : `${getCoalitionDocumentTitle(route)} | Polis`;
   }
   if (
     routeKey === ROUTE_KEY_MESSAGES_ROOT ||
@@ -6017,12 +6076,52 @@ function formatRelativeTime(value) {
   });
 }
 
-function isVideoItem(item) {
-  return item?.kind === "post" && item.mediaType === "video";
+function postMediaItems(item) {
+  return Array.isArray(item?.mediaItems) && item.mediaItems.length
+    ? item.mediaItems
+    : normalizeOrderedPostMedia(item?.raw || item || {});
 }
 
-function isImageItem(item) {
-  return item?.kind === "post" && item.mediaType === "image";
+function postMediaIndex(item) {
+  const mediaItems = postMediaItems(item);
+  if (!mediaItems.length) {
+    return 0;
+  }
+  const stored = Number(
+    state.ui.postMediaIndexById?.[normalizeString(item?.postId)],
+  );
+  return Number.isInteger(stored)
+    ? Math.max(0, Math.min(mediaItems.length - 1, stored))
+    : 0;
+}
+
+function setPostMediaIndex(postId, requestedIndex, { focus = true } = {}) {
+  const item = findFeedPostItem(postId);
+  const mediaItems = postMediaItems(item);
+  if (!item || mediaItems.length < 2) {
+    return;
+  }
+  const numericIndex = Number(requestedIndex);
+  if (!Number.isFinite(numericIndex)) {
+    return;
+  }
+  const nextIndex =
+    ((Math.trunc(numericIndex) % mediaItems.length) + mediaItems.length) %
+    mediaItems.length;
+  state.ui.postMediaIndexById[normalizeString(postId)] = nextIndex;
+  scheduleRender();
+  if (focus) {
+    window.requestAnimationFrame(() => {
+      const carousel = root?.querySelector(
+        `[data-post-carousel][data-post-id="${CSS.escape(normalizeString(postId))}"]`,
+      );
+      try {
+        carousel?.focus({ preventScroll: true });
+      } catch {
+        carousel?.focus();
+      }
+    });
+  }
 }
 
 function buildDeepLinkOpenUrl(path) {
@@ -8537,7 +8636,32 @@ function normalizeFeedItem(raw = {}, index = 0) {
 
   const postId = normalizeString(raw.postId);
   const rawType = normalizeString(raw.mediaType || raw.type).toLowerCase();
-  const mediaType = rawType === "image" ? "image" : "video";
+  const hasCanonicalMediaPayload = Array.isArray(raw.mediaItems);
+  const mediaItems = normalizeOrderedPostMedia(raw);
+  const firstMedia = mediaItems[0] || {};
+  const firstPresentation = mediaItems.length
+    ? mediaPresentation(firstMedia)
+    : {
+        mediaType: rawType === "image" ? "image" : "video",
+        imageUrl: hasCanonicalMediaPayload ? "" : normalizeUrl(raw.imageUrl),
+        videoUrl: hasCanonicalMediaPayload
+          ? ""
+          : normalizeUrl(raw.videoUrl || raw.mediaUrl),
+        mp4Url: hasCanonicalMediaPayload ? "" : normalizeUrl(raw.mp4Url),
+        posterUrl: hasCanonicalMediaPayload
+          ? ""
+          : normalizeUrl(
+              raw.thumbUrl ||
+                raw.previewUrl ||
+                raw.imageUrl ||
+                raw.previewMediaThumbnail,
+            ),
+        playbackId: hasCanonicalMediaPayload
+          ? ""
+          : normalizeString(raw.playbackId),
+        durationMs: hasCanonicalMediaPayload ? null : Number(raw.durationMs) || null,
+      };
+  const mediaType = firstPresentation.mediaType;
   const caption =
     normalizeString(raw.description) ||
     normalizeString(raw.caption) ||
@@ -8545,13 +8669,19 @@ function normalizeFeedItem(raw = {}, index = 0) {
     normalizeString(raw.previewText) ||
     normalizeString(raw.previewTitle);
   const rawPosterUrl =
-    normalizeUrl(raw.thumbUrl) ||
-    normalizeUrl(raw.previewUrl) ||
-    normalizeUrl(raw.imageUrl) ||
-    normalizeUrl(raw.previewMediaThumbnail);
+    normalizeUrl(firstPresentation.posterUrl) ||
+    (hasCanonicalMediaPayload
+      ? ""
+      : normalizeUrl(raw.thumbUrl) ||
+        normalizeUrl(raw.previewUrl) ||
+        normalizeUrl(raw.imageUrl) ||
+        normalizeUrl(raw.previewMediaThumbnail));
   const posterUrl =
     mediaType === "video" ? upgradePosterUrl(rawPosterUrl) : rawPosterUrl;
-  const imageUrl = normalizeUrl(raw.imageUrl) || posterUrl;
+  const imageUrl =
+    normalizeUrl(firstPresentation.imageUrl) ||
+    (hasCanonicalMediaPayload ? "" : normalizeUrl(raw.imageUrl)) ||
+    posterUrl;
   const rawFeedSlot = raw.feedSlot ?? raw.feed_slot ?? raw.slot ?? raw.rankPos;
   const feedSlot = Number(rawFeedSlot);
 
@@ -8565,13 +8695,24 @@ function normalizeFeedItem(raw = {}, index = 0) {
       normalizeString(raw.displayName || raw.userDisplayName) || "Post author",
     authorUsername: normalizeString(raw.username),
     authorAvatarUrl: normalizeUrl(raw.avatarUrl || raw.userAvatarUrl),
+    mediaItems,
     mediaType,
-    videoUrl: normalizeUrl(raw.videoUrl || raw.mediaUrl),
-    mp4Url: normalizeUrl(raw.mp4Url),
+    videoUrl:
+      normalizeUrl(firstPresentation.videoUrl) ||
+      (hasCanonicalMediaPayload ? "" : normalizeUrl(raw.videoUrl || raw.mediaUrl)),
+    mp4Url:
+      normalizeUrl(firstPresentation.mp4Url) ||
+      (hasCanonicalMediaPayload ? "" : normalizeUrl(raw.mp4Url)),
     imageUrl,
     posterUrl,
-    playbackId: normalizeString(raw.playbackId),
-    durationMs: Number(raw.durationMs) || null,
+    playbackId:
+      normalizeString(firstPresentation.playbackId) ||
+      (hasCanonicalMediaPayload ? "" : normalizeString(raw.playbackId)),
+    durationMs:
+      Number(
+        firstPresentation.durationMs ||
+          (hasCanonicalMediaPayload ? null : raw.durationMs),
+      ) || null,
     caption,
     tags: normalizeTagList(raw.tags || raw.hashtags || raw.hashTags),
     issueIds: normalizeStringList(raw.issueIds || raw.issue_ids),
@@ -22563,6 +22704,104 @@ function currentCoalitionDetailId() {
   return decodeRouteSegment(getCurrentRoute().routeParams.coalitionId);
 }
 
+function currentOrganizationGovernanceId(route = state.route) {
+  return decodeRouteSegment(route?.routeParams?.organizationId);
+}
+
+function organizationGovernanceRouteParts(route = state.route) {
+  return splitDecodedRoutePath(route?.routeParams?.governancePath);
+}
+
+function organizationGovernanceRouteForRoute(route = state.route) {
+  const parts = organizationGovernanceRouteParts(route);
+  const keywords = parts.map(routeKeyword);
+  const query = readCurrentSearchParams();
+  if (keywords[0] === "paper") {
+    return {
+      key: "paper",
+      voteId: normalizeString(parts[1] || query.get("voteId")),
+      auditCaseId: "",
+    };
+  }
+  if (keywords[0] === "votes") {
+    if (keywords[1] === "new") {
+      return { key: "vote-create", voteId: "", auditCaseId: "" };
+    }
+    const voteId = normalizeString(parts[1]);
+    if (keywords[2] === "results") {
+      return { key: "vote-results", voteId, auditCaseId: "" };
+    }
+    if (keywords[2] === "audit") {
+      return {
+        key: "vote-audit",
+        voteId,
+        auditCaseId: normalizeString(query.get("auditCaseId")),
+      };
+    }
+    if (keywords[2] === "edit") {
+      return { key: "vote-edit", voteId, auditCaseId: "" };
+    }
+    return { key: voteId ? "vote-detail" : "votes", voteId, auditCaseId: "" };
+  }
+  if (keywords[0] === "audit-cases") {
+    return {
+      key: "audit-case",
+      voteId: "",
+      auditCaseId: normalizeString(parts[1]),
+    };
+  }
+  if (keywords[0] === "audit-log") {
+    return { key: "audit-log", voteId: "", auditCaseId: "" };
+  }
+  if (keywords[0] === "sessions") {
+    return { key: "sessions", voteId: "", auditCaseId: "" };
+  }
+  if (keywords[0] === "constitutions") {
+    return { key: "constitutions", voteId: "", auditCaseId: "" };
+  }
+  return { key: "overview", voteId: "", auditCaseId: "" };
+}
+
+function organizationGovernanceRoutePath(organizationId, sectionKey = "") {
+  const encodedId = encodeURIComponent(normalizeString(organizationId));
+  if (!encodedId) {
+    return "/organizations";
+  }
+  const section = normalizeString(sectionKey).replace(/^\/+|\/+$/gu, "");
+  if (!section) {
+    return `/organizations/${encodedId}/governance`;
+  }
+  const encodedSection = section
+    .split("/")
+    .map((part) => encodeURIComponent(part))
+    .join("/");
+  return `/organizations/${encodedId}/governance/${encodedSection}`;
+}
+
+function organizationGovernanceApiPath(organizationId, sectionKey = "") {
+  const encodedId = encodeURIComponent(normalizeString(organizationId));
+  const section = normalizeString(sectionKey).replace(/^\/+|\/+$/gu, "");
+  const encodedSection = section
+    ? section
+        .split("/")
+        .map((part) => encodeURIComponent(part))
+        .join("/")
+    : "";
+  return `/api/organizations/${encodedId}/governance/v2${encodedSection ? `/${encodedSection}` : ""}`;
+}
+
+function organizationGovernanceApiPathWithQuery(path, query = {}) {
+  const params = new URLSearchParams();
+  Object.entries(query).forEach(([key, value]) => {
+    const normalizedValue = normalizeString(value);
+    if (normalizedValue) {
+      params.set(key, normalizedValue);
+    }
+  });
+  const queryString = params.toString();
+  return queryString ? `${path}?${queryString}` : path;
+}
+
 function canManageCoalitionProfile(membership) {
   return (
     membership?.isAdmin ||
@@ -26431,6 +26670,949 @@ async function loadCoalitionVoteResults(voteId) {
       ...workspace.loadingResultsByVoteId,
       [normalizedVoteId]: false,
     };
+    scheduleRender();
+  }
+}
+
+function organizationGovernancePageState() {
+  if (!state.pages.organizationGovernance) {
+    state.pages.organizationGovernance = createOrganizationGovernancePageState();
+  }
+  return state.pages.organizationGovernance;
+}
+
+function organizationGovernancePolicyVersion(page = organizationGovernancePageState()) {
+  const policy = readObjectPayload(page.overview?.policy || page.overview);
+  return readOptionalGovernanceNumber(policy.version ?? page.overview?.version) || 0;
+}
+
+function organizationGovernanceFindVote(page, voteId) {
+  const normalizedVoteId = normalizeString(voteId);
+  return (
+    page.votes.find((vote) => vote.voteId === normalizedVoteId) ||
+    (page.selectedVote?.voteId === normalizedVoteId ? page.selectedVote : null)
+  );
+}
+
+let organizationGovernanceLoadRequestId = 0;
+
+function organizationGovernanceRouteMatches({ organizationId, routeKind, voteId }) {
+  const route = getCurrentRoute();
+  const routeInfo = organizationGovernanceRouteForRoute(route);
+  return (
+    normalizeString(route?.routeKey) === ROUTE_KEY_ORGANIZATION_GOVERNANCE &&
+    currentOrganizationGovernanceId(route) === normalizeString(organizationId) &&
+    routeInfo.key === normalizeString(routeKind) &&
+    normalizeString(routeInfo.voteId) === normalizeString(voteId)
+  );
+}
+
+async function loadOrganizationGovernancePage({ refresh = false } = {}) {
+  const route = getCurrentRoute();
+  const routeInfo = organizationGovernanceRouteForRoute(route);
+  const organizationId = currentOrganizationGovernanceId(route);
+  const page = organizationGovernancePageState();
+  if (!organizationId) {
+    state.pages.organizationGovernance = createOrganizationGovernancePageState({
+      routeKind: routeInfo.key,
+      error: "Organization Governance route is missing an organization id.",
+      loaded: true,
+    });
+    scheduleRender();
+    return;
+  }
+  const loadRequestId = ++organizationGovernanceLoadRequestId;
+  const routeIdentity = {
+    organizationId,
+    routeKind: routeInfo.key,
+    voteId: routeInfo.voteId,
+  };
+  const isCurrentRequest = () =>
+    state.pages.organizationGovernance?.loadRequestId === loadRequestId &&
+    organizationGovernanceRouteMatches(routeIdentity);
+  if (page.organizationId !== organizationId) {
+    page.votes = [];
+    page.votesNextCursor = "";
+    page.votesConsumedCursors = [];
+    page.selectedVote = null;
+    page.loaded = false;
+  }
+  page.votesLoadingMore = false;
+  page.votesPaginationError = "";
+  if (
+    page.organizationId !== organizationId ||
+    routeInfo.key !== "paper" ||
+    (page.paperRoster?.voteId && page.paperRoster.voteId !== routeInfo.voteId)
+  ) {
+    page.paperRoster = null;
+    page.paperRosterConsumedCursors = [];
+    page.paperRosterLoadingMore = false;
+    page.paperRosterPaginationError = "";
+  }
+  page.organizationId = organizationId;
+  page.routeKind = routeInfo.key;
+  page.loadRequestId = loadRequestId;
+  page.loading = true;
+  page.error = "";
+  if (refresh) {
+    page.loaded = false;
+  }
+  scheduleRender();
+  try {
+    const overviewPromise = fetchJson(organizationGovernanceApiPath(organizationId), {
+      auth: true,
+    }).catch((error) => ({ __error: error }));
+    const votesPromise = fetchJson(
+      organizationGovernanceApiPathWithQuery(
+        organizationGovernanceApiPath(organizationId, "votes"),
+        { limit: "100" },
+      ),
+      { auth: true },
+    ).catch((error) => ({ __error: error }));
+    const presetsPromise = fetchJson(
+      organizationGovernanceApiPath(organizationId, "vote-presets"),
+      { auth: true },
+    ).catch((error) => ({ __error: error }));
+    const [overviewPayload, votesPayload, presetsPayload] = await Promise.all([
+      overviewPromise,
+      votesPromise,
+      presetsPromise,
+    ]);
+    if (!isCurrentRequest()) return;
+    if (overviewPayload.__error && votesPayload.__error) {
+      throw overviewPayload.__error;
+    }
+    const votes = votesPayload.__error
+      ? page.votes
+      : normalizeOrganizationGovernanceVotesPayload(votesPayload);
+    const presets = presetsPayload.__error
+      ? page.presets
+      : normalizeOrganizationGovernancePresetsPayload(presetsPayload);
+    let selectedVote = routeInfo.voteId
+      ? votes.find((vote) => vote.voteId === routeInfo.voteId) || null
+      : null;
+    if (routeInfo.voteId && !selectedVote) {
+      const votePayload = await fetchJson(
+        organizationGovernanceApiPath(
+          organizationId,
+          `votes/${routeInfo.voteId}`,
+        ),
+        { auth: true },
+      );
+      selectedVote = normalizeOrganizationGovernanceVote(votePayload);
+      if (!isCurrentRequest()) return;
+    }
+    let results = null;
+    let paperRoster = null;
+    let auditCase = null;
+    let auditDelivery = null;
+    let auditDisclosure = null;
+    if (routeInfo.key === "vote-results" && routeInfo.voteId) {
+      const resultsPayload = await fetchJson(
+        organizationGovernanceApiPath(
+          organizationId,
+          `votes/${routeInfo.voteId}/results`,
+        ),
+        { auth: true },
+      );
+      results = normalizeOrganizationGovernanceResults(resultsPayload);
+      if (!isCurrentRequest()) return;
+    }
+    if (
+      routeInfo.key === "paper" &&
+      routeInfo.voteId &&
+      organizationGovernanceVoteMethod(selectedVote) !== "AGGREGATE_FLOOR_COUNT"
+    ) {
+      const rosterPayload = await fetchJson(
+        organizationGovernanceApiPathWithQuery(
+          organizationGovernanceApiPath(
+            organizationId,
+            `votes/${routeInfo.voteId}/paper-roster`,
+          ),
+          { limit: "100" },
+        ),
+        { auth: true },
+      );
+      paperRoster = normalizeOrganizationGovernancePaperRoster(rosterPayload);
+      if (!isCurrentRequest()) return;
+    }
+    const auditCaseId =
+      routeInfo.auditCaseId ||
+      normalizeString(readCurrentSearchParams().get("auditCaseId"));
+    if (
+      (routeInfo.key === "vote-audit" || routeInfo.key === "audit-case") &&
+      auditCaseId
+    ) {
+      const auditPayload = await fetchJson(
+        organizationGovernanceApiPath(organizationId, `audit-cases/${auditCaseId}`),
+        { auth: true },
+      );
+      auditCase = normalizeOrganizationGovernanceAuditCase(auditPayload);
+      if (!isCurrentRequest()) return;
+    }
+    if (!isCurrentRequest()) return;
+    state.pages.organizationGovernance = createOrganizationGovernancePageState({
+      ...page,
+      organizationId,
+      routeKind: routeInfo.key,
+      overview: overviewPayload.__error ? page.overview : overviewPayload,
+      presets,
+      votes,
+      votesNextCursor: votesPayload.__error
+        ? page.votesNextCursor
+        : normalizeString(votesPayload.nextCursor),
+      votesConsumedCursors: votesPayload.__error ? page.votesConsumedCursors : [],
+      votesLoadingMore: false,
+      votesPaginationError: "",
+      selectedVote,
+      results,
+      paperRoster,
+      paperRosterConsumedCursors: [],
+      paperRosterLoadingMore: false,
+      paperRosterPaginationError: "",
+      auditCase,
+      auditDelivery,
+      auditDisclosure,
+      loaded: true,
+      loading: false,
+      error: votesPayload.__error
+        ? settingsErrorMessage(
+            votesPayload.__error,
+            "Governance votes could not be loaded.",
+          )
+        : "",
+      loadRequestId,
+    });
+  } catch (error) {
+    if (!isCurrentRequest()) return;
+    state.pages.organizationGovernance = createOrganizationGovernancePageState({
+      ...page,
+      organizationId,
+      routeKind: routeInfo.key,
+      loaded: true,
+      loading: false,
+      error: settingsErrorMessage(
+        error,
+        "Organization Governance could not be loaded.",
+      ),
+      loadRequestId,
+    });
+  } finally {
+    if (isCurrentRequest()) {
+      scheduleRender();
+    }
+  }
+}
+
+/** Append cursor pages without replacing the versions already open in this view. */
+async function loadMoreOrganizationGovernanceVotes() {
+  const route = getCurrentRoute();
+  const routeInfo = organizationGovernanceRouteForRoute(route);
+  const organizationId = currentOrganizationGovernanceId(route);
+  const page = organizationGovernancePageState();
+  const cursor = normalizeString(page.votesNextCursor);
+  const routeIdentity = {
+    organizationId,
+    routeKind: routeInfo.key,
+    voteId: routeInfo.voteId,
+  };
+  const loadRequestId = page.loadRequestId;
+  const isCurrentRequest = () =>
+    state.pages.organizationGovernance === page &&
+    page.loadRequestId === loadRequestId &&
+    organizationGovernanceRouteMatches(routeIdentity);
+  if (
+    !organizationId ||
+    page.organizationId !== organizationId ||
+    !cursor ||
+    page.loading ||
+    page.votesLoadingMore ||
+    !isCurrentRequest()
+  ) {
+    return false;
+  }
+  page.votesLoadingMore = true;
+  page.votesPaginationError = "";
+  scheduleRender();
+  try {
+    const payload = await fetchJson(
+      organizationGovernanceApiPathWithQuery(
+        organizationGovernanceApiPath(organizationId, "votes"),
+        { limit: "100", cursor },
+      ),
+      { auth: true },
+    );
+    if (!isCurrentRequest()) return false;
+    const incoming = normalizeOrganizationGovernanceVotesPayload(payload);
+    if (
+      incoming.some(
+        (vote) => vote.organizationId && vote.organizationId !== organizationId,
+      )
+    ) {
+      throw new Error(
+        "The vote page belongs to a different organization. Refresh to retry safely.",
+      );
+    }
+    const byId = new Map(page.votes.map((vote) => [vote.voteId, vote]));
+    for (const vote of incoming) {
+      if (!byId.has(vote.voteId)) {
+        byId.set(
+          vote.voteId,
+          page.selectedVote?.voteId === vote.voteId ? page.selectedVote : vote,
+        );
+      }
+    }
+    const consumedCursors = new Set(page.votesConsumedCursors);
+    consumedCursors.add(cursor);
+    const nextCursor = normalizeString(payload.nextCursor);
+    const repeatedCursor = Boolean(nextCursor && consumedCursors.has(nextCursor));
+    page.votes = Array.from(byId.values());
+    page.votesNextCursor = repeatedCursor ? "" : nextCursor;
+    page.votesConsumedCursors = Array.from(consumedCursors);
+    if (repeatedCursor) {
+      page.votesPaginationError =
+        "The vote list returned a repeated page cursor. Refresh this page to retry safely.";
+    }
+    return true;
+  } catch (error) {
+    if (!isCurrentRequest()) return false;
+    page.votesPaginationError = settingsErrorMessage(
+      error,
+      "More Governance votes could not be loaded.",
+    );
+    return false;
+  } finally {
+    if (isCurrentRequest()) {
+      page.votesLoadingMore = false;
+      scheduleRender();
+    }
+  }
+}
+
+async function loadMoreOrganizationGovernancePaperRoster() {
+  const route = getCurrentRoute();
+  const routeInfo = organizationGovernanceRouteForRoute(route);
+  const organizationId = currentOrganizationGovernanceId(route);
+  const page = organizationGovernancePageState();
+  const roster = page.paperRoster;
+  const cursor = normalizeString(roster?.nextCursor);
+  const routeIdentity = {
+    organizationId,
+    routeKind: routeInfo.key,
+    voteId: routeInfo.voteId,
+  };
+  const loadRequestId = page.loadRequestId;
+  const isCurrentRequest = () =>
+    state.pages.organizationGovernance === page &&
+    page.loadRequestId === loadRequestId &&
+    organizationGovernanceRouteMatches(routeIdentity);
+  if (
+    routeInfo.key !== "paper" ||
+    !organizationId ||
+    !routeInfo.voteId ||
+    !roster ||
+    !cursor ||
+    page.loading ||
+    page.paperRosterLoadingMore
+  ) {
+    return false;
+  }
+
+  page.paperRosterLoadingMore = true;
+  page.paperRosterPaginationError = "";
+  scheduleRender();
+  try {
+    const rosterPayload = await fetchJson(
+      organizationGovernanceApiPathWithQuery(
+        organizationGovernanceApiPath(
+          organizationId,
+          `votes/${routeInfo.voteId}/paper-roster`,
+        ),
+        { limit: "100", cursor },
+      ),
+      { auth: true },
+    );
+    if (!isCurrentRequest()) return false;
+    const incoming = normalizeOrganizationGovernancePaperRoster(rosterPayload);
+    if (
+      (incoming.voteId && incoming.voteId !== routeInfo.voteId) ||
+      (roster.voteId && incoming.voteId && incoming.voteId !== roster.voteId) ||
+      (roster.voteVersion &&
+        incoming.voteVersion &&
+        roster.voteVersion !== incoming.voteVersion)
+    ) {
+      page.paperRoster = { ...roster, nextCursor: "" };
+      page.paperRosterPaginationError =
+        "The paper roster changed while loading. Refresh this page before continuing.";
+      return false;
+    }
+
+    const consumedCursors = new Set(page.paperRosterConsumedCursors);
+    consumedCursors.add(cursor);
+    const nextCursor = normalizeString(incoming.nextCursor);
+    const repeatedCursor = Boolean(nextCursor && consumedCursors.has(nextCursor));
+    const items = mergeOrganizationGovernancePaperRosterItems(
+      roster.items,
+      incoming.items,
+    );
+    page.paperRoster = {
+      ...roster,
+      ...incoming,
+      items,
+      nextCursor: repeatedCursor ? "" : nextCursor,
+      summary: {
+        ...readObjectPayload(roster.summary),
+        ...readObjectPayload(incoming.summary),
+        readyForPaperEntry: items.filter((item) => item.readyForPaperEntry).length,
+        readyForVerification: items.filter((item) => item.readyForVerification)
+          .length,
+        readyForVoidReview: items.filter((item) => item.readyForVoidReview).length,
+      },
+    };
+    page.paperRosterConsumedCursors = Array.from(consumedCursors);
+    if (repeatedCursor) {
+      page.paperRosterPaginationError =
+        "The paper roster returned a repeated page cursor. Refresh this page to retry safely.";
+    }
+    return true;
+  } catch (error) {
+    if (!isCurrentRequest()) return false;
+    page.paperRosterPaginationError = settingsErrorMessage(
+      error,
+      "More paper roster members could not be loaded.",
+    );
+    return false;
+  } finally {
+    if (isCurrentRequest()) {
+      page.paperRosterLoadingMore = false;
+      scheduleRender();
+    }
+  }
+}
+
+function organizationGovernanceVoteOptionsFromForm(formData) {
+  const raw = normalizeString(formData.get("options"));
+  const labels = raw
+    .split(/\r?\n/gu)
+    .map((entry) => normalizeString(entry).replace(/^[-*]\s*/u, ""))
+    .filter(Boolean)
+    .slice(0, 20);
+  let originalOptions = [];
+  try {
+    const parsed = JSON.parse(String(formData.get("originalOptions") || "[]"));
+    if (Array.isArray(parsed)) {
+      originalOptions = parsed
+        .map((option) => ({
+          optionId: normalizeString(option?.optionId || option?.id),
+          label: normalizeString(option?.label || option?.title),
+        }))
+        .filter((option) => option.optionId && option.label);
+    }
+  } catch {
+    originalOptions = [];
+  }
+  const changed =
+    labels.length !== originalOptions.length ||
+    labels.some((label, index) => label !== originalOptions[index]?.label);
+  if (!changed) return { changed: false, options: originalOptions };
+
+  const byLabel = new Map();
+  originalOptions.forEach((option) => {
+    const matches = byLabel.get(option.label) || [];
+    matches.push(option);
+    byLabel.set(option.label, matches);
+  });
+  const usedIds = new Set();
+  const assignedIds = labels.map((label) => {
+    const exact = (byLabel.get(label) || []).find(
+      (option) => !usedIds.has(option.optionId),
+    );
+    if (!exact) return "";
+    usedIds.add(exact.optionId);
+    return exact.optionId;
+  });
+  assignedIds.forEach((optionId, index) => {
+    if (optionId) return;
+    const positional = originalOptions[index];
+    if (!positional || usedIds.has(positional.optionId)) return;
+    assignedIds[index] = positional.optionId;
+    usedIds.add(positional.optionId);
+  });
+  const originalIds = new Set(originalOptions.map((option) => option.optionId));
+  const nextGeneratedId = (index) => {
+    let suffix = index + 1;
+    let candidate = `option-${suffix}`;
+    while (usedIds.has(candidate) || originalIds.has(candidate)) {
+      suffix += 1;
+      candidate = `option-${suffix}`;
+    }
+    return candidate;
+  };
+  const options = labels.map((label, index) => {
+    const optionId = assignedIds[index] || nextGeneratedId(index);
+    usedIds.add(optionId);
+    return { optionId, label };
+  });
+  return { changed: true, options };
+}
+
+function organizationGovernanceVotePayloadFromForm(
+  formData,
+  { create = false } = {},
+) {
+  const question = normalizeString(formData.get("question"));
+  const presetId = normalizeString(formData.get("presetId"));
+  const description = normalizeString(formData.get("description"));
+  const sessionId = normalizeString(formData.get("sessionId"));
+  const ballotMethod =
+    normalizeString(formData.get("ballotMethod")).toUpperCase() || "YES_NO";
+  const privacyMode =
+    normalizeString(formData.get("privacyMode")).toUpperCase() ||
+    "OPEN_ATTRIBUTED";
+  if (!question) {
+    throw new Error("Question is required.");
+  }
+  if (create && !presetId) {
+    throw new Error("Choose a vote preset.");
+  }
+  const optionState = organizationGovernanceVoteOptionsFromForm(formData);
+  const expectedVersion =
+    readOptionalGovernanceNumber(formData.get("expectedVersion")) || 0;
+  return {
+    expectedVersion,
+    question,
+    ...(create && presetId ? { presetId } : {}),
+    ...(create
+      ? description
+        ? { description }
+        : {}
+      : { description }),
+    ...(create ? (sessionId ? { sessionId } : {}) : { sessionId }),
+    ...(optionState.changed ? { options: optionState.options } : {}),
+    rules: {
+      ballotMethod,
+      privacyMode,
+      participation: {
+        remoteEnabled: formData.has("remoteEnabled"),
+      },
+      paper: {
+        allowed: formData.has("paperAllowed"),
+        evidenceRequired: formData.has("paperEvidenceRequired"),
+      },
+    },
+  };
+}
+
+async function createOrganizationGovernanceVote(formData) {
+  const organizationId = currentOrganizationGovernanceId();
+  const page = organizationGovernancePageState();
+  if (!organizationId) {
+    showToast("Organization Governance unavailable.");
+    return false;
+  }
+  let body;
+  try {
+    body = organizationGovernanceVotePayloadFromForm(formData, { create: true });
+  } catch (error) {
+    page.error = normalizeString(error?.message) || "Vote form is invalid.";
+    showToast(page.error);
+    scheduleRender();
+    return false;
+  }
+  body.expectedVersion = 0;
+  page.actionPendingKey = "vote:create";
+  page.error = "";
+  scheduleRender();
+  try {
+    const payload = await fetchJson(
+      organizationGovernanceApiPath(organizationId, "votes"),
+      { auth: true, method: "POST", body },
+    );
+    const vote = normalizeOrganizationGovernanceVote(payload);
+    showToast("Governance vote created.");
+    navigateTo(
+      organizationGovernanceRoutePath(
+        organizationId,
+        vote.voteId ? `votes/${vote.voteId}` : "votes",
+      ),
+      { replace: true },
+    );
+    await loadOrganizationGovernancePage({ refresh: true });
+    return true;
+  } catch (error) {
+    page.error = settingsErrorMessage(error, "Governance vote could not be created.");
+    showToast(page.error);
+    return false;
+  } finally {
+    if (page.actionPendingKey === "vote:create") {
+      page.actionPendingKey = "";
+    }
+    scheduleRender();
+  }
+}
+
+async function updateOrganizationGovernanceVote(formData) {
+  const organizationId = currentOrganizationGovernanceId();
+  const voteId = normalizeString(formData.get("voteId"));
+  const page = organizationGovernancePageState();
+  if (!organizationId || !voteId) {
+    showToast("Governance vote unavailable.");
+    return false;
+  }
+  let body;
+  try {
+    body = organizationGovernanceVotePayloadFromForm(formData);
+  } catch (error) {
+    page.error = normalizeString(error?.message) || "Vote form is invalid.";
+    showToast(page.error);
+    scheduleRender();
+    return false;
+  }
+  const actionKey = `vote:update:${voteId}`;
+  page.actionPendingKey = actionKey;
+  page.error = "";
+  scheduleRender();
+  try {
+    await fetchJson(organizationGovernanceApiPath(organizationId, `votes/${voteId}`), {
+      auth: true,
+      method: "PATCH",
+      body,
+    });
+    showToast("Governance vote updated.");
+    navigateTo(organizationGovernanceRoutePath(organizationId, `votes/${voteId}`), {
+      replace: true,
+    });
+    await loadOrganizationGovernancePage({ refresh: true });
+    return true;
+  } catch (error) {
+    page.error = settingsErrorMessage(error, "Governance vote could not be updated.");
+    showToast(page.error);
+    return false;
+  } finally {
+    if (page.actionPendingKey === actionKey) {
+      page.actionPendingKey = "";
+    }
+    scheduleRender();
+  }
+}
+
+async function createOrganizationGovernanceAuditCase(formData) {
+  const organizationId = currentOrganizationGovernanceId();
+  const routeInfo = organizationGovernanceRouteForRoute();
+  const voteId = normalizeString(formData.get("voteId")) || routeInfo.voteId;
+  const targetReceiptCode = normalizeString(formData.get("targetReceiptCode"));
+  const reason = normalizeString(formData.get("reason"));
+  const namedAuditorUserId = normalizeString(formData.get("namedAuditorUserId"));
+  const page = organizationGovernancePageState();
+  if (!organizationId || !voteId || !targetReceiptCode || !reason || !namedAuditorUserId) {
+    page.error = "Receipt code, reason, and named auditor are required.";
+    showToast(page.error);
+    scheduleRender();
+    return false;
+  }
+  const actionKey = `audit:create:${voteId}`;
+  page.actionPendingKey = actionKey;
+  page.error = "";
+  scheduleRender();
+  try {
+    const payload = await fetchJson(
+      organizationGovernanceApiPath(organizationId, `votes/${voteId}/audit-cases`),
+      {
+        auth: true,
+        method: "POST",
+        body: { targetReceiptCode, reason, namedAuditorUserId },
+      },
+    );
+    const auditCase = normalizeOrganizationGovernanceAuditCase(payload);
+    showToast("Audit case opened.");
+    const query = auditCase.auditCaseId
+      ? `?auditCaseId=${encodeURIComponent(auditCase.auditCaseId)}`
+      : "";
+    navigateTo(
+      `${organizationGovernanceRoutePath(organizationId, `votes/${voteId}/audit`)}${query}`,
+      { replace: true },
+    );
+    await loadOrganizationGovernancePage({ refresh: true });
+    return true;
+  } catch (error) {
+    page.error = settingsErrorMessage(error, "Audit case could not be opened.");
+    showToast(page.error);
+    return false;
+  } finally {
+    if (page.actionPendingKey === actionKey) {
+      page.actionPendingKey = "";
+    }
+    scheduleRender();
+  }
+}
+
+async function runOrganizationGovernanceAuditAction(action, auditCaseId) {
+  const normalizedAction = normalizeString(action);
+  const organizationId = currentOrganizationGovernanceId();
+  const page = organizationGovernancePageState();
+  const auditCase =
+    page.auditCase?.auditCaseId === normalizeString(auditCaseId)
+      ? page.auditCase
+      : null;
+  const normalizedAuditCaseId = normalizeString(auditCaseId || auditCase?.auditCaseId);
+  if (!organizationId || !normalizedAuditCaseId || !auditCase) {
+    showToast("Audit case unavailable.");
+    return;
+  }
+  let body = {
+    expectedVersion: readOptionalGovernanceNumber(auditCase.version) || 0,
+  };
+  if (normalizedAction === "authorize") {
+    const authorizationVoteId = await requestTextPrompt({
+      eyebrow: "Sealed audit",
+      title: "Authorize disclosure",
+      message: "Enter the authorization vote id created for this sealed audit case.",
+      inputLabel: "Authorization vote id",
+      placeholder: "vote-...",
+      confirmLabel: "Authorize",
+      icon: "shield",
+      required: true,
+    });
+    if (authorizationVoteId === null) {
+      return;
+    }
+    body = { ...body, authorizationVoteId: normalizeString(authorizationVoteId) };
+  }
+  const actionLabels = {
+    approve: "approved",
+    authorize: "authorized",
+    disclose: "disclosed",
+    view: "loaded",
+  };
+  const actionKey = `audit:${normalizedAction}:${normalizedAuditCaseId}`;
+  page.actionPendingKey = actionKey;
+  page.error = "";
+  scheduleRender();
+  try {
+    const payload = await fetchJson(
+      organizationGovernanceApiPath(
+        organizationId,
+        `audit-cases/${normalizedAuditCaseId}/${normalizedAction}`,
+      ),
+      { auth: true, method: "POST", body },
+    );
+    if (payload.auditCase) {
+      page.auditCase = normalizeOrganizationGovernanceAuditCase(payload);
+    }
+    if (payload.delivery) {
+      page.auditDelivery = readObjectPayload(payload.delivery);
+    }
+    if (payload.disclosure) {
+      page.auditDisclosure = readObjectPayload(payload.disclosure);
+    }
+    showToast(`Audit case ${actionLabels[normalizedAction] || "updated"}.`);
+  } catch (error) {
+    page.error = settingsErrorMessage(error, "Audit case action failed.");
+    showToast(page.error);
+  } finally {
+    if (page.actionPendingKey === actionKey) {
+      page.actionPendingKey = "";
+    }
+    scheduleRender();
+  }
+}
+
+function organizationGovernanceFloorCountFromForm(formData) {
+  const readCount = (name) => {
+    const value = Number(formData.get(name));
+    if (!Number.isInteger(value) || value < 0) {
+      throw new Error("Floor counts must be whole numbers at zero or above.");
+    }
+    return value;
+  };
+  return {
+    YES: readCount("yes"),
+    NO: readCount("no"),
+    ABSTAIN: readCount("abstain"),
+  };
+}
+
+async function submitOrganizationGovernanceFloorAttestation(formData) {
+  const organizationId = currentOrganizationGovernanceId();
+  const routeInfo = organizationGovernanceRouteForRoute();
+  const voteId = normalizeString(formData.get("voteId")) || routeInfo.voteId;
+  const page = organizationGovernancePageState();
+  if (!organizationId || !voteId) {
+    showToast("Aggregate floor count unavailable.");
+    return false;
+  }
+  let totals;
+  try {
+    totals = organizationGovernanceFloorCountFromForm(formData);
+  } catch (error) {
+    page.error =
+      normalizeString(error?.message) || "Aggregate floor counts are invalid.";
+    showToast(page.error);
+    scheduleRender();
+    return false;
+  }
+  const expectedVersion =
+    readOptionalGovernanceNumber(formData.get("expectedVersion")) ||
+    readOptionalGovernanceNumber(organizationGovernanceFindVote(page, voteId)?.voteVersion) ||
+    0;
+  const actionKey = `floor:${voteId}`;
+  page.actionPendingKey = actionKey;
+  page.error = "";
+  scheduleRender();
+  try {
+    const payload = await fetchJson(
+      organizationGovernanceApiPath(
+        organizationId,
+        `votes/${voteId}/floor-count-attestations`,
+      ),
+      {
+        auth: true,
+        method: "POST",
+        body: { expectedVersion, totals },
+      },
+    );
+    showToast(
+      normalizeString(payload?.status).toUpperCase() === "MATCHED"
+        ? "Floor count matched."
+        : "Attestation saved. A matching second count is required.",
+    );
+    await loadOrganizationGovernancePage({ refresh: true });
+    return true;
+  } catch (error) {
+    page.error = settingsErrorMessage(error, "Floor count attestation failed.");
+    showToast(page.error);
+    return false;
+  } finally {
+    if (page.actionPendingKey === actionKey) {
+      page.actionPendingKey = "";
+    }
+    scheduleRender();
+  }
+}
+
+async function runOrganizationGovernancePaperAction(memberKey, action) {
+  const organizationId = currentOrganizationGovernanceId();
+  const routeInfo = organizationGovernanceRouteForRoute();
+  const voteId = routeInfo.voteId;
+  const page = organizationGovernancePageState();
+  const member = page.paperRoster?.items.find(
+    (item) => item.canonicalMemberKey === normalizeString(memberKey),
+  );
+  if (!organizationId || !voteId || !member) {
+    showToast("Paper roster member unavailable.");
+    return;
+  }
+  const selectedVote = organizationGovernanceFindVote(page, voteId);
+  const expectedVersion =
+    readOptionalGovernanceNumber(selectedVote?.voteVersion) ||
+    readOptionalGovernanceNumber(page.paperRoster?.voteVersion) ||
+    0;
+  const normalizedAction = normalizeString(action);
+  let sectionKey = "";
+  let body = { expectedVersion };
+  if (normalizedAction === "verify" || normalizedAction === "reject") {
+    const approved = normalizedAction === "verify";
+    const reason = approved
+      ? ""
+      : await requestTextPrompt({
+          eyebrow: "Paper ballot",
+          title: "Reject verification?",
+          message: "Add the audit reason for rejecting this paper ballot.",
+          inputLabel: "Reason",
+          placeholder: "Explain the issue with this ballot.",
+          confirmLabel: "Reject",
+          icon: "close",
+          tone: "danger",
+          required: true,
+        });
+    if (reason === null) {
+      return;
+    }
+    if (member.privatePaperBallotId) {
+      sectionKey = `votes/${voteId}/private-paper-ballots/${member.privatePaperBallotId}/verify`;
+      body = {
+        expectedVersion,
+        canonicalMemberKey: member.canonicalMemberKey,
+        approved,
+        ...(reason ? { reason: normalizeString(reason) } : {}),
+      };
+    } else {
+      sectionKey = `votes/${voteId}/paper-ballots/${member.canonicalMemberKey}/verify`;
+      body = {
+        expectedVersion,
+        approved,
+        ...(reason ? { reason: normalizeString(reason) } : {}),
+      };
+    }
+  } else if (normalizedAction === "void-request") {
+    const reason = await requestTextPrompt({
+      eyebrow: "Paper correction",
+      title: "Request ballot correction",
+      message: "Enter why this paper ballot needs to be voided and corrected.",
+      inputLabel: "Reason",
+      placeholder: "Explain the correction needed.",
+      confirmLabel: "Request correction",
+      icon: "edit",
+      required: true,
+    });
+    if (reason === null) {
+      return;
+    }
+    sectionKey = `votes/${voteId}/paper-ballots/${member.canonicalMemberKey}/void`;
+    body = { expectedVersion, reason: normalizeString(reason) };
+  } else if (
+    normalizedAction === "void-approve" ||
+    normalizedAction === "void-reject"
+  ) {
+    const approved = normalizedAction === "void-approve";
+    const reason = approved
+      ? ""
+      : await requestTextPrompt({
+          eyebrow: "Paper correction",
+          title: "Reject correction?",
+          message: "Add the audit reason for rejecting this correction request.",
+          inputLabel: "Reason",
+          placeholder: "Explain why it should remain counted.",
+          confirmLabel: "Reject",
+          icon: "close",
+          tone: "danger",
+          required: true,
+        });
+    if (reason === null) {
+      return;
+    }
+    sectionKey = `votes/${voteId}/paper-ballots/${member.canonicalMemberKey}/void`;
+    body = {
+      expectedVersion,
+      confirmVoid: true,
+      voidRequestId: member.voidRequestId,
+      approved,
+      ...(reason ? { reason: normalizeString(reason) } : {}),
+    };
+  }
+  if (!sectionKey) {
+    showToast("Paper action unavailable in web.");
+    return;
+  }
+  const actionKey = `paper:${normalizedAction}:${member.canonicalMemberKey}`;
+  page.actionPendingKey = actionKey;
+  page.error = "";
+  scheduleRender();
+  try {
+    await fetchJson(organizationGovernanceApiPath(organizationId, sectionKey), {
+      auth: true,
+      method: "POST",
+      body,
+    });
+    showToast("Paper roster updated.");
+    await loadOrganizationGovernancePage({ refresh: true });
+  } catch (error) {
+    page.error = settingsErrorMessage(error, "Paper roster action failed.");
+    showToast(page.error);
+  } finally {
+    if (page.actionPendingKey === actionKey) {
+      page.actionPendingKey = "";
+    }
     scheduleRender();
   }
 }
@@ -32080,6 +33262,72 @@ function normalizeCoalitionVote(raw = {}) {
   };
 }
 
+function normalizeGovernanceStringListPayload(value) {
+  return (Array.isArray(value) ? value : [])
+    .map(normalizeString)
+    .filter(Boolean);
+}
+
+function normalizeGovernanceIntegerString(value) {
+  if (typeof value === "number" && Number.isInteger(value)) {
+    return String(value);
+  }
+  const normalized = normalizeString(value);
+  return /^-?(?:0|[1-9][0-9]*)$/u.test(normalized) ? normalized : "";
+}
+
+function normalizeGovernanceExactRational(value) {
+  const source = readObjectPayload(value);
+  let numerator = normalizeGovernanceIntegerString(source.numerator);
+  let denominator = normalizeGovernanceIntegerString(source.denominator);
+  if (!numerator && !denominator && typeof value === "number" && Number.isInteger(value)) {
+    numerator = String(value);
+    denominator = "1";
+  }
+  if (
+    !numerator ||
+    !denominator ||
+    denominator === "0" ||
+    denominator.startsWith("-")
+  ) {
+    return null;
+  }
+  return {
+    numerator,
+    denominator,
+    displayValue: denominator === "1" ? numerator : `${numerator}/${denominator}`,
+  };
+}
+
+function normalizeGovernanceStvRound(round = {}, index = 0) {
+  const source = readObjectPayload(round);
+  const tallies = Object.entries(readObjectPayload(source.tallies)).reduce(
+    (acc, [key, value]) => {
+      const normalizedKey = normalizeString(key);
+      const exactValue = normalizeGovernanceExactRational(value);
+      if (normalizedKey && exactValue) {
+        acc[normalizedKey] = exactValue;
+      }
+      return acc;
+    },
+    {},
+  );
+  return {
+    round: readOptionalGovernanceNumber(source.round ?? source.number) || index + 1,
+    action: normalizeString(source.action).toUpperCase(),
+    quota: normalizeGovernanceExactRational(source.quota),
+    tallies,
+    electedOptionIds: normalizeGovernanceStringListPayload(source.electedOptionIds),
+    eliminatedOptionIds: normalizeGovernanceStringListPayload(
+      source.eliminatedOptionIds,
+    ),
+    newlyElectedOptionIds: normalizeGovernanceStringListPayload(
+      source.newlyElectedOptionIds,
+    ),
+    actingOptionId: normalizeString(source.actingOptionId),
+  };
+}
+
 function normalizeCoalitionVoteResults(raw = {}) {
   const source =
     raw.results && typeof raw.results === "object"
@@ -32128,15 +33376,18 @@ function normalizeCoalitionVoteResults(raw = {}) {
       ? source.tallies
       : null;
   const yesCount = readOptionalNumber(
-    source.yesCount ?? source.yes_count ?? talliesSource?.yes,
+    source.yesCount ?? source.yes_count ?? talliesSource?.yes ?? talliesSource?.YES,
   );
   const noCount = readOptionalNumber(
-    source.noCount ?? source.no_count ?? talliesSource?.no,
+    source.noCount ?? source.no_count ?? talliesSource?.no ?? talliesSource?.NO,
   );
   const abstainCount = readOptionalNumber(
-    source.abstainCount ?? source.abstain_count ?? talliesSource?.abstain,
+    source.abstainCount ??
+      source.abstain_count ??
+      talliesSource?.abstain ??
+      talliesSource?.ABSTAIN,
   );
-  const rounds = (
+  const roundsSource = (
     Array.isArray(source.rounds)
       ? source.rounds
       : Array.isArray(source.irvRounds)
@@ -32144,14 +33395,27 @@ function normalizeCoalitionVoteResults(raw = {}) {
         : Array.isArray(source.irv?.rounds)
           ? source.irv.rounds
           : []
-  ).map(normalizeRound);
+  );
+  const rounds = roundsSource.map(normalizeRound);
   const outcome = normalizeString(source.outcome) || "pending";
   const passed =
     source.passed === undefined
       ? ["approved", "passed", "ratified"].includes(outcome.toLowerCase())
       : parseBoolean(source.passed, false);
+  const winnerOptionIds = normalizeGovernanceStringListPayload(
+    source.winnerOptionIds || source.winner_option_ids,
+  );
+  const winnerOptionId =
+    normalizeString(source.winnerOptionId || source.winner_option_id) ||
+    winnerOptionIds[0] ||
+    "";
   return {
     vote,
+    ballotMethod: normalizeString(
+      source.ballotMethod || source.method || source.proposalType,
+    ).toUpperCase(),
+    countStatus: normalizeString(source.countStatus || source.count_status)
+      .toUpperCase(),
     quorumMet: parseBoolean(source.quorumMet ?? source.quorum_met, null),
     quorumRequired: readOptionalNumber(
       source.quorumRequired ?? source.quorum_required,
@@ -32173,12 +33437,387 @@ function normalizeCoalitionVoteResults(raw = {}) {
         : rounds.length
           ? { rounds }
           : null,
-    winnerOptionId: normalizeString(
-      source.winnerOptionId || source.winner_option_id,
+    winnerOptionId,
+    winnerOptionIds,
+    tiedOptionIds: normalizeGovernanceStringListPayload(
+      source.tiedOptionIds || source.tied_option_ids,
     ),
+    provisionallyElectedOptionIds: normalizeGovernanceStringListPayload(
+      source.provisionallyElectedOptionIds || source.provisionally_elected_option_ids,
+    ),
+    unresolvedCountOptionIds: normalizeGovernanceStringListPayload(
+      source.unresolvedCountOptionIds || source.unresolved_count_option_ids,
+    ),
+    requiresRunoff: parseBoolean(
+      source.requiresRunoff ?? source.requires_runoff,
+      false,
+    ),
+    requiresNewElection: parseBoolean(
+      source.requiresNewElection ?? source.requires_new_election,
+      false,
+    ),
+    tieStage: normalizeString(source.tieStage || source.tie_stage).toUpperCase(),
+    tieDisposition: normalizeString(
+      source.tieDisposition || source.tie_disposition,
+    ).toUpperCase(),
+    tieResolution: readObjectPayload(source.tieResolution || source.tie_resolution),
+    stvResultSchemaVersion: normalizeString(source.stvResultSchemaVersion),
+    tallyProfile: normalizeString(source.tallyProfile),
+    seats: readOptionalNumber(source.seats),
+    seatsFilled: readOptionalNumber(source.seatsFilled ?? source.seats_filled),
+    provisionalSeatsFilled: readOptionalNumber(
+      source.provisionalSeatsFilled ?? source.provisional_seats_filled,
+    ),
+    quota: normalizeGovernanceExactRational(source.quota),
+    conservationVerified: source.conservationVerified === true,
+    stvRounds: roundsSource.map(normalizeGovernanceStvRound),
     winnerShare: readOptionalNumber(source.winnerShare ?? source.winner_share),
     passed,
     outcome,
+    raw: source,
+  };
+}
+
+function readOptionalGovernanceNumber(value) {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function normalizeOrganizationGovernanceRules(raw = {}) {
+  const source = readObjectPayload(raw);
+  const participation = readObjectPayload(source.participation);
+  const paper = readObjectPayload(source.paper);
+  return {
+    ballotMethod:
+      normalizeString(
+        source.ballotMethod ||
+          source.method ||
+          source.proposalType ||
+          source.type,
+      ).toUpperCase() || "YES_NO",
+    privacyMode:
+      normalizeString(source.privacyMode || source.privacy || source.mode)
+        .toUpperCase() || "VISIBLE",
+    paperAllowed: parseBoolean(
+      paper.allowed ??
+        source.paperAllowed ??
+        source.paperBallotsEnabled ??
+        source.paperEnabled ??
+        source.allowPaper,
+      false,
+    ),
+    paperEvidenceRequired: parseBoolean(
+      paper.evidenceRequired ??
+        source.paperEvidenceRequired ??
+        source.evidenceRequired,
+      false,
+    ),
+    remoteEnabled: parseBoolean(
+      participation.remoteEnabled ??
+        source.remoteEnabled ??
+        source.remoteVotingEnabled,
+      true,
+    ),
+    resultsRelease:
+      normalizeString(source.resultsRelease || source.resultRelease)
+        .toUpperCase() || "",
+    quorumPct: readOptionalGovernanceNumber(
+      source.quorumPct ?? source.quorum_pct,
+    ),
+    thresholdPct: readOptionalGovernanceNumber(
+      source.thresholdPct ?? source.threshold_pct,
+    ),
+  };
+}
+
+function normalizeOrganizationGovernanceVote(raw = {}) {
+  const source = readObjectPayload(raw.vote || raw.item || raw);
+  const rules = normalizeOrganizationGovernanceRules(
+    source.rules || source.votingRules || source.voteRules || source,
+  );
+  return {
+    voteId:
+      normalizeString(source.voteId || source.id || source.vote_id) || "vote",
+    organizationId: normalizeString(
+      source.organizationId || source.organization_id,
+    ),
+    title: normalizeString(source.title || source.name) || "Governance vote",
+    question: normalizeString(source.question || source.summary || source.body),
+    status: normalizeString(source.status || source.state) || "scheduled",
+    voteVersion:
+      readOptionalGovernanceNumber(source.voteVersion ?? source.version) || 0,
+    manifestHash: normalizeString(
+      source.manifestHash || source.manifest_hash || source.receiptHash,
+    ),
+    sessionId: normalizeString(source.sessionId || source.session_id),
+    options: readArrayPayload(source, ["options", "choices"]).map(
+      normalizeCoalitionProposalOption,
+    ),
+    rules,
+    startsAt: normalizeCoalitionGovernanceTimestamp(
+      source.voteStartAtMs,
+      source.startsAt,
+      source.startAt,
+      source.voteStartAt,
+      source.voteStartAtIso,
+      source.vote_start_at_ms,
+    ),
+    endsAt: normalizeCoalitionGovernanceTimestamp(
+      source.voteEndAtMs,
+      source.endsAt,
+      source.endAt,
+      source.voteEndAt,
+      source.voteEndAtIso,
+      source.vote_end_at_ms,
+    ),
+    createdAt: normalizeCoalitionGovernanceTimestamp(
+      source.createdAtMs,
+      source.createdAt,
+      source.createdAtIso,
+      source.created_at,
+    ),
+    raw: source,
+  };
+}
+
+function normalizeOrganizationGovernanceVotesPayload(payload = {}) {
+  return readArrayPayload(payload, ["votes", "items", "results"])
+    .map(normalizeOrganizationGovernanceVote)
+    .filter((vote) => Boolean(vote.voteId));
+}
+
+function normalizeOrganizationGovernancePreset(raw = {}) {
+  const source = readObjectPayload(raw.preset || raw.item || raw);
+  return {
+    presetId:
+      normalizeString(source.presetId || source.id || source.key) || "custom",
+    label:
+      normalizeString(source.label || source.title || source.name) ||
+      "Governance preset",
+    description: normalizeString(source.description || source.summary),
+    available: source.available !== false,
+    unavailableReason: normalizeString(source.unavailableReason),
+    rules: normalizeOrganizationGovernanceRules(source.rules || source),
+    raw: source,
+  };
+}
+
+function normalizeOrganizationGovernancePresetsPayload(payload = {}) {
+  return readArrayPayload(payload, ["items", "presets"])
+    .map(normalizeOrganizationGovernancePreset)
+    .filter((preset) => Boolean(preset.presetId));
+}
+
+function normalizeOrganizationGovernanceResults(raw = {}) {
+  const source = readObjectPayload(
+    raw.results || raw.voteResults || raw.item || raw,
+  );
+  const results = normalizeCoalitionVoteResults(source);
+  return {
+    ...results,
+    vote: source.vote ? normalizeOrganizationGovernanceVote(source.vote) : results.vote,
+    privacyMode: normalizeString(source.privacyMode || source.privacy).toUpperCase(),
+    manifestHash: normalizeString(source.manifestHash || source.manifest_hash),
+  };
+}
+
+function normalizeOrganizationGovernancePaperMember(raw = {}) {
+  const source = readObjectPayload(raw.member || raw.item || raw);
+  const ballot = readObjectPayload(source.ballot || source.paperBallot);
+  const disposition = readObjectPayload(
+    source.paperDisposition || source.disposition,
+  );
+  const voidRequest = readObjectPayload(
+    ballot.void || source.void || source.voidRequest,
+  );
+  return {
+    canonicalMemberKey: normalizeString(
+      source.canonicalMemberKey ||
+        source.memberKey ||
+        source.id ||
+        source.canonical_member_key,
+    ),
+    displayName:
+      normalizeString(source.displayName || source.name || source.label) ||
+      "Roster member",
+    source:
+      normalizeString(source.source || source.memberSource).toUpperCase() ||
+      "DIRECTORY",
+    linkedAccount: parseBoolean(
+      source.linkedAccount ?? source.hasLinkedAccount,
+      false,
+    ),
+    rosterMemberId: normalizeString(
+      source.rosterMemberId || source.roster_member_id,
+    ),
+    eligibilityStatus:
+      normalizeString(source.eligibilityStatus || source.eligibility)
+        .toUpperCase() || "UNKNOWN",
+    attendance:
+      normalizeString(
+        readObjectPayload(source.attendance).status ||
+          source.attendanceStatus ||
+          (typeof source.attendance === "string" ? source.attendance : ""),
+      )
+        .toUpperCase() || "UNKNOWN",
+    ballotStatus:
+      normalizeString(ballot.status || source.ballotStatus).toUpperCase(),
+    paperBallotId: normalizeString(
+      ballot.paperBallotId || source.paperBallotId,
+    ),
+    privatePaperBallotId: normalizeString(
+      ballot.privatePaperBallotId || source.privatePaperBallotId,
+    ),
+    anonymousIssuanceId: normalizeString(
+      ballot.anonymousIssuanceId || source.anonymousIssuanceId,
+    ),
+    paperDispositionStatus:
+      normalizeString(disposition.status || source.paperDispositionStatus)
+        .toUpperCase() || "",
+    voidRequestId: normalizeString(
+      voidRequest.voidRequestId || source.voidRequestId,
+    ),
+    readyForPaperEntry: parseBoolean(source.readyForPaperEntry, false),
+    readyForVerification: parseBoolean(source.readyForVerification, false),
+    readyForAnonymousCompletion: parseBoolean(
+      source.readyForAnonymousCompletion,
+      false,
+    ),
+    readyForVoidRequest: parseBoolean(source.readyForVoidRequest, false),
+    readyForVoidReview: parseBoolean(source.readyForVoidReview, false),
+    raw: source,
+  };
+}
+
+function normalizeOrganizationGovernancePaperRoster(raw = {}) {
+  const source = readObjectPayload(raw.roster || raw.paperRoster || raw);
+  const permissions = readObjectPayload(source.permissions);
+  return {
+    voteId: normalizeString(source.voteId || source.vote_id),
+    voteVersion:
+      readOptionalGovernanceNumber(source.voteVersion ?? source.version) || 0,
+    voteStatus: normalizeString(source.voteStatus || source.status),
+    sessionId: normalizeString(source.sessionId || source.session_id),
+    dayKey: normalizeString(source.dayKey || source.day_key),
+    canRecord: parseBoolean(permissions.canRecord ?? source.canRecord, false),
+    canVerify: parseBoolean(permissions.canVerify ?? source.canVerify, false),
+    canVoid: parseBoolean(permissions.canVoid ?? source.canVoid, false),
+    items: readArrayPayload(source, ["items", "members", "roster"]).map(
+      normalizeOrganizationGovernancePaperMember,
+    ),
+    summary: readObjectPayload(source.summary),
+    nextCursor: normalizeString(source.nextCursor || source.next_cursor),
+    raw: source,
+  };
+}
+
+function organizationGovernancePaperRosterMemberKey(member = {}) {
+  for (const field of [
+    "canonicalMemberKey",
+    "rosterMemberId",
+    "privatePaperBallotId",
+    "paperBallotId",
+  ]) {
+    const value = normalizeString(member[field]);
+    if (value) return `${field}:${value}`;
+  }
+  return "";
+}
+
+function mergeOrganizationGovernancePaperRosterItems(current = [], incoming = []) {
+  const merged = Array.isArray(current) ? [...current] : [];
+  const indexByKey = new Map();
+  merged.forEach((member, index) => {
+    const key = organizationGovernancePaperRosterMemberKey(member);
+    if (key && !indexByKey.has(key)) {
+      indexByKey.set(key, index);
+    }
+  });
+  (Array.isArray(incoming) ? incoming : []).forEach((member) => {
+    const key = organizationGovernancePaperRosterMemberKey(member);
+    if (key && indexByKey.has(key)) {
+      merged[indexByKey.get(key)] = member;
+      return;
+    }
+    if (key) {
+      indexByKey.set(key, merged.length);
+    }
+    merged.push(member);
+  });
+  return merged;
+}
+
+function normalizeOrganizationGovernanceAuditCase(raw = {}) {
+  const source = readObjectPayload(raw.auditCase || raw.case || raw.item || raw);
+  const authorization = readObjectPayload(source.authorization);
+  const terminalOutcome = readObjectPayload(
+    source.terminalOutcome || source.outcome,
+  );
+  return {
+    auditCaseId:
+      normalizeString(
+        source.auditCaseId || source.caseId || source.id || source.audit_case_id,
+      ) || "",
+    organizationId: normalizeString(
+      source.organizationId || source.organization_id,
+    ),
+    voteId: normalizeString(source.voteId || source.vote_id),
+    manifestHash: normalizeString(source.manifestHash || source.manifest_hash),
+    privacyMode:
+      normalizeString(source.privacyMode || source.privacy).toUpperCase() ||
+      "SEALED_AUDIT",
+    status: normalizeString(source.status || source.state).toUpperCase(),
+    version: readOptionalGovernanceNumber(source.version),
+    targetReceiptCode: normalizeString(
+      source.targetReceiptCode || source.receiptCode,
+    ),
+    targetReceiptDigest: normalizeString(
+      source.targetReceiptDigest || source.receiptDigest,
+    ),
+    caseScopeHash: normalizeString(source.caseScopeHash || source.scopeHash),
+    requestedByUserId: normalizeString(
+      source.requestedByUserId || source.requested_by,
+    ),
+    namedAuditorUserId: normalizeString(
+      source.namedAuditorUserId || source.auditorUserId,
+    ),
+    reason: normalizeString(source.reason),
+    approvals: readArrayPayload(source, ["approvals"]).map((approval) => {
+      const item = readObjectPayload(approval);
+      return {
+        approverUserId: normalizeString(
+          item.approverUserId || item.userId || item.approver,
+        ),
+        approvedAt: normalizeCoalitionGovernanceTimestamp(
+          item.approvedAtMs,
+          item.approvedAt,
+          item.createdAt,
+        ),
+      };
+    }),
+    authorization,
+    authorizedAt: normalizeCoalitionGovernanceTimestamp(
+      source.authorizedAtMs,
+      source.authorizedAt,
+      authorization.authorizedAt,
+    ),
+    grantId: normalizeString(
+      source.grantId || source.auditGrantId || source.accessGrantId,
+    ),
+    terminalOutcome,
+    createdAt: normalizeCoalitionGovernanceTimestamp(
+      source.createdAtMs,
+      source.createdAt,
+      source.createdAtIso,
+    ),
+    approvalExpiresAt: normalizeCoalitionGovernanceTimestamp(
+      source.approvalExpiresAtMs,
+      source.approvalExpiresAt,
+      source.approvalExpiresAtIso,
+    ),
     raw: source,
   };
 }
@@ -44853,6 +46492,12 @@ function createSettingsAccountSecurityState() {
       notice: "",
       copied: false,
     },
+    passkey: {
+      registering: false,
+      registered: false,
+      error: "",
+      notice: "",
+    },
   };
 }
 
@@ -44974,6 +46619,11 @@ function getSettingsSectionConfig(sectionKey = getSettingsSection()) {
 function getSettingsHeaderConfig(sectionKey = getSettingsSection(), route = getCurrentRoute()) {
   const settingsPath = getSettingsRoutePath(route).replace(/\/$/u, "");
   const exactConfigs = {
+    "account-security/governance-passkey": {
+      label: "Account Passkey",
+      description:
+        "Set up the account passkey used for Governance votes and meetings.",
+    },
     "account-security/totp": {
       label: "Authenticator App",
       description: "Set up or verify authenticator MFA for account sign-in.",
@@ -53867,6 +55517,10 @@ function normalizeCreateUploadPayload(payload = {}) {
     payload.cfAsset && typeof payload.cfAsset === "object"
       ? payload.cfAsset
       : {};
+  const mediaItem =
+    payload.mediaItem && typeof payload.mediaItem === "object"
+      ? payload.mediaItem
+      : {};
   const uploadUrl =
     normalizeString(
       payload.uploadURL ||
@@ -53886,6 +55540,12 @@ function normalizeCreateUploadPayload(payload = {}) {
   return {
     uploadUrl,
     uid,
+    assetId: normalizeString(payload.assetId || cfAsset.assetId || mediaItem.assetId),
+    sourceAssetVersionId: normalizeString(
+      payload.sourceAssetVersionId ||
+        cfAsset.sourceAssetVersionId ||
+        mediaItem.sourceAssetVersionId,
+    ),
     postId: normalizeString(payload.postId) || uid,
     type: payloadType,
     method: normalizeString(payload.method || cfAsset.method).toUpperCase(),
@@ -55210,12 +56870,16 @@ async function submitPostComposer(formData) {
       },
     });
 
+    const composerMediaItems = buildComposerMediaItems(upload, mediaType);
     composer.stage = "Publishing post";
     scheduleRender();
     const createPayload = await fetchJson("/api/posts", {
       auth: true,
       method: "POST",
       body: {
+        ...(composerMediaItems.length
+          ? { mediaItems: composerMediaItems }
+          : {}),
         type: mediaType,
         cfUid: upload.uid,
         ...(mediaType === "image"
@@ -58229,6 +59893,57 @@ async function verifySettingsTotpSetup(formData) {
   }
 }
 
+function settingsGovernancePasskeyErrorMessage(error) {
+  const code = normalizeString(error?.errorCode || error?.payload?.error)
+    .toLowerCase();
+  if (code === "passkey_registration_cancelled" || code === "passkey_cancelled") {
+    return "Passkey setup was cancelled. No account passkey was added.";
+  }
+  if (code === "passkey_already_registered") {
+    return "This passkey is already registered to your Polis account.";
+  }
+  if (
+    code === "governance_access_token_unavailable" ||
+    code === "passkey_session_expired" ||
+    Number(error?.statusCode || error?.status || 0) === 401
+  ) {
+    return "Sign in again before setting up an account passkey.";
+  }
+  if (Number(error?.statusCode || error?.status || 0) >= 500) {
+    return "The account passkey service is temporarily unavailable. Try again shortly.";
+  }
+  return settingsErrorMessage(
+    error,
+    "Passkey setup could not be completed. Please try again.",
+  );
+}
+
+async function registerSettingsGovernancePasskey() {
+  const account = settingsAccountSecurity();
+  const passkey = account.passkey;
+  passkey.registering = true;
+  passkey.error = "";
+  passkey.notice = "";
+  scheduleRender();
+  try {
+    await registerSharedFeedGovernancePasskey(
+      state.auth.config,
+      state.auth.session,
+    );
+    passkey.registered = true;
+    passkey.notice =
+      "Account passkey ready. You can now return to your organization action.";
+    showToast("Account passkey ready.");
+  } catch (error) {
+    passkey.error = settingsGovernancePasskeyErrorMessage(error);
+    passkey.notice = "";
+    showToast(passkey.error);
+  } finally {
+    passkey.registering = false;
+    scheduleRender();
+  }
+}
+
 async function loadCurrentRoute({ refresh = false } = {}) {
   const route = getCurrentRoute();
   state.renderError = "";
@@ -58426,6 +60141,10 @@ async function loadCurrentRoute({ refresh = false } = {}) {
     routeKey === ROUTE_KEY_COALITION_SECTION
   ) {
     await loadCoalitionsPage({ refresh });
+    return;
+  }
+  if (routeKey === ROUTE_KEY_ORGANIZATION_GOVERNANCE) {
+    await loadOrganizationGovernancePage({ refresh });
     return;
   }
   if (routeKey === ROUTE_KEY_MISSIONS) {
@@ -60182,6 +61901,17 @@ function getNavItems() {
       path: "/coalitions",
       active: activeSection === "coalitions",
     },
+    ...(state.filesNavigation.enabled
+      ? [
+          {
+            label: "Files",
+            key: "files",
+            icon: "file",
+            path: "/files",
+            active: activeSection === "files",
+          },
+        ]
+      : []),
     {
       label: "Missions",
       key: "missions",
@@ -60394,6 +62124,7 @@ function getTopChromeTitle(route = state.route) {
     [ROUTE_KEY_SEARCH_RESULTS]: "Search",
     [ROUTE_KEY_CANDIDATE_VOTER_MAP]: "Voter Map",
     [ROUTE_KEY_CANDIDATE_VOTER_MAP_SECTION]: "Voter Map",
+    [ROUTE_KEY_ORGANIZATION_GOVERNANCE]: "Governance",
     [ROUTE_KEY_MANAGE_EVENTS]: "Manage Events",
     [ROUTE_KEY_MANAGE_EVENTS_NEW]: "Manage Events",
     [ROUTE_KEY_MANAGE_EVENTS_EDIT]: "Manage Events",
@@ -60482,8 +62213,86 @@ function renderFeedPostIssueTags(item, { compact = false } = {}) {
   </div>`;
 }
 
+function renderPostMediaUsageBadges(mediaItem) {
+  const badges = visibleMediaUsageBadges(
+    mediaItem || {},
+    window.location.origin,
+  ).slice(0, 4);
+  if (!badges.length) {
+    return "";
+  }
+  return `<div class="shared-feed-post__provenance" data-playback-control="1" aria-label="Published posts using this media">
+    ${badges
+      .map((badge) => {
+        const badgeUrl = normalizeUrl(badge.badgeUrl);
+        const content = `${
+          badgeUrl ? `<img src="${escapeHtml(badgeUrl)}" alt="" />` : ""
+        }<span>${escapeHtml(badge.label)}</span>`;
+        return badge.path
+          ? `<a href="${escapeHtml(badge.path)}" aria-label="View published post by ${escapeHtml(badge.label)}">${content}</a>`
+          : `<span class="shared-feed-post__provenance-badge">${content}</span>`;
+      })
+      .join("")}
+  </div>`;
+}
+
+function renderPostCarouselControls(item, mediaIndex, mediaCount) {
+  if (mediaCount < 2) {
+    return "";
+  }
+  const postId = normalizeString(item.postId);
+  return `<div class="shared-feed-post__carousel-controls" data-playback-control="1">
+    <button class="shared-feed-post__carousel-step shared-feed-post__carousel-step--previous" type="button" data-action="post-carousel-step" data-post-id="${escapeHtml(postId)}" data-direction="-1" aria-label="Previous media">&#8249;</button>
+    <div class="shared-feed-post__carousel-status" aria-live="polite" aria-atomic="true">${mediaIndex + 1} / ${mediaCount}</div>
+    <button class="shared-feed-post__carousel-step shared-feed-post__carousel-step--next" type="button" data-action="post-carousel-step" data-post-id="${escapeHtml(postId)}" data-direction="1" aria-label="Next media">&#8250;</button>
+    <div class="shared-feed-post__carousel-dots" role="group" aria-label="Choose media item">
+      ${Array.from(
+        { length: mediaCount },
+        (_, dotIndex) =>
+          `<button type="button" data-action="post-carousel-go" data-post-id="${escapeHtml(postId)}" data-media-index="${dotIndex}" aria-label="Show media ${dotIndex + 1} of ${mediaCount}"${dotIndex === mediaIndex ? ' aria-current="true"' : ""}></button>`,
+      ).join("")}
+    </div>
+  </div>`;
+}
+
+function postMediaCropAttributes(mediaItem) {
+  const crop = mediaItem?.crop;
+  if (!crop || typeof crop !== "object") {
+    return "";
+  }
+  const x = Number(crop.x);
+  const y = Number(crop.y);
+  const width = Number(crop.width);
+  const height = Number(crop.height);
+  if (
+    ![x, y, width, height].every(Number.isFinite) ||
+    width <= 0 ||
+    height <= 0
+  ) {
+    return "";
+  }
+  const centerX = Math.max(0, Math.min(100, (x + width / 2) * 100));
+  const centerY = Math.max(0, Math.min(100, (y + height / 2) * 100));
+  return ` data-media-crop data-media-crop-x="${centerX.toFixed(3)}" data-media-crop-y="${centerY.toFixed(3)}"`;
+}
+
 function renderPostItem(item, index) {
   const active = index === state.activeIndex;
+  const mediaItems = postMediaItems(item);
+  const mediaIndex = postMediaIndex(item);
+  const mediaItem = mediaItems[mediaIndex] || mediaItems[0] || {};
+  const presentation = mediaPresentation(mediaItem);
+  const legacyMediaFallback = mediaItem.publicDerivative ? {} : item;
+  const mediaType = presentation.mediaType;
+  const imageSource = normalizeUrl(presentation.imageUrl || legacyMediaFallback.imageUrl);
+  const videoSource = normalizeUrl(presentation.videoUrl || legacyMediaFallback.videoUrl);
+  const mp4Source = normalizeUrl(presentation.mp4Url || legacyMediaFallback.mp4Url);
+  const hasVideoMedia = mediaType === "video" && Boolean(videoSource || mp4Source);
+  const videoKey = `${normalizeString(item.postId)}:${
+    normalizeString(mediaItem.sourceAssetVersionId) ||
+    normalizeString(mediaItem.publicDerivative?.derivativeId) ||
+    mediaIndex
+  }`;
   const hasExpandableCopy = hasExpandablePostCopy(item);
   const isExpanded =
     normalizeString(state.ui.expandedPostId) === normalizeString(item.postId);
@@ -60494,18 +62303,23 @@ function renderPostItem(item, index) {
     item.authorUserId && !item.isFollowing
       ? `<button class="shared-feed-avatar__follow" data-action="follow-author" data-post-id="${escapeHtml(item.postId)}" aria-label="Follow ${escapeHtml(item.authorDisplayName)}">+</button>`
       : "";
-  const mediaMarkup = isImageItem(item)
-    ? `<img class="shared-feed-post__image" src="${escapeHtml(item.imageUrl)}" alt="${escapeHtml(item.previewTitle || item.caption || item.authorDisplayName)}" loading="${index < 2 ? "eager" : "lazy"}" />`
-    : `<video
+  const mediaMarkup = mediaType === "image" && imageSource
+    ? `<img class="shared-feed-post__image" src="${escapeHtml(imageSource)}" alt="${escapeHtml(mediaItem.altText || item.previewTitle || item.caption || item.authorDisplayName)}" loading="${index < 2 ? "eager" : "lazy"}"${postMediaCropAttributes(mediaItem)} />`
+    : hasVideoMedia
+      ? `<video
         class="shared-feed-post__video"
         playsinline
         loop
         preload="${index <= 1 ? "auto" : "metadata"}"
-        poster="${escapeHtml(item.posterUrl)}"
+        poster="${escapeHtml(upgradePosterUrl(presentation.posterUrl || legacyMediaFallback.posterUrl))}"
+        aria-label="${escapeHtml(mediaItem.altText || item.previewTitle || item.caption || "Post video")}"
         data-video-post-id="${escapeHtml(item.postId)}"
-        data-video-url="${escapeHtml(item.videoUrl)}"
-        data-mp4-url="${escapeHtml(item.mp4Url)}"
-      ></video>`;
+        data-video-key="${escapeHtml(videoKey)}"
+        data-video-url="${escapeHtml(videoSource)}"
+        data-mp4-url="${escapeHtml(mp4Source)}"
+        ${postMediaCropAttributes(mediaItem)}
+      ></video>`
+      : `<div class="shared-feed-post__media-unavailable" role="img" aria-label="Media unavailable"><span>Media unavailable</span></div>`;
   const previewCopy =
     item.caption ||
     item.tags.map((tag) => `#${normalizeString(tag)}`).join(" ");
@@ -60536,16 +62350,19 @@ function renderPostItem(item, index) {
         ${tagMarkup}
       </div>`
     : captionLine;
+  const isCarousel = mediaItems.length > 1;
   const duration =
-    isVideoItem(item) && item.durationMs
-      ? `<div class="shared-feed-post__duration">${escapeHtml(formatDuration(item.durationMs))}</div>`
+    hasVideoMedia && presentation.durationMs
+      ? `<div class="shared-feed-post__duration">${escapeHtml(formatDuration(presentation.durationMs))}</div>`
       : "";
 
   return `<article class="shared-feed-item shared-feed-item--post${active ? " is-active" : ""}" data-index="${index}" data-post-id="${escapeHtml(item.postId)}">
     <div class="shared-feed-post">
-      <div class="shared-feed-post__frame" data-action="toggle-play" data-post-id="${escapeHtml(item.postId)}">
+      <div class="shared-feed-post__frame${isCarousel ? " shared-feed-post__frame--carousel" : ""}"${hasVideoMedia ? ' data-action="toggle-play"' : ""} data-post-id="${escapeHtml(item.postId)}"${isCarousel ? ` data-post-carousel tabindex="0" role="region" aria-roledescription="carousel" aria-label="Post media carousel, item ${mediaIndex + 1} of ${mediaItems.length}"` : ""}>
         ${mediaMarkup}
         <div class="shared-feed-post__overlay shared-feed-post__overlay--gradient${isExpanded ? " is-expanded" : ""}"></div>
+        ${renderPostMediaUsageBadges(mediaItem)}
+        ${renderPostCarouselControls(item, mediaIndex, mediaItems.length)}
         <div class="shared-feed-post__overlay shared-feed-post__overlay--chrome">
           ${duration}
           <div class="shared-feed-post__content">
@@ -60561,9 +62378,9 @@ function renderPostItem(item, index) {
               ${copyMarkup}
             </div>
             ${
-              isVideoItem(item)
+              hasVideoMedia
                 ? `<div class="shared-feed-scrubber" data-scrubber="${escapeHtml(item.postId)}" data-playback-control="1">
-                    <div class="shared-feed-scrubber__time" data-scrubber-time="${escapeHtml(item.postId)}">00:00 / ${escapeHtml(formatDuration(item.durationMs || 0))}</div>
+                    <div class="shared-feed-scrubber__time" data-scrubber-time="${escapeHtml(item.postId)}">00:00 / ${escapeHtml(formatDuration(presentation.durationMs || 0))}</div>
                     <input class="shared-feed-scrubber__slider" type="range" min="0" max="1000" value="0" step="1" data-scrubber-input="${escapeHtml(item.postId)}" />
                   </div>`
                 : ""
@@ -60621,14 +62438,22 @@ function renderPostItem(item, index) {
                   </button>`
                 : ""
             }
-            <button class="shared-feed-post__volume" data-action="toggle-volume" aria-label="${state.userHasInteracted ? "Toggle sound" : "Enable sound"}">
-              ${renderIcon(state.userHasInteracted ? "soundOn" : "soundOff")}
-            </button>
+            ${
+              hasVideoMedia
+                ? `<button class="shared-feed-post__volume" data-action="toggle-volume" aria-label="${state.userHasInteracted ? "Toggle sound" : "Enable sound"}">
+                    ${renderIcon(state.userHasInteracted ? "soundOn" : "soundOff")}
+                  </button>`
+                : ""
+            }
           </div>
         </div>
-        <button class="shared-feed-post__playback-indicator${active ? "" : " is-visible"}" data-playback-indicator="${escapeHtml(item.postId)}" aria-hidden="true">
-          ${renderIcon("play")}
-        </button>
+        ${
+          hasVideoMedia
+            ? `<button class="shared-feed-post__playback-indicator${active ? "" : " is-visible"}" data-playback-indicator="${escapeHtml(item.postId)}" aria-hidden="true">
+                ${renderIcon("play")}
+              </button>`
+            : ""
+        }
       </div>
     </div>
   </article>`;
@@ -87833,6 +89658,40 @@ function coalitionVoteResultOptionLabel(vote, optionId) {
   );
 }
 
+function coalitionVoteResultOptionNames(vote, optionIds = []) {
+  return normalizeGovernanceStringListPayload(optionIds)
+    .map((optionId) => coalitionVoteResultOptionLabel(vote, optionId))
+    .filter(Boolean)
+    .join(", ");
+}
+
+function coalitionVoteResultMethod(results, vote) {
+  return (
+    normalizeString(results.ballotMethod || vote?.rules?.ballotMethod || vote?.proposalType)
+      .toUpperCase() || "YES_NO"
+  );
+}
+
+function coalitionVoteResultMethodLabel(method) {
+  if (method === "YES_NO") return "Yes / No";
+  if (method === "IRV") return "Ranked choice";
+  if (method === "STV") return "STV";
+  if (method === "AGGREGATE_FLOOR_COUNT") return "Aggregate floor count";
+  return humanizeLabel(method || "vote");
+}
+
+function coalitionVoteResultIsIncompleteStv(results) {
+  return results.countStatus === "INCOMPLETE_UNRESOLVED_MATERIAL_TIE";
+}
+
+function coalitionVoteResultIsIncompleteIrv(results) {
+  return results.countStatus === "INCOMPLETE_UNRESOLVED_ELIMINATION_TIE";
+}
+
+function coalitionVoteResultIsCompleteStv(results, method) {
+  return method === "STV" && results.countStatus === "COMPLETE";
+}
+
 function coalitionVoteResultShareLabel(results) {
   const provided = Number(results.winnerShare);
   if (Number.isFinite(provided) && provided > 0) {
@@ -87856,6 +89715,81 @@ function coalitionVoteResultShareLabel(results) {
     return "Final active share unavailable";
   }
   return `${Math.round((winnerCount / total) * 100)}% final active share`;
+}
+
+function coalitionVoteResultHeadline(results, vote, method) {
+  if (coalitionVoteResultIsIncompleteStv(results)) {
+    return "No winners certified - STV count incomplete";
+  }
+  if (coalitionVoteResultIsIncompleteIrv(results)) {
+    return "No winner certified - IRV count unresolved";
+  }
+  if (
+    ["YES_NO", "UNANIMOUS_CONSENT", "OBSERVED_DIVISION", "AGGREGATE_FLOOR_COUNT"].includes(
+      method,
+    )
+  ) {
+    return results.passed ? "Motion passed" : "Motion did not pass";
+  }
+  if (results.quorumMet === false) {
+    return "No winner - quorum not met";
+  }
+  const winners = coalitionVoteResultOptionNames(
+    vote,
+    results.winnerOptionIds?.length
+      ? results.winnerOptionIds
+      : results.winnerOptionId
+        ? [results.winnerOptionId]
+        : [],
+  );
+  if (winners) {
+    return (results.winnerOptionIds || []).length > 1
+      ? `Winners: ${winners}`
+      : `Winner: ${winners}`;
+  }
+  const tied = coalitionVoteResultOptionNames(vote, results.tiedOptionIds || []);
+  if (tied) {
+    return results.requiresRunoff ? `Runoff required: ${tied}` : `Tie: ${tied}`;
+  }
+  return "Pending";
+}
+
+function coalitionIncompleteStvMessage(results, vote) {
+  const provisional = coalitionVoteResultOptionNames(
+    vote,
+    results.provisionallyElectedOptionIds || [],
+  );
+  const unresolved =
+    coalitionVoteResultOptionNames(vote, results.unresolvedCountOptionIds || []) ||
+    "the tied candidates";
+  const provisionalText = provisional
+    ? `Provisionally elected: ${provisional}. They are not certified winners.`
+    : "No candidate was provisionally elected.";
+  const unresolvedText =
+    results.tieStage === "SURPLUS_ORDER"
+      ? `Countback could not resolve the equal-surplus transfer order involving ${unresolved}.`
+      : `Countback could not determine which candidate to eliminate among ${unresolved}.`;
+  const resolutionText = results.requiresNewElection
+    ? "A full new election is required. This incomplete count cannot be resumed."
+    : "The vote failed. No partial winners were certified. This incomplete count cannot be resumed.";
+  return `${provisionalText} ${unresolvedText} ${resolutionText}`;
+}
+
+function coalitionIncompleteIrvMessage(results, vote) {
+  const unresolved =
+    coalitionVoteResultOptionNames(vote, results.tiedOptionIds || []) ||
+    "the tied candidates";
+  const resolutionText = results.requiresNewElection
+    ? "A full new election is required. Use the certified result to create a corrected draft."
+    : "The vote failed under its configured tie rule.";
+  return `The count could not determine which candidate to eliminate among ${unresolved}. No winner was certified. ${resolutionText} This count cannot be resumed.`;
+}
+
+function renderCoalitionGovernanceResultNotice(title, message) {
+  return `<div class="shared-coalition-governance-result-notice">
+    <strong>${escapeHtml(title)}</strong>
+    <p>${escapeHtml(message)}</p>
+  </div>`;
 }
 
 function renderCoalitionVoteIrvResults(results, vote) {
@@ -87915,10 +89849,77 @@ function renderCoalitionVoteIrvResults(results, vote) {
   </div>`;
 }
 
+function coalitionVoteStvActingOptionLabel(action) {
+  if (action === "TRANSFER_SURPLUS") return "Surplus transferred from";
+  if (action === "ELIMINATE_AND_TRANSFER") return "Eliminated";
+  return "Count action candidate";
+}
+
+function renderCoalitionVoteStvResults(results, vote) {
+  const rounds = Array.isArray(results.stvRounds) ? results.stvRounds : [];
+  if (!coalitionVoteResultIsCompleteStv(results, "STV")) {
+    return "";
+  }
+  return `<div class="shared-coalition-governance-stv">
+    <div class="shared-coalition-governance-stv-summary">
+      <div><span>Seats filled</span><strong>${escapeHtml(formatCount(results.seatsFilled))} of ${escapeHtml(formatCount(results.seats))}</strong></div>
+      <div><span>Droop quota</span><strong>${escapeHtml(results.quota?.displayValue || "Unavailable")}</strong></div>
+    </div>
+    ${renderCoalitionGovernanceResultNotice(
+      "Ballot-weight conservation verified",
+      "Tallies are shown as exact rational values from the certified aggregate count.",
+    )}
+    ${
+      rounds.length
+        ? `<div class="shared-coalition-governance-stv-rounds" aria-label="STV rounds">
+          <h3>STV rounds</h3>
+          ${rounds
+            .map((round) => {
+              const tallies = Object.entries(round.tallies || {});
+              const elected = coalitionVoteResultOptionNames(
+                vote,
+                round.newlyElectedOptionIds || [],
+              );
+              const acting = round.actingOptionId
+                ? coalitionVoteResultOptionLabel(vote, round.actingOptionId)
+                : "";
+              return `<article class="shared-coalition-governance-stv-round">
+                <div class="shared-coalition-governance-irv-round__top">
+                  <strong>Round ${escapeHtml(formatCount(round.round))}</strong>
+                  ${renderCoalitionGovernancePill(humanizeLabel(round.action || "count"))}
+                </div>
+                ${elected ? `<p>Elected this round: ${escapeHtml(elected)}</p>` : ""}
+                ${
+                  acting
+                    ? `<p>${escapeHtml(coalitionVoteStvActingOptionLabel(round.action))}: ${escapeHtml(acting)}</p>`
+                    : ""
+                }
+                <div class="shared-coalition-governance-irv-round__tallies">
+                  ${
+                    tallies.length
+                      ? tallies
+                          .map(
+                            ([id, count]) =>
+                              `<span><em>${escapeHtml(coalitionVoteResultOptionLabel(vote, id))}</em><strong>${escapeHtml(count.displayValue || "0")}</strong></span>`,
+                          )
+                          .join("")
+                      : '<span><em>No tally rows returned</em><strong>0</strong></span>'
+                  }
+                </div>
+              </article>`;
+            })
+            .join("")}
+        </div>`
+        : ""
+    }
+  </div>`;
+}
+
 function renderCoalitionVoteResults(results, vote) {
   if (!results) {
     return "";
   }
+  const method = coalitionVoteResultMethod(results, vote);
   const outcomeLabel = humanizeLabel(results.outcome);
   const quorumLabel =
     results.quorumMet === null
@@ -87928,17 +89929,11 @@ function renderCoalitionVoteResults(results, vote) {
       : results.quorumMet
         ? `Met${results.quorumRequired ? ` (${formatCount(results.quorumRequired)}%)` : ""}`
         : `Not met${results.quorumRequired ? ` (${formatCount(results.quorumRequired)}%)` : ""}`;
-  const winnerLabel = results.winnerOptionId
-    ? coalitionVoteResultOptionLabel(vote, results.winnerOptionId)
-    : results.tallies
-      ? results.passed
-        ? "Passed"
-        : "Not passed"
-      : "Pending";
+  const winnerLabel = coalitionVoteResultHeadline(results, vote, method);
   return `<div class="shared-coalition-governance-results">
     <div class="shared-coalition-governance-results__top">
       ${renderCoalitionGovernancePill(outcomeLabel, results.passed ? "good" : "warn")}
-      ${renderCoalitionGovernancePill(vote.proposalType === "YES_NO" ? "Yes / No" : "Ranked choice")}
+      ${renderCoalitionGovernancePill(coalitionVoteResultMethodLabel(method))}
     </div>
     <div class="shared-coalition-governance-results__metrics">
       <div>
@@ -87950,11 +89945,33 @@ function renderCoalitionVoteResults(results, vote) {
         <strong>${escapeHtml(quorumLabel)}</strong>
       </div>
       <div>
-        <span>${escapeHtml(results.winnerOptionId ? "Winner" : "Outcome")}</span>
+        <span>${escapeHtml(winnerLabel.startsWith("Winner") ? "Winner" : "Outcome")}</span>
         <strong>${escapeHtml(winnerLabel)}</strong>
       </div>
     </div>
-    ${vote.proposalType === "YES_NO" ? renderCoalitionVoteResultBars(results, vote) : renderCoalitionVoteIrvResults(results, vote)}
+    ${
+      coalitionVoteResultIsIncompleteStv(results)
+        ? renderCoalitionGovernanceResultNotice(
+            "STV count unresolved",
+            coalitionIncompleteStvMessage(results, vote),
+          )
+        : ""
+    }
+    ${
+      coalitionVoteResultIsIncompleteIrv(results)
+        ? renderCoalitionGovernanceResultNotice(
+            "IRV count unresolved",
+            coalitionIncompleteIrvMessage(results, vote),
+          )
+        : ""
+    }
+    ${
+      method === "YES_NO" || method === "AGGREGATE_FLOOR_COUNT"
+        ? renderCoalitionVoteResultBars(results, vote)
+        : method === "STV"
+          ? renderCoalitionVoteStvResults(results, vote)
+          : renderCoalitionVoteIrvResults(results, vote)
+    }
   </div>`;
 }
 
@@ -88486,6 +90503,758 @@ function renderCoalitionGovernance(detail, coalition, membership) {
       </aside>
     </div>
   </div>`;
+}
+
+function organizationGovernanceVoteMethod(vote) {
+  return normalizeString(vote?.rules?.ballotMethod || vote?.proposalType)
+    .toUpperCase() || "YES_NO";
+}
+
+function organizationGovernancePaperRouteAvailable(vote) {
+  const method = organizationGovernanceVoteMethod(vote);
+  const status = normalizeString(vote?.status).toUpperCase();
+  return (
+    (vote?.rules?.paperAllowed || method === "AGGREGATE_FLOOR_COUNT") &&
+    ["OPEN", "CLOSED", "TALLYING"].includes(status)
+  );
+}
+
+function organizationGovernanceViewerPermissionSet(page) {
+  const overview = readObjectPayload(page?.overview);
+  const viewer = readObjectPayload(
+    overview.viewer || overview.membership || overview.access || overview.viewerAccess,
+  );
+  const values = [
+    ...readArrayPayload(viewer, ["permissions", "capabilities", "access"]),
+    ...readArrayPayload(overview, ["permissions", "capabilities"]),
+  ];
+  return new Set(values.map(normalizeString).filter(Boolean));
+}
+
+function organizationGovernanceViewerCan(page, permission) {
+  const overview = readObjectPayload(page?.overview);
+  const viewer = readObjectPayload(
+    overview.viewer || overview.membership || overview.access || overview.viewerAccess,
+  );
+  if (
+    parseBoolean(viewer.admin ?? viewer.isAdmin ?? overview.admin ?? overview.isAdmin, false)
+  ) {
+    return true;
+  }
+  return organizationGovernanceViewerPermissionSet(page).has(
+    normalizeString(permission),
+  );
+}
+
+function organizationGovernanceVoteAsCoalitionVote(vote) {
+  return {
+    ...vote,
+    proposalType: organizationGovernanceVoteMethod(vote),
+    summary: vote?.question || vote?.summary || "",
+  };
+}
+
+function organizationGovernanceVoteTone(vote) {
+  const status = normalizeString(vote?.status).toLowerCase();
+  if (status.includes("open") || status.includes("active")) return "good";
+  if (status.includes("closed") || status.includes("result")) return "warn";
+  return "";
+}
+
+function renderOrganizationGovernanceHash(label, value) {
+  const normalizedValue = normalizeString(value);
+  if (!normalizedValue) {
+    return "";
+  }
+  return `<span><em>${escapeHtml(label)}</em><strong>${escapeHtml(normalizedValue.slice(0, 18))}${normalizedValue.length > 18 ? "..." : ""}</strong></span>`;
+}
+
+function renderOrganizationGovernanceNav(organizationId, routeInfo) {
+  const items = [
+    ["overview", "Overview", "dashboard", ""],
+    ["vote-create", "New vote", "create", "votes/new"],
+    ["paper", "Paper", "file", "paper"],
+    ["vote-audit", "Audit", "shield", "audit-log"],
+    ["sessions", "Sessions", "calendar", "sessions"],
+    ["constitutions", "Constitutions", "registry", "constitutions"],
+  ];
+  const activeKey =
+    routeInfo.key === "vote-detail" ||
+    routeInfo.key === "vote-results" ||
+    routeInfo.key === "vote-edit"
+      ? "overview"
+      : routeInfo.key === "audit-log" || routeInfo.key === "audit-case"
+        ? "vote-audit"
+      : routeInfo.key;
+  return `<nav class="shared-coalition-tabs shared-organization-governance-tabs" aria-label="Organization Governance sections">
+    ${items
+      .map(([key, label, icon, path]) => {
+        const active = key === activeKey;
+        return `<button class="shared-coalition-tab${active ? " is-active" : ""}" type="button" data-action="navigate" data-route="${escapeHtml(organizationGovernanceRoutePath(organizationId, path))}">
+          <span>${renderIcon(icon)}</span>
+          <strong>${escapeHtml(label)}</strong>
+        </button>`;
+      })
+      .join("")}
+  </nav>`;
+}
+
+function renderOrganizationGovernanceCommandCenter(page, organizationId, routeInfo) {
+  const openVotes = page.votes.filter((vote) => {
+    const status = normalizeString(vote.status).toLowerCase();
+    return status.includes("open") || status.includes("active");
+  }).length;
+  const paperVotes = page.votes.filter(organizationGovernancePaperRouteAvailable)
+    .length;
+  const auditReadyVotes = page.votes.filter((vote) =>
+    normalizeString(vote.rules?.privacyMode).toUpperCase().includes("AUDIT"),
+  ).length;
+  const cards = [
+    {
+      icon: "election",
+      label: "Vote agenda",
+      value: `${formatCount(openVotes)} open`,
+      copy: `${formatCount(page.votes.length)} committed organization vote${page.votes.length === 1 ? "" : "s"} loaded.`,
+      route: organizationGovernanceRoutePath(organizationId),
+      active: routeInfo.key === "overview",
+      tone: openVotes ? "good" : "",
+    },
+    {
+      icon: "create",
+      label: "Create route",
+      value: `${formatCount(page.presets.length)} preset${page.presets.length === 1 ? "" : "s"}`,
+      copy: "Use existing Governance presets and rules; no new infrastructure is created.",
+      route: organizationGovernanceRoutePath(organizationId, "votes/new"),
+      active: routeInfo.key === "vote-create",
+    },
+    {
+      icon: "file",
+      label: "Paper roster",
+      value: `${formatCount(paperVotes)} enabled`,
+      copy: "Review in-person paper states, verification, and correction requests.",
+      route: organizationGovernanceRoutePath(organizationId, "paper"),
+      active: routeInfo.key === "paper",
+      tone: paperVotes ? "good" : "",
+    },
+    {
+      icon: "shield",
+      label: "Audit path",
+      value: `${formatCount(auditReadyVotes)} auditable`,
+      copy: "Open receipt-based exceptional audit cases and disclosure actions.",
+      route: organizationGovernanceRoutePath(organizationId, "audit-log"),
+      active:
+        routeInfo.key === "vote-audit" ||
+        routeInfo.key === "audit-case" ||
+        routeInfo.key === "audit-log",
+      tone: auditReadyVotes ? "warn" : "",
+    },
+  ];
+  return `<article class="shared-coalition-panel shared-coalition-governance-command shared-organization-governance-command">
+    <div class="shared-coalition-governance-command__header">
+      <div>
+        <h2>Governance workbench</h2>
+        <p>Organization-scoped votes, paper rosters, and exceptional audits now resolve in the browser instead of dropping to a route fallback.</p>
+      </div>
+      <div class="shared-coalition-governance-command__status">
+        ${renderCoalitionGovernancePill(page.loaded ? "Loaded" : "Loading", page.loaded ? "good" : "")}
+        ${renderCoalitionGovernancePill(routeInfo.key === "overview" ? "Overview" : humanizeLabel(routeInfo.key))}
+      </div>
+    </div>
+    <div class="shared-coalition-governance-command-grid">
+      ${cards.map(renderCoalitionGovernanceCommandCard).join("")}
+    </div>
+  </article>`;
+}
+
+function renderOrganizationGovernanceVoteCard(vote, page, { focused = false } = {}) {
+  const organizationId = page.organizationId;
+  const method = organizationGovernanceVoteMethod(vote);
+  const statusTone = organizationGovernanceVoteTone(vote);
+  const windowLabel = [
+    vote.startsAt ? `Starts ${formatAbsoluteDateTime(vote.startsAt)}` : "",
+    vote.endsAt ? `Ends ${formatAbsoluteDateTime(vote.endsAt)}` : "",
+  ]
+    .filter(Boolean)
+    .join(" | ");
+  const actionPending =
+    page.actionPendingKey === `vote:update:${vote.voteId}` ||
+    page.actionPendingKey === `audit:create:${vote.voteId}`;
+  return `<article class="shared-coalition-governance-vote shared-organization-governance-vote${focused ? " is-focused" : ""}">
+    <div class="shared-coalition-governance-vote__top">
+      <div>
+        <h3>${escapeHtml(vote.title || vote.question || "Governance vote")}</h3>
+        <p>${escapeHtml(vote.question || "Organization vote manifest")}</p>
+      </div>
+      ${renderCoalitionGovernancePill(humanizeLabel(vote.status), statusTone)}
+    </div>
+    <div class="shared-coalition-governance-pills">
+      ${renderCoalitionGovernancePill(humanizeLabel(method))}
+      ${renderCoalitionGovernancePill(humanizeLabel(vote.rules?.privacyMode || "visible"))}
+      ${vote.rules?.paperAllowed ? renderCoalitionGovernancePill("Paper enabled", "good") : renderCoalitionGovernancePill("Remote only")}
+      ${vote.rules?.paperEvidenceRequired ? renderCoalitionGovernancePill("Evidence required", "warn") : ""}
+    </div>
+    <div class="shared-coalition-governance-meta">
+      ${vote.voteVersion ? `<span><em>Version</em><strong>${escapeHtml(String(vote.voteVersion))}</strong></span>` : ""}
+      ${vote.sessionId ? `<span><em>Session</em><strong>${escapeHtml(vote.sessionId)}</strong></span>` : ""}
+      ${windowLabel ? `<span><em>Window</em><strong>${escapeHtml(windowLabel)}</strong></span>` : ""}
+      ${renderOrganizationGovernanceHash("Manifest", vote.manifestHash)}
+    </div>
+    <div class="shared-coalition-governance-options">
+      ${
+        vote.options.length
+          ? vote.options
+              .map((option) => `<span>${escapeHtml(option.label || option.optionId)}</span>`)
+              .join("")
+          : `<span>${escapeHtml(method === "YES_NO" ? "Yes / No ballot" : "Options returned by manifest")}</span>`
+      }
+    </div>
+    <div class="shared-coalition-governance-vote-actions">
+      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(organizationGovernanceRoutePath(organizationId, `votes/${vote.voteId}`))}">Details</button>
+      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(organizationGovernanceRoutePath(organizationId, `votes/${vote.voteId}/results`))}">Results</button>
+      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(organizationGovernanceRoutePath(organizationId, `paper/${vote.voteId}`))}"${disabledAttr(!organizationGovernancePaperRouteAvailable(vote))}>Paper</button>
+      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(organizationGovernanceRoutePath(organizationId, `votes/${vote.voteId}/audit`))}">Audit</button>
+      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(organizationGovernanceRoutePath(organizationId, `votes/${vote.voteId}/edit`))}"${disabledAttr(actionPending)}>Edit</button>
+    </div>
+  </article>`;
+}
+
+function renderOrganizationGovernanceVotesPagination(page) {
+  if (!page.votesNextCursor && !page.votesPaginationError) return "";
+  return `<div class="shared-coalition-governance-actions">
+    <span role="status">${escapeHtml(`${formatCount(page.votes.length)} votes loaded.${page.votesNextCursor ? " More votes are available." : ""}`)}</span>
+    ${page.votesPaginationError ? `<div class="shared-page__error">${escapeHtml(page.votesPaginationError)}</div>` : ""}
+    ${page.votesNextCursor
+      ? `<button class="shared-feed-chip" type="button" data-action="organization-votes-load-more"${disabledAttr(page.loading || page.votesLoadingMore)}>${page.votesLoadingMore ? "Loading votes..." : "Load more votes"}</button>`
+      : `<button class="shared-feed-chip" type="button" data-action="refresh-current-route"${disabledAttr(page.loading)}>Refresh votes</button>`}
+  </div>`;
+}
+
+function renderOrganizationGovernanceVoteList(page, routeInfo) {
+  const focusedVoteId = normalizeString(routeInfo.voteId);
+  const votes = focusedVoteId
+    ? page.votes.filter((vote) => vote.voteId !== focusedVoteId)
+    : page.votes;
+  if (!votes.length) {
+    return `<div class="shared-page__empty">${escapeHtml(focusedVoteId ? "No other organization votes are loaded." : "No organization Governance votes were returned.")}</div>${renderOrganizationGovernanceVotesPagination(page)}`;
+  }
+  return `<div class="shared-coalition-governance-list shared-organization-governance-vote-list">
+    ${votes.map((vote) => renderOrganizationGovernanceVoteCard(vote, page)).join("")}
+  </div>${renderOrganizationGovernanceVotesPagination(page)}`;
+}
+
+function renderOrganizationGovernanceVoteForm(page, { vote = null } = {}) {
+  const editing = Boolean(vote?.voteId);
+  const pending = editing
+    ? page.actionPendingKey === `vote:update:${vote.voteId}`
+    : page.actionPendingKey === "vote:create";
+  const method = organizationGovernanceVoteMethod(vote);
+  const privacyMode =
+    normalizeString(vote?.rules?.privacyMode).toUpperCase() || "OPEN_ATTRIBUTED";
+  const privacyModes = Array.from(
+    new Set(
+      [
+        privacyMode,
+        "OPEN_ATTRIBUTED",
+        "SECRET_ADMIN_AUDITABLE",
+        "SEALED_AUDIT",
+      ].filter(Boolean),
+    ),
+  );
+  const optionText = (vote?.options || [])
+    .map((option) => option.label || option.optionId)
+    .filter(Boolean)
+    .join("\n");
+  const originalOptions = JSON.stringify(
+    (vote?.options || []).map((option) => ({
+      optionId: option.optionId,
+      label: option.label || option.optionId,
+    })),
+  );
+  const existingPresetId = normalizeString(
+    vote?.raw?.rules?.presetId ||
+      vote?.raw?.rules?.derivedFromPresetId ||
+      vote?.raw?.presetId,
+  );
+  const existingPresetLabel =
+    page.presets.find((preset) => preset.presetId === existingPresetId)?.label ||
+    existingPresetId ||
+    "Existing vote rules";
+  const availablePresets = page.presets.filter(
+    (preset) => preset.available !== false,
+  );
+  const ballotMethods = Array.from(
+    new Set(
+      [
+        method,
+        ...availablePresets.map((preset) => preset.rules?.ballotMethod),
+      ]
+        .map((value) => normalizeString(value).toUpperCase())
+        .filter(Boolean),
+    ),
+  );
+  const presetSelect = editing
+    ? `<label><span>Preset</span><input value="${escapeHtml(existingPresetLabel)}" disabled /></label>`
+    : availablePresets.length
+      ? `<label><span>Preset</span><select name="presetId"${disabledAttr(pending)}>
+        ${availablePresets
+          .map(
+            (preset, index) =>
+              `<option value="${escapeHtml(preset.presetId)}"${index === 0 ? " selected" : ""}>${escapeHtml(preset.label)}</option>`,
+          )
+          .join("")}
+      </select></label>`
+      : `<label><span>Preset id</span><input name="presetId" placeholder="constitution_ratification"${disabledAttr(pending)} required /></label>`;
+  return `<article class="shared-coalition-panel shared-organization-governance-form-panel">
+    <div class="shared-coalition-panel__header">
+      <div>
+        <h2>${escapeHtml(editing ? "Edit Governance vote" : "Create Governance vote")}</h2>
+        <p>${escapeHtml(editing ? "Update committed vote copy, session, options, and browser-safe rules through the organization Governance API." : "Create an organization vote from an existing Governance preset with browser-safe rule controls.")}</p>
+      </div>
+      ${renderCoalitionGovernancePill(editing ? `v${vote.voteVersion || 0}` : `Policy v${organizationGovernancePolicyVersion(page) || 0}`)}
+    </div>
+    <form class="shared-coalition-governance-form shared-organization-governance-form" data-route-form="${editing ? "organization-governance-vote-update" : "organization-governance-vote-create"}">
+      ${editing ? `<input type="hidden" name="voteId" value="${escapeHtml(vote.voteId)}" />` : ""}
+      <input type="hidden" name="expectedVersion" value="${escapeHtml(String(editing ? vote.voteVersion || 0 : 0))}" />
+      <input type="hidden" name="originalOptions" value="${escapeHtml(originalOptions)}" />
+      <label class="is-wide"><span>Question</span><input name="question" value="${escapeHtml(vote?.question || vote?.title || "")}" placeholder="Authorize the annual operating plan?"${disabledAttr(pending)} required /></label>
+      ${presetSelect}
+      <label><span>Session id</span><input name="sessionId" value="${escapeHtml(vote?.sessionId || "")}" placeholder="Optional meeting session"${disabledAttr(pending)} /></label>
+      <label class="is-full"><span>Description</span><textarea name="description" rows="3" placeholder="Add context voters will see before casting a ballot."${disabledAttr(pending)}>${escapeHtml(vote?.raw?.description || "")}</textarea></label>
+      <section class="shared-coalition-governance-form-section is-full">
+        <div class="shared-coalition-governance-form-section__header">
+          <strong>Ballot rules</strong>
+          <span>These mirror the committed app rule switches without creating any new service resources.</span>
+        </div>
+        <div class="shared-coalition-governance-rule-form-grid">
+          <label><span>Ballot method</span><select name="ballotMethod"${disabledAttr(pending)}>
+            ${ballotMethods.map((value) => `<option value="${escapeHtml(value)}"${value === method ? " selected" : ""}>${escapeHtml(humanizeLabel(value))}</option>`).join("")}
+          </select></label>
+          <label><span>Privacy</span><select name="privacyMode"${disabledAttr(pending)}>
+            ${privacyModes.map((value) => `<option value="${escapeHtml(value)}"${value === privacyMode ? " selected" : ""}>${escapeHtml(humanizeLabel(value))}</option>`).join("")}
+          </select></label>
+          <label class="shared-organization-governance-check"><input type="checkbox" name="remoteEnabled"${vote?.rules?.remoteEnabled === false ? "" : " checked"}${disabledAttr(pending)} /> <span>Remote voting</span></label>
+          <label class="shared-organization-governance-check"><input type="checkbox" name="paperAllowed"${vote?.rules?.paperAllowed ? " checked" : ""}${disabledAttr(pending)} /> <span>Paper ballots</span></label>
+          <label class="shared-organization-governance-check"><input type="checkbox" name="paperEvidenceRequired"${vote?.rules?.paperEvidenceRequired ? " checked" : ""}${disabledAttr(pending)} /> <span>Paper evidence</span></label>
+        </div>
+      </section>
+      <label class="is-full"><span>Options</span><textarea name="options" rows="5" placeholder="One option per line. Leave blank for Yes / No."${disabledAttr(pending)}>${escapeHtml(optionText)}</textarea></label>
+      <div class="shared-coalition-governance-form__actions">
+        <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(pending)}>${escapeHtml(pending ? "Saving..." : editing ? "Save vote" : "Create vote")}</button>
+        <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(organizationGovernanceRoutePath(page.organizationId, editing ? `votes/${vote.voteId}` : ""))}">Cancel</button>
+      </div>
+    </form>
+  </article>`;
+}
+
+function renderOrganizationGovernanceResultsPanel(page, routeInfo) {
+  const vote = page.selectedVote || organizationGovernanceFindVote(page, routeInfo.voteId);
+  if (!routeInfo.voteId || !vote) {
+    return `<article class="shared-coalition-panel"><div class="shared-page__empty">Choose a vote before opening results.</div></article>`;
+  }
+  const results = page.results;
+  return `<div class="shared-organization-governance-focus-stack">
+    ${renderOrganizationGovernanceVoteCard(vote, page, { focused: true })}
+    <article class="shared-coalition-panel">
+      <div class="shared-coalition-panel__header">
+        <div>
+          <h2>Results</h2>
+          <p>${escapeHtml(results ? "Certified tallies and quorum data returned by Governance v2." : "Results are not available for this vote yet.")}</p>
+        </div>
+        ${renderCoalitionGovernancePill(humanizeLabel(results?.privacyMode || vote.rules?.privacyMode || "visible"))}
+      </div>
+      ${results ? renderCoalitionVoteResults(results, organizationGovernanceVoteAsCoalitionVote(vote)) : `<div class="shared-page__empty">No result payload was returned.</div>`}
+      <div class="shared-coalition-governance-meta">
+        ${renderOrganizationGovernanceHash("Manifest", results?.manifestHash || vote.manifestHash)}
+      </div>
+    </article>
+  </div>`;
+}
+
+function renderOrganizationGovernancePaperVotePicker(page) {
+  const paperVotes = page.votes.filter(organizationGovernancePaperRouteAvailable);
+  if (!paperVotes.length) {
+    return `<article class="shared-coalition-panel"><div class="shared-page__empty">No loaded open or reviewable vote allows paper ballots or aggregate floor counts.</div>${renderOrganizationGovernanceVotesPagination(page)}</article>`;
+  }
+  return `<article class="shared-coalition-panel">
+    <div class="shared-coalition-panel__header">
+      <div>
+        <h2>Choose a paper roster</h2>
+        <p>Open a vote to review attendance, paper ballot entry, verification, and correction states.</p>
+      </div>
+    </div>
+    <div class="shared-coalition-governance-list shared-organization-governance-vote-list">
+      ${paperVotes.map((vote) => renderOrganizationGovernanceVoteCard(vote, page)).join("")}
+    </div>
+    ${renderOrganizationGovernanceVotesPagination(page)}
+  </article>`;
+}
+
+function renderOrganizationGovernanceAggregateFloorCount(page, vote) {
+  const pending = page.actionPendingKey === `floor:${vote.voteId}`;
+  const canRecord = organizationGovernanceViewerCan(page, "paper_ballot_record");
+  const canSubmit = canRecord && normalizeString(vote.status).toUpperCase() === "OPEN";
+  return `<div class="shared-organization-governance-focus-stack">
+    ${renderOrganizationGovernanceVoteCard(vote, page, { focused: true })}
+    <article class="shared-coalition-panel shared-organization-governance-floor">
+      <div class="shared-coalition-panel__header">
+        <div>
+          <h2>Aggregate floor count</h2>
+          <p>Two authorized officials independently enter matching For, Against, and Abstain totals. No member-by-member paper roster is used.</p>
+        </div>
+        ${renderCoalitionGovernancePill(canRecord ? "Recorder" : "Verify only", canRecord ? "good" : "warn")}
+      </div>
+      ${renderCoalitionGovernanceResultNotice(
+        "Independent matching counts",
+        "A second official must independently enter matching totals before this count is accepted.",
+      )}
+      ${
+        canRecord
+          ? `<form class="shared-coalition-governance-form shared-organization-governance-floor-form" data-route-form="organization-governance-floor-attestation">
+              <input type="hidden" name="voteId" value="${escapeHtml(vote.voteId)}" />
+              <input type="hidden" name="expectedVersion" value="${escapeHtml(String(vote.voteVersion || 0))}" />
+              <label><span>For</span><input name="yes" type="number" min="0" step="1" inputmode="numeric" value="0"${disabledAttr(pending || !canSubmit)} required /></label>
+              <label><span>Against</span><input name="no" type="number" min="0" step="1" inputmode="numeric" value="0"${disabledAttr(pending || !canSubmit)} required /></label>
+              <label><span>Abstain</span><input name="abstain" type="number" min="0" step="1" inputmode="numeric" value="0"${disabledAttr(pending || !canSubmit)} required /></label>
+              <div class="shared-coalition-governance-form__actions">
+                <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(pending || !canSubmit)}>${pending ? "Submitting..." : "Submit attestation"}</button>
+              </div>
+            </form>`
+          : renderCoalitionGovernanceResultNotice(
+              "Recorder permission required",
+              "Submitting either independent floor count requires paper_ballot_record permission.",
+            )
+      }
+    </article>
+  </div>`;
+}
+
+function renderOrganizationGovernancePaperMemberActions(member, page) {
+  const pendingPrefix = `paper:`;
+  const pending =
+    normalizeString(page.actionPendingKey).startsWith(pendingPrefix) &&
+    normalizeString(page.actionPendingKey).endsWith(`:${member.canonicalMemberKey}`);
+  const actions = [];
+  if (member.readyForVerification) {
+    actions.push(`<button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="organization-paper-action" data-member-key="${escapeHtml(member.canonicalMemberKey)}" data-paper-action="verify"${disabledAttr(pending)}>Verify</button>`);
+    actions.push(`<button class="shared-feed-chip" type="button" data-action="organization-paper-action" data-member-key="${escapeHtml(member.canonicalMemberKey)}" data-paper-action="reject"${disabledAttr(pending)}>Reject</button>`);
+  }
+  if (member.readyForVoidRequest) {
+    actions.push(`<button class="shared-feed-chip" type="button" data-action="organization-paper-action" data-member-key="${escapeHtml(member.canonicalMemberKey)}" data-paper-action="void-request"${disabledAttr(pending)}>Request correction</button>`);
+  }
+  if (member.readyForVoidReview && member.voidRequestId) {
+    actions.push(`<button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="organization-paper-action" data-member-key="${escapeHtml(member.canonicalMemberKey)}" data-paper-action="void-approve"${disabledAttr(pending)}>Approve correction</button>`);
+    actions.push(`<button class="shared-feed-chip" type="button" data-action="organization-paper-action" data-member-key="${escapeHtml(member.canonicalMemberKey)}" data-paper-action="void-reject"${disabledAttr(pending)}>Reject correction</button>`);
+  }
+  if (member.readyForPaperEntry || member.readyForAnonymousCompletion) {
+    actions.push(`<button class="shared-feed-chip" type="button" data-action="open-app-shell">Record in app</button>`);
+  }
+  return actions.length
+    ? `<div class="shared-coalition-governance-vote-actions">${actions.join("")}</div>`
+    : `<div class="shared-page__empty shared-organization-governance-inline-empty">No browser action is currently available.</div>`;
+}
+
+function renderOrganizationGovernancePaperRoster(page, routeInfo) {
+  if (!routeInfo.voteId) {
+    return renderOrganizationGovernancePaperVotePicker(page);
+  }
+  const vote = page.selectedVote || organizationGovernanceFindVote(page, routeInfo.voteId);
+  if (vote && organizationGovernanceVoteMethod(vote) === "AGGREGATE_FLOOR_COUNT") {
+    return renderOrganizationGovernanceAggregateFloorCount(page, vote);
+  }
+  const roster = page.paperRoster;
+  const summary = readObjectPayload(roster?.summary);
+  return `<div class="shared-organization-governance-focus-stack">
+    ${vote ? renderOrganizationGovernanceVoteCard(vote, page, { focused: true }) : ""}
+    <article class="shared-coalition-panel shared-organization-governance-roster">
+      <div class="shared-coalition-panel__header">
+        <div>
+          <h2>Paper roster</h2>
+          <p>${escapeHtml(roster ? "Review ballot station status, verification, and correction actions." : "No paper roster payload was returned for this vote.")}</p>
+        </div>
+        ${roster ? renderCoalitionGovernancePill(`${formatCount(roster.items.length)} member${roster.items.length === 1 ? "" : "s"} loaded`, "good") : ""}
+      </div>
+      ${
+        roster
+          ? `<div class="shared-coalition-governance-results__metrics">
+              <div><span>Ready</span><strong>${escapeHtml(formatCount(summary.readyForPaperEntry || roster.items.filter((item) => item.readyForPaperEntry).length))}</strong></div>
+              <div><span>Verify</span><strong>${escapeHtml(formatCount(summary.readyForVerification || roster.items.filter((item) => item.readyForVerification).length))}</strong></div>
+              <div><span>Corrections</span><strong>${escapeHtml(formatCount(summary.readyForVoidReview || roster.items.filter((item) => item.readyForVoidReview).length))}</strong></div>
+            </div>
+            <div class="shared-organization-governance-roster-list">
+              ${
+                roster.items.length
+                  ? roster.items
+                      .map(
+                        (member) => `<article class="shared-organization-governance-roster-card">
+                          <div>
+                            <h3>${escapeHtml(member.displayName)}</h3>
+                            <p>${escapeHtml(member.canonicalMemberKey)}</p>
+                          </div>
+                          <div class="shared-coalition-governance-pills">
+                            ${renderCoalitionGovernancePill(humanizeLabel(member.eligibilityStatus), member.eligibilityStatus === "ELIGIBLE" ? "good" : "")}
+                            ${renderCoalitionGovernancePill(humanizeLabel(member.attendance))}
+                            ${member.ballotStatus ? renderCoalitionGovernancePill(humanizeLabel(member.ballotStatus), member.ballotStatus.includes("VERIFIED") ? "good" : "") : ""}
+                            ${member.linkedAccount ? renderCoalitionGovernancePill("Linked account", "good") : renderCoalitionGovernancePill("Roster only")}
+                          </div>
+                          <div class="shared-coalition-governance-meta">
+                            ${member.paperBallotId ? `<span><em>Paper ballot</em><strong>${escapeHtml(member.paperBallotId)}</strong></span>` : ""}
+                            ${member.privatePaperBallotId ? `<span><em>Private ballot</em><strong>${escapeHtml(member.privatePaperBallotId)}</strong></span>` : ""}
+                            ${member.voidRequestId ? `<span><em>Correction</em><strong>${escapeHtml(member.voidRequestId)}</strong></span>` : ""}
+                          </div>
+                          ${renderOrganizationGovernancePaperMemberActions(member, page)}
+                        </article>`,
+                      )
+                      .join("")
+                  : `<div class="shared-page__empty">No roster members were returned.</div>`
+              }
+            </div>
+            ${
+              page.paperRosterPaginationError
+                ? `<div class="shared-page__error">${escapeHtml(page.paperRosterPaginationError)}</div>`
+                : ""
+            }
+            ${
+              roster.nextCursor
+                ? `<div class="shared-card__actions"><button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="organization-paper-roster-load-more"${disabledAttr(page.paperRosterLoadingMore || page.loading)}>${page.paperRosterLoadingMore ? "Loading..." : "Load more members"}</button></div>`
+                : ""
+            }`
+          : `<div class="shared-page__empty">Open a paper-enabled vote or refresh this route.</div>`
+      }
+    </article>
+  </div>`;
+}
+
+function renderOrganizationGovernanceAuditCaseCard(page) {
+  const auditCase = page.auditCase;
+  if (!auditCase?.auditCaseId) {
+    return "";
+  }
+  const pending = normalizeString(page.actionPendingKey).includes(
+    auditCase.auditCaseId,
+  );
+  const status = normalizeString(auditCase.status).toUpperCase();
+  const canApprove = status.includes("PENDING_APPROVAL");
+  const canAuthorize = status.includes("PENDING_AUTHORIZATION");
+  const canDisclose = status.includes("AUTHORIZED");
+  const canView = Boolean(auditCase.grantId) || status.includes("GRANT");
+  return `<article class="shared-coalition-panel shared-organization-governance-audit-card">
+    <div class="shared-coalition-panel__header">
+      <div>
+        <h2>Audit case</h2>
+        <p>${escapeHtml(auditCase.reason || "Exceptional audit request")}</p>
+      </div>
+      ${renderCoalitionGovernancePill(humanizeLabel(auditCase.status), canDisclose || canView ? "good" : "warn")}
+    </div>
+    <div class="shared-coalition-governance-meta">
+      <span><em>Case</em><strong>${escapeHtml(auditCase.auditCaseId)}</strong></span>
+      <span><em>Vote</em><strong>${escapeHtml(auditCase.voteId)}</strong></span>
+      <span><em>Auditor</em><strong>${escapeHtml(auditCase.namedAuditorUserId || "Not named")}</strong></span>
+      ${renderOrganizationGovernanceHash("Scope", auditCase.caseScopeHash)}
+      ${renderOrganizationGovernanceHash("Receipt", auditCase.targetReceiptDigest || auditCase.targetReceiptCode)}
+      ${auditCase.approvalExpiresAt ? `<span><em>Expires</em><strong>${escapeHtml(formatAbsoluteDateTime(auditCase.approvalExpiresAt))}</strong></span>` : ""}
+    </div>
+    <div class="shared-coalition-governance-vote-actions">
+      <button class="shared-feed-chip" type="button" data-action="organization-audit-action" data-audit-action="approve" data-audit-case-id="${escapeHtml(auditCase.auditCaseId)}"${disabledAttr(!canApprove || pending)}>Approve</button>
+      <button class="shared-feed-chip" type="button" data-action="organization-audit-action" data-audit-action="authorize" data-audit-case-id="${escapeHtml(auditCase.auditCaseId)}"${disabledAttr(!canAuthorize || pending)}>Authorize</button>
+      <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="organization-audit-action" data-audit-action="disclose" data-audit-case-id="${escapeHtml(auditCase.auditCaseId)}"${disabledAttr(!canDisclose || pending)}>Disclose</button>
+      <button class="shared-feed-chip" type="button" data-action="organization-audit-action" data-audit-action="view" data-audit-case-id="${escapeHtml(auditCase.auditCaseId)}"${disabledAttr(!canView || pending)}>View disclosure</button>
+    </div>
+    ${
+      page.auditDelivery || page.auditDisclosure
+        ? `<div class="shared-organization-governance-audit-output">
+            <strong>Disclosure response</strong>
+            <pre>${escapeHtml(JSON.stringify(page.auditDisclosure || page.auditDelivery, null, 2))}</pre>
+          </div>`
+        : ""
+    }
+  </article>`;
+}
+
+function renderOrganizationGovernanceAuditPanel(page, routeInfo) {
+  const vote = page.selectedVote || organizationGovernanceFindVote(page, routeInfo.voteId);
+  const pending = page.actionPendingKey === `audit:create:${routeInfo.voteId}`;
+  const votePicker = !routeInfo.voteId
+    ? `<article class="shared-coalition-panel">
+        <div class="shared-coalition-panel__header">
+          <div>
+            <h2>Choose a vote to audit</h2>
+            <p>Open a specific vote to start or continue an exceptional audit case.</p>
+          </div>
+        </div>
+        ${renderOrganizationGovernanceVoteList(page, routeInfo)}
+      </article>`
+    : "";
+  const auditForm =
+    routeInfo.voteId && vote
+      ? `<article class="shared-coalition-panel shared-organization-governance-audit-form-panel">
+          <div class="shared-coalition-panel__header">
+            <div>
+              <h2>Open audit case</h2>
+              <p>Request receipt-scoped review with a named auditor, matching the app's Governance audit workflow.</p>
+            </div>
+            ${renderCoalitionGovernancePill(humanizeLabel(vote.rules?.privacyMode || "audit"))}
+          </div>
+          <form class="shared-coalition-governance-form shared-organization-governance-audit-form" data-route-form="organization-governance-audit-create">
+            <input type="hidden" name="voteId" value="${escapeHtml(routeInfo.voteId)}" />
+            <label><span>Receipt code</span><input name="targetReceiptCode" placeholder="Receipt code"${disabledAttr(pending)} required /></label>
+            <label><span>Named auditor user id</span><input name="namedAuditorUserId" placeholder="user-..."${disabledAttr(pending)} required /></label>
+            <label class="is-full"><span>Reason</span><textarea name="reason" rows="3" placeholder="Explain why this receipt requires exceptional review."${disabledAttr(pending)} required></textarea></label>
+            <div class="shared-coalition-governance-form__actions">
+              <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(pending)}>${pending ? "Opening..." : "Open audit case"}</button>
+            </div>
+          </form>
+        </article>`
+      : "";
+  return `<div class="shared-organization-governance-focus-stack">
+    ${vote ? renderOrganizationGovernanceVoteCard(vote, page, { focused: true }) : ""}
+    ${votePicker}
+    ${auditForm}
+    ${renderOrganizationGovernanceAuditCaseCard(page)}
+  </div>`;
+}
+
+function renderOrganizationGovernancePlaceholder(routeInfo) {
+  const labels = {
+    sessions: "Meeting sessions",
+    constitutions: "Constitution versions",
+    "audit-log": "Audit log",
+  };
+  return `<article class="shared-coalition-panel shared-organization-governance-placeholder">
+    <div class="shared-coalition-panel__header">
+      <div>
+        <h2>${escapeHtml(labels[routeInfo.key] || "Governance route")}</h2>
+        <p>This committed app route now resolves in the website shell. The browser view keeps users oriented while the detailed native-only workflow remains in the app.</p>
+      </div>
+      <button class="shared-feed-chip" type="button" data-action="open-app-shell">Open app</button>
+    </div>
+  </article>`;
+}
+
+function renderOrganizationGovernanceBody(page, routeInfo) {
+  if (page.loading && !page.loaded) {
+    return `<article class="shared-coalition-panel"><div class="shared-page__empty">Loading organization Governance...</div></article>`;
+  }
+  if (routeInfo.key === "vote-create") {
+    return renderOrganizationGovernanceVoteForm(page);
+  }
+  if (routeInfo.key === "vote-edit") {
+    const vote = page.selectedVote || organizationGovernanceFindVote(page, routeInfo.voteId);
+    return vote
+      ? renderOrganizationGovernanceVoteForm(page, { vote })
+      : `<article class="shared-coalition-panel"><div class="shared-page__empty">Vote could not be loaded for editing.</div></article>`;
+  }
+  if (routeInfo.key === "vote-results") {
+    return renderOrganizationGovernanceResultsPanel(page, routeInfo);
+  }
+  if (routeInfo.key === "paper") {
+    return renderOrganizationGovernancePaperRoster(page, routeInfo);
+  }
+  if (routeInfo.key === "vote-audit" || routeInfo.key === "audit-case") {
+    return renderOrganizationGovernanceAuditPanel(page, routeInfo);
+  }
+  if (["sessions", "constitutions", "audit-log"].includes(routeInfo.key)) {
+    return renderOrganizationGovernancePlaceholder(routeInfo);
+  }
+  if (routeInfo.key === "vote-detail") {
+    const vote = page.selectedVote || organizationGovernanceFindVote(page, routeInfo.voteId);
+    return `<div class="shared-organization-governance-focus-stack">
+      ${vote ? renderOrganizationGovernanceVoteCard(vote, page, { focused: true }) : `<article class="shared-coalition-panel"><div class="shared-page__empty">Vote detail unavailable.</div></article>`}
+      <article class="shared-coalition-panel">
+        <div class="shared-coalition-panel__header">
+          <div>
+            <h2>Other votes</h2>
+            <p>Move between committed organization Governance manifests without leaving the web shell.</p>
+          </div>
+        </div>
+        ${renderOrganizationGovernanceVoteList(page, routeInfo)}
+      </article>
+    </div>`;
+  }
+  return `<div class="shared-coalition-governance-grid">
+    <div class="shared-coalition-governance-main">
+      <article class="shared-coalition-panel">
+        <div class="shared-coalition-panel__header">
+          <div>
+            <h2>Votes</h2>
+            <p>Committed organization Governance votes with status, privacy, paper, results, and audit actions.</p>
+          </div>
+        </div>
+        ${renderOrganizationGovernanceVoteList(page, routeInfo)}
+      </article>
+    </div>
+    <aside class="shared-coalition-governance-side">
+      <article class="shared-coalition-panel">
+        <div class="shared-coalition-panel__header">
+          <div>
+            <h2>Policy</h2>
+            <p>Organization policy metadata returned by Governance v2.</p>
+          </div>
+        </div>
+        <div class="shared-coalition-governance-access">
+          ${renderCoalitionGovernancePill(`Policy v${organizationGovernancePolicyVersion(page) || 0}`)}
+          ${renderCoalitionGovernancePill(`${formatCount(page.presets.length)} presets`)}
+          ${renderCoalitionGovernancePill(page.overview ? "Overview loaded" : "Overview unavailable", page.overview ? "good" : "warn")}
+        </div>
+      </article>
+      <article class="shared-coalition-panel">
+        <div class="shared-coalition-panel__header">
+          <div>
+            <h2>Paper and audit</h2>
+            <p>Open a paper roster or receipt audit from a vote card.</p>
+          </div>
+        </div>
+        <div class="shared-coalition-governance-actions">
+          <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(organizationGovernanceRoutePath(page.organizationId, "paper"))}">Paper rosters</button>
+          <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(organizationGovernanceRoutePath(page.organizationId, "audit-log"))}">Audit log</button>
+        </div>
+      </article>
+    </aside>
+  </div>`;
+}
+
+function renderOrganizationGovernancePage() {
+  const page = organizationGovernancePageState();
+  const organizationId =
+    page.organizationId || currentOrganizationGovernanceId() || "";
+  const routeInfo = organizationGovernanceRouteForRoute();
+  const openVotes = page.votes.filter((vote) =>
+    normalizeString(vote.status).toLowerCase().includes("open"),
+  ).length;
+  const paperVotes = page.votes.filter(organizationGovernancePaperRouteAvailable)
+    .length;
+  return `<section class="shared-page shared-coalition-workspace shared-organization-governance-route">
+    ${renderTopChrome()}
+    <div class="shared-page__content">
+      <section class="shared-coalition-hero shared-organization-governance-hero">
+        <div class="shared-coalition-hero__identity">
+          <div class="shared-coalition-avatar shared-coalition-avatar--large">${renderIcon("shield")}</div>
+          <div>
+            <div class="shared-card__meta">
+              <span>Organization Governance</span>
+              <span>${escapeHtml(organizationId || "Organization")}</span>
+              <span>${escapeHtml(humanizeLabel(routeInfo.key))}</span>
+            </div>
+            <h1>Organization Governance</h1>
+            <p>Vote manifests, paper roster review, and exceptional audit workflows from the committed app routes.</p>
+          </div>
+        </div>
+        <div class="shared-coalition-hero__actions">
+          <button class="shared-feed-chip" type="button" data-action="refresh-current-route"${disabledAttr(page.loading)}>Refresh</button>
+          <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="${escapeHtml(organizationGovernanceRoutePath(organizationId, "votes/new"))}">New vote</button>
+        </div>
+      </section>
+      <div class="shared-coalition-metrics">
+        ${renderCoalitionMetric("Votes loaded", formatCount(page.votes.length))}
+        ${renderCoalitionMetric("Open", formatCount(openVotes), openVotes ? "cyan" : "")}
+        ${renderCoalitionMetric("Paper", formatCount(paperVotes))}
+        ${renderCoalitionMetric("Presets", formatCount(page.presets.length))}
+      </div>
+      ${page.error ? `<div class="shared-page__error">${escapeHtml(page.error)}</div>` : ""}
+      ${renderOrganizationGovernanceCommandCenter(page, organizationId, routeInfo)}
+      ${renderOrganizationGovernanceNav(organizationId, routeInfo)}
+      ${renderOrganizationGovernanceBody(page, routeInfo)}
+    </div>
+  </section>`;
 }
 
 function coalitionAmplifyPlatformLabel(key) {
@@ -112454,6 +115223,14 @@ function renderSettingsAccountSecurityHub() {
           <button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="/settings/account-security/totp">Set up MFA</button>
         </article>
         <article class="shared-settings-security-card">
+          <span>${renderIcon("shield")}</span>
+          <div>
+            <h3>Governance account passkey</h3>
+            <p>Set up the account confirmation used for sensitive votes and meetings.</p>
+          </div>
+          <button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="/settings/account-security/governance-passkey">Set up passkey</button>
+        </article>
+        <article class="shared-settings-security-card">
           <span>${renderIcon("messages")}</span>
           <div>
             <h3>Messaging Security Center</h3>
@@ -112552,13 +115329,89 @@ function renderSettingsAccountSecurityTotp() {
   </div>`;
 }
 
+function renderSettingsAccountSecurityGovernancePasskey() {
+  const account = settingsAccountSecurity();
+  const passkey = account.passkey;
+  const browserReady =
+    typeof window !== "undefined" &&
+    typeof navigator !== "undefined" &&
+    typeof window.PublicKeyCredential !== "undefined" &&
+    typeof navigator.credentials?.create === "function";
+  const actionDisabled = passkey.registering || !browserReady;
+  return `<div class="shared-settings-main shared-settings-security shared-settings-governance-passkey">
+    <section class="shared-settings-panel">
+      <div class="shared-settings-panel__header">
+        <div>
+          <h2>Set up your account passkey</h2>
+          <p>A passkey confirms that sensitive organization actions come from your signed-in Polis account.</p>
+        </div>
+        <button class="shared-feed-chip" data-action="navigate" data-route="/settings/account-security">Account security</button>
+      </div>
+      <div class="shared-settings-return">
+        <strong>Private and device protected</strong>
+        <span>Polis never receives your biometric or device PIN. Cancelling setup never completes the action.</span>
+      </div>
+      ${renderSettingsSecurityStatus(passkey)}
+      <div class="shared-settings-governance-passkey-status">
+        <span class="${browserReady ? "is-good" : "is-pending"}">
+          <small>Browser</small>
+          <strong>${browserReady ? "Passkeys available" : "Passkeys unavailable"}</strong>
+        </span>
+        <span class="${passkey.registered ? "is-good" : "is-pending"}">
+          <small>Account</small>
+          <strong>${passkey.registered ? "Passkey ready" : "Setup required"}</strong>
+        </span>
+      </div>
+      <div class="shared-settings-security-flow shared-settings-governance-passkey-flow">
+        <article class="shared-settings-security-step">
+          <strong>1</strong>
+          <div>
+            <h3>Start setup</h3>
+            <p>Polis requests a server-bound credential for this signed-in account.</p>
+          </div>
+        </article>
+        <article class="shared-settings-security-step">
+          <strong>2</strong>
+          <div>
+            <h3>Confirm on this device</h3>
+            <p>Your browser opens the trusted passkey screen for the current device or password manager.</p>
+          </div>
+        </article>
+        <article class="shared-settings-security-step">
+          <strong>3</strong>
+          <div>
+            <h3>Return to Governance</h3>
+            <p>After setup, votes and meeting check-ins can ask for this account confirmation.</p>
+          </div>
+        </article>
+      </div>
+      <div class="shared-settings-form-actions">
+        <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="settings-governance-passkey-register"${disabledAttr(actionDisabled)}>${
+          passkey.registering
+            ? "Opening passkey setup..."
+            : passkey.registered
+              ? "Add another account passkey"
+              : "Set up account passkey"
+        }</button>
+      </div>
+    </section>
+  </div>`;
+}
+
 function renderSettingsAccountSecurity() {
   const pathname =
     typeof window !== "undefined" ? normalizePathname(window.location.pathname) : "";
-  return getSettingsSubpath() === "totp" ||
-    pathname === "/settings/account-security/totp"
-    ? renderSettingsAccountSecurityTotp()
-    : renderSettingsAccountSecurityHub();
+  const subpath = getSettingsSubpath();
+  if (
+    subpath === "governance-passkey" ||
+    pathname === "/settings/account-security/governance-passkey"
+  ) {
+    return renderSettingsAccountSecurityGovernancePasskey();
+  }
+  if (subpath === "totp" || pathname === "/settings/account-security/totp") {
+    return renderSettingsAccountSecurityTotp();
+  }
+  return renderSettingsAccountSecurityHub();
 }
 
 function renderSettingsStatusPill(label, tone = "") {
@@ -117636,7 +120489,8 @@ function renderRouteStage() {
       routeKey === ROUTE_KEY_COALITION_START ||
       routeKey === ROUTE_KEY_COALITION_JOIN ||
       routeKey === ROUTE_KEY_COALITION_DETAIL ||
-      routeKey === ROUTE_KEY_COALITION_SECTION
+      routeKey === ROUTE_KEY_COALITION_SECTION ||
+      routeKey === ROUTE_KEY_ORGANIZATION_GOVERNANCE
     ) {
       return renderCoalitionsAuthGate();
     }
@@ -117830,6 +120684,9 @@ function renderRouteStage() {
     routeKey === ROUTE_KEY_COALITION_SECTION
   ) {
     return renderCoalitionDetailPage();
+  }
+  if (routeKey === ROUTE_KEY_ORGANIZATION_GOVERNANCE) {
+    return renderOrganizationGovernancePage();
   }
   if (routeKey === ROUTE_KEY_MISSIONS) {
     return renderMissionsListPage();
@@ -118999,6 +121856,7 @@ function renderApp() {
   restoreFeedScrollState(scrollSnapshot);
   restorePetitionAddressFocusState(petitionAddressFocusSnapshot);
   bindObservers();
+  bindPostMediaCrops();
   bindVideos();
   bindPostComposerCameraPreview();
   bindPostComposerCoverPreview();
@@ -119297,6 +122155,18 @@ function bindVideos() {
   syncPlayback();
 }
 
+function bindPostMediaCrops() {
+  Array.from(root?.querySelectorAll("[data-media-crop]") || []).forEach(
+    (media) => {
+      const x = Number(media.getAttribute("data-media-crop-x"));
+      const y = Number(media.getAttribute("data-media-crop-y"));
+      if (Number.isFinite(x) && Number.isFinite(y)) {
+        media.style.objectPosition = `${x}% ${y}%`;
+      }
+    },
+  );
+}
+
 function snapshotPlaybackState() {
   if (!root) {
     return {};
@@ -119304,10 +122174,11 @@ function snapshotPlaybackState() {
   return Array.from(root.querySelectorAll("video[data-video-post-id]")).reduce(
     (snapshot, video) => {
       const postId = normalizeString(video.dataset.videoPostId);
-      if (!postId) {
+      const videoKey = normalizeString(video.dataset.videoKey) || postId;
+      if (!videoKey) {
         return snapshot;
       }
-      snapshot[postId] = {
+      snapshot[videoKey] = {
         currentTime: Number(video.currentTime) || 0,
         paused: video.paused,
         muted: video.muted,
@@ -119319,9 +122190,9 @@ function snapshotPlaybackState() {
 }
 
 function restorePlaybackState(snapshot = {}) {
-  Object.entries(snapshot).forEach(([postId, value]) => {
+  Object.entries(snapshot).forEach(([videoKey, value]) => {
     const video = root?.querySelector(
-      `video[data-video-post-id="${CSS.escape(postId)}"]`,
+      `video[data-video-key="${CSS.escape(videoKey)}"]`,
     );
     if (!video) {
       return;
@@ -122117,6 +124988,11 @@ async function handleRootClick(event) {
     return;
   }
 
+  if (action === "settings-governance-passkey-register") {
+    registerSettingsGovernancePasskey().catch(() => {});
+    return;
+  }
+
   if (action === "settings-voter-profile-refresh-districts") {
     loadSettingsMyDistricts({ refresh: true }).catch(() => {
       showToast("District refresh failed.");
@@ -124367,6 +127243,40 @@ async function handleRootClick(event) {
     return;
   }
 
+  if (action === "organization-audit-action") {
+    runOrganizationGovernanceAuditAction(
+      target.getAttribute("data-audit-action"),
+      target.getAttribute("data-audit-case-id"),
+    ).catch(() => {
+      showToast("Audit action failed.");
+    });
+    return;
+  }
+
+  if (action === "organization-paper-action") {
+    runOrganizationGovernancePaperAction(
+      target.getAttribute("data-member-key"),
+      target.getAttribute("data-paper-action"),
+    ).catch(() => {
+      showToast("Paper action failed.");
+    });
+    return;
+  }
+
+  if (action === "organization-votes-load-more") {
+    loadMoreOrganizationGovernanceVotes().catch(() => {
+      showToast("More Governance votes could not be loaded.");
+    });
+    return;
+  }
+
+  if (action === "organization-paper-roster-load-more") {
+    loadMoreOrganizationGovernancePaperRoster().catch(() => {
+      showToast("More paper roster members could not be loaded.");
+    });
+    return;
+  }
+
   if (action === "refresh-current-route") {
     loadCurrentRoute({ refresh: true }).catch(() => {
       showToast("Refresh failed.");
@@ -124677,6 +127587,24 @@ async function handleRootClick(event) {
     return;
   }
 
+  if (action === "post-carousel-step") {
+    event.preventDefault();
+    const postId = normalizeString(target.getAttribute("data-post-id"));
+    const item = findFeedPostItem(postId);
+    const direction = Number(target.getAttribute("data-direction")) || 0;
+    setPostMediaIndex(postId, postMediaIndex(item) + direction);
+    return;
+  }
+
+  if (action === "post-carousel-go") {
+    event.preventDefault();
+    setPostMediaIndex(
+      target.getAttribute("data-post-id"),
+      target.getAttribute("data-media-index"),
+    );
+    return;
+  }
+
   if (action === "toggle-volume") {
     state.userHasInteracted = !state.userHasInteracted;
     Array.from(
@@ -124915,6 +127843,26 @@ function handleRootKeydown(event) {
   if (event.key === "Escape" && state.ui.confirmation?.open) {
     event.preventDefault();
     closeConfirmationSheet(false);
+    return;
+  }
+
+  const postCarousel = event.target.closest("[data-post-carousel]");
+  if (
+    postCarousel &&
+    ["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)
+  ) {
+    event.preventDefault();
+    const postId = normalizeString(postCarousel.getAttribute("data-post-id"));
+    const item = findFeedPostItem(postId);
+    const currentIndex = postMediaIndex(item);
+    const mediaCount = postMediaItems(item).length;
+    const nextIndex =
+      event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? mediaCount - 1
+          : currentIndex + (event.key === "ArrowRight" ? 1 : -1);
+    setPostMediaIndex(postId, nextIndex);
     return;
   }
 
@@ -126788,6 +129736,22 @@ function handleCommentSubmit(event) {
       castCoalitionVote(formData).catch(() => {});
       return;
     }
+    if (formKind === "organization-governance-vote-create") {
+      createOrganizationGovernanceVote(formData).catch(() => {});
+      return;
+    }
+    if (formKind === "organization-governance-vote-update") {
+      updateOrganizationGovernanceVote(formData).catch(() => {});
+      return;
+    }
+    if (formKind === "organization-governance-audit-create") {
+      createOrganizationGovernanceAuditCase(formData).catch(() => {});
+      return;
+    }
+    if (formKind === "organization-governance-floor-attestation") {
+      submitOrganizationGovernanceFloorAttestation(formData).catch(() => {});
+      return;
+    }
     if (formKind === "candidate-calendar-filters") {
       applyCandidateCalendarFilters(formData).catch(() => {});
       return;
@@ -127486,6 +130450,21 @@ async function bootstrapAuth() {
   }
 }
 
+async function bootstrapFilesNavigation() {
+  state.filesNavigation.loaded = true;
+  state.filesNavigation.enabled = false;
+  if (!state.auth.session) return;
+  try {
+    const payload = await fetchJson("/api/files/workspaces", { auth: true });
+    const workspaces = Array.isArray(payload?.workspaces)
+      ? payload.workspaces
+      : [];
+    state.filesNavigation.enabled = workspaces.some(isFilesWorkspaceAccessible);
+  } catch {
+    // Files stays hidden when entitlement discovery is unavailable.
+  }
+}
+
 function attachGlobalListeners() {
   root?.addEventListener("click", handleRootClick);
   root?.addEventListener("keydown", handleRootKeydown);
@@ -127573,6 +130552,7 @@ async function init() {
   applySettingsDisplayPreferences();
   attachGlobalListeners();
   await bootstrapAuth();
+  await bootstrapFilesNavigation();
   maybeOpenAuthPromptFromUrl();
   await loadCurrentRoute({ refresh: true });
 }

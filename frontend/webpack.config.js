@@ -2,6 +2,7 @@ const HtmlWebpackPlugin = require("html-webpack-plugin");
 const MiniCssExtractPlugin = require("mini-css-extract-plugin");
 const { CleanWebpackPlugin } = require("clean-webpack-plugin");
 const webpack = require("webpack");
+const fs = require("fs");
 const path = require("path");
 const rootPackage = require("../package.json");
 const frontendPackage = require("./package.json");
@@ -25,6 +26,31 @@ const webAppInfo = {
   commit: webAppCommit ? webAppCommit.slice(0, 12) : "",
   builtAt: process.env.POLIS_WEB_BUILD_TIME || "",
 };
+
+class StaticTextAssetPlugin {
+  constructor({ sourcePath, filename }) {
+    this.sourcePath = sourcePath;
+    this.filename = filename;
+  }
+
+  apply(compiler) {
+    const pluginName = this.constructor.name;
+    compiler.hooks.thisCompilation.tap(pluginName, (compilation) => {
+      compilation.hooks.processAssets.tap(
+        {
+          name: pluginName,
+          stage: webpack.Compilation.PROCESS_ASSETS_STAGE_ADDITIONAL,
+        },
+        () => {
+          compilation.emitAsset(
+            this.filename,
+            new webpack.sources.RawSource(fs.readFileSync(this.sourcePath)),
+          );
+        },
+      );
+    });
+  }
+}
 
 function serializeInlineJson(value) {
   return JSON.stringify(value)
@@ -242,6 +268,38 @@ function staticCoalitionsShell(filename) {
   });
 }
 
+function staticFilesShell(filename) {
+  return new HtmlWebpackPlugin({
+    template: "./src/pages/files/files.html",
+    filename,
+    chunks: ["files"],
+    publicPath: "/",
+    favicon: "./src/assets/images/polis/Polis.png",
+  });
+}
+
+function staticOrganizationGovernanceShell(filename) {
+  return new HtmlWebpackPlugin({
+    templateContent: buildStaticSharedFeedShellHtml({
+      route: "/organizations/org/governance",
+      routeKey: "organization-governance",
+      routeParams: { organizationId: "org", governancePath: "" },
+      title: "Organization Governance | Polis",
+      description:
+        "Open organization Governance votes, paper rosters, results, and exceptional audit workflows in Polis.",
+      eyebrow: "Organization Governance",
+      headline: "Opening organization Governance",
+      supportingCopy:
+        "Review organization votes, paper ballot roster states, certified results, and receipt-scoped audit workflows from the browser.",
+      requiresAuth: true,
+    }),
+    filename,
+    chunks: ["shared-feed"],
+    publicPath: "/",
+    favicon: "./src/assets/images/polis/Polis.png",
+  });
+}
+
 function staticSharedAppShell(
   filename,
   {
@@ -354,6 +412,12 @@ const settingsSectionShells = [
     "Account Security",
     "Manage Polis password recovery and authenticator security.",
     "Reset passwords, configure authenticator MFA, and review account security options from the browser.",
+  ),
+  settingsSectionShell(
+    "/settings/account-security/governance-passkey",
+    "Account Passkey",
+    "Set up the account passkey used for Polis Governance.",
+    "Create the signed-in account confirmation used for sensitive Governance votes and meeting actions.",
   ),
   settingsSectionShell(
     "/settings/account-security/totp",
@@ -862,6 +926,13 @@ const sharedAppShells = [
   },
 ];
 
+const postsSharedAppShell = sharedAppShells.find(
+  (shell) => shell.route === "/posts",
+);
+if (!postsSharedAppShell) {
+  throw new Error("Missing the shared Posts shell configuration.");
+}
+
 const sharedAppRouteRewrites = [
   [/^\/auth\/signup\/email(?:\/.*)?$/u, "/auth/signup/email/index.html"],
   [/^\/auth\/signup\/password(?:\/.*)?$/u, "/auth/signup/password/index.html"],
@@ -880,6 +951,7 @@ const sharedAppRouteRewrites = [
   [/^\/settings\/voter-intelligence(?:\/.*)?$/u, "/settings/voter-intelligence/index.html"],
   [/^\/messages(?:\/.*)?$/u, "/messages/index.html"],
   [/^\/candidate-dashboard(?:\/.*)?$/u, "/candidate-dashboard/index.html"],
+  [/^\/organizations(?:\/.*)?$/u, "/organizations/index.html"],
   [/^\/coalitions(?:\/.*)?$/u, "/coalitions/index.html"],
   [/^\/cta-invite(?:\/.*)?$/u, "/cta-invite/index.html"],
   [/^\/petitions(?:\/.*)?$/u, "/petitions/index.html"],
@@ -947,6 +1019,7 @@ const deleteAccountDefineEnv = {
   __CTA_APP_DEEP_LINK_BASE_URL__: JSON.stringify(
     process.env.CTA_APP_DEEP_LINK_BASE_URL || "",
   ),
+  __POLIS_FILES_API_BASE_URL__: JSON.stringify(webAppApiBaseUrl),
 };
 
 module.exports = {
@@ -965,6 +1038,7 @@ module.exports = {
     deleteAccount: "./src/pages/delete-account/delete-account.js",
     textBankingReturn:
       "./src/pages/text-banking-return/text-banking-return.js",
+    files: "./src/pages/files/files.js",
     "shared-feed": "./src/pages/shared-feed/shared-feed.js",
     notFound: "./src/pages/404/404.js",
   },
@@ -1017,6 +1091,10 @@ module.exports = {
   },
   plugins: [
     new CleanWebpackPlugin(),
+    new StaticTextAssetPlugin({
+      sourcePath: path.resolve(__dirname, "src/_redirects"),
+      filename: "_redirects",
+    }),
     new MiniCssExtractPlugin({
       filename: (pathData) =>
         pathData.chunk?.name === "shared-feed"
@@ -1109,17 +1187,23 @@ module.exports = {
       publicPath: "/",
       favicon: "./src/assets/images/polis/Polis.png",
     }),
+    staticFilesShell("files/index.html"),
+    staticFilesShell("route-shells/files.html"),
     staticCtaInviteShell("cta-invite/index.html"),
     staticSettingsVoterIntelligenceShell("settings/voter-intelligence/index.html"),
     staticMessagesShell("messages.html"),
     staticMessagesShell("messages/index.html"),
     staticCandidateDashboardShell("candidate-dashboard.html"),
     staticCandidateDashboardShell("candidate-dashboard/index.html"),
+    staticOrganizationGovernanceShell("organizations.html"),
+    staticOrganizationGovernanceShell("organizations/index.html"),
+    staticOrganizationGovernanceShell("route-shells/organizations.html"),
     staticCoalitionsShell("coalitions.html"),
     staticCoalitionsShell("coalitions/index.html"),
     ...sharedAppShells.map((shell) =>
       staticSharedAppShell(shell.filename, shell),
     ),
+    staticSharedAppShell("route-shells/posts.html", postsSharedAppShell),
     new HtmlWebpackPlugin({
       template: "./src/pages/404/404.html",
       filename: "404.html",
@@ -1132,7 +1216,11 @@ module.exports = {
   ],
   devServer: {
     historyApiFallback: {
-      rewrites: [...publicPageRouteRewrites, ...sharedAppRouteRewrites],
+      rewrites: [
+        ...publicPageRouteRewrites,
+        { from: /^\/files(?:\/.*)?$/u, to: "/files/index.html" },
+        ...sharedAppRouteRewrites,
+      ],
     },
     proxy: [
       {
