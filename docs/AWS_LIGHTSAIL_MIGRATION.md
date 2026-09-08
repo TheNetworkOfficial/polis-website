@@ -72,6 +72,37 @@ If you want AWS DNS later, Route 53 hosted zones are billed separately at **$0.5
 
 ## Step 1: Build the website locally
 
+### Preserve the dedicated account-deletion build configuration
+
+The static deletion page consumes authentication settings at **build time**.
+Changing the website service's runtime environment does not configure that
+already-built page. A build with missing settings disables its sign-in flow.
+
+The verified public deletion-only values are documented in
+[`delete-account.build.env.example`](../deploy/lightsail/delete-account.build.env.example).
+Webpack does not automatically load this file: export these variables into the
+isolated build process before building. Keep them separate from portal/mobile
+client settings; the generic `COGNITO_*` variables also influence other generated
+website shells. Do not publish a whole website build made with the dedicated
+deletion-client profile.
+
+For a deletion-only update, preserve the deployed revision, existing HTML,
+Nginx configuration and old hashed assets first. Build from the intended release
+revision in isolation, validate the deletion tests, and publish only the new
+`deleteAccount` JavaScript, license and CSS plus `delete-account.html` (HTML last).
+Compare every other dependency referenced by that HTML with the target server.
+For a later full website release, build other pages with their own correct
+profile, then separately build and validate the deletion page at the same source
+revision before assembling the approved release. Never overwrite the protected
+Files/Governance source or deploy an unapproved full build to repair this page.
+
+Before acceptance, verify `/delete-account` on the canonical apex origin, the
+`www` redirect to that origin, the hosted sign-in page, the configured provider
+buttons, and that inactive deletion steps are hidden. Test state/PKCE and the
+verification-proof gate without submitting an actual deletion. Preserve the
+current Cognito client callbacks, old assets and rollback snapshots until the
+user explicitly closes retention.
+
 From the repo root:
 
 ```bash

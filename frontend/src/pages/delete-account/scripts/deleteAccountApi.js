@@ -1,6 +1,6 @@
 export const DELETE_CONFIRMATION_PHRASE = "DELETE";
 
-/* global __DELETE_ACCOUNT_API_BASE_URL__, __COGNITO_REGION__, __COGNITO_APP_CLIENT_ID__, __COGNITO_DOMAIN__, __COGNITO_REDIRECT_URI__, __COGNITO_SCOPES__, __COGNITO_ENABLE_PASSWORD_FLOW__ */
+/* global __DELETE_ACCOUNT_API_BASE_URL__, __COGNITO_REGION__, __COGNITO_APP_CLIENT_ID__, __COGNITO_DOMAIN__, __COGNITO_REDIRECT_URI__, __COGNITO_SCOPES__, __COGNITO_ENABLE_PASSWORD_FLOW__, __COGNITO_SUPPORTED_IDENTITY_PROVIDERS__ */
 const DELETE_ACCOUNT_API_BASE_URL = __DELETE_ACCOUNT_API_BASE_URL__;
 const COGNITO_REGION = __COGNITO_REGION__;
 const COGNITO_APP_CLIENT_ID = __COGNITO_APP_CLIENT_ID__;
@@ -8,6 +8,8 @@ const COGNITO_DOMAIN = __COGNITO_DOMAIN__;
 const COGNITO_REDIRECT_URI = __COGNITO_REDIRECT_URI__;
 const COGNITO_SCOPES = __COGNITO_SCOPES__;
 const COGNITO_ENABLE_PASSWORD_FLOW = __COGNITO_ENABLE_PASSWORD_FLOW__;
+const COGNITO_SUPPORTED_IDENTITY_PROVIDERS =
+  __COGNITO_SUPPORTED_IDENTITY_PROVIDERS__;
 
 const DEFAULT_COGNITO_REGION = "us-west-2";
 const DEFAULT_COGNITO_SCOPES =
@@ -112,12 +114,26 @@ function hasHostedSignInConfig() {
   return Boolean(resolveCognitoClientId() && resolveCognitoDomain());
 }
 
+function resolveSupportedIdentityProviders() {
+  const raw = resolveConfigValue(
+    COGNITO_SUPPORTED_IDENTITY_PROVIDERS,
+    "COGNITO",
+  );
+  return new Set(
+    raw
+      .split(/[\s,]+/)
+      .map((provider) => provider.trim().toLowerCase())
+      .filter(Boolean),
+  );
+}
+
 export function getDeleteAccountAuthCapabilities() {
   const hosted = hasHostedSignInConfig();
+  const providers = resolveSupportedIdentityProviders();
   return {
     password: hasPasswordSignInConfig(),
     hosted,
-    google: hosted,
+    google: hosted && providers.has("google"),
   };
 }
 

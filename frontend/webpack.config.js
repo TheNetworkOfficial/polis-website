@@ -1011,6 +1011,9 @@ const deleteAccountDefineEnv = {
   __COGNITO_ENABLE_PASSWORD_FLOW__: JSON.stringify(
     process.env.COGNITO_ENABLE_PASSWORD_FLOW || "false",
   ),
+  __COGNITO_SUPPORTED_IDENTITY_PROVIDERS__: JSON.stringify(
+    process.env.COGNITO_SUPPORTED_IDENTITY_PROVIDERS || "COGNITO",
+  ),
   __CTA_API_BASE_URL__: JSON.stringify(process.env.CTA_API_BASE_URL || ""),
   __CTA_IOS_STORE_URL__: JSON.stringify(process.env.CTA_IOS_STORE_URL || ""),
   __CTA_ANDROID_STORE_URL__: JSON.stringify(
