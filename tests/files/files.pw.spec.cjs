@@ -5030,3 +5030,104 @@ test("direct host-reference detail fails closed for an ineligible workspace", as
   await expect(page.getByText("opposition research")).toHaveCount(0);
   await expect(page.getByText("secret purpose")).toHaveCount(0);
 });
+
+async function deferFilesAnimationFrames(page) {
+  await page.addInitScript(() => {
+    const requestFrame = window.requestAnimationFrame.bind(window);
+    window.__deferredFilesFrames = [];
+    window.__holdFilesFrames = false;
+    window.requestAnimationFrame = (callback) => {
+      if (!window.__holdFilesFrames) return requestFrame(callback);
+      window.__deferredFilesFrames.push(callback);
+      return 0;
+    };
+  });
+}
+
+async function releaseFilesAnimationFrames(page) {
+  await page.evaluate(() => {
+    window.__holdFilesFrames = false;
+    const callbacks = window.__deferredFilesFrames.splice(0);
+    callbacks.forEach((callback) => callback(performance.now()));
+  });
+}
+
+test("queued initial drawer focus preserves an already focused caption", async ({
+  page,
+}) => {
+  await deferFilesAnimationFrames(page);
+  await seedSession(page);
+  await mockFiles(page, { assets: [assets[0]] });
+  await page.goto("/files/folders/folder-1");
+  await page
+    .getByRole("button", { name: `Select ${assets[0].name}`, exact: true })
+    .click();
+  await page.evaluate(() => {
+    window.__holdFilesFrames = true;
+  });
+  await page
+    .getByRole("button", { name: /Create post/u })
+    .dispatchEvent("click");
+  const input = page.getByLabel("Post idea or caption");
+  await input.fill("Keep typing without a delayed focus jump");
+  await input.focus();
+  await expect(input).toBeFocused();
+  await releaseFilesAnimationFrames(page);
+  await expect(input).toBeFocused();
+  await expect(input).toHaveValue("Keep typing without a delayed focus jump");
+});
+
+test("initial drawer focus still reaches its first control without user focus", async ({
+  page,
+}) => {
+  await deferFilesAnimationFrames(page);
+  await seedSession(page);
+  await mockFiles(page, { assets: [assets[0]] });
+  await page.goto("/files/folders/folder-1");
+  await page
+    .getByRole("button", { name: `Select ${assets[0].name}`, exact: true })
+    .click();
+  await page.evaluate(() => {
+    window.__holdFilesFrames = true;
+  });
+  await page
+    .getByRole("button", { name: /Create post/u })
+    .dispatchEvent("click");
+  await releaseFilesAnimationFrames(page);
+  await expect(
+    page
+      .locator(".files-post-drawer")
+      .getByRole("button", { name: "Close", exact: true }),
+  ).toBeFocused();
+});
+
+test("stale drawer focus cannot move focus from a replacement dialog", async ({
+  page,
+}) => {
+  await deferFilesAnimationFrames(page);
+  await seedSession(page);
+  await mockFiles(page, { assets: [assets[0]] });
+  await page.goto("/files/folders/folder-1");
+  await page
+    .getByRole("button", { name: `Select ${assets[0].name}`, exact: true })
+    .click();
+  await page.evaluate(() => {
+    window.__holdFilesFrames = true;
+  });
+  await page
+    .getByRole("button", { name: /Create post/u })
+    .dispatchEvent("click");
+  await page
+    .locator(".files-post-drawer")
+    .getByRole("button", { name: "Close", exact: true })
+    .dispatchEvent("click");
+  await page
+    .getByRole("button", { name: "New subfolder", exact: true })
+    .dispatchEvent("click");
+  const input = page.getByLabel("What belongs here?");
+  await input.fill("Keep the replacement dialog focused");
+  await input.focus();
+  await releaseFilesAnimationFrames(page);
+  await expect(input).toBeFocused();
+  await expect(input).toHaveValue("Keep the replacement dialog focused");
+});

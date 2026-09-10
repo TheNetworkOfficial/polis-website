@@ -2828,6 +2828,20 @@ function render({ preserveLayers = false } = {}) {
   if (activeLayer && !layerState.focused) {
     layerState.focused = true;
     window.requestAnimationFrame(() => {
+      const currentLayer = state.modal
+        ? root.querySelector(".files-modal")
+        : state.postDraft.open
+          ? root.querySelector(".files-post-drawer")
+          : null;
+      // A delayed opening callback must not override a newer dialog or focus
+      // the person has already moved into this one.
+      if (
+        !activeLayer.isConnected ||
+        currentLayer !== activeLayer ||
+        (state.modal || state.postDraft) !== layerState ||
+        activeLayer.contains(document.activeElement)
+      )
+        return;
       const preferred = activeLayer.querySelector("[autofocus]");
       const fallback = activeLayer.querySelector(
         "input:not([type='hidden']), textarea, select, button",
