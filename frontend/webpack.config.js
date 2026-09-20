@@ -946,6 +946,7 @@ const publicPageRouteRewrites = [
   [/^\/faq\/?$/u, "/faq.html"],
   [/^\/contact\/?$/u, "/contact.html"],
   [/^\/terms\/?$/u, "/terms.html"],
+  [/^\/texting-payment-terms\/?$/u, "/texting-payment-terms.html"],
   [/^\/privacy-policy\/?$/u, "/privacy-policy.html"],
   [/^\/data-safety\/?$/u, "/data-safety.html"],
   [/^\/child-safety\/?$/u, "/child-safety.html"],
@@ -988,6 +989,8 @@ module.exports = {
     faq: "./src/pages/faq/faq.js",
     contact: "./src/pages/contact/contact.js",
     terms: "./src/pages/terms/terms.js",
+    textingPaymentTerms:
+      "./src/pages/texting-payment-terms/texting-payment-terms.js",
     privacyPolicy: "./src/pages/privacy-policy/privacy-policy.js",
     dataSafety: "./src/pages/data-safety/data-safety.js",
     childSafety: "./src/pages/child-safety/child-safety.js",
@@ -1099,6 +1102,12 @@ module.exports = {
       template: "./src/pages/terms/terms.html",
       filename: "terms.html",
       chunks: ["main", "terms"],
+      favicon: "./src/assets/images/polis/Polis.png",
+    }),
+    new HtmlWebpackPlugin({
+      template: "./src/pages/texting-payment-terms/texting-payment-terms.html",
+      filename: "texting-payment-terms.html",
+      chunks: ["main", "textingPaymentTerms"],
       favicon: "./src/assets/images/polis/Polis.png",
     }),
     new HtmlWebpackPlugin({

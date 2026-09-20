@@ -1,0 +1,28 @@
+.texting-payment-terms {
+  min-width: 0;
+}
+
+.texting-payment-terms h3 {
+  margin-top: var(--space-lg);
+}
+
+.texting-payment-terms__table {
+  overflow-x: auto;
+}
+
+.texting-payment-terms table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.texting-payment-terms caption {
+  margin-bottom: 0.75rem;
+  text-align: left;
+}
+
+.texting-payment-terms th,
+.texting-payment-terms td {
+  padding: 0.65rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border-color, currentColor);
+}
