@@ -31,6 +31,7 @@ import {
   createMessagingSocketClient,
 } from "./scripts/webMessaging.js";
 import { isFilesWorkspaceAccessible } from "../files/scripts/filesEntitlements.js";
+import { createTextingBalancePage } from "./scripts/textingBalance.js";
 import {
   buildComposerMediaItems,
   mediaPresentation,
@@ -41,6 +42,20 @@ import {
 const runtimeConfig =
   window.__POLIS_WEB_APP__ || window.__POLIS_SHARED_FEED__ || {};
 const root = document.getElementById("shared-feed-app");
+const textingBalancePage = createTextingBalancePage({
+  request: fetchJson,
+  context: () => {
+    const route = getCurrentRoute();
+    if (route.routeKey !== "organization-texting-balance") return null;
+    return {
+      organizationId: decodeRouteSegment(route.routeParams.organizationId),
+      userId: state.auth.session
+        ? getAuthenticatedUser(state.auth.session)?.userId || ""
+        : "",
+    };
+  },
+  changed: scheduleRender,
+});
 let stripeJsLoadPromise = null;
 const initialCommentId =
   new URL(window.location.href).searchParams.get("commentId") || "";
@@ -411,6 +426,7 @@ const ROUTE_KEY_COALITION_JOIN = "coalition-join";
 const ROUTE_KEY_COALITION_DETAIL = "coalition-detail";
 const ROUTE_KEY_COALITION_SECTION = "coalition-section";
 const ROUTE_KEY_ORGANIZATION_GOVERNANCE = "organization-governance";
+const ROUTE_KEY_ORGANIZATION_TEXTING_BALANCE = "organization-texting-balance";
 const ROUTE_KEY_MISSIONS = "missions";
 const ROUTE_KEY_MISSION_DETAIL = "mission-detail";
 const ROUTE_KEY_EVENTS = "events";
@@ -3035,6 +3051,11 @@ function parseRouteFromLocation(pathname = window.location.pathname) {
       ["voterMapSection"],
     ],
     [ROUTE_KEY_CANDIDATE_VOTER_MAP, /^\/candidate\/voter-map$/u, []],
+    [
+      ROUTE_KEY_ORGANIZATION_TEXTING_BALANCE,
+      /^\/organizations\/([^/]+)\/texting-balance\/?$/u,
+      ["organizationId"],
+    ],
     [
       ROUTE_KEY_ORGANIZATION_GOVERNANCE,
       /^\/organizations\/([^/]+)\/governance(?:\/(.+))?$/u,
@@ -5826,7 +5847,8 @@ function getRouteSection(route = state.route) {
     routeKey === ROUTE_KEY_COALITION_JOIN ||
     routeKey === ROUTE_KEY_COALITION_DETAIL ||
     routeKey === ROUTE_KEY_COALITION_SECTION ||
-    routeKey === ROUTE_KEY_ORGANIZATION_GOVERNANCE
+    routeKey === ROUTE_KEY_ORGANIZATION_GOVERNANCE ||
+    routeKey === ROUTE_KEY_ORGANIZATION_TEXTING_BALANCE
   ) {
     return "coalitions";
   }
@@ -6196,11 +6218,14 @@ function getRouteDocumentTitle(route = state.route) {
     routeKey === ROUTE_KEY_COALITION_JOIN ||
     routeKey === ROUTE_KEY_COALITION_DETAIL ||
     routeKey === ROUTE_KEY_COALITION_SECTION ||
-    routeKey === ROUTE_KEY_ORGANIZATION_GOVERNANCE
+    routeKey === ROUTE_KEY_ORGANIZATION_GOVERNANCE ||
+    routeKey === ROUTE_KEY_ORGANIZATION_TEXTING_BALANCE
   ) {
-    return routeKey === ROUTE_KEY_ORGANIZATION_GOVERNANCE
-      ? "Organization Governance | Polis"
-      : `${getCoalitionDocumentTitle(route)} | Polis`;
+    return routeKey === ROUTE_KEY_ORGANIZATION_TEXTING_BALANCE
+      ? "Texting balance | Polis"
+      : routeKey === ROUTE_KEY_ORGANIZATION_GOVERNANCE
+        ? "Organization Governance | Polis"
+        : `${getCoalitionDocumentTitle(route)} | Polis`;
   }
   if (
     routeKey === ROUTE_KEY_MESSAGES_ROOT ||
@@ -62425,6 +62450,10 @@ async function loadCurrentRoute({ refresh = false } = {}) {
     await loadCoalitionsPage({ refresh });
     return;
   }
+  if (routeKey === ROUTE_KEY_ORGANIZATION_TEXTING_BALANCE) {
+    await textingBalancePage.load();
+    return;
+  }
   if (routeKey === ROUTE_KEY_ORGANIZATION_GOVERNANCE) {
     await loadOrganizationGovernancePage({ refresh });
     return;
@@ -64442,6 +64471,7 @@ function getTopChromeTitle(route = state.route) {
     [ROUTE_KEY_CANDIDATE_VOTER_MAP]: "Voter Map",
     [ROUTE_KEY_CANDIDATE_VOTER_MAP_SECTION]: "Voter Map",
     [ROUTE_KEY_ORGANIZATION_GOVERNANCE]: "Governance",
+    [ROUTE_KEY_ORGANIZATION_TEXTING_BALANCE]: "Texting balance",
     [ROUTE_KEY_MANAGE_EVENTS]: "Manage Events",
     [ROUTE_KEY_MANAGE_EVENTS_NEW]: "Manage Events",
     [ROUTE_KEY_MANAGE_EVENTS_EDIT]: "Manage Events",
@@ -87705,6 +87735,12 @@ function renderCoalitionOverview(detail, coalition, membership) {
         : ""
     }
     <div class="shared-coalition-overview-grid">
+      ${
+        membership.isAdmin ? `<article class="shared-coalition-panel">
+        <h2>Texting balance</h2><p>Manage prepaid texting funds and purchase history.</p>
+        <button class="shared-feed-chip" data-action="navigate" data-route="/organizations/${escapeHtml(encodeURIComponent(coalition.coalitionId))}/texting-balance">Manage texting funds</button>
+      </article>` : ""
+      }
       ${
         canOpenMissions
           ? `<article class="shared-coalition-panel">
@@ -125659,7 +125695,8 @@ function renderRouteStage() {
       routeKey === ROUTE_KEY_COALITION_JOIN ||
       routeKey === ROUTE_KEY_COALITION_DETAIL ||
       routeKey === ROUTE_KEY_COALITION_SECTION ||
-      routeKey === ROUTE_KEY_ORGANIZATION_GOVERNANCE
+      routeKey === ROUTE_KEY_ORGANIZATION_GOVERNANCE ||
+      routeKey === ROUTE_KEY_ORGANIZATION_TEXTING_BALANCE
     ) {
       return renderCoalitionsAuthGate();
     }
@@ -125849,6 +125886,9 @@ function renderRouteStage() {
     routeKey === ROUTE_KEY_COALITION_SECTION
   ) {
     return renderCoalitionDetailPage();
+  }
+  if (routeKey === ROUTE_KEY_ORGANIZATION_TEXTING_BALANCE) {
+    return `<section class="shared-page">${renderTopChrome()}${textingBalancePage.render()}</section>`;
   }
   if (routeKey === ROUTE_KEY_ORGANIZATION_GOVERNANCE) {
     return renderOrganizationGovernancePage();
@@ -131089,6 +131129,7 @@ async function handleRootClick(event) {
   }
 
   if (action === "logout") {
+    textingBalancePage.reset();
     clearProfileAvatarUpload({ abort: true });
     clearMessagingServerMediaUploads({ abort: true, schedule: false });
     clearSharedFeedSession();
