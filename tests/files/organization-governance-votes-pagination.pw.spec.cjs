@@ -160,7 +160,7 @@ test("votes beyond the first 100 remain discoverable with deduplicated actions",
   ).toBeEnabled();
   await expect(
     older.getByRole("button", { name: "Edit", exact: true }),
-  ).toBeEnabled();
+  ).toBeDisabled();
   await expect(
     page.getByRole("heading", { name: "Vote vote-1", exact: true }),
   ).toHaveCount(1);
