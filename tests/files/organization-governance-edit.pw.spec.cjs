@@ -137,7 +137,7 @@ const PRESETS = [
   },
 ];
 
-async function routeGovernanceApi(page, captures, vote) {
+async function routeGovernanceApi(page, captures, vote, freshVote = vote) {
   await page.route(`${BASE_URL}/api/**`, async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -200,6 +200,12 @@ async function routeGovernanceApi(page, captures, vote) {
     }
     if (
       path === "/api/organizations/org-1/governance/v2/votes/vote-1" &&
+      request.method() === "GET"
+    ) {
+      return json(route, { ok: true, vote: freshVote });
+    }
+    if (
+      path === "/api/organizations/org-1/governance/v2/votes/vote-1" &&
       request.method() === "PATCH"
     ) {
       captures.updates.push(JSON.parse(request.postData() || "{}"));
@@ -210,6 +216,70 @@ async function routeGovernanceApi(page, captures, vote) {
     return json(route, {});
   });
 }
+
+for (const status of ["SEALED", "OPEN", "CERTIFIED", "PUBLISHED"]) {
+  test(`${status} vote has disabled Edit and a read-only direct edit route`, async ({
+    page,
+  }) => {
+    const vote = {
+      ...governanceVote({
+        ballotMethod: "YES_NO",
+        presetId: "simple_majority",
+      }),
+      status,
+    };
+    const captures = { creates: [], updates: [], unhandled: [] };
+    await seedSession(page);
+    await routeGovernanceApi(page, captures, vote);
+    await page.goto(`${BASE_URL}/organizations/org-1/governance/votes/vote-1`);
+    await expect(
+      page.locator('.is-focused button[data-route$="/edit"]'),
+    ).toBeDisabled();
+    await page.goto(
+      `${BASE_URL}/organizations/org-1/governance/votes/vote-1/edit`,
+    );
+    await expect(
+      page.getByText("Only draft votes you can manage may be edited.", {
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Save vote", exact: true }),
+    ).toHaveCount(0);
+    expect(captures.updates).toEqual([]);
+  });
+}
+
+test("draft becoming published before Save sends only a fresh read", async ({
+  page,
+}) => {
+  const vote = governanceVote({
+    ballotMethod: "YES_NO",
+    presetId: "simple_majority",
+  });
+  const captures = { creates: [], updates: [], unhandled: [] };
+  await seedSession(page);
+  await routeGovernanceApi(page, captures, vote, {
+    ...vote,
+    status: "PUBLISHED",
+    version: 9,
+  });
+  await page.goto(
+    `${BASE_URL}/organizations/org-1/governance/votes/vote-1/edit`,
+  );
+  await page.getByRole("button", { name: "Save vote", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Save vote", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page
+      .getByText("Only draft votes you can manage may be edited.", {
+        exact: true,
+      })
+      .first(),
+  ).toBeVisible();
+  expect(captures.updates).toEqual([]);
+});
 
 for (const [ballotMethod, presetId] of [
   ["AGGREGATE_FLOOR_COUNT", "aggregate_floor_count"],
@@ -380,4 +450,67 @@ test("create uses version zero and the nested Governance rule contract", async (
     participation: { remoteEnabled: true },
     paper: { allowed: false, evidenceRequired: false },
   });
+});
+
+test("choosing IRV disables unavailable private modes without changing the selected privacy", async ({
+  page,
+}) => {
+  const vote = governanceVote({
+    ballotMethod: "YES_NO",
+    presetId: "simple_majority",
+  });
+  const captures = { creates: [], updates: [], unhandled: [] };
+  await seedSession(page);
+  await routeGovernanceApi(page, captures, vote);
+  await page.goto(`${BASE_URL}/organizations/org-1/governance/votes/new`);
+  const privacy = page.locator('select[name="privacyMode"]');
+  await privacy.selectOption("SECRET_ADMIN_AUDITABLE");
+  await page.locator('select[name="ballotMethod"]').selectOption("IRV");
+  await expect(privacy).toHaveValue("SECRET_ADMIN_AUDITABLE");
+  await expect(
+    privacy.locator('option[value="SEALED_AUDIT"]'),
+  ).toHaveJSProperty("disabled", true);
+  await page.locator('input[name="question"]').fill("Elect a delegate");
+  await page.getByRole("button", { name: "Create vote", exact: true }).click();
+  await expect(privacy).toHaveJSProperty(
+    "validationMessage",
+    "Private IRV is unavailable. Choose open-attributed voting or another ballot method.",
+  );
+  await expect(privacy).toHaveValue("SECRET_ADMIN_AUDITABLE");
+  expect(captures.creates).toEqual([]);
+});
+
+test("existing private IRV stays selected until explicitly changed to open voting", async ({
+  page,
+}) => {
+  const vote = governanceVote({
+    ballotMethod: "IRV",
+    presetId: "open_irv",
+    privacyMode: "SEALED_AUDIT",
+  });
+  const captures = { creates: [], updates: [], unhandled: [] };
+  await seedSession(page);
+  await routeGovernanceApi(page, captures, vote);
+  await page.goto(
+    `${BASE_URL}/organizations/org-1/governance/votes/vote-1/edit`,
+  );
+  const privacy = page.locator('select[name="privacyMode"]');
+  await expect(privacy).toHaveValue("SEALED_AUDIT");
+  await page.getByRole("button", { name: "Save vote" }).click();
+  await expect(page.locator(".shared-page__error")).toContainText(
+    "Private IRV is unavailable",
+  );
+  expect(captures.updates).toEqual([]);
+  await expect(privacy).toHaveValue("SEALED_AUDIT");
+  await privacy.selectOption("OPEN_ATTRIBUTED");
+  await expect(
+    privacy.locator('option[value="SEALED_AUDIT"]'),
+  ).toHaveJSProperty("disabled", true);
+  await page.getByRole("button", { name: "Save vote" }).click();
+  await expect.poll(() => captures.updates.length).toBe(1);
+  expect(captures.updates[0].rules).toMatchObject({
+    ballotMethod: "IRV",
+    privacyMode: "OPEN_ATTRIBUTED",
+  });
+  expect(captures.updates[0].expectedVersion).toBe(7);
 });

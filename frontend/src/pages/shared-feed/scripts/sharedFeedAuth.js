@@ -404,7 +404,15 @@ export function getSharedFeedAuthCapabilities(config = {}) {
 }
 
 export function buildAuthorizedHeaders(session, extra = {}, options = {}) {
-  const authToken = normalizeString(session?.idToken || session?.accessToken);
+  // These API Gateway methods require an OAuth scope and therefore an access
+  // bearer. Keep the existing ID bearer for the unscoped API methods.
+  const isGovernanceRequest =
+    /^\/api\/organizations\/[^/?#]+\/governance\/v2(?:[/?#]|$)/u.test(
+      normalizeString(options.requestPath),
+    );
+  const authToken = isGovernanceRequest
+    ? requireAccessToken(session, "Governance")
+    : normalizeString(session?.idToken || session?.accessToken);
   const accessToken = normalizeString(session?.accessToken);
   if (!authToken || !accessToken) {
     throw new Error("unauthorized");
@@ -1078,8 +1086,7 @@ export async function verifySharedFeedTotpSetup(
     method: "POST",
     headers: {
       "Content-Type": "application/x-amz-json-1.1",
-      "X-Amz-Target":
-        "AWSCognitoIdentityProviderService.VerifySoftwareToken",
+      "X-Amz-Target": "AWSCognitoIdentityProviderService.VerifySoftwareToken",
     },
     body: JSON.stringify(body),
   });
@@ -1144,9 +1151,8 @@ async function postGovernancePasskeyJson(
 function buildPublicKeyCredentialCreationOptions(rawOptions = {}) {
   const options =
     rawOptions && typeof rawOptions === "object" ? rawOptions : {};
-  const user = options.user && typeof options.user === "object"
-    ? options.user
-    : {};
+  const user =
+    options.user && typeof options.user === "object" ? options.user : {};
   return {
     ...options,
     challenge: base64UrlToArrayBuffer(options.challenge),

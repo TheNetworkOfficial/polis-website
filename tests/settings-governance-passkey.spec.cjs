@@ -1,6 +1,6 @@
 const { test, expect } = require("@playwright/test");
 
-const BASE_URL = process.env.POLIS_TEST_BASE_URL || "http://127.0.0.1:9015";
+const BASE_URL = process.env.POLIS_TEST_BASE_URL || "http://127.0.0.1:9000";
 
 function jwt(claims) {
   const header = Buffer.from(
@@ -244,7 +244,13 @@ test("account security exposes and completes Governance passkey setup", async ({
   await expect.poll(() => captures.beginRequests.length).toBe(1);
   await expect.poll(() => captures.completeRequests.length).toBe(1);
 
-  expect(captures.beginRequests[0].authorization).toMatch(/^Bearer .+/u);
+  const session = await page.evaluate(() =>
+    JSON.parse(sessionStorage.getItem("sharedFeedSession.v1")),
+  );
+  expect(session.accessToken).not.toBe(session.idToken);
+  expect(captures.beginRequests[0].authorization).toBe(
+    `Bearer ${session.accessToken}`,
+  );
   expect(captures.beginRequests[0].body).toEqual({});
   expect(captures.completeRequests[0].authorization).toBe(
     captures.beginRequests[0].authorization,

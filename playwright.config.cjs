@@ -1,8 +1,8 @@
 const { defineConfig, devices } = require("@playwright/test");
 
 module.exports = defineConfig({
-  testDir: "./tests/files",
-  testMatch: "**/*.pw.spec.cjs",
+  testDir: "./tests",
+  testMatch: ["files/**/*.pw.spec.cjs", "settings-governance-passkey.spec.cjs"],
   timeout: 30_000,
   expect: { timeout: 7_000 },
   fullyParallel: false,
