@@ -290,7 +290,6 @@ test("designated acceptance purchase shows its real amount and beta terms, then 
   await page.getByRole("button", { name: "$1.00", exact: true }).click();
   const review = page.locator(".texting-balance__review");
   await expect(review.locator("dd")).toHaveText(["$1.00", "$0.05", "$1.05"]);
-  await expect(review).toContainText("One-time acceptance purchase");
   await expect(review).toContainText(BETA_TAX_NOTICE);
   await expect(
     page.getByText("Test mode — no real payment is collected.", {
@@ -328,7 +327,7 @@ test("designated acceptance purchase shows its real amount and beta terms, then 
     "Fee $0.05 · Tax $0.00 · Total $1.05",
   );
   await expect(page.locator(".texting-balance")).toContainText(
-    "Your acceptance purchase is complete.",
+    "Purchases are unavailable",
   );
   await expect(page.locator(".texting-balance__packs")).toHaveCount(0);
 

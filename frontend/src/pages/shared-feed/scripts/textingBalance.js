@@ -358,22 +358,8 @@ export function createTextingBalancePage({ request, context, changed }) {
   function renderPacks(billing) {
     if (!billing.canManageBilling)
       return "<p>Only organization administrators can add texting funds or view purchases.</p>";
-    if (!billing.canPurchase) {
-      const acceptanceNotices = {
-        acceptance_purchase_completed:
-          "Your acceptance purchase is complete. Additional purchases will be available after the controlled acceptance check.",
-        acceptance_purchase_not_authorized:
-          "This acceptance purchase is reserved for the designated administrator.",
-        acceptance_purchase_expired:
-          "The acceptance purchase window has expired. Contact beta support before trying again.",
-        purchase_window_expiring:
-          "This purchase window is closing. Contact beta support before trying again.",
-      };
-      const reason = billing.blockedReasons?.find(
-        (item) => acceptanceNotices[item],
-      );
-      return `<p>${reason ? acceptanceNotices[reason] : "Purchases are unavailable until registration approval and billing setup are complete and any billing hold is resolved."}</p>`;
-    }
+    if (!billing.canPurchase)
+      return "<p>Purchases are unavailable until registration approval and billing setup are complete and any billing hold is resolved.</p>";
     const pack = billing.packs?.find((item) => item.id === view.selectedPack);
     const termsUrl = safeUrl(billing.terms?.url);
     return `<section class="shared-coalition-panel">
@@ -392,7 +378,6 @@ export function createTextingBalancePage({ request, context, changed }) {
         <dl><dt>Texting funds</dt><dd>${money(pack.principalCents)}</dd>
           <dt>Polis service fee (5%)</dt><dd>${money(pack.serviceFeeCents)}</dd>
           <dt>Total before applicable tax</dt><dd>${money(pack.totalBeforeTaxCents)}</dd></dl>
-        ${pack.notice ? `<p>${escape(pack.notice)}</p>` : ""}
         <p>${escape(billing.terms?.taxNotice || "Any applicable tax and your final total will be shown in secure checkout before payment.")}</p>
         <p>${escape(billing.terms?.refundPolicy || "No routine refunds. Contact support for payment errors, disputes, or refunds required by law.")}</p>
         <p>One-time purchase. No automatic refills, expiration, or transfers. Adding funds does not approve registration or restart messaging.</p>
