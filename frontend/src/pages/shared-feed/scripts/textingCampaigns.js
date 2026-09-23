@@ -119,6 +119,7 @@ export function createCampaigns(r) {
       item = list(q?.items)[0],
       p = item?.preview,
       held = item && r.sendHeld(`queue:${c.campaignId}:${item.itemId}`),
+      pending = item && s.pendingItemId === item.itemId,
       price = p && messagePrice(r.billing(), p.message, !!p.attachmentUrl);
     if (!c) return head("TEXTING", "Choose a campaign") + listCards(s);
     return (
@@ -131,7 +132,7 @@ export function createCampaigns(r) {
       (!q
         ? `<section class="pt-card"><h2>Your next conversation</h2><p class="pt-muted">Get your assigned recipients when you’re ready.</p>${button("queue-load", "Get my next messages", { disabled: !c.canFetchQueue || !r.can("manualQueue") || r.busy() })}${reasons(c.blockedReasons)}</section>`
         : item
-          ? `<div class="pt-grid pt-grid--two"><section class="pt-card"><div class="pt-row"><div><h2>${e(p?.contactDisplayName || "Recipient")}</h2><p class="pt-muted">${e(p?.contactPhone || "Recipient unavailable")}</p></div><span class="pt-tag">${e(label(held ? "needs_review" : item.state))}</span></div><div class="pt-eyebrow">FINAL MESSAGE</div><div class="pt-workspace-bubble">${p?.attachmentUrl ? (checkedUrl(p.attachmentUrl) ? `<img data-workspace-queue-image="${e(item.itemId)}" src="${e(checkedUrl(p.attachmentUrl))}" alt="Final message attachment" referrerpolicy="no-referrer">` : notice("Attachment unavailable")) : ""}<p>${e(p?.message || "Final text unavailable")}</p></div>${held ? notice("Delivery needs review", "Do not send again. Its charge stays reserved until the outcome is confirmed.") : ""}${reasons(item.blockedReasons)}${item.expiresAtMs <= Date.now() ? notice("Preview expired", "Check the campaign status before continuing.") : ""}<div class="pt-row"><span>${p?.attachmentUrl ? "MMS" : "SMS"} · ${price === null ? "Rate unavailable" : money(price)}</span><div class="pt-actions">${button("queue-skip", "Skip recipient", { secondary: true, disabled: r.busy() || held || item.state !== "awaiting_confirmation" })}${button("queue-confirm", `Send to ${p?.contactDisplayName || p?.contactPhone || "recipient"}`, { disabled: r.busy() || held || !queueCanConfirm(item, r.workspace(), r.billing(), s.imageLoaded === item.itemId) })}</div></div><p class="pt-muted">Sends this message to this person only.</p></section><aside class="pt-card"><div class="pt-eyebrow">YOUR SESSION</div>${stat("Messages confirmed this session", count(s.sent || 0))}<div class="pt-row"><span>Available funds</span><strong>${money(r.billing()?.availableMicros)}</strong></div>${go("inbox", "Open inbox", "", true)}</aside></div>`
+          ? `<div class="pt-grid pt-grid--two"><section class="pt-card"><div class="pt-row"><div><h2>${e(p?.contactDisplayName || "Recipient")}</h2><p class="pt-muted">${e(p?.contactPhone || "Recipient unavailable")}</p></div><span class="pt-tag">${e(label(pending ? s.pendingAction : held ? "needs_review" : item.state))}</span></div><div class="pt-eyebrow">FINAL MESSAGE</div><div class="pt-workspace-bubble">${p?.attachmentUrl ? (checkedUrl(p.attachmentUrl) ? `<img data-workspace-queue-image="${e(item.itemId)}" src="${e(checkedUrl(p.attachmentUrl))}" alt="Final message attachment" referrerpolicy="no-referrer">` : notice("Attachment unavailable")) : ""}<p>${e(p?.message || "Final text unavailable")}</p></div>${held && !pending ? notice("Delivery needs review", "Do not send again. Its charge stays reserved until the outcome is confirmed.") : ""}${reasons(item.blockedReasons)}${item.expiresAtMs <= Date.now() ? notice("Preview expired", "Check the campaign status before continuing.") : ""}<div class="pt-row"><span>${p?.attachmentUrl ? "MMS" : "SMS"} · ${price === null ? "Rate unavailable" : money(price)}</span><div class="pt-actions">${button("queue-skip", "Skip recipient", { secondary: true, disabled: r.busy() || held || item.state !== "awaiting_confirmation" })}${button("queue-confirm", pending && s.pendingAction === "sending" ? "Sending…" : `Send to ${p?.contactDisplayName || p?.contactPhone || "recipient"}`, { disabled: r.busy() || held || !queueCanConfirm(item, r.workspace(), r.billing(), s.imageLoaded === item.itemId) })}</div></div><p class="pt-muted">Sends this message to this person only.</p></section><aside class="pt-card"><div class="pt-eyebrow">YOUR SESSION</div>${stat("Messages confirmed this session", count(s.sent || 0))}<div class="pt-row"><span>Available funds</span><strong>${money(r.billing()?.availableMicros)}</strong></div>${go("inbox", "Open inbox", "", true)}</aside></div>`
           : `<section class="pt-card"><h2>${q.state === "allocation_unknown" ? "Session needs review" : "You’re caught up"}</h2><p class="pt-muted">${q.state === "allocation_unknown" ? "Your assigned messages could not be confirmed. An administrator must check the saved status." : "Get another group when you’re ready."}</p>${q.state !== "allocation_unknown" ? button("queue-load", "Get more messages", { disabled: !c.canFetchQueue || r.busy() }) : ""}${reasons(q.blockedReasons)}</section>`)
     );
   }
@@ -363,30 +364,39 @@ export function createCampaigns(r) {
         throw new Error(
           "This preview is not ready. Check its status before continuing.",
         );
-      // Hold before transport. Any ambiguous response keeps this exact item fenced; there is no automatic retry.
-      r.holdSend(key);
+      // The durable hold also fences an in-flight request. Only a completed
+      // unknown/failed request should be presented as an uncertain outcome.
       const confirming = name === "queue-confirm";
-      const result = (
-        await r.api(
-          `/campaigns/${id(c.campaignId)}/queue/${id(item.itemId)}/${confirming ? "confirm" : "skip"}`,
-          confirming
-            ? { humanConfirmation: item.humanConfirmation }
-            : { actionId: uuid() },
-        )
-      ).result;
-      if (!result || result.itemId !== item.itemId)
-        throw new Error("The message outcome could not be verified.");
-      if (["accepted", "confirmed"].includes(result.state)) {
-        r.releaseSend(key);
-        s.queue.items.shift();
-        if (confirming) s.sent = (s.sent || 0) + 1;
-        r.toast(confirming ? "Message accepted" : "Recipient skipped");
-      } else {
-        item.state = result.state || "provider_outcome_unknown";
-        r.toast("Message outcome needs review");
+      r.holdSend(key);
+      s.pendingItemId = item.itemId;
+      s.pendingAction = confirming ? "sending" : "skipping";
+      r.changed();
+      try {
+        const result = (
+          await r.api(
+            `/campaigns/${id(c.campaignId)}/queue/${id(item.itemId)}/${confirming ? "confirm" : "skip"}`,
+            confirming
+              ? { humanConfirmation: item.humanConfirmation }
+              : { actionId: uuid() },
+          )
+        ).result;
+        if (!result || result.itemId !== item.itemId)
+          throw new Error("The message outcome could not be verified.");
+        if (["accepted", "confirmed"].includes(result.state)) {
+          r.releaseSend(key);
+          s.queue.items.shift();
+          if (confirming) s.sent = (s.sent || 0) + 1;
+          r.toast(confirming ? "Message accepted" : "Recipient skipped");
+        } else {
+          item.state = result.state || "provider_outcome_unknown";
+          r.toast("Message outcome needs review");
+        }
+      } finally {
+        s.pendingItemId = null;
+        s.pendingAction = null;
       }
       s.imageLoaded = null;
-      await r.refreshBilling();
+      await r.refreshSendStatus();
       r.armExpiry(list(s.queue.items)[0]?.expiresAtMs);
       return true;
     }

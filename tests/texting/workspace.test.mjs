@@ -317,7 +317,10 @@ test("uncertain initial sends stay fenced and never auto-retry", async () => {
         result: { itemId: q.itemId, state: "provider_outcome_unknown" },
       };
     },
-    refreshBilling: async () => {},
+    refreshSendStatus: async () => {},
+    changed: () => {},
+    context: () => ({ resourceId: "campaign-one" }),
+    busy: () => false,
     armExpiry: () => {},
     toast: () => {},
   };
@@ -328,6 +331,8 @@ test("uncertain initial sends stay fenced and never auto-retry", async () => {
   await assert.rejects(page.action("queue-confirm"), /not ready/);
   assert.equal(calls.length, 1);
   assert.equal(state.campaigns.queue.items.length, 1);
+  assert.match(page.render("send"), /Delivery needs review/);
+  assert.doesNotMatch(page.render("send"), /Sending…/);
 });
 
 test("a confirmed message advances only the local item; it does not confirm the next recipient", async () => {
@@ -352,7 +357,10 @@ test("a confirmed message advances only the local item; it does not confirm the 
       calls.push(path);
       return { result: { itemId: q.itemId, state: "confirmed" } };
     },
-    refreshBilling: async () => {},
+    refreshSendStatus: async () => {},
+    changed: () => {},
+    context: () => ({ resourceId: "campaign-one" }),
+    busy: () => false,
     armExpiry: () => {},
     toast: () => {},
   };
@@ -583,4 +591,100 @@ test("a lost preparation response reconciles by reads without another contact tr
   assert.equal(calls.filter((c) => c.body).length, 1);
   assert.equal(calls.length, 5);
   page.dispose();
+});
+
+test("sending feedback remains pending until confirmation, then refreshes pilot limits and balance without another send", async () => {
+  const listeners = new Map();
+  globalThis.document = {
+    addEventListener: (name, handler) => listeners.set(name, handler),
+  };
+  const campaign = {
+    campaignId: "campaign-one",
+    name: "Example campaign",
+    canFetchQueue: true,
+  };
+  const calls = [];
+  let releaseSend,
+    sent = false;
+  const page = createTextingWorkspacePage({
+    context: () => ({
+      organizationId: "org-one",
+      userId: "admin",
+      section: "send",
+      resourceId: campaign.campaignId,
+    }),
+    changed: () => {},
+    navigate: () => {},
+    request: async (url, options) => {
+      calls.push({ url, options });
+      if (url.endsWith("/workspace"))
+        return {
+          ok: true,
+          workspace: {
+            ...workspace,
+            sendingMode: "pilot",
+            pilot: {
+              remainingMessages: sent ? 5 : 6,
+              remainingSpendMicros: sent ? 465000 : 500000,
+            },
+          },
+        };
+      if (url.endsWith("/summary"))
+        return {
+          ok: true,
+          billing: { ...billing, availableMicros: sent ? 965000 : 1000000 },
+        };
+      if (url.endsWith("/queue"))
+        return { ok: true, items: [item(), { ...item(), itemId: "item-two" }] };
+      if (url.endsWith("/confirm"))
+        return new Promise((resolve) => {
+          releaseSend = () => {
+            sent = true;
+            resolve({
+              ok: true,
+              result: { itemId: "item-one", state: "confirmed" },
+            });
+          };
+        });
+      return { ok: true, campaign };
+    },
+  });
+  const click = (action) => {
+    const target = {
+      disabled: false,
+      dataset: { workspaceAction: action },
+      closest: () => ({
+        dataset: { workspaceKey: "admin:org-one:send:campaign-one" },
+      }),
+    };
+    listeners.get("click")({ target: { closest: () => target } });
+  };
+  await page.load();
+  click("queue-load");
+  await flush();
+  click("queue-confirm");
+  await flush();
+  assert.match(page.render(), /Sending…/);
+  assert.doesNotMatch(
+    page.render(),
+    /Delivery needs review|needs review|Saving…/,
+  );
+  assert.match(
+    page.render(),
+    /data-workspace-action="queue-confirm"[^>]*disabled/,
+  );
+  click("queue-confirm");
+  assert.equal(calls.filter((call) => call.url.endsWith("/confirm")).length, 1);
+  releaseSend();
+  await flush();
+  assert.match(page.render(), /Message accepted/);
+  assert.match(page.render(), /5 messages and \$0.465 remain/);
+  assert.match(page.render(), /\$0.965/);
+  assert.doesNotMatch(page.render(), /Delivery needs review|Sending…/);
+  assert.equal(
+    calls.filter((call) => call.url.endsWith("/workspace")).length,
+    2,
+  );
+  assert.equal(calls.filter((call) => call.url.endsWith("/confirm")).length, 1);
+  page.reset();
 });
