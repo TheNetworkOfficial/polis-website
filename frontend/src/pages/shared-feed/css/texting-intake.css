@@ -1,0 +1,184 @@
+.texting-workspace .pt-intake {
+  max-width: 1100px;
+}
+.texting-workspace .pt-intake-steps {
+  display: flex;
+  gap: 24px;
+  padding: 0;
+  margin: 0 0 28px;
+  list-style: none;
+  flex-wrap: wrap;
+}
+.texting-workspace .pt-intake-steps li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--polis-text-muted);
+  font-size: 14px;
+}
+.texting-workspace .pt-intake-steps li > span {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--polis-surface-raised);
+}
+.texting-workspace .pt-intake-steps [aria-current] {
+  color: var(--polis-primary);
+  font-weight: 700;
+}
+.texting-workspace .pt-intake-steps [aria-current] > span {
+  background: var(--polis-primary);
+  color: #fff;
+}
+.texting-workspace .pt-intake-steps .is-complete > span {
+  color: var(--polis-success);
+}
+.texting-workspace .pt-intake-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  border-top: 1px solid var(--polis-border);
+  padding-top: 20px;
+  margin-top: 20px;
+  flex-wrap: wrap;
+}
+.texting-workspace .pt-intake-validation,
+.texting-workspace .pt-intake-error {
+  color: var(--polis-danger);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.texting-workspace .pt-intake-error:empty,
+.texting-workspace .pt-intake-validation:empty {
+  display: none;
+}
+.texting-workspace .pt-intake-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  line-height: 1.6;
+  margin: 20px 0;
+  cursor: pointer;
+}
+.texting-workspace .pt-intake-check input {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  margin: 3px 0 0;
+  accent-color: var(--polis-primary);
+}
+.texting-workspace .pt-intake-details {
+  margin: 16px 0;
+}
+.texting-workspace .pt-intake-details summary {
+  cursor: pointer;
+  color: var(--polis-primary);
+  font-weight: 600;
+  padding: 12px 0;
+}
+.texting-workspace .pt-intake-link {
+  color: var(--polis-primary);
+  display: inline-block;
+  margin-top: 16px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.texting-workspace .pt-intake-readback {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+  padding: 16px 0;
+}
+.texting-workspace .pt-intake-readback dt {
+  font-size: 12px;
+  color: var(--polis-text-muted);
+  margin-bottom: 5px;
+}
+.texting-workspace .pt-intake-readback dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.texting-workspace .pt-intake-status {
+  text-align: center;
+  padding-block: 44px;
+}
+.texting-workspace .pt-intake-status .pt-actions {
+  justify-content: center;
+}
+.texting-workspace .pt-intake-status-icon {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--polis-surface-raised);
+  color: var(--polis-primary);
+  font-size: 32px;
+  margin: 0 auto 16px;
+}
+.texting-workspace .pt-intake-path {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: 22px;
+  counter-reset: registration;
+  margin: 32px 0;
+}
+.texting-workspace .pt-intake-path li {
+  counter-increment: registration;
+  display: grid;
+  grid-template-columns: 36px 1fr;
+  gap: 4px 12px;
+}
+.texting-workspace .pt-intake-path li::before {
+  content: counter(registration);
+  grid-row: span 2;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--polis-surface-raised);
+  color: var(--polis-primary);
+}
+.texting-workspace .pt-intake-path li > span {
+  color: var(--polis-text-muted);
+  font-size: 14px;
+}
+.texting-workspace .pt-intake-save-note {
+  font-size: 12px;
+}
+.texting-workspace .pt-intake-stop {
+  max-width: 720px;
+}
+.texting-workspace .pt-intake-stop ul {
+  padding-left: 20px;
+  line-height: 1.8;
+}
+@media (max-width: 640px) {
+  .texting-workspace .pt-intake-steps {
+    gap: 12px;
+  }
+  .texting-workspace .pt-intake-steps li {
+    font-size: 12px;
+    gap: 5px;
+  }
+  .texting-workspace .pt-intake-steps li > span {
+    width: 24px;
+    height: 24px;
+  }
+  .texting-workspace .pt-intake-readback {
+    grid-template-columns: 1fr;
+  }
+  .texting-workspace .pt-intake-footer {
+    align-items: stretch;
+  }
+  .texting-workspace .pt-intake-footer > .pt-actions {
+    flex: 1;
+    justify-content: flex-end;
+  }
+}

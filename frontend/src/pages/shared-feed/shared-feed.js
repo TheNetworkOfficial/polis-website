@@ -1,6 +1,7 @@
 import "../../css/polis-design-system.css";
 import "./css/shared-feed.css";
 import "./css/civic-neon.css";
+import "./css/texting-workspace.css";
 import polisLogoUrl from "../../assets/images/polis/Polis.png";
 
 import {
@@ -31,6 +32,15 @@ import {
   createMessagingSocketClient,
 } from "./scripts/webMessaging.js";
 import { createTextingBalancePage } from "./scripts/textingBalance.js";
+import { createTextingIntakePage } from "./scripts/textingIntake.js";
+import { createTextingWorkspacePage } from "./scripts/textingWorkspace.js";
+import {
+  parseTextingRoute,
+  textingRoute,
+  renderTextingShell,
+  snapshotTextingFocus,
+  restoreTextingFocus,
+} from "./scripts/textingShell.js";
 
 const runtimeConfig =
   window.__POLIS_WEB_APP__ || window.__POLIS_SHARED_FEED__ || {};
@@ -48,6 +58,24 @@ const textingBalancePage = createTextingBalancePage({
     };
   },
   changed: scheduleRender,
+});
+const textingIntakePage = createTextingIntakePage({
+  request: fetchJson,
+  context: () => {
+    const current = currentTextingContext();
+    return current && ["registration", "settings"].includes(current.section) ? current : null;
+  },
+  changed: scheduleRender,
+  navigate: navigateTexting,
+});
+const textingWorkspacePage = createTextingWorkspacePage({
+  request: fetchJson,
+  context: () => {
+    const current = currentTextingContext();
+    return current && !["registration", "settings", "balance"].includes(current.section) ? current : null;
+  },
+  changed: scheduleRender,
+  navigate: navigateTexting,
 });
 let stripeJsLoadPromise = null;
 const initialCommentId =
@@ -370,6 +398,7 @@ const ROUTE_KEY_COALITION_DETAIL = "coalition-detail";
 const ROUTE_KEY_COALITION_SECTION = "coalition-section";
 const ROUTE_KEY_ORGANIZATION_GOVERNANCE = "organization-governance";
 const ROUTE_KEY_ORGANIZATION_TEXTING_BALANCE = "organization-texting-balance";
+const ROUTE_KEY_ORGANIZATION_TEXTING = "organization-texting";
 const ROUTE_KEY_MISSIONS = "missions";
 const ROUTE_KEY_MISSION_DETAIL = "mission-detail";
 const ROUTE_KEY_EVENTS = "events";
@@ -2587,6 +2616,12 @@ function normalizeCalendarReturnLocation() {
 function parseRouteFromLocation(pathname = window.location.pathname) {
   const calendarTargetPath = calendarReturnTargetPathFromLocation(pathname);
   const normalizedPath = calendarTargetPath || normalizePathname(pathname);
+  const texting = parseTextingRoute(normalizedPath);
+  if (texting) return {
+    routeKey: texting.section === "balance" ? ROUTE_KEY_ORGANIZATION_TEXTING_BALANCE : ROUTE_KEY_ORGANIZATION_TEXTING,
+    routePath: normalizedPath,
+    routeParams: { organizationId: encodeURIComponent(texting.organizationId), textingSection: texting.section, textingResourceId: encodeURIComponent(texting.resourceId) },
+  };
   if (connectedAccountReturnPathStatus(pathname)) {
     return {
       routeKey: ROUTE_KEY_SETTINGS_SECTION,
@@ -5458,7 +5493,8 @@ function getRouteSection(route = state.route) {
     routeKey === ROUTE_KEY_COALITION_DETAIL ||
     routeKey === ROUTE_KEY_COALITION_SECTION ||
     routeKey === ROUTE_KEY_ORGANIZATION_GOVERNANCE ||
-    routeKey === ROUTE_KEY_ORGANIZATION_TEXTING_BALANCE
+    routeKey === ROUTE_KEY_ORGANIZATION_TEXTING_BALANCE ||
+    routeKey === ROUTE_KEY_ORGANIZATION_TEXTING
   ) {
     return "coalitions";
   }
@@ -5825,9 +5861,12 @@ function getRouteDocumentTitle(route = state.route) {
     routeKey === ROUTE_KEY_COALITION_DETAIL ||
     routeKey === ROUTE_KEY_COALITION_SECTION ||
     routeKey === ROUTE_KEY_ORGANIZATION_GOVERNANCE ||
-    routeKey === ROUTE_KEY_ORGANIZATION_TEXTING_BALANCE
+    routeKey === ROUTE_KEY_ORGANIZATION_TEXTING_BALANCE ||
+    routeKey === ROUTE_KEY_ORGANIZATION_TEXTING
   ) {
-    return routeKey === ROUTE_KEY_ORGANIZATION_TEXTING_BALANCE
+    return routeKey === ROUTE_KEY_ORGANIZATION_TEXTING
+      ? "Texting | Polis"
+      : routeKey === ROUTE_KEY_ORGANIZATION_TEXTING_BALANCE
       ? "Texting balance | Polis"
       : routeKey === ROUTE_KEY_ORGANIZATION_GOVERNANCE
         ? "Organization Governance | Polis"
@@ -5983,6 +6022,33 @@ function syncPublicPetitionSocialMeta(petition) {
       "summary_large_image",
     );
   }
+}
+
+function currentTextingContext() {
+  const route = getCurrentRoute();
+  if (![ROUTE_KEY_ORGANIZATION_TEXTING, ROUTE_KEY_ORGANIZATION_TEXTING_BALANCE].includes(route.routeKey)) return null;
+  const parsed = parseTextingRoute(route.routePath || window.location.pathname);
+  if (!parsed) return null;
+  const user = state.auth.session ? getAuthenticatedUser(state.auth.session) : null;
+  return { ...parsed, userId: user?.userId || "", organizationName: "" };
+}
+
+function navigateTexting(section, resourceId = "") {
+  const current = currentTextingContext();
+  if (current) navigateTo(textingRoute(current.organizationId, section, resourceId));
+}
+
+function isTextingAuthRoute() {
+  return getCurrentRoute().routeKey === ROUTE_KEY_AUTH && Boolean(parseTextingRoute(getPathnameFromRouteTarget(authRouteReturnPath())));
+}
+
+function renderCurrentTextingPage() {
+  const current = currentTextingContext();
+  if (!current) return "";
+  const controller = current.section === "balance" ? textingBalancePage : ["registration", "settings"].includes(current.section) ? textingIntakePage : textingWorkspacePage;
+  const meta = controller.getMeta?.() || {};
+  const user = state.auth.session ? getAuthenticatedUser(state.auth.session) : null;
+  return renderTextingShell({ ...current, organizationName: meta.organizationName || "", userName: user?.displayName || user?.username || user?.name || "Your account", logoUrl: resolveSharedAssetUrl(polisLogoUrl), content: controller.render() });
 }
 
 function navigateTo(path, { replace = false } = {}) {
@@ -46458,6 +46524,10 @@ async function requireAuthForRoute(route = state.route) {
     scheduleRender();
     return false;
   }
+  if (parseTextingRoute(route.routePath || "")) {
+    navigateTo(`/auth?returnTo=${encodeURIComponent(`${route.routePath}${window.location.search}`)}`, { replace: true });
+    return false;
+  }
   promptForProtectedRoute(`${route.routePath}${window.location.search}`);
   return false;
 }
@@ -59977,6 +60047,16 @@ async function registerSettingsGovernancePasskey() {
 async function loadCurrentRoute({ refresh = false } = {}) {
   const route = getCurrentRoute();
   state.renderError = "";
+  const texting = currentTextingContext();
+  if (!texting || !state.auth.session) {
+    textingBalancePage.reset(); textingIntakePage.reset(); textingWorkspacePage.reset();
+  } else if (texting.section === "balance") {
+    textingIntakePage.reset(); textingWorkspacePage.reset();
+  } else if (["registration", "settings"].includes(texting.section)) {
+    textingBalancePage.reset(); textingWorkspacePage.reset();
+  } else {
+    textingBalancePage.reset(); textingIntakePage.reset();
+  }
   if (!(await requireAuthForRoute(route))) {
     return;
   }
@@ -60171,6 +60251,10 @@ async function loadCurrentRoute({ refresh = false } = {}) {
     routeKey === ROUTE_KEY_COALITION_SECTION
   ) {
     await loadCoalitionsPage({ refresh });
+    return;
+  }
+  if (routeKey === ROUTE_KEY_ORGANIZATION_TEXTING) {
+    await (["registration", "settings"].includes(currentTextingContext()?.section) ? textingIntakePage : textingWorkspacePage).load();
     return;
   }
   if (routeKey === ROUTE_KEY_ORGANIZATION_TEXTING_BALANCE) {
@@ -84435,10 +84519,14 @@ function renderCoalitionOverview(detail, coalition, membership) {
     }
     <div class="shared-coalition-overview-grid">
       ${
-        membership.isAdmin ? `<article class="shared-coalition-panel">
-        <h2>Texting balance</h2><p>Manage prepaid texting funds and purchase history.</p>
-        <button class="shared-feed-chip" data-action="navigate" data-route="/organizations/${escapeHtml(encodeURIComponent(coalition.coalitionId))}/texting-balance">Manage texting funds</button>
-      </article>` : ""
+        membership.isActive && !membership.isPending
+          ? `<article class="shared-coalition-panel pt-org-entry">
+        <span class="pt-eyebrow">KEEP THE CONVERSATION GOING</span>
+        <h2>Every message matters.</h2><p>Texting, contacts, and conversations for your team.</p>
+        <button class="pt-btn" data-action="navigate" data-route="${escapeHtml(textingRoute(coalition.coalitionId))}">Open texting</button>
+        ${membership.isAdmin ? `<button class="pt-btn pt-btn--secondary" data-action="navigate" data-route="${escapeHtml(textingRoute(coalition.coalitionId, "balance"))}">Texting balance</button>` : ""}
+      </article>`
+          : ""
       }
       ${
         canOpenMissions
@@ -110558,6 +110646,14 @@ function renderAuthRoutePage() {
   } else {
     body = `${renderAuthRouteModeControls("login")} ${renderAuthRouteStatus(auth)} ${renderAuthRouteLogin(auth, capabilities)}`;
   }
+  if (isTextingAuthRoute()) {
+    const heading = mode === "signup" ? "Create your account." : mode === "confirm" ? "Check your inbox." : mode.startsWith("reset") ? "Reset your password." : "Welcome back.";
+    return `<section class="texting-workspace"><main class="pt-auth">
+      <a class="pt-brand" href="/feed" data-action="navigate" data-route="/feed"><img src="${escapeHtml(resolveSharedAssetUrl(polisLogoUrl))}" alt="" width="48" height="48"><span>Polis</span></a>
+      <div class="pt-eyebrow">YOUR ORGANIZATION. CONNECTED.</div><h1>${heading}</h1>
+      <p>Sign in to continue to texting.</p><section class="shared-auth-route-panel">${body}</section>
+    </main></section>`;
+  }
   return `<section class="shared-page shared-auth-route-page">
     ${renderTopChrome()}
     <div class="shared-page__content shared-auth-route-content">
@@ -120512,7 +120608,8 @@ function renderRouteStage() {
       routeKey === ROUTE_KEY_COALITION_DETAIL ||
       routeKey === ROUTE_KEY_COALITION_SECTION ||
       routeKey === ROUTE_KEY_ORGANIZATION_GOVERNANCE ||
-      routeKey === ROUTE_KEY_ORGANIZATION_TEXTING_BALANCE
+      routeKey === ROUTE_KEY_ORGANIZATION_TEXTING_BALANCE ||
+    routeKey === ROUTE_KEY_ORGANIZATION_TEXTING
     ) {
       return renderCoalitionsAuthGate();
     }
@@ -120707,8 +120804,8 @@ function renderRouteStage() {
   ) {
     return renderCoalitionDetailPage();
   }
-  if (routeKey === ROUTE_KEY_ORGANIZATION_TEXTING_BALANCE) {
-    return `<section class="shared-page">${renderTopChrome()}${textingBalancePage.render()}</section>`;
+  if (routeKey === ROUTE_KEY_ORGANIZATION_TEXTING_BALANCE || routeKey === ROUTE_KEY_ORGANIZATION_TEXTING) {
+    return renderCurrentTextingPage();
   }
   if (routeKey === ROUTE_KEY_ORGANIZATION_GOVERNANCE) {
     return renderOrganizationGovernancePage();
@@ -121857,7 +121954,12 @@ function renderApp() {
   const petitionAddressFocusSnapshot = snapshotPetitionAddressFocusState();
   syncActiveSettingsHomeLocationDraftBeforeRender();
   const publicPetitionRoute = isPublicPetitionRoute();
-  const shell = publicPetitionRoute
+  const textingPresentation = Boolean(currentTextingContext()) || isTextingAuthRoute();
+  const textingIdentity = state.auth.session ? getAuthenticatedUser(state.auth.session)?.userId || "" : "";
+  const textingFocus = snapshotTextingFocus(root, textingIdentity);
+  const shell = textingPresentation
+    ? `<div class="shared-feed-shell shared-feed-shell--texting">${renderRouteStage()}</div>${renderAuthModal()}${renderConfirmationPanel()}${renderToast()}`
+    : publicPetitionRoute
     ? `<div class="shared-feed-shell shared-feed-shell--public">
         ${renderRouteStage()}
       </div>
@@ -121880,6 +121982,7 @@ function renderApp() {
   root.innerHTML = shell;
   restoreFeedScrollState(scrollSnapshot);
   restorePetitionAddressFocusState(petitionAddressFocusSnapshot);
+  restoreTextingFocus(root, textingFocus, textingIdentity);
   bindObservers();
   bindVideos();
   bindPostComposerCameraPreview();
@@ -125815,6 +125918,8 @@ async function handleRootClick(event) {
 
   if (action === "logout") {
     textingBalancePage.reset();
+    textingIntakePage.reset();
+    textingWorkspacePage.reset();
     clearProfileAvatarUpload({ abort: true });
     clearMessagingServerMediaUploads({ abort: true, schedule: false });
     clearSharedFeedSession();
@@ -130435,7 +130540,18 @@ async function bootstrapAuth() {
   }
 }
 
+let textingResumeReadAt = 0;
+function refreshTextingOnResume() {
+  const current = currentTextingContext();
+  if (document.hidden || !current?.userId || Date.now() - textingResumeReadAt < 10000) return;
+  textingResumeReadAt = Date.now();
+  const controller = current.section === "balance" ? textingBalancePage : ["registration", "settings"].includes(current.section) ? null : textingWorkspacePage;
+  // Resume only re-reads server state; it cannot allocate work, submit, or send.
+  controller?.refresh?.().catch(() => {});
+}
+
 function attachGlobalListeners() {
+  window.addEventListener("focus", refreshTextingOnResume);
   root?.addEventListener("click", handleRootClick);
   root?.addEventListener("keydown", handleRootKeydown);
   root?.addEventListener("input", handleRootInput);
@@ -130458,6 +130574,7 @@ function attachGlobalListeners() {
       }
       return;
     }
+    refreshTextingOnResume();
     if (isElectionDayRoute()) {
       configureElectionPolling();
       loadElectionResults().catch(() => {});

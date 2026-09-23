@@ -155,6 +155,7 @@ export function createTextingBalancePage({ request, context, changed }) {
         return;
       }
       if (TERMINAL.has(view.purchase?.status)) {
+        view.section = "balance";
         retryKeys.delete(
           `polis.textingCheckout.${view.key}.${view.purchase.packId}`,
         );
@@ -205,6 +206,7 @@ export function createTextingBalancePage({ request, context, changed }) {
       pollCount: 0,
       purchaseId: /^[A-Za-z0-9_-]{1,200}$/.test(purchaseId) ? purchaseId : "",
       canceledReturn: query.get("checkout") === "canceled",
+      section: "balance",
     };
     changed();
     try {
@@ -229,6 +231,69 @@ export function createTextingBalancePage({ request, context, changed }) {
     } finally {
       if (current(key, version)) {
         view.loading = false;
+        changed();
+      }
+    }
+  }
+
+  /** Recheck current permissions and funds without clearing an in-progress review. */
+  async function refresh() {
+    if (
+      identity() !== view.key ||
+      view.loading ||
+      view.refreshing ||
+      view.saving
+    )
+      return;
+    const key = view.key;
+    const version = sequence;
+    view.refreshing = true;
+    try {
+      const result = await request(path(context().organizationId, "summary"), {
+        auth: true,
+      });
+      if (!current(key, version)) return;
+      if (!result.billing || result.billing.currency !== "usd")
+        throw new Error("billing_unavailable");
+      const oldPack = view.billing?.packs?.find(
+        (item) => item.id === view.selectedPack,
+      );
+      const newPack = result.billing.packs?.find(
+        (item) => item.id === view.selectedPack,
+      );
+      if (
+        JSON.stringify(oldPack) !== JSON.stringify(newPack) ||
+        view.billing?.terms?.version !== result.billing.terms?.version
+      ) {
+        view.acceptedTerms = false;
+      }
+      view.billing = result.billing;
+      view.error = "";
+      if (!view.billing.canManageBilling) {
+        view.purchase = null;
+        view.purchaseId = "";
+        view.transactions = [];
+        view.section = "balance";
+      } else {
+        if (!view.billing.canPurchase && view.section === "add-funds")
+          view.section = "balance";
+        if (view.purchaseId) await checkPurchase();
+      }
+    } catch (error) {
+      if (!current(key, version)) return;
+      view.error =
+        error.status === 401 || error.status === 403
+          ? "You do not have access to this organization's texting balance."
+          : "The balance could not be refreshed. Refresh before starting a purchase.";
+      if (error.status === 401 || error.status === 403) {
+        view.billing = null;
+        view.transactions = [];
+        view.purchase = null;
+        view.acceptedTerms = false;
+      }
+    } finally {
+      if (current(key, version)) {
+        view.refreshing = false;
         changed();
       }
     }
@@ -313,9 +378,12 @@ export function createTextingBalancePage({ request, context, changed }) {
     const button = event.target.closest("[data-texting-action]");
     if (!button || button.disabled || identity() !== view.key) return;
     const action = button.dataset.textingAction;
-    if (action === "refresh") void load();
+    if (action === "refresh") void refresh();
     else if (action === "more") void history({ append: true });
     else if (action === "checkout") void checkout();
+    else if (action === "add-funds") show("add-funds");
+    else if (action === "balance") show("balance");
+    else if (action === "history") show("history");
     else if (action === "pack" && !view.saving) {
       view.selectedPack = button.dataset.pack;
       view.acceptedTerms = false;
@@ -330,73 +398,107 @@ export function createTextingBalancePage({ request, context, changed }) {
     ) {
       view.acceptedTerms = event.target.checked;
       changed();
+      requestAnimationFrame(() =>
+        document.querySelector("[data-texting-terms]")?.focus(),
+      );
     }
   });
+
+  /** Switch local views without creating a checkout or changing financial state. */
+  function show(section = "balance") {
+    if (identity() !== view.key || view.saving) return;
+    if (!["balance", "history", "add-funds"].includes(section)) return;
+    if (section !== "balance" && !view.billing?.canManageBilling) return;
+    if (section === "add-funds" && !view.billing?.canPurchase) return;
+    view.section = section;
+    if (section === "add-funds") {
+      view.selectedPack = "";
+      view.acceptedTerms = false;
+      view.checkoutError = "";
+    }
+    changed();
+    requestAnimationFrame(() =>
+      document.querySelector("[data-texting-heading]")?.focus(),
+    );
+  }
 
   function renderPurchase() {
     if (!view.purchaseId) return "";
     const purchase = view.purchase;
+    const funded = purchase?.status === "funded";
     const receipt = safeUrl(purchase?.receiptUrl, [
       "pay.stripe.com",
       "invoice.stripe.com",
       "receipt.stripe.com",
     ]);
-    return `<section class="shared-coalition-panel" aria-live="polite" data-testid="texting-purchase-status">
-      <h2>${escape(view.purchaseError ? "Payment status unavailable" : purchaseLabel(purchase?.status))}</h2>
+    return `<section class="texting-balance__card texting-balance__result ${funded ? "texting-balance__result--funded" : ""}" aria-live="polite" data-testid="texting-purchase-status">
+      <span class="texting-balance__result-icon" aria-hidden="true">${funded ? "✓" : "↻"}</span>
+      <div><h2>${escape(view.purchaseError ? "Payment status unavailable" : purchaseLabel(purchase?.status))}</h2>
       <p>${escape(
         view.purchaseError ||
-          (purchase?.status === "funded"
+          (funded
             ? `${money(purchase.principalCents)} was added to this organization's texting balance.`
             : TERMINAL.has(purchase?.status)
-              ? "The balance above reflects confirmed account activity."
-              : "Waiting for payment confirmation. Leaving this page will not interrupt processing. No funds are added based on this return page."),
+              ? "Your balance reflects confirmed account activity."
+              : "We're confirming your payment. You can leave this page; don't pay again."),
       )}</p>
-      ${receipt ? `<a href="${escape(receipt)}" target="_blank" rel="noopener noreferrer">View receipt</a>` : ""}
+      ${receipt ? `<a href="${escape(receipt)}" target="_blank" rel="noopener noreferrer">View receipt ↗</a>` : ""}</div>
     </section>`;
   }
 
   function renderPacks(billing) {
-    if (!billing.canManageBilling)
-      return "<p>Only organization administrators can add texting funds or view purchases.</p>";
-    if (!billing.canPurchase)
-      return "<p>Purchases are unavailable until registration approval and billing setup are complete and any billing hold is resolved.</p>";
+    if (!billing.canManageBilling || !billing.canPurchase) return "";
     const pack = billing.packs?.find((item) => item.id === view.selectedPack);
     const termsUrl = safeUrl(billing.terms?.url);
-    return `<section class="shared-coalition-panel">
-      <h2>Add texting funds</h2>
-      <p>The full amount selected becomes texting funds. The 5% Polis service fee includes payment processing.</p>
-      <div class="texting-balance__packs">${(billing.packs || [])
-        .map(
-          (item) =>
-            `<button class="shared-feed-chip" data-texting-action="pack" data-pack="${escape(item.id)}" aria-pressed="${item.id === view.selectedPack}" ${view.saving ? "disabled" : ""}>${money(item.principalCents)}</button>`,
+    return `<div class="texting-balance__purchase-grid">
+      <section class="texting-balance__card">
+        <span class="texting-balance__eyebrow">ONE-TIME PURCHASE</span>
+        <h2>Choose your amount</h2>
+        <p>Your organization receives the full amount selected.</p>
+        <div class="texting-balance__packs" role="group" aria-label="Texting funds">${(
+          billing.packs || []
         )
-        .join("")}</div>
+          .map(
+            (item) =>
+              `<button class="texting-balance__pack" data-texting-action="pack" data-pack="${escape(item.id)}" aria-pressed="${item.id === view.selectedPack}" ${view.saving ? "disabled" : ""}>${money(item.principalCents)}</button>`,
+          )
+          .join("")}</div>
+        <p class="texting-balance__fine">Plus a 5% service fee, including payment processing.</p>
+        <details class="texting-balance__details"><summary>How texting funds work</summary>
+          <p>No automatic refills, expiration, or transfers. Adding funds does not approve registration, remove holds, or restart messaging.</p>
+        </details>
+      </section>
       ${
         pack
-          ? `<div class="texting-balance__review">
-        <h3>Review purchase for ${escape(billing.organizationName || context().organizationId)}</h3>
-        <dl><dt>Texting funds</dt><dd>${money(pack.principalCents)}</dd>
-          <dt>Polis service fee (5%)</dt><dd>${money(pack.serviceFeeCents)}</dd>
-          <dt>Total before applicable tax</dt><dd>${money(pack.totalBeforeTaxCents)}</dd></dl>
-        <p>${escape(billing.terms?.taxNotice || "Any applicable tax and your final total will be shown in secure checkout before payment.")}</p>
-        <p>${escape(billing.terms?.refundPolicy || "No routine refunds. Contact support for payment errors, disputes, or refunds required by law.")}</p>
-        <p>One-time purchase. No automatic refills, expiration, or transfers. Adding funds does not approve registration or restart messaging.</p>
-        ${termsUrl ? `<a href="${escape(termsUrl)}" target="_blank" rel="noopener noreferrer">Read payment terms</a>` : "<p>Payment terms must be available before checkout can open.</p>"}
-        <label class="texting-balance__terms"><input type="checkbox" data-texting-terms ${view.acceptedTerms ? "checked" : ""} ${view.saving ? "disabled" : ""}> I agree to the payment terms and authorize this organization's purchase.</label>
-        <button class="shared-feed-chip" data-texting-action="checkout" ${!view.acceptedTerms || !termsUrl || view.saving ? "disabled" : ""}>${view.saving ? "Opening checkout…" : "Continue to secure checkout"}</button>
-        ${view.checkoutError ? `<p role="alert">${escape(view.checkoutError)}</p>` : ""}
-      </div>`
-          : ""
+          ? `<section class="texting-balance__card texting-balance__review" aria-label="Review purchase">
+          <span class="texting-balance__eyebrow">REVIEW PURCHASE</span>
+          <h2>${escape(billing.organizationName || context().organizationId)}</h2>
+          ${pack.notice ? `<p class="texting-balance__notice">${escape(pack.notice)}</p>` : ""}
+          <dl><dt>Texting funds</dt><dd>${money(pack.principalCents)}</dd>
+            <dt>Service fee (5%)</dt><dd>${money(pack.serviceFeeCents)}</dd>
+            <dt class="texting-balance__total">Total before applicable tax</dt><dd class="texting-balance__total">${money(pack.totalBeforeTaxCents)}</dd></dl>
+          <p class="texting-balance__fine">${escape(billing.terms?.taxNotice || "Any applicable tax and your final total will be shown in secure checkout before payment.")}</p>
+          <p class="texting-balance__fine">${escape(billing.terms?.refundPolicy || "No routine refunds. Contact support for payment errors, disputes, or refunds required by law.")}</p>
+          ${termsUrl ? `<a href="${escape(termsUrl)}" target="_blank" rel="noopener noreferrer">Read payment terms ↗</a>` : "<p>Payment terms must be available before checkout can open.</p>"}
+          <label class="texting-balance__terms"><input type="checkbox" data-texting-terms ${view.acceptedTerms ? "checked" : ""} ${view.saving ? "disabled" : ""}><span>I agree to the payment terms and authorize this organization's purchase.</span></label>
+          <button class="texting-balance__button texting-balance__button--primary texting-balance__button--full" data-texting-action="checkout" ${!view.acceptedTerms || !termsUrl || view.saving ? "disabled" : ""}>${view.saving ? "Opening checkout…" : "Continue to secure checkout"}</button>
+          <p class="texting-balance__fine texting-balance__secure">Payment is completed securely with Stripe.</p>
+          ${view.checkoutError ? `<p class="texting-balance__notice" role="alert">${escape(view.checkoutError)}</p>` : ""}
+        </section>`
+          : `<section class="texting-balance__card texting-balance__placeholder"><span aria-hidden="true">＋</span><h2>Ready when you are</h2><p>Select an amount to review the total.</p></section>`
       }
-    </section>`;
+    </div>`;
   }
 
-  function renderHistory(billing) {
+  function renderHistory(billing, preview = false) {
     if (!billing.canManageBilling) return "";
-    return `<section class="shared-coalition-panel"><h2>Purchase history</h2>
+    const items = view.transactions || [];
+    return `<section class="texting-balance__card">
+      <div class="texting-balance__section-heading"><h2>${preview ? "Recent purchases" : "Purchase history"}</h2>
+      ${preview ? '<button class="texting-balance__link" data-texting-action="history">View all</button>' : ""}</div>
       ${view.historyError ? `<p role="alert">${escape(view.historyError)}</p>` : ""}
       <div class="texting-balance__history">${
-        (view.transactions || [])
+        (preview ? items.slice(0, 3) : items)
           .map((item) => {
             const receipt = safeUrl(item.receiptUrl, [
               "pay.stripe.com",
@@ -404,58 +506,83 @@ export function createTextingBalancePage({ request, context, changed }) {
               "receipt.stripe.com",
             ]);
             const date = new Date(item.createdAt || item.createdAtMs);
-            return `<article class="texting-balance__transaction"><strong>${money(item.principalCents)} texting funds</strong>
-          <span>${escape(purchaseLabel(item.status))} · ${Number.isNaN(date.valueOf()) ? "" : escape(date.toLocaleDateString())}</span>
-          <span>Fee ${money(item.serviceFeeCents)} · Tax ${Number.isSafeInteger(item.taxCents) ? money(item.taxCents) : "Pending"} · Total ${Number.isSafeInteger(item.totalCents) ? money(item.totalCents) : "Pending"}</span>
-          ${receipt ? `<a href="${escape(receipt)}" target="_blank" rel="noopener noreferrer">View receipt</a>` : ""}</article>`;
+            return `<article class="texting-balance__transaction"><div class="texting-balance__transaction-icon" aria-hidden="true">↙</div><div class="texting-balance__transaction-copy"><strong>${money(item.principalCents)} texting funds</strong>
+            <span>${escape(purchaseLabel(item.status))}${Number.isNaN(date.valueOf()) ? "" : ` · ${escape(date.toLocaleDateString())}`}</span>
+            <span>Fee ${money(item.serviceFeeCents)} · Tax ${Number.isSafeInteger(item.taxCents) ? money(item.taxCents) : "Pending"} · Total ${Number.isSafeInteger(item.totalCents) ? money(item.totalCents) : "Pending"}</span></div>
+            ${receipt ? `<a href="${escape(receipt)}" target="_blank" rel="noopener noreferrer">View receipt ↗</a>` : ""}</article>`;
           })
           .join("") ||
-        `<p>${view.historyLoading ? "Loading purchases…" : "No purchases yet."}</p>`
+        `<div class="texting-balance__empty"><p>${view.historyLoading ? "Loading purchases…" : "No purchases yet."}</p>${!view.historyLoading ? '<span class="texting-balance__fine">Confirmed purchases and receipts appear here.</span>' : ""}</div>`
       }</div>
-      ${view.nextCursor ? `<button class="shared-feed-chip" data-texting-action="more" ${view.historyLoading ? "disabled" : ""}>Load more purchases</button>` : ""}
+      ${!preview && view.nextCursor ? `<button class="texting-balance__button" data-texting-action="more" ${view.historyLoading ? "disabled" : ""}>Load more purchases</button>` : ""}
     </section>`;
+  }
+
+  function renderBalance(billing) {
+    const capacityVerified =
+      billing.rateStatus === "verified" &&
+      Number.isSafeInteger(billing.estimatedSmsMessages) &&
+      Number.isSafeInteger(billing.estimatedMmsMessages);
+    const ratesVerified =
+      billing.rateStatus === "verified" &&
+      Number.isSafeInteger(billing.smsUpToTwoSegmentsMicros) &&
+      Number.isSafeInteger(billing.smsAdditionalSegmentMicros) &&
+      Number.isSafeInteger(billing.mmsMicros);
+    return `<div class="texting-balance__overview">
+      <section class="texting-balance__card texting-balance__hero">
+        <span class="texting-balance__eyebrow">AVAILABLE TO SEND</span>
+        <strong class="texting-balance__amount" data-testid="texting-available">${money(billing.availableMicros, 1000000)}</strong>
+        ${
+          capacityVerified
+            ? `<div class="texting-balance__capacity"><div><strong>${billing.estimatedSmsMessages.toLocaleString()}</strong><span>SMS · up to 2 segments</span></div><span class="texting-balance__capacity-or">or</span><div><strong>${billing.estimatedMmsMessages.toLocaleString()}</strong><span>MMS messages</span></div></div><p class="texting-balance__fine">Estimated capacity before other messaging charges.</p>`
+            : '<p class="texting-balance__fine">Message capacity appears once your rates are verified.</p>'
+        }
+        ${billing.canManageBilling && billing.canPurchase ? '<button class="texting-balance__button texting-balance__button--primary" data-texting-action="add-funds">Add texting funds</button>' : ""}
+        ${!billing.canManageBilling ? '<p class="texting-balance__fine">An organization administrator can add funds.</p>' : !billing.canPurchase ? '<p class="texting-balance__fine">Purchases are unavailable until your organization is eligible.</p>' : ""}
+      </section>
+      <section class="texting-balance__card texting-balance__usage"><h2>Usage</h2>
+        <div><span>Pending charges</span><strong>${money(billing.reservedMicros, 1000000)}</strong></div>
+        <div><span>Completed usage</span><strong>${money(billing.settledMicros, 1000000)}</strong></div>
+        <p class="texting-balance__fine">Pending charges are held for messages awaiting settlement.</p>
+        ${ratesVerified ? `<details class="texting-balance__details"><summary>View your messaging rates</summary><p>${money(billing.smsUpToTwoSegmentsMicros, 1000000)} per SMS including up to two segments.<br>${money(billing.smsAdditionalSegmentMicros, 1000000)} per additional SMS segment.<br>${money(billing.mmsMicros, 1000000)} per complete MMS.</p><p>Longer SMS messages use additional funds. Your payment terms describe other applicable messaging charges.</p></details>` : ""}
+      </section>
+    </div>${renderHistory(billing, true)}`;
   }
 
   function render() {
     const billing = identity() === view.key ? view.billing : null;
-    return `<div class="shared-page__content texting-balance">
-      <div class="shared-page__header"><div><h1>Texting balance</h1>
-        <p>${escape(billing?.organizationName || context()?.organizationId || "")}</p></div>
-        <button class="shared-feed-chip" data-texting-action="refresh" ${view.loading ? "disabled" : ""}>Refresh balance</button></div>
-      ${view.error && identity() === view.key ? `<p role="alert">${escape(view.error)}</p>` : ""}
+    const section =
+      billing?.canManageBilling &&
+      (view.section !== "add-funds" || billing.canPurchase)
+        ? view.section || "balance"
+        : "balance";
+    const title =
+      section === "add-funds"
+        ? "Add texting funds"
+        : section === "history"
+          ? "Purchase history"
+          : "Texting balance";
+    return `<div class="texting-balance">
+      ${section !== "balance" ? '<button class="texting-balance__link texting-balance__back" data-texting-action="balance">← Back to balance</button>' : ""}
+      <div class="texting-balance__header"><div><span class="texting-balance__eyebrow">${escape(billing?.organizationName || "TEXTING")}</span><h1 tabindex="-1" data-texting-heading>${title}</h1></div>
+        <button class="texting-balance__button" data-texting-action="refresh" ${view.loading || view.saving ? "disabled" : ""}>Refresh balance</button></div>
+      ${view.error && identity() === view.key ? `<p class="texting-balance__notice" role="alert">${escape(view.error)}</p>` : ""}
       ${
         !billing
-          ? `<p>${view.loading ? "Loading texting balance…" : "No balance is available."}</p>`
-          : `
-        ${billing.environment === "test" ? '<p class="shared-page__banner">Test mode — no real payment is collected.</p>' : ""}
-        <div class="texting-balance__metrics">
-          <article class="shared-coalition-panel"><span>Available funds</span><strong data-testid="texting-available">${money(billing.availableMicros, 1000000)}</strong></article>
-          <article class="shared-coalition-panel"><span>Pending message charges</span><strong>${money(billing.reservedMicros, 1000000)}</strong></article>
-          <article class="shared-coalition-panel"><span>Completed usage</span><strong>${money(billing.settledMicros, 1000000)}</strong></article>
-        </div>
-        ${
-          billing.rateStatus === "verified" &&
-          Number.isSafeInteger(billing.estimatedSmsMessages) &&
-          Number.isSafeInteger(billing.estimatedMmsMessages)
-            ? `<p>Estimated capacity: ${billing.estimatedSmsMessages.toLocaleString()} SMS messages of up to two segments or ${billing.estimatedMmsMessages.toLocaleString()} MMS messages, before other applicable messaging charges. Longer SMS messages use additional funds.</p>`
-            : "<p>Message capacity will be available after messaging rates are verified.</p>"
-        }
-        ${
-          billing.rateStatus === "verified" &&
-          Number.isSafeInteger(billing.smsUpToTwoSegmentsMicros) &&
-          Number.isSafeInteger(billing.smsAdditionalSegmentMicros) &&
-          Number.isSafeInteger(billing.mmsMicros)
-            ? `<p>Current rates: ${money(billing.smsUpToTwoSegmentsMicros, 1000000)} per SMS including up to two segments, ${money(billing.smsAdditionalSegmentMicros, 1000000)} per additional SMS segment, and ${money(billing.mmsMicros, 1000000)} per complete MMS.</p>`
-            : ""
-        }
-        ${billing.sendingBlocked ? `<p class="shared-page__banner">Sending is paused. ${billing.billingHold ? "A billing hold must be resolved by support; adding funds does not remove it." : "Funding, registration, and messaging requirements must all be met before sending."}</p>` : ""}
-        ${view.canceledReturn && !view.purchase ? "<p>Checkout was closed. Your balance changes only after a confirmed payment.</p>" : ""}
-        ${renderPurchase()}${renderPacks(billing)}${renderHistory(billing)}
-        ${/^[^\s@<>]+@[^\s@<>]+$/.test(billing.terms?.supportEmail || "") ? `<p>Payment help: <a href="mailto:${escape(billing.terms.supportEmail)}">${escape(billing.terms.supportEmail)}</a></p>` : ""}
-      `
+          ? `<section class="texting-balance__card" aria-live="polite"><p>${view.loading ? "Loading texting balance…" : "No balance is available."}</p></section>`
+          : `${billing.environment === "test" ? '<p class="texting-balance__notice">Test mode — no real payment is collected.</p>' : ""}
+          ${billing.sendingBlocked ? `<div class="texting-balance__notice"><strong>Sending is paused.</strong> ${billing.billingHold ? "Contact support to resolve the billing hold. Adding funds won't remove it." : "Funding, registration, and messaging requirements must be met before sending."}</div>` : ""}
+          ${view.canceledReturn && !view.purchase ? '<p class="texting-balance__notice">Checkout was closed. Funds are added only after payment is confirmed.</p>' : ""}
+          ${renderPurchase()}
+          ${section === "add-funds" ? renderPacks(billing) : section === "history" ? renderHistory(billing) : renderBalance(billing)}
+          ${/^[^\s@<>]+@[^\s@<>]+$/.test(billing.terms?.supportEmail || "") ? `<footer class="texting-balance__support">Payment help · <a href="mailto:${escape(billing.terms.supportEmail)}">${escape(billing.terms.supportEmail)}</a></footer>` : ""}`
       }
     </div>`;
   }
 
-  return { load, render, reset };
+  const getMeta = () => ({
+    organizationName:
+      identity() === view.key ? view.billing?.organizationName || "" : "",
+  });
+  return { load, render, reset, refresh, show, getMeta };
 }
