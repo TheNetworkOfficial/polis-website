@@ -121,6 +121,10 @@ test("redesigned workspace uses explicit single-recipient sends, recorded replie
       attachmentUrl: null,
     },
   }));
+  let releaseFilesDiscovery;
+  const filesDiscoveryHold = new Promise((resolve) => {
+    releaseFilesDiscovery = resolve;
+  });
   await page.route(`${BASE}/api/**`, async (route) => {
     const request = route.request(),
       path = new URL(request.url()).pathname;
@@ -129,6 +133,10 @@ test("redesigned workspace uses explicit single-recipient sends, recorded replie
         contentType: "application/json",
         body: JSON.stringify(body),
       });
+    if (path === "/api/files/workspaces") {
+      await filesDiscoveryHold;
+      return respond({ workspaces: [] });
+    }
     if (!path.startsWith(PREFIX)) return respond({});
     const suffix = path.slice(PREFIX.length);
     if (request.method() !== "GET")
@@ -192,6 +200,7 @@ test("redesigned workspace uses explicit single-recipient sends, recorded replie
   await expect(
     page.getByRole("heading", { name: "Good conversations start here." }),
   ).toBeVisible();
+  releaseFilesDiscovery();
   await expect(page.locator(".pt-brand img")).toBeVisible();
   await page.screenshot({
     path: testInfo.outputPath("workspace-home.png"),

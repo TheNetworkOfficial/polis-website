@@ -135503,7 +135503,9 @@ async function init() {
   applySettingsDisplayPreferences();
   attachGlobalListeners();
   await bootstrapAuth();
-  await bootstrapFilesNavigation();
+  void bootstrapFilesNavigation().then(() => {
+    if (isCoalitionPresentationRoute()) renderApp();
+  });
   maybeOpenAuthPromptFromUrl();
   await loadCurrentRoute({ refresh: true });
 }
