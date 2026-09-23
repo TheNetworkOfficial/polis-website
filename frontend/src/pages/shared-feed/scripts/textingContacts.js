@@ -148,7 +148,13 @@ export function createContacts(r) {
     clearTimeout(pollTimer);
   }
   const needsUpdate = (s) =>
-    s.checkingSubmission || s.refreshError || processing.has(s.job?.status);
+    s.checkingSubmission ||
+    s.transferNeedsRead ||
+    s.refreshError ||
+    processing.has(s.job?.status) ||
+    (s.transfer?.backgroundActive === true &&
+      !s.transfer.backgroundError &&
+      !["verified", "reconciliation_hold"].includes(s.transfer.state));
   /** Only saved-status GETs retry. A lost mutation response never repeats the import. */
   function scheduleUpdate() {
     clearTimeout(pollTimer);
@@ -191,10 +197,12 @@ export function createContacts(r) {
       s.reviewed = false;
     }
     if (!s.preview) s.mapping = structuredClone(job.mapping || {});
-    if (job.audienceId && r.can("canPrepareProviderAudience"))
+    if (job.audienceId && r.can("canPrepareProviderAudience")) {
       s.transfer = (
         await r.api(`/audiences/${id(job.audienceId)}/provider-sync`)
       ).transfer;
+      s.transferNeedsRead = false;
+    }
   }
   async function refreshImport(resource) {
     if (refreshing || disposed) return;
@@ -378,7 +386,7 @@ export function createContacts(r) {
         ? `<section class="pt-card"><p class="pt-muted">No saved import start has been confirmed. Reopen the saved mapping to review it before submitting again.</p>${button("reload", "Review saved mapping", { secondary: true })}</section>`
         : "") +
       (s.transfer
-        ? `<section class="pt-card"><div class="pt-row"><div><h2>${s.transfer.state === "verified" ? "List ready with vendor" : "Prepare list for texting"}</h2><p class="pt-muted">${e(label(s.transfer.state))}</p></div>${button("transfer-refresh", "Refresh", { secondary: true })}</div><p class="pt-muted">Each part contains at most 20,000 contacts. No messages are sent.</p>${list(
+        ? `<section class="pt-card"><div class="pt-row"><div><h2>${s.transfer.state === "verified" ? "List ready with vendor" : "Prepare list for texting"}</h2><p class="pt-muted">${e(label(s.transfer.state))}</p></div>${button("transfer-refresh", "Refresh", { secondary: true })}</div>${s.transferNeedsRead ? notice("Checking list preparation", "We are checking the saved result. Contacts will not be submitted again automatically.") : ""}<p class="pt-muted">Each part contains at most 20,000 contacts. No messages are sent.</p>${list(
             s.transfer.partitions,
           )
             .map(
@@ -586,13 +594,30 @@ export function createContacts(r) {
       )
         return true;
       s.transferNeedsRead = true;
-      s.transfer = (
-        await r.api(
-          `/audiences/${id(j.audienceId)}/provider-sync`,
-          write ? {} : undefined,
-        )
-      ).transfer;
-      s.transferNeedsRead = false;
+      pollReads = 0;
+      s.updatesPaused = false;
+      r.changed();
+      try {
+        s.transfer = (
+          await r.api(
+            `/audiences/${id(j.audienceId)}/provider-sync`,
+            write ? {} : undefined,
+          )
+        ).transfer;
+        s.transferNeedsRead = false;
+      } catch (error) {
+        r.guard();
+        if (
+          error?.status &&
+          error.status < 500 &&
+          ![408, 429].includes(error.status)
+        ) {
+          throw error;
+        }
+        // The vendor preparation may already have completed. Read its durable
+        // status without repeating a contact transfer after a lost response.
+      }
+      scheduleUpdate();
       return true;
     }
     return false;

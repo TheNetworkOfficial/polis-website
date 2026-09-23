@@ -38,6 +38,7 @@ import {
 import { createTextingBalancePage } from "./scripts/textingBalance.js";
 import { createTextingIntakePage } from "./scripts/textingIntake.js";
 import { createTextingWorkspacePage } from "./scripts/textingWorkspace.js";
+import { createTextingSessionRequest } from "./scripts/textingSession.js";
 import {
   parseTextingRoute,
   textingRoute,
@@ -49,8 +50,20 @@ import {
 const runtimeConfig =
   window.__POLIS_WEB_APP__ || window.__POLIS_SHARED_FEED__ || {};
 const root = document.getElementById("shared-feed-app");
-const textingBalancePage = createTextingBalancePage({
+const textingRequest = createTextingSessionRequest({
   request: fetchJson,
+  getSession: () => state.auth.session,
+  restoreSession: () =>
+    restoreSharedFeedSession(state.auth.config, { clearOnFailure: false }),
+  saveSession: (session) => {
+    state.auth.session = session;
+    state.auth.user = getAuthenticatedUser(session);
+  },
+  userId: (session) => getAuthenticatedUser(session)?.userId || "",
+  contextKey: getCurrentPathWithQuery,
+});
+const textingBalancePage = createTextingBalancePage({
+  request: textingRequest,
   context: () => {
     const route = getCurrentRoute();
     if (route.routeKey !== "organization-texting-balance") return null;
@@ -64,7 +77,7 @@ const textingBalancePage = createTextingBalancePage({
   changed: scheduleRender,
 });
 const textingIntakePage = createTextingIntakePage({
-  request: fetchJson,
+  request: textingRequest,
   context: () => {
     const current = currentTextingContext();
     return current && ["registration", "settings"].includes(current.section)
@@ -75,7 +88,7 @@ const textingIntakePage = createTextingIntakePage({
   navigate: navigateTexting,
 });
 const textingWorkspacePage = createTextingWorkspacePage({
-  request: fetchJson,
+  request: textingRequest,
   context: () => {
     const current = currentTextingContext();
     return current &&

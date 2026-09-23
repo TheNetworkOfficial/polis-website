@@ -99,7 +99,9 @@ export function createTextingWorkspacePage({
       view.campaigns = null;
       view.conversations = null;
       view.error =
-        "Your access has changed. Refresh to check your organization permissions.";
+        error?.status === 401
+          ? "Your session could not be refreshed. Please sign in again."
+          : "Your access has changed. Refresh to check your organization permissions.";
     } else
       view.error =
         error?.message ||
@@ -118,6 +120,7 @@ export function createTextingWorkspacePage({
         `/api/text-banking/prompt/scopes/${id(`coalition:${organizationId}`)}${suffix}`,
         {
           auth: true,
+          beforeRequest: guard,
           ...(body === undefined ? {} : { method: method || "POST", body }),
         },
       );
