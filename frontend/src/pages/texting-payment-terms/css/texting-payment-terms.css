@@ -1,28 +1,199 @@
+body:has(.texting-payment-terms) {
+  --tp-bg: var(--polis-background);
+  --tp-surface: var(--polis-surface);
+  --tp-ink: var(--polis-text);
+  --tp-muted: var(--polis-text-muted);
+  --tp-line: color-mix(in srgb, var(--polis-border) 60%, transparent);
+  --tp-blue: var(--polis-primary);
+  --tp-raised: var(--polis-surface-raised);
+  color: var(--tp-ink);
+  background: var(--tp-bg);
+}
+.texting-payment-terms__header {
+  max-width: 1100px;
+  margin: auto;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 24px 28px;
+  gap: 20px;
+}
+.texting-payment-terms__header > a {
+  color: var(--tp-blue);
+  font-size: 0.85rem;
+}
+.texting-payment-terms__brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+}
+.texting-payment-terms__brand img {
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+}
+.texting-payment-terms__brand span {
+  color: var(--tp-ink);
+  font-size: 1.6rem;
+  font-weight: 650;
+  letter-spacing: -0.05em;
+}
+.legal-main:has(.texting-payment-terms) {
+  display: block;
+  padding: 24px 24px 48px;
+}
 .texting-payment-terms {
   min-width: 0;
+  max-width: 850px;
+  margin: auto;
+  padding: 42px;
+  border: 0;
+  border-radius: 24px;
+  color: var(--tp-ink);
+  background: var(--tp-surface);
+  box-shadow: none;
+  font-size: 0.9rem;
+  line-height: 1.8;
 }
-
+.texting-payment-terms a {
+  color: var(--tp-blue);
+  text-underline-offset: 3px;
+  overflow-wrap: anywhere;
+}
+.texting-payment-terms h1 {
+  font-size: clamp(1.8rem, 5vw, 2.4rem);
+  font-weight: 650;
+  letter-spacing: -0.04em;
+  line-height: 1.2;
+  margin: 10px 0 18px;
+  color: var(--tp-ink);
+}
 .texting-payment-terms h3 {
-  margin-top: var(--space-lg);
+  font-size: 1rem;
+  margin: 26px 0 12px;
+  color: var(--tp-ink);
 }
-
+.texting-payment-terms p,
+.texting-payment-terms li {
+  color: var(--tp-muted);
+}
+.texting-payment-terms .texting-payment-terms__intro {
+  font-size: 1rem;
+  margin-bottom: 26px;
+}
+.texting-payment-terms__eyebrow {
+  font-size: 0.65rem;
+  letter-spacing: 0.15em;
+  font-weight: 650;
+  color: var(--tp-blue);
+}
+.texting-payment-terms__summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 28px;
+}
+.texting-payment-terms__summary span {
+  border-radius: 18px;
+  background: var(--tp-raised);
+  color: var(--tp-blue);
+  padding: 7px 12px;
+  font-size: 0.72rem;
+}
+.texting-payment-terms__merchant {
+  font-size: 0.8rem;
+  padding: 18px 0;
+  border-block: 1px solid var(--tp-line);
+}
+.texting-payment-terms summary {
+  cursor: pointer;
+  color: var(--tp-blue);
+}
+.texting-payment-terms__merchant p {
+  margin: 8px 0;
+}
+.texting-payment-terms__section {
+  padding: 25px 0;
+  border-top: 1px solid var(--tp-line);
+}
+.texting-payment-terms__section > summary {
+  font-size: 1.15rem;
+  font-weight: 600;
+  line-height: 1.5;
+  letter-spacing: -0.015em;
+  color: var(--tp-ink);
+}
+.texting-payment-terms__section[open] > summary {
+  margin-bottom: 22px;
+}
+.texting-payment-terms__section p {
+  margin: 16px 0;
+}
 .texting-payment-terms__table {
   overflow-x: auto;
+  margin: 22px 0;
 }
-
 .texting-payment-terms table {
   width: 100%;
   border-collapse: collapse;
+  font-size: 0.78rem;
 }
-
 .texting-payment-terms caption {
   margin-bottom: 0.75rem;
   text-align: left;
+  color: var(--tp-muted);
 }
-
 .texting-payment-terms th,
 .texting-payment-terms td {
-  padding: 0.65rem;
+  padding: 0.75rem;
   text-align: left;
-  border-bottom: 1px solid var(--border-color, currentColor);
+  border-bottom: 1px solid var(--tp-line);
+  color: var(--tp-ink);
+}
+.texting-payment-terms th {
+  font-weight: 600;
+}
+.texting-payment-terms__footer {
+  padding: 0 24px 30px;
+  text-align: center;
+  color: var(--tp-muted);
+  font-size: 0.75rem;
+}
+.texting-payment-terms__footer a {
+  color: var(--tp-blue);
+}
+@media (max-width: 600px) {
+  .texting-payment-terms__header {
+    padding: 20px;
+  }
+  .legal-main:has(.texting-payment-terms) {
+    padding: 12px 16px 32px;
+  }
+  .texting-payment-terms {
+    padding: 26px 22px;
+    border-radius: 20px;
+  }
+  .texting-payment-terms__summary {
+    display: grid;
+    justify-items: start;
+  }
+  .texting-payment-terms th,
+  .texting-payment-terms td {
+    padding: 0.65rem 0.3rem;
+  }
+}
+@media print {
+  .texting-payment-terms__header > a:last-child {
+    display: none;
+  }
+  .texting-payment-terms details::details-content {
+    content-visibility: visible;
+  }
+  .texting-payment-terms {
+    padding: 0;
+  }
+  .texting-payment-terms__footer {
+    margin-top: 20px;
+  }
 }

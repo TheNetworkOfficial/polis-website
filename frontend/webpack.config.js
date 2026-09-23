@@ -1103,7 +1103,7 @@ module.exports = {
         },
       },
       {
-        test: /\.(png|jpg|gif|mp4)$/,
+        test: /\.(png|jpg|gif|mp4|pdf|woff2)$/,
         type: "asset/resource",
         generator: {
           filename: "assets/[name][ext]",
@@ -1131,6 +1131,10 @@ module.exports = {
     new StaticTextAssetPlugin({
       sourcePath: path.resolve(__dirname, "src/_redirects"),
       filename: "_redirects",
+    }),
+    new StaticTextAssetPlugin({
+      sourcePath: path.resolve(__dirname, "src/assets/fonts/Inter-LICENSE.txt"),
+      filename: "assets/Inter-LICENSE.txt",
     }),
     new MiniCssExtractPlugin({
       filename: (pathData) =>

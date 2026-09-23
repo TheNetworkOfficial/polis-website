@@ -10,172 +10,201 @@
     <title>Texting Payment Terms | Polis</title>
   </head>
   <body>
-    <div id="header-placeholder"></div>
+    <header class="texting-payment-terms__header">
+      <a class="texting-payment-terms__brand" href="/" aria-label="Polis home"
+        ><img data-polis-terms-logo alt="" width="36" height="36" /><span
+          >Polis</span
+        ></a
+      >
+      <a href="/organizations">Back to Polis</a>
+    </header>
 
     <main class="page-shell legal-main">
       <section class="container card legal-card texting-payment-terms">
-        <h1>Texting Payment Terms</h1>
-        <p><strong>Merchant:</strong> Lux Corp</p>
-        <p><strong>Address:</strong> 4700 3rd Ave S, Great Falls, MT 59405</p>
-        <p>
-          <strong>Payment support:</strong>
-          <a href="mailto:lux@luxformontana.com">lux@luxformontana.com</a>
+        <span class="texting-payment-terms__eyebrow">PAYMENTS</span>
+        <h1>Texting payment terms</h1>
+        <p class="texting-payment-terms__intro">
+          Your funds. Your organization's conversations.
         </p>
-        <p><strong>Effective date:</strong> September 23, 2026</p>
-        <p><strong>Version:</strong> texting-payments-2026-09-23</p>
+        <div class="texting-payment-terms__summary" aria-label="At a glance">
+          <span>Full amount added to your balance</span
+          ><span>5% service fee</span><span>No automatic refills</span>
+        </div>
+        <details class="texting-payment-terms__merchant">
+          <summary>Merchant &amp; document details</summary>
+          <p><strong>Merchant:</strong> Lux Corp</p>
+          <p><strong>Address:</strong> 4700 3rd Ave S, Great Falls, MT 59405</p>
+          <p>
+            <strong>Payment support:</strong>
+            <a href="mailto:lux@luxformontana.com">lux@luxformontana.com</a>
+          </p>
+          <p><strong>Effective date:</strong> September 23, 2026</p>
+          <p><strong>Version:</strong> texting-payments-2026-09-23</p>
+        </details>
         <p>
           These terms apply to prepaid texting purchases through the Polis
           website and supplement the
           <a href="/terms">Polis Terms of Service</a>.
         </p>
 
-        <h2>Adding texting funds</h2>
-        <p>
-          An authorized organization administrator may purchase texting funds
-          for their organization. The full selected texting amount is credited
-          to the organization's balance after payment is confirmed. A separate
-          5% Polis service fee includes payment processing. The service fee and
-          applicable taxes do not become texting funds.
-        </p>
-        <div class="texting-payment-terms__table">
-          <table>
-            <caption>
-              One-time purchases in US dollars
-            </caption>
-            <thead>
-              <tr>
-                <th scope="col">Texting funds</th>
-                <th scope="col">5% service fee</th>
-                <th scope="col">Total before applicable tax</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>$100</td>
-                <td>$5</td>
-                <td>$105</td>
-              </tr>
-              <tr>
-                <td>$250</td>
-                <td>$12.50</td>
-                <td>$262.50</td>
-              </tr>
-              <tr>
-                <td>$500</td>
-                <td>$25</td>
-                <td>$525</td>
-              </tr>
-              <tr>
-                <td>$1,000</td>
-                <td>$50</td>
-                <td>$1,050</td>
-              </tr>
-              <tr>
-                <td>$2,000</td>
-                <td>$100</td>
-                <td>$2,100</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <p>
-          Any applicable tax and the final total are shown in secure checkout
-          before payment. A pending, failed, or canceled payment does not add
-          spendable funds. Opening checkout or returning to Polis does not
-          establish that payment was confirmed.
-        </p>
-        <h3>Designated private acceptance participants</h3>
-        <p>
-          A designated administrator may be offered a temporary, one-time
-          acceptance purchase: $1 in organization texting funds plus a $0.05
-          service fee, for a $1.05 total. It is a real payment, not a sandbox
-          transaction. This option is restricted to the administrator and
-          organization shown in the purchase review and expires when its
-          acceptance window closes. It does not change the ordinary purchase
-          amounts above or cause the credited balance to expire.
-        </p>
-        <p>
-          If your purchase review explicitly identifies the private beta tax
-          deferral, no tax is collected on that purchase while Lux Corp reviews
-          its tax treatment. This is not a tax exemption or a determination that
-          no tax is owed. The deferral applies only to designated private beta
-          purchases; it does not apply generally to Polis customers.
-        </p>
-
-        <h2>Messaging charges</h2>
-        <p>
-          Polis passes through verified messaging costs without an additional
-          per-message markup. Your organization's verified rates are shown in
-          its texting workspace. The initial rates are:
-        </p>
-        <ul>
-          <li>
-            Outgoing SMS, including messages sent as replies: $0.035 for up to
-            two segments, plus $0.015 for each additional segment.
-          </li>
-          <li>Outgoing MMS: $0.045 per complete message.</li>
-          <li>Received MMS: $0.05 per message.</li>
-          <li>
-            Received SMS: actual carrier charges, only when their billing basis
-            is disclosed and their cost is verified. There is no assumed fixed
-            incoming SMS rate.
-          </li>
-        </ul>
-        <p>
-          Text and encoding affect the number of SMS segments. Capacity
-          estimates are estimates, not a fixed number of credits or a guarantee
-          of delivery. Registration and number-rental fees are billed separately
-          and are not deducted from these texting funds.
-        </p>
-        <h3>Controlled pilot</h3>
-        <p>
-          For organizations participating in the controlled pilot, Polis pays
-          all automatic-response charges, including STOP and HELP responses, and
-          other charges whose billing basis or amount remains unresolved. Those
-          costs are not deducted from your organization's balance. They will not
-          be charged retroactively. Any change to this pilot policy will be
-          disclosed before it applies to future messaging.
-        </p>
-
-        <h2>Available funds and pending charges</h2>
-        <p>
-          Funds are reserved before an outgoing message is sent. Your available
-          balance must cover that message's cost. Its reservation remains
-          pending until the charge can be verified, including when the send
-          outcome is uncertain. Final settlement accounts for the reservation
-          without charging the same message twice.
-        </p>
-        <p>
-          Adding funds does not grant registration approval, remove a billing or
-          provider hold, override an opt-out, confirm a queued message, or
-          restart a campaign. New outgoing messages pause when funds are
-          insufficient. Existing conversations, incoming messages and opt-out
-          processing remain available as permitted by your organization's access
-          and provider service. Disclosed incoming-message charges can continue
-          while outgoing messages are paused.
-        </p>
-
-        <h2>Balance rules, refunds and support</h2>
-        <p>
-          Purchases are one-time payments, with no subscription or automatic
-          refill. Balances belong to the purchasing organization, do not expire,
-          and cannot be transferred, cashed out or used by another organization.
-        </p>
-        <p>
-          There are no routine refunds or customer self-service refunds. Contact
-          <a href="mailto:lux@luxformontana.com">lux@luxformontana.com</a>
-          for payment errors, disputes, or refunds required by law. Staff will
-          review the request and record any authorized adjustment against the
-          original payment. These terms do not limit rights required by law.
-        </p>
-        <p>
-          A reversal or dispute can reduce the balance or place outgoing
-          messaging on a billing hold. Additional purchases do not automatically
-          remove that hold. Contact support to resolve it.
-        </p>
+        <details class="texting-payment-terms__section" open>
+          <summary>Adding texting funds</summary>
+          <p>
+            An authorized organization administrator may purchase texting funds
+            for their organization. The full selected texting amount is credited
+            to the organization's balance after payment is confirmed. A separate
+            5% Polis service fee includes payment processing. The service fee
+            and applicable taxes do not become texting funds.
+          </p>
+          <div class="texting-payment-terms__table">
+            <table>
+              <caption>
+                One-time purchases in US dollars
+              </caption>
+              <thead>
+                <tr>
+                  <th scope="col">Texting funds</th>
+                  <th scope="col">5% service fee</th>
+                  <th scope="col">Total before applicable tax</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>$100</td>
+                  <td>$5</td>
+                  <td>$105</td>
+                </tr>
+                <tr>
+                  <td>$250</td>
+                  <td>$12.50</td>
+                  <td>$262.50</td>
+                </tr>
+                <tr>
+                  <td>$500</td>
+                  <td>$25</td>
+                  <td>$525</td>
+                </tr>
+                <tr>
+                  <td>$1,000</td>
+                  <td>$50</td>
+                  <td>$1,050</td>
+                </tr>
+                <tr>
+                  <td>$2,000</td>
+                  <td>$100</td>
+                  <td>$2,100</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            Any applicable tax and the final total are shown in secure checkout
+            before payment. A pending, failed, or canceled payment does not add
+            spendable funds. Opening checkout or returning to Polis does not
+            establish that payment was confirmed.
+          </p>
+          <h3>Designated private acceptance participants</h3>
+          <p>
+            A designated administrator may be offered a temporary, one-time
+            acceptance purchase: $1 in organization texting funds plus a $0.05
+            service fee, for a $1.05 total. It is a real payment, not a sandbox
+            transaction. This option is restricted to the administrator and
+            organization shown in the purchase review and expires when its
+            acceptance window closes. It does not change the ordinary purchase
+            amounts above or cause the credited balance to expire.
+          </p>
+          <p>
+            If your purchase review explicitly identifies the private beta tax
+            deferral, no tax is collected on that purchase while Lux Corp
+            reviews its tax treatment. This is not a tax exemption or a
+            determination that no tax is owed. The deferral applies only to
+            designated private beta purchases; it does not apply generally to
+            Polis customers.
+          </p>
+        </details>
+        <details class="texting-payment-terms__section">
+          <summary>Messaging charges</summary>
+          <p>
+            Polis passes through verified messaging costs without an additional
+            per-message markup. Your organization's verified rates are shown in
+            its texting workspace. The initial rates are:
+          </p>
+          <ul>
+            <li>
+              Outgoing SMS, including messages sent as replies: $0.035 for up to
+              two segments, plus $0.015 for each additional segment.
+            </li>
+            <li>Outgoing MMS: $0.045 per complete message.</li>
+            <li>Received MMS: $0.05 per message.</li>
+            <li>
+              Received SMS: actual carrier charges, only when their billing
+              basis is disclosed and their cost is verified. There is no assumed
+              fixed incoming SMS rate.
+            </li>
+          </ul>
+          <p>
+            Text and encoding affect the number of SMS segments. Capacity
+            estimates are estimates, not a fixed number of credits or a
+            guarantee of delivery. Registration and number-rental fees are
+            billed separately and are not deducted from these texting funds.
+          </p>
+          <h3>Controlled pilot</h3>
+          <p>
+            For organizations participating in the controlled pilot, Polis pays
+            all automatic-response charges, including STOP and HELP responses,
+            and other charges whose billing basis or amount remains unresolved.
+            Those costs are not deducted from your organization's balance. They
+            will not be charged retroactively. Any change to this pilot policy
+            will be disclosed before it applies to future messaging.
+          </p>
+        </details>
+        <details class="texting-payment-terms__section">
+          <summary>Available funds and pending charges</summary>
+          <p>
+            Funds are reserved before an outgoing message is sent. Your
+            available balance must cover that message's cost. Its reservation
+            remains pending until the charge can be verified, including when the
+            send outcome is uncertain. Final settlement accounts for the
+            reservation without charging the same message twice.
+          </p>
+          <p>
+            Adding funds does not grant registration approval, remove a billing
+            or provider hold, override an opt-out, confirm a queued message, or
+            restart a campaign. New outgoing messages pause when funds are
+            insufficient. Existing conversations, incoming messages and opt-out
+            processing remain available as permitted by your organization's
+            access and provider service. Disclosed incoming-message charges can
+            continue while outgoing messages are paused.
+          </p>
+        </details>
+        <details class="texting-payment-terms__section">
+          <summary>Balance rules, refunds and support</summary>
+          <p>
+            Purchases are one-time payments, with no subscription or automatic
+            refill. Balances belong to the purchasing organization, do not
+            expire, and cannot be transferred, cashed out or used by another
+            organization.
+          </p>
+          <p>
+            There are no routine refunds or customer self-service refunds.
+            Contact
+            <a href="mailto:lux@luxformontana.com">lux@luxformontana.com</a>
+            for payment errors, disputes, or refunds required by law. Staff will
+            review the request and record any authorized adjustment against the
+            original payment. These terms do not limit rights required by law.
+          </p>
+          <p>
+            A reversal or dispute can reduce the balance or place outgoing
+            messaging on a billing hold. Additional purchases do not
+            automatically remove that hold. Contact support to resolve it.
+          </p>
+        </details>
       </section>
     </main>
 
-    <div id="footer-placeholder"></div>
+    <footer class="texting-payment-terms__footer">
+      Lux Corp · <a href="/terms">Terms of Service</a> ·
+      <a href="/privacy-policy">Privacy policy</a>
+    </footer>
   </body>
 </html>

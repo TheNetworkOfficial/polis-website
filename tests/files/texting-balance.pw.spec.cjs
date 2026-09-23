@@ -178,6 +178,9 @@ test("admin reviews each server-owned pack, retries the same purchase, and uses 
   await expect(
     page.getByRole("heading", { name: "Texting balance", exact: true }),
   ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Add texting funds", exact: true })
+    .click();
   for (const [funds, fee, total] of [
     [100, 5, 105],
     [250, 12.5, 262.5],
@@ -260,6 +263,7 @@ test("return URL cannot credit funds; verified funding shows principal, receipt 
   await expect(page.locator(".texting-balance__history")).toContainText(
     "Fee $5.00 · Tax $2.10 · Total $107.10",
   );
+  await page.getByRole("button", { name: "View all", exact: true }).click();
   await page.getByRole("button", { name: "Load more purchases" }).click();
   await expect(page.locator(".texting-balance__transaction")).toHaveCount(2);
   expect(calls.some((call) => call.search.includes("cursor=next_page"))).toBe(
@@ -284,6 +288,9 @@ test("designated acceptance purchase shows its real amount and beta terms, then 
     route.fulfill({ body: "Test stand-in for live hosted checkout" }),
   );
   await page.goto(PAGE);
+  await page
+    .getByRole("button", { name: "Add texting funds", exact: true })
+    .click();
   await expect(page.locator(".texting-balance__packs button")).toHaveText([
     "$1.00",
   ]);
@@ -299,7 +306,11 @@ test("designated acceptance purchase shows its real amount and beta terms, then 
   await expect(
     page.getByRole("link", { name: "lux@luxformontana.com", exact: true }),
   ).toHaveAttribute("href", "mailto:lux@luxformontana.com");
+  expect(calls.filter((call) => call.method === "POST")).toHaveLength(0);
   await page.getByRole("checkbox").check();
+  await page.getByRole("button", { name: "Refresh balance" }).click();
+  await expect(page.getByRole("checkbox")).toBeChecked();
+  await expect(review.locator("dd")).toHaveText(["$1.00", "$0.05", "$1.05"]);
   await page.screenshot({
     path: test.info().outputPath("acceptance-purchase-review.png"),
     fullPage: true,
@@ -387,6 +398,9 @@ test("canceled and failed checkouts do not change balance; untrusted checkout de
   );
   await expect(page.getByTestId("texting-available")).toHaveText("$100.00");
   state.status = "pending";
+  await page
+    .getByRole("button", { name: "Add texting funds", exact: true })
+    .click();
   await page
     .locator(".texting-balance__packs")
     .getByRole("button", { name: "$100.00", exact: true })
