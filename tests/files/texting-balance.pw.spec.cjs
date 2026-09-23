@@ -3,6 +3,8 @@ const { test, expect } = require("@playwright/test");
 const BASE_URL = process.env.POLIS_TEST_BASE_URL || "http://127.0.0.1:9000";
 const PAGE = `${BASE_URL}/organizations/org-1/texting-balance`;
 const API = "/api/text-banking/prompt/scopes/coalition%3Aorg-1/billing/";
+const BETA_TAX_NOTICE =
+  "No tax is collected for this designated private beta purchase while Lux Corp reviews its tax treatment. This is not a tax exemption.";
 
 function jwt(claims) {
   return `e30.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.test`;
@@ -17,6 +19,7 @@ async function setup(page, options = {}) {
     denied: false,
     checkoutFailures: 0,
     checkoutUrl: "https://checkout.stripe.com/c/pay/cs_test_example",
+    acceptance: false,
     ...options,
   };
   await page.addInitScript(
@@ -52,12 +55,13 @@ async function setup(page, options = {}) {
   );
   const purchase = () => ({
     purchaseId: "purchase_1",
-    packId: "usd_100",
+    packId: state.acceptance ? "usd_acceptance_1" : "usd_100",
     status: state.status,
-    principalCents: 10000,
-    serviceFeeCents: 500,
-    taxCents: state.status === "funded" ? 210 : null,
-    totalCents: state.status === "funded" ? 10710 : null,
+    principalCents: state.acceptance ? 100 : 10000,
+    serviceFeeCents: state.acceptance ? 5 : 500,
+    taxCents: state.status === "funded" ? (state.acceptance ? 0 : 210) : null,
+    totalCents:
+      state.status === "funded" ? (state.acceptance ? 105 : 10710) : null,
     createdAtMs: 1789812000000,
     receiptUrl:
       state.status === "funded"
@@ -98,22 +102,43 @@ async function setup(page, options = {}) {
           estimatedSmsMessages: Math.floor(state.funds / 35000),
           estimatedMmsMessages: Math.floor(state.funds / 45000),
           canManageBilling: state.admin,
-          canPurchase: state.admin,
+          canPurchase:
+            state.admin && !(state.acceptance && state.status === "funded"),
           sendingBlocked: state.funds === 0,
           billingHold: null,
-          blockedReasons: [],
-          environment: "test",
-          packs: [100, 250, 500, 1000, 2000].map((amount) => ({
-            id: `usd_${amount}`,
-            principalCents: amount * 100,
-            serviceFeeCents: amount * 5,
-            totalBeforeTaxCents: amount * 105,
-          })),
+          blockedReasons:
+            state.acceptance && state.status === "funded"
+              ? ["acceptance_purchase_completed"]
+              : [],
+          environment: state.acceptance ? "live" : "test",
+          packs: state.acceptance
+            ? state.status === "funded"
+              ? []
+              : [
+                  {
+                    id: "usd_acceptance_1",
+                    principalCents: 100,
+                    serviceFeeCents: 5,
+                    totalBeforeTaxCents: 105,
+                    notice:
+                      "One-time acceptance purchase. Adds $1 to this organization’s texting balance.",
+                  },
+                ]
+            : [100, 250, 500, 1000, 2000].map((amount) => ({
+                id: `usd_${amount}`,
+                principalCents: amount * 100,
+                serviceFeeCents: amount * 5,
+                totalBeforeTaxCents: amount * 105,
+              })),
           terms: {
-            version: "texting-payments-2026-09-19",
+            version: "texting-payments-2026-09-23",
             url: "https://polisapp.io/texting-payment-terms",
-            supportEmail: "support@example.test",
-            taxNotice: "Applicable tax is calculated in checkout.",
+            supportEmail: state.acceptance
+              ? "lux@luxformontana.com"
+              : "support@example.test",
+            taxNotice: state.acceptance
+              ? BETA_TAX_NOTICE
+              : "Applicable tax is calculated in checkout.",
             refundPolicy: "No routine refunds.",
           },
         },
@@ -249,6 +274,75 @@ test("return URL cannot credit funds; verified funding shows principal, receipt 
     path: test.info().outputPath("funded-mobile.png"),
     fullPage: true,
   });
+});
+
+test("designated acceptance purchase shows its real amount and beta terms, then closes after funding", async ({
+  page,
+}) => {
+  const { state, calls } = await setup(page, { acceptance: true });
+  await page.route("https://checkout.stripe.com/**", (route) =>
+    route.fulfill({ body: "Test stand-in for live hosted checkout" }),
+  );
+  await page.goto(PAGE);
+  await expect(page.locator(".texting-balance__packs button")).toHaveText([
+    "$1.00",
+  ]);
+  await page.getByRole("button", { name: "$1.00", exact: true }).click();
+  const review = page.locator(".texting-balance__review");
+  await expect(review.locator("dd")).toHaveText(["$1.00", "$0.05", "$1.05"]);
+  await expect(review).toContainText("One-time acceptance purchase");
+  await expect(review).toContainText(BETA_TAX_NOTICE);
+  await expect(
+    page.getByText("Test mode — no real payment is collected.", {
+      exact: true,
+    }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("link", { name: "lux@luxformontana.com", exact: true }),
+  ).toHaveAttribute("href", "mailto:lux@luxformontana.com");
+  await page.getByRole("checkbox").check();
+  await page.screenshot({
+    path: test.info().outputPath("acceptance-purchase-review.png"),
+    fullPage: true,
+  });
+  await page
+    .getByRole("button", { name: "Continue to secure checkout" })
+    .click();
+  await expect(page).toHaveURL(state.checkoutUrl);
+  const creates = calls.filter((call) => call.method === "POST");
+  expect(creates).toHaveLength(1);
+  expect(creates[0].body.packId).toBe("usd_acceptance_1");
+  expect(Object.keys(creates[0].body).sort()).toEqual([
+    "idempotencyKey",
+    "packId",
+  ]);
+
+  state.status = "funded";
+  state.funds = 1000000;
+  await page.goto(`${PAGE}?purchase=purchase_1&checkout=returned`);
+  await expect(page.getByTestId("texting-purchase-status")).toContainText(
+    "$1.00 was added",
+  );
+  await expect(page.getByTestId("texting-available")).toHaveText("$1.00");
+  await expect(page.locator(".texting-balance__history")).toContainText(
+    "Fee $0.05 · Tax $0.00 · Total $1.05",
+  );
+  await expect(page.locator(".texting-balance")).toContainText(
+    "Your acceptance purchase is complete.",
+  );
+  await expect(page.locator(".texting-balance__packs")).toHaveCount(0);
+
+  await page.goto(`${BASE_URL}/texting-payment-terms`);
+  await expect(page.locator("main")).toContainText(
+    "texting-payments-2026-09-23",
+  );
+  await expect(page.locator("main")).toContainText(
+    "It is a real payment, not a sandbox transaction.",
+  );
+  await expect(page.locator("main")).toContainText(
+    "This is not a tax exemption",
+  );
+  await expect(page.locator("main")).not.toContainText("support@polisapp.io");
 });
 
 test("members cannot purchase or request history, and revoked access clears financial details", async ({
