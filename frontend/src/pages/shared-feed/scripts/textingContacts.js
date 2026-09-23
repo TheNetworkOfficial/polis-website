@@ -133,17 +133,106 @@ export async function uploadContactFile({
 
 export function createContacts(r) {
   const state = () => (r.view().contacts ||= {});
+  const processing = new Set([
+    "verifying",
+    "queued",
+    "processing",
+    "preparing",
+  ]);
+  let pollTimer,
+    pollReads = 0,
+    disposed = false,
+    refreshing = false;
+  function dispose() {
+    disposed = true;
+    clearTimeout(pollTimer);
+  }
+  const needsUpdate = (s) =>
+    s.checkingSubmission || s.refreshError || processing.has(s.job?.status);
+  /** Only saved-status GETs retry. A lost mutation response never repeats the import. */
+  function scheduleUpdate() {
+    clearTimeout(pollTimer);
+    if (disposed) return;
+    const s = state();
+    if (!s.job || !needsUpdate(s)) return;
+    if (pollReads >= 60) {
+      s.updatesPaused = true;
+      return;
+    }
+    pollTimer = setTimeout(
+      async () => {
+        if (disposed) return;
+        try {
+          r.guard();
+          if (r.busy()) {
+            scheduleUpdate();
+            return;
+          }
+          pollReads++;
+          await refreshImport(s.job.importId);
+        } catch {
+          // The route or signed-in organization changed; its old view is discarded.
+        }
+      },
+      s.refreshError ? 15000 : 5000,
+    );
+  }
+  async function readImport(resource) {
+    const s = state();
+    const job = (await r.api(`/imports/${id(resource)}`)).import;
+    if (disposed) return;
+    if (job?.importId !== resource)
+      throw new Error("The saved import response could not be verified.");
+    if (job.revision < s.job?.revision) return;
+    s.job = job;
+    if (!job.actions?.canReviewMapping) {
+      s.checkingSubmission = false;
+      s.preview = null;
+      s.reviewed = false;
+    }
+    if (!s.preview) s.mapping = structuredClone(job.mapping || {});
+    if (job.audienceId && r.can("canPrepareProviderAudience"))
+      s.transfer = (
+        await r.api(`/audiences/${id(job.audienceId)}/provider-sync`)
+      ).transfer;
+  }
+  async function refreshImport(resource) {
+    if (refreshing || disposed) return;
+    refreshing = true;
+    const s = state();
+    try {
+      try {
+        await readImport(resource);
+        if (disposed) return;
+        s.refreshError = false;
+      } catch (error) {
+        r.guard();
+        if (disposed) return;
+        if (error?.status === 401 || error?.status === 403) {
+          dispose();
+          r.fail(error);
+          r.changed();
+          return;
+        }
+        s.refreshError = true;
+        if (
+          error?.status >= 400 &&
+          error.status < 500 &&
+          ![408, 429].includes(error.status)
+        )
+          pollReads = 60;
+      }
+      scheduleUpdate();
+      r.changed();
+    } finally {
+      refreshing = false;
+    }
+  }
   async function load(resource) {
     const s = state();
     if (resource && resource !== "new") {
-      s.job = (await r.api(`/imports/${id(resource)}`)).import;
-      s.mapping = structuredClone(s.job.mapping || {});
-      s.preview = null;
-      s.reviewed = false;
-      if (s.job.audienceId && r.can("canPrepareProviderAudience"))
-        s.transfer = (
-          await r.api(`/audiences/${id(s.job.audienceId)}/provider-sync`)
-        ).transfer;
+      await readImport(resource);
+      scheduleUpdate();
     } else if (resource !== "new") {
       const result = await r.api("/imports");
       s.imports = list(result.imports);
@@ -261,12 +350,33 @@ export function createContacts(r) {
       head(
         "CONTACTS",
         j.file?.fileName || "Import",
-        label(j.status),
+        s.starting
+          ? "Starting import"
+          : s.checkingSubmission
+            ? "Checking import status"
+            : j.status === "staged"
+              ? "Imported"
+              : label(j.status),
         go("contacts", "All lists", "", true),
       ) +
-      (j.actions?.canReviewMapping
-        ? mappingForm(s)
-        : `<div class="pt-grid pt-grid--three">${stat("Staged", count(j.progress?.rowsStaged))}${stat("Rejected", count(j.progress?.rowsRejected))}${stat("Parts prepared", count(j.progress?.partitionsPrepared))}</div><section class="pt-card"><div class="pt-row"><h2>${j.status === "staged" ? "List reviewed" : "Import progress"}</h2>${button("import-refresh", "Refresh", { secondary: true })}</div>${j.status === "uploading" ? `<progress class="pt-workspace-progress" value="${e(s.bytes || j.progress?.bytesUploaded || 0)}" max="${e(j.file.sizeBytes)}"></progress><p class="pt-muted">${bytes(s.bytes || j.progress?.bytesUploaded || 0)} of ${bytes(j.file.sizeBytes)}</p><label class="pt-field"><span>Select the original file to resume</span><input type="file" accept=".csv,.tsv,.txt" data-workspace-change="resume-file"></label>${button("upload-resume", "Resume upload", { disabled: !s.file || r.busy() })}${button("upload-stop", "Stop upload", { secondary: true, disabled: !r.busy() })}` : `<p class="pt-muted">${j.status === "staged" ? "Duplicates, invalid numbers and opt-outs have been checked. Preparing a list does not send messages." : "Processing continues in the background. You can leave and check back."}</p>`}${j.error ? notice("Import needs attention", label(j.error.code)) : ""}<div class="pt-actions">${j.actions?.canComplete ? button("import-complete", "Finish upload") : ""}${j.actions?.canRetry ? button("import-retry", "Resume processing", { secondary: true }) : ""}${j.actions?.canRecover ? button("import-recover", "Recover processing", { secondary: true }) : ""}${j.actions?.canReadReports ? button("import-report", "Review records", { secondary: true }) : ""}${j.actions?.canCancel ? button("import-cancel", "Cancel import", { secondary: true }) : ""}</div></section>`) +
+      (s.starting || s.checkingSubmission
+        ? `<section class="pt-card" role="status"><h2>${s.starting ? "Starting your import…" : "Checking your saved import…"}</h2><p class="pt-muted">${s.starting ? "Your reviewed columns are being saved. No messages are sent." : "The request may still be processing. We are checking its status without submitting it again."}</p>${!s.starting ? button("import-refresh", "Check status", { secondary: true, disabled: r.busy() }) : ""}</section>`
+        : j.actions?.canReviewMapping
+          ? mappingForm(s)
+          : `<div class="pt-grid pt-grid--three">${stat("Imported", count(j.progress?.rowsStaged))}${stat("Rejected", count(j.progress?.rowsRejected))}${stat("Batches prepared", count(j.progress?.partitionsPrepared))}</div><section class="pt-card"><div class="pt-row"><h2>${j.status === "staged" ? "Contacts imported" : j.status === "failed" ? "Import needs attention" : j.status === "cancelled" ? "Import canceled" : "Import progress"}</h2>${button("import-refresh", "Refresh", { secondary: true })}</div>${j.status === "uploading" ? `<progress class="pt-workspace-progress" value="${e(s.bytes || j.progress?.bytesUploaded || 0)}" max="${e(j.file.sizeBytes)}"></progress><p class="pt-muted">${bytes(s.bytes || j.progress?.bytesUploaded || 0)} of ${bytes(j.file.sizeBytes)}</p><label class="pt-field"><span>Select the original file to resume</span><input type="file" accept=".csv,.tsv,.txt" data-workspace-change="resume-file"></label>${button("upload-resume", "Resume upload", { disabled: !s.file || r.busy() })}${button("upload-stop", "Stop upload", { secondary: true, disabled: !r.busy() })}` : `<p class="pt-muted">${j.status === "staged" ? "Duplicates, invalid numbers and opt-outs have been checked. Preparing a list does not send messages." : j.status === "failed" ? "Processing stopped. Review the issue below before continuing." : j.status === "cancelled" ? "This import was canceled. These contacts will not be used for new campaigns." : "Processing continues in the background. This page checks for updates automatically."}</p>`}${j.error ? notice("Import needs attention", label(j.error.code)) : ""}<div class="pt-actions">${j.actions?.canComplete ? button("import-complete", "Finish upload") : ""}${j.actions?.canRetry && (!processing.has(j.status) || j.error || s.updatesPaused) ? button("import-retry", "Resume processing", { secondary: true }) : ""}${j.actions?.canRecover ? button("import-recover", "Recover processing", { secondary: true }) : ""}${j.actions?.canReadReports ? button("import-report", "Review records", { secondary: true }) : ""}${j.actions?.canCancel ? button("import-cancel", "Cancel import", { secondary: true }) : ""}</div></section>`) +
+      (s.refreshError || s.updatesPaused
+        ? notice(
+            s.updatesPaused
+              ? "Automatic updates paused"
+              : "Reconnecting to import status",
+            s.updatesPaused
+              ? "Your last saved status is shown. Use Refresh to check again; do not upload the file again."
+              : "The latest status could not be loaded. Your import has not been marked failed. We’ll check again automatically.",
+          )
+        : "") +
+      (s.updatesPaused && s.checkingSubmission && j.actions?.canReviewMapping
+        ? `<section class="pt-card"><p class="pt-muted">No saved import start has been confirmed. Reopen the saved mapping to review it before submitting again.</p>${button("reload", "Review saved mapping", { secondary: true })}</section>`
+        : "") +
       (s.transfer
         ? `<section class="pt-card"><div class="pt-row"><div><h2>${s.transfer.state === "verified" ? "List ready with vendor" : "Prepare list for texting"}</h2><p class="pt-muted">${e(label(s.transfer.state))}</p></div>${button("transfer-refresh", "Refresh", { secondary: true })}</div><p class="pt-muted">Each part contains at most 20,000 contacts. No messages are sent.</p>${list(
             s.transfer.partitions,
@@ -388,20 +498,36 @@ export function createContacts(r) {
       return true;
     }
     if (name === "import-refresh") {
-      await load(j.importId);
+      pollReads = 0;
+      s.updatesPaused = false;
+      await refreshImport(j.importId);
       return true;
     }
     if (name === "mapping-save") {
       if (!s.preview || !s.reviewed || !s.settings?.fields.phone)
         throw new Error("Review the mapping first.");
-      s.preview = null;
-      s.reviewed = false;
-      s.job = (
-        await r.api(`/imports/${id(j.importId)}/mapping`, {
-          expectedRevision: j.revision,
-          ...s.settings,
-        })
-      ).import;
+      if (s.starting || s.checkingSubmission) return true;
+      s.starting = true;
+      r.changed();
+      try {
+        s.job = (
+          await r.api(`/imports/${id(j.importId)}/mapping`, {
+            expectedRevision: j.revision,
+            ...s.settings,
+          })
+        ).import;
+        s.preview = null;
+        s.reviewed = false;
+      } catch (error) {
+        r.guard();
+        if (error?.status && error.status < 500 && error.status !== 408)
+          throw error;
+        s.checkingSubmission = true;
+        s.refreshError = true;
+      } finally {
+        s.starting = false;
+        if (!disposed) scheduleUpdate();
+      }
       return true;
     }
     if (
@@ -429,6 +555,7 @@ export function createContacts(r) {
       )
         return true;
       s.job = (await r.api(`/imports/${id(j.importId)}/${op}`, {})).import;
+      scheduleUpdate();
       return true;
     }
     if (name === "import-report" || name === "import-report-more") {
@@ -490,5 +617,5 @@ export function createContacts(r) {
     }
     return false;
   }
-  return { load, render, submit, action, change };
+  return { load, render, submit, action, change, dispose };
 }

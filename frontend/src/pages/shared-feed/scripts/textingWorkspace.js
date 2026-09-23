@@ -76,6 +76,7 @@ export function createTextingWorkspacePage({
   function clearView() {
     sequence++;
     clearTimeout(timer);
+    for (const module of Object.values(modules)) module.dispose?.();
     upload?.abort();
     upload = null;
     view = {};
@@ -91,6 +92,7 @@ export function createTextingWorkspacePage({
     view.workspace.capabilities?.[name] === true;
   function fail(error) {
     if (error?.status === 401 || error?.status === 403) {
+      for (const module of Object.values(modules)) module.dispose?.();
       view.workspace = null;
       view.billing = null;
       view.contacts = null;
@@ -130,6 +132,7 @@ export function createTextingWorkspacePage({
     return {
       api,
       guard,
+      fail,
       refreshBilling,
       context,
       can,
@@ -334,7 +337,8 @@ export function createTextingWorkspacePage({
           `${count(w.pilot.remainingMessages)} messages and ${money(w.pilot.remainingSpendMicros)} remain. Only approved test recipients can be contacted.`,
         );
     }
-    return `<div data-workspace-key="${e(view.key)}" aria-busy="${view.busy ? "true" : "false"}">${view.error ? `<div class="pt-notice" role="alert">${e(view.error)}</div>` : ""}${view.message ? notice(view.message) : ""}${view.busy ? `<div class="pt-workspace-working" role="status">Saving…</div>` : ""}${html}</div>`;
+    const busyLabel = section === "contacts" ? "Updating import…" : "Saving…";
+    return `<div data-workspace-key="${e(view.key)}" aria-busy="${view.busy ? "true" : "false"}">${view.error ? `<div class="pt-notice" role="alert">${e(view.error)}</div>` : ""}${view.message ? notice(view.message) : ""}${view.busy && !view.contacts?.starting ? `<div class="pt-workspace-working" role="status">${busyLabel}</div>` : ""}${html}</div>`;
   }
   function owned(target) {
     return (

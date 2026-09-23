@@ -20,7 +20,9 @@ async function moduleUrl(name) {
   return url;
 }
 const ui = await import(await moduleUrl("textingWorkspaceUi"));
-const { uploadContactFile } = await import(await moduleUrl("textingContacts"));
+const { uploadContactFile, createContacts } = await import(
+  await moduleUrl("textingContacts")
+);
 const { createCampaigns } = await import(await moduleUrl("textingCampaigns"));
 const { createTextingWorkspacePage } = await import(
   await moduleUrl("textingWorkspace")
@@ -358,4 +360,164 @@ test("a confirmed message advances only the local item; it does not confirm the 
   assert.equal(calls.length, 1);
   assert.equal(state.campaigns.queue.items[0].itemId, "item-two");
   assert.equal(state.campaigns.sent, 1);
+});
+
+const importJob = (status, revision = 1) => ({
+  importId: "import-one",
+  file: { fileName: "example.csv" },
+  status,
+  revision,
+  progress: { rowsStaged: status === "staged" ? 1 : 0 },
+  mapping: { fields: { phone: "phone" }, headers: ["phone"] },
+  actions: {
+    canReviewMapping: status === "awaiting_mapping",
+    canRetry: status === "queued",
+  },
+});
+const flush = () => new Promise((resolve) => setImmediate(resolve));
+function importHarness(api) {
+  const view = {
+    contacts: {
+      job: importJob("awaiting_mapping"),
+      preview: { totalRows: 1, counts: { validPhones: 1 }, rows: [] },
+      reviewed: true,
+      mapping: { fields: { phone: "phone" }, headers: ["phone"] },
+      settings: { fields: { phone: "phone" } },
+    },
+  };
+  let current = true,
+    failure;
+  const page = createContacts({
+    view: () => view,
+    context: () => ({ resourceId: "import-one" }),
+    api,
+    can: (name) => name === "uploadImports",
+    busy: () => false,
+    changed: () => {},
+    guard: () => {
+      if (!current) throw new Error("Workspace changed");
+    },
+    fail: (error) => {
+      failure = error;
+    },
+  });
+  return {
+    page,
+    view,
+    changeRoute: () => {
+      current = false;
+    },
+    failure: () => failure,
+  };
+}
+
+test("import keeps a stable starting view and recovers a failed status read without another POST", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const calls = [];
+  let finishMapping,
+    reads = 0;
+  const h = importHarness(async (path, body) => {
+    calls.push({ path, body });
+    if (body)
+      return new Promise((resolve) => {
+        finishMapping = resolve;
+      });
+    reads++;
+    if (reads === 1) throw new TypeError("Failed to fetch");
+    return { import: importJob("staged", 3) };
+  });
+  const saving = h.page.action("mapping-save");
+  assert.match(h.page.render(), /Starting your import/);
+  assert.doesNotMatch(h.page.render(), /Match your columns/);
+  finishMapping({ import: importJob("queued", 2) });
+  await saving;
+  assert.match(h.page.render(), /Import progress/);
+  assert.doesNotMatch(h.page.render(), /Resume processing/);
+  t.mock.timers.tick(5000);
+  await flush();
+  assert.match(h.page.render(), /Reconnecting to import status/);
+  assert.doesNotMatch(h.page.render(), /Failed to fetch|Contacts imported/);
+  assert.equal(h.view.contacts.job.status, "queued");
+  t.mock.timers.tick(15000);
+  await flush();
+  assert.match(h.page.render(), /Contacts imported/);
+  assert.doesNotMatch(h.page.render(), /Reconnecting/);
+  t.mock.timers.tick(30000);
+  await flush();
+  assert.equal(reads, 2);
+  assert.equal(calls.filter((c) => c.body).length, 1);
+  h.page.dispose();
+});
+
+test("a lost mapping response only checks its durable import and never resubmits", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const calls = [];
+  const h = importHarness(async (path, body) => {
+    calls.push({ path, body });
+    if (body) throw new TypeError("Failed to fetch");
+    return { import: importJob("staged", 3) };
+  });
+  await h.page.action("mapping-save");
+  assert.match(h.page.render(), /Checking your saved import/);
+  await h.page.action("mapping-save");
+  assert.equal(calls.length, 1);
+  t.mock.timers.tick(15000);
+  await flush();
+  assert.match(h.page.render(), /Contacts imported/);
+  assert.equal(calls.filter((c) => c.body).length, 1);
+  h.page.dispose();
+});
+
+test("automatic import reads are bounded and stop on disposal or revoked access", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let reads = 0;
+  const h = importHarness(async () => {
+    reads++;
+    return { import: importJob("queued", 2) };
+  });
+  await h.page.load("import-one");
+  for (let i = 0; i < 61; i++) {
+    t.mock.timers.tick(5000);
+    await flush();
+  }
+  assert.equal(reads, 61); // One initial read and 60 automatic checks.
+  assert.match(h.page.render(), /Automatic updates paused/);
+  await h.page.action("import-refresh");
+  assert.equal(reads, 62);
+  h.page.dispose();
+  t.mock.timers.tick(30000);
+  await flush();
+  assert.equal(reads, 62);
+
+  let revoked = false,
+    forbiddenReads = 0;
+  const denied = importHarness(async () => {
+    forbiddenReads++;
+    if (revoked) throw Object.assign(new Error("Forbidden"), { status: 403 });
+    return { import: importJob("queued", 2) };
+  });
+  await denied.page.load("import-one");
+  revoked = true;
+  t.mock.timers.tick(5000);
+  await flush();
+  assert.equal(denied.failure()?.status, 403);
+  t.mock.timers.tick(30000);
+  await flush();
+  assert.equal(forbiddenReads, 2);
+});
+
+test("a disposed import cannot replace saved state with a late status response", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let finish;
+  const h = importHarness(
+    async () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const pending = h.page.action("import-refresh");
+  h.page.dispose();
+  finish({ import: importJob("staged", 3) });
+  await pending;
+  assert.equal(h.view.contacts.job.status, "awaiting_mapping");
 });
