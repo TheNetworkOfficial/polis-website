@@ -521,3 +521,66 @@ test("a disposed import cannot replace saved state with a late status response",
   await pending;
   assert.equal(h.view.contacts.job.status, "awaiting_mapping");
 });
+
+test("a lost preparation response reconciles by reads without another contact transfer", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const oldWindow = globalThis.window;
+  globalThis.window = { confirm: () => true };
+  t.after(() => {
+    globalThis.window = oldWindow;
+  });
+  const job = { ...importJob("staged", 3), audienceId: "audience-one" };
+  const view = {
+    contacts: { job, transfer: { state: "not_started", canAdvance: true } },
+  };
+  const calls = [];
+  let transferReads = 0;
+  const page = createContacts({
+    view: () => view,
+    context: () => ({ resourceId: job.importId }),
+    can: () => true,
+    busy: () => false,
+    changed: () => {},
+    guard: () => {},
+    api: async (path, body) => {
+      calls.push({ path, body });
+      if (body) throw new TypeError("Failed to fetch");
+      if (path.endsWith("provider-sync") && ++transferReads === 1)
+        return {
+          transfer: {
+            state: "in_progress",
+            backgroundActive: true,
+            canAdvance: false,
+          },
+        };
+      return path.endsWith("provider-sync")
+        ? {
+            transfer: {
+              state: "verified",
+              canAdvance: false,
+              partitions: [
+                { partitionIndex: 0, verifiedCount: 1, contactCount: 1 },
+              ],
+            },
+          }
+        : { import: job };
+    },
+  });
+  await page.action("transfer-start");
+  assert.match(page.render(), /Checking list preparation/);
+  assert.doesNotMatch(page.render(), /Failed to fetch/);
+  await assert.rejects(page.action("transfer-start"), /Refresh/);
+  t.mock.timers.tick(5000);
+  await flush();
+  assert.equal(view.contacts.transfer.state, "in_progress");
+  assert.doesNotMatch(page.render(), /List ready with vendor/);
+  t.mock.timers.tick(5000);
+  await flush();
+  assert.match(page.render(), /List ready with vendor/);
+  assert.doesNotMatch(page.render(), /Checking list preparation/);
+  t.mock.timers.tick(30000);
+  await flush();
+  assert.equal(calls.filter((c) => c.body).length, 1);
+  assert.equal(calls.length, 5);
+  page.dispose();
+});
