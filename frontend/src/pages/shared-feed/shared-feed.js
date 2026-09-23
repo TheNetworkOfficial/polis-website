@@ -2,6 +2,9 @@ import "../../css/polis-design-system.css";
 import "./css/shared-feed.css";
 import "./css/civic-neon.css";
 import "./css/texting-workspace.css";
+import "./css/coalition-workspace.css";
+import "./css/coalition-features.css";
+import "./css/coalition-rooms.css";
 import polisLogoUrl from "../../assets/images/polis/Polis.png";
 
 import {
@@ -4919,6 +4922,7 @@ const state = {
   filesNavigation: {
     loaded: false,
     enabled: false,
+    workspaces: [],
   },
   ui: {
     toast: "",
@@ -64811,7 +64815,57 @@ function getTopChromeTitle(route = state.route) {
   return sectionTitles[section] || "Polis";
 }
 
+function isCoalitionPresentationRoute() {
+  const route = getCurrentRoute();
+  if (
+    [ROUTE_KEY_MESSAGES_ROOT, ROUTE_KEY_MESSAGES_WILDCARD].includes(
+      route.routeKey,
+    )
+  ) {
+    return parseMessagingSubroute(route).scopeType === "coalition";
+  }
+  return [
+    ROUTE_KEY_COALITIONS,
+    ROUTE_KEY_COALITION_START,
+    ROUTE_KEY_COALITION_JOIN,
+    ROUTE_KEY_COALITION_DETAIL,
+    ROUTE_KEY_COALITION_SECTION,
+    ROUTE_KEY_ORGANIZATION_GOVERNANCE,
+  ].includes(getCurrentRoute().routeKey);
+}
+
+function renderCoalitionWorkspaceTopbar() {
+  const route = getCurrentRoute();
+  const roomScope = [
+    ROUTE_KEY_MESSAGES_ROOT,
+    ROUTE_KEY_MESSAGES_WILDCARD,
+  ].includes(route.routeKey)
+    ? parseMessagingSubroute(route)
+    : null;
+  const coalitionId =
+    roomScope?.scopeType === "coalition"
+      ? roomScope.scopeId
+      : decodeRouteSegment(route.routeParams?.coalitionId || "");
+  const loaded = state.pages.coalitions.detail.coalition;
+  const coalition =
+    loaded?.coalitionId === coalitionId
+      ? loaded
+      : findCoalitionListItem(coalitionId)?.coalition;
+  const actions = getTopActions()
+    .map(
+      (item) =>
+        `<button class="shared-feed-topbar__icon" data-action="top-action" data-top-key="${escapeHtml(item.key)}" data-route="${escapeHtml(item.path || "")}" aria-label="${escapeHtml(item.label)}">${renderIcon(item.icon)}</button>`,
+    )
+    .join("");
+  return `<header class="coalition-ui-topbar">
+    <a class="coalition-ui-brand" href="/feed" data-action="navigate" data-route="/feed"><img src="${escapeHtml(resolveSharedAssetUrl(polisLogoUrl))}" alt="" width="40" height="40" /><span>Polis</span></a>
+    <button class="coalition-ui-switcher" data-action="navigate" data-route="/coalitions" aria-label="Choose coalition">${escapeHtml(coalition?.name || (roomScope?.scopeType === "coalition" ? findMessagingServer("coalition", coalitionId)?.title : "") || "Coalitions")} <span aria-hidden="true">⌄</span></button>
+    <div class="coalition-ui-topbar__actions">${actions}</div>
+  </header>`;
+}
+
 function renderTopChrome() {
+  if (isCoalitionPresentationRoute()) return renderCoalitionWorkspaceTopbar();
   const actions = getTopActions()
     .map(
       (item) =>
@@ -86872,7 +86926,7 @@ function renderCoalitionListCard(item) {
   const membership = item.membership;
   const canOpen = !membership.isPending && membership.isActive;
   const entryPath = coalitionEntryPath(coalition, membership);
-  const highlights = coalitionFeatureHighlights(coalition, membership, 5);
+  const highlights = coalitionFeatureHighlights(coalition, membership, 3);
   const status = membership.isPending
     ? "Pending"
     : membership.isActive
@@ -87036,7 +87090,7 @@ function renderCoalitionOnboardingSide(mode) {
           </div>`
         : ""
     }
-    ${renderCoalitionOnboardingChecklist(mode)}
+    <details class="coalition-ui-disclosure"><summary>Setup guide</summary>${renderCoalitionOnboardingChecklist(mode)}</details>
     <section class="shared-coalition-panel">
       <div class="shared-coalition-panel__header">
         <div>
@@ -87853,7 +87907,7 @@ function renderCoalitionsRootPage() {
       <div class="shared-page__header">
         <div>
           <h1>Coalitions</h1>
-          <p>Open coalition rooms, member access, missions, voter map tools, governance, calendar, and amplify requests.</p>
+          <p>Choose your team. Get to work.</p>
         </div>
         <div class="shared-card__actions">
           <button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="/coalitions/start">Start coalition</button>
@@ -87875,8 +87929,8 @@ function renderCoalitionsRootPage() {
       }
       ${
         list.items.length
-          ? `${renderCoalitionsRootSummary(list.items)}
-            <div class="shared-coalition-grid">${list.items.map(renderCoalitionListCard).join("")}</div>`
+          ? `<div class="shared-coalition-grid">${list.items.map(renderCoalitionListCard).join("")}</div>
+            <details class="coalition-ui-disclosure"><summary>All tools & access</summary>${renderCoalitionsRootSummary(list.items)}</details>`
           : list.loaded && !list.loading
             ? renderCoalitionsRootEmpty()
             : ""
@@ -87886,81 +87940,60 @@ function renderCoalitionsRootPage() {
 }
 
 function renderCoalitionHero(coalition, membership) {
-  const sectionByKey = new Map(
-    COALITION_SECTION_CONFIG.map((section) => [section.key, section]),
+  const activeSection = coalitionSectionForRoute(getCurrentRoute());
+  const labels = {
+    overview: "Home",
+    members: "People",
+    "voter-map": "Field work",
+    admin: "Administration",
+  };
+  const section = COALITION_SECTION_CONFIG.find(
+    (item) => item.key === activeSection,
   );
-  const statusLabel = membership.isPending
-    ? "Pending approval"
-    : membership.isActive
-      ? "Active member"
-      : humanizeLabel(membership.status);
-  const actions = [];
-  if (membership.isPending) {
-    actions.push(
-      `<button class="shared-feed-chip shared-feed-chip--primary" type="button"${disabledAttr(true)}>Pending approval</button>`,
-    );
-  } else if (membership.isActive && membership.isLeader) {
-    actions.push(
-      `<button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, "admin"))}">${renderIcon("dashboard")} Admin view</button>`,
-    );
-  }
-  if (membership.isActive) {
-    actions.push(
-      `<button class="shared-feed-chip${membership.isLeader ? "" : " shared-feed-chip--primary"}" data-action="navigate" data-route="/messages/servers/coalition/${escapeHtml(encodeURIComponent(coalition.coalitionId))}">${renderIcon("messages")} Rooms</button>`,
-    );
-  }
-  if (canViewCoalitionMissions(membership)) {
-    actions.push(
-      `<button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, "missions"))}">${renderIcon("mission")} Missions</button>`,
-    );
-  }
-  if (
-    canOpenCoalitionSection(
-      sectionByKey.get("voter-map"),
-      coalition,
-      membership,
-    )
-  ) {
-    actions.push(
-      `<button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, "voter-map"))}">${renderIcon("map")} Voter map</button>`,
-    );
-  }
-  actions.push(
-    `<button class="shared-feed-chip" data-action="open-app-shell">Open app</button>`,
-  );
-  return `<section class="shared-coalition-hero">
-    <div class="shared-coalition-hero__identity">
-      ${renderCoalitionAvatar(coalition, "shared-coalition-avatar--large")}
-      <div>
-        <div class="shared-card__meta">
-          <span>${escapeHtml(statusLabel)}</span>
-          <span>${escapeHtml(membership.roleLabel)}</span>
-          <span>${escapeHtml(humanizeLabel(coalition.coalitionType))}</span>
-        </div>
-        <h1>${escapeHtml(coalition.name)}</h1>
-        <p>${escapeHtml(coalition.description || "Coalition operations")}</p>
-      </div>
+  return `<header class="coalition-ui-heading">
+    <div><span class="coalition-ui-eyebrow">${escapeHtml(coalition.name)}</span>
+      <h1>${escapeHtml(labels[activeSection] || section?.label || "Coalition")}</h1>
+      ${activeSection === "overview" && coalition.description ? `<p>${escapeHtml(coalition.description)}</p>` : ""}
     </div>
-    <div class="shared-coalition-hero__actions">
-      ${actions.join("")}
-    </div>
-  </section>`;
+    <span class="coalition-ui-membership">${escapeHtml(membership.isPending ? "Pending approval" : membership.roleLabel)}</span>
+  </header>`;
 }
 
 function renderCoalitionTabs(coalition, membership, activeSection) {
-  return `<nav class="shared-coalition-tabs" aria-label="Coalition sections">
-    ${COALITION_SECTION_CONFIG.map((section) => {
-      const active = section.key === activeSection;
-      const enabled = canOpenCoalitionSection(section, coalition, membership);
-      const status = coalitionFeatureStatus(section, coalition, membership);
-      const actionAttrs = enabled
-        ? `data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, section.key))}"`
-        : `${disabledAttr(true)} aria-disabled="true" title="${escapeHtml(status.cta)}"`;
-      return `<button class="shared-coalition-tab${active ? " is-active" : ""}${enabled ? "" : " is-muted"}" type="button" ${actionAttrs}>
-        <span>${renderIcon(section.icon)}</span>
-        <strong>${escapeHtml(section.label)}</strong>
-      </button>`;
-    }).join("")}
+  const labels = {
+    overview: "Home",
+    members: "People",
+    "voter-map": "Field work",
+  };
+  const items = COALITION_SECTION_CONFIG.map((section) => {
+    const active = section.key === activeSection;
+    const enabled = canOpenCoalitionSection(section, coalition, membership);
+    const status = coalitionFeatureStatus(section, coalition, membership);
+    const actionAttrs = enabled
+      ? `data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, section.key))}"`
+      : `${disabledAttr(true)} aria-disabled="true" title="${escapeHtml(status.cta)}"`;
+    return `<button class="shared-coalition-tab${active ? " is-active" : ""}${enabled ? "" : " is-muted"}" type="button" ${active ? 'aria-current="page"' : ""} ${actionAttrs}>
+      <span>${renderIcon(section.icon)}</span><strong>${escapeHtml(labels[section.key] || section.label)}</strong>
+    </button>`;
+  }).join("");
+  const active = membership.isActive && !membership.isPending;
+  const workspace = active
+    ? state.filesNavigation.workspaces.find(
+        (item) =>
+          isFilesWorkspaceAccessible(item) &&
+          item.principal?.id === coalition.coalitionId &&
+          ["organization", "coalition"].includes(
+            item.principal?.sourceType || item.principal?.type,
+          ),
+      )
+    : null;
+  const filesRoute = workspace?.filesWorkspaceId
+    ? `/files?workspace=${encodeURIComponent(workspace.filesWorkspaceId)}`
+    : "";
+  return `<nav class="shared-coalition-tabs" aria-label="Coalition sections">${items}
+    ${filesRoute ? `<a class="shared-coalition-tab" href="${escapeHtml(filesRoute)}" data-route="${escapeHtml(filesRoute)}"><span>${renderIcon("file")}</span><strong>Files</strong></a>` : ""}
+    ${active ? `<button class="shared-coalition-tab coalition-ui-texting-link" type="button" data-action="navigate" data-route="${escapeHtml(textingRoute(coalition.coalitionId))}"><span>${renderIcon("messages")}</span><strong>Texting</strong></button>` : ""}
+    ${active && membership.isLeader ? `<button class="shared-coalition-tab${activeSection === "admin" ? " is-active" : ""}" type="button" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, "admin"))}"><span>${renderIcon("settings")}</span><strong>Administration</strong></button>` : ""}
   </nav>`;
 }
 
@@ -88028,11 +88061,8 @@ function renderCoalitionOverview(detail, coalition, membership) {
       formatCount(detail.members.length),
       "cyan",
     ),
-    renderCoalitionMetric("Roles", formatCount(detail.roles.length)),
     renderCoalitionMetric("Missions", formatCount(detail.missions.length)),
     renderCoalitionMetric("Calendar", formatCount(detail.calendar.length)),
-    renderCoalitionMetric("Proposals", formatCount(detail.proposals.length)),
-    renderCoalitionMetric("Votes", formatCount(detail.votes.length)),
   ].join("");
   return `<div class="shared-coalition-section">
     <div class="shared-coalition-metrics">${metrics}</div>
@@ -88101,19 +88131,14 @@ function renderCoalitionOverview(detail, coalition, membership) {
           detail.members.slice(0, 4),
           (member) => `<div class="shared-list-item">
             <strong>${escapeHtml(member.displayName)}</strong>
-            <span>${escapeHtml(member.roleLabel)} - ${escapeHtml(formatCount(member.permissions.length))} permissions</span>
+            <span>${escapeHtml(member.roleLabel)}</span>
           </div>`,
           "No members loaded.",
         )}
       </article>
-      <article class="shared-coalition-panel shared-coalition-panel--wide">
-        <div class="shared-coalition-panel__header">
-          <div>
-            <span class="shared-card__meta"><span>Feature map</span><span>${escapeHtml(membership?.isLeader ? "Leader workspace" : "Member workspace")}</span></span>
-            <h2>Coalition command center</h2>
-            <p>Open the browser surfaces that match the Polis app coalition hub. Locked cards show what exists but needs approval, a permission, voter-map enablement, or governance setup.</p>
-          </div>
-        </div>
+      <details class="coalition-ui-disclosure shared-coalition-panel--wide">
+        <summary>All tools & access</summary>
+        ${renderCoalitionCommandStrip(coalition, membership)}
         <div class="shared-coalition-feature-grid">
           ${featureSections
             .map((section) =>
@@ -88121,8 +88146,8 @@ function renderCoalitionOverview(detail, coalition, membership) {
             )
             .join("")}
         </div>
-      </article>
-      ${renderCoalitionContactPanel(coalition)}
+      </details>
+      <details class="coalition-ui-disclosure shared-coalition-panel--wide"><summary>Contact details</summary>${renderCoalitionContactPanel(coalition)}</details>
     </div>
   </div>`;
 }
@@ -89325,7 +89350,8 @@ function coalitionRoomCategoryLabel(category = {}, index = 0) {
 function coalitionRoomChannelCategoryId(channel = {}) {
   const raw = channel.raw || {};
   return normalizeString(
-    raw.categoryId ||
+    channel.categoryId ||
+      raw.categoryId ||
       raw.category_id ||
       raw.category?.categoryId ||
       raw.category?.id ||
@@ -89398,39 +89424,19 @@ function renderCoalitionRoomCard(coalition, channel, canManage) {
     channel.conversationId,
     "/settings",
   );
-  return `<article class="shared-coalition-room-card">
-    <div class="shared-coalition-room-card__top">
-      <span class="shared-coalition-room-icon">${renderIcon(channel.kind === "announcement" ? "bell" : "messages")}</span>
-      <div>
-        <div class="shared-coalition-room-pills">
-          <span>${escapeHtml(coalitionRoomKindLabel(channel))}</span>
-          ${channel.unreadCount ? `<span class="is-alert">${escapeHtml(formatCount(channel.unreadCount))} unread</span>` : ""}
-          ${channel.canManage ? '<span class="is-good">Manage</span>' : ""}
-        </div>
-        <h3>${escapeHtml(channel.title)}</h3>
-        <p>${escapeHtml(channel.subtitle || channel.lastMessagePreview || "Shared coalition room")}</p>
-      </div>
-    </div>
-    <div class="shared-coalition-room-card__stats">
-      <span><strong>${escapeHtml(formatCount(channel.participantCount || 0))}</strong><small>members</small></span>
-      <span><strong>${escapeHtml(coalitionRoomLastActivityLabel(channel))}</strong><small>activity</small></span>
-    </div>
-    <div class="shared-coalition-room-card__actions">
-      <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="${escapeHtml(roomRoute)}">Open room</button>
-      ${canManage || channel.canManage ? `<button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(settingsRoute)}">Settings</button>` : ""}
-    </div>
+  return `<article class="shared-coalition-room-entry">
+    <button class="shared-coalition-room-entry__open" type="button" data-action="navigate" data-route="${escapeHtml(roomRoute)}">
+      <span class="shared-coalition-room-hash" aria-hidden="true">${channel.kind === "announcement" ? renderIcon("bell") : "#"}</span>
+      <span><strong>${escapeHtml(channel.title)}</strong><small>${escapeHtml(channel.subtitle || channel.lastMessagePreview || "Start the conversation.")}</small></span>
+      ${channel.unreadCount ? `<b class="shared-coalition-room-unread">${escapeHtml(formatCount(channel.unreadCount))}<span class="shared-sr-only"> unread messages</span></b>` : ""}
+    </button>
+    ${canManage || channel.canManage ? `<button class="shared-coalition-room-icon-button" type="button" data-action="navigate" data-route="${escapeHtml(settingsRoute)}" aria-label="${escapeHtml(`Settings for ${channel.title}`)}">${renderIcon("settings")}</button>` : ""}
   </article>`;
 }
 
 function renderCoalitionRoomGroup(coalition, group, canManage) {
-  return `<article class="shared-coalition-panel shared-coalition-room-group">
-    <div class="shared-coalition-room-group__header">
-      <div>
-        <h2>${escapeHtml(group.label)}</h2>
-        <p>${escapeHtml(group.description || `${formatCount(group.channels.length)} coalition room${group.channels.length === 1 ? "" : "s"}`)}</p>
-      </div>
-      <span>${escapeHtml(formatCount(group.channels.length))}</span>
-    </div>
+  return `<section class="shared-coalition-room-directory-group">
+    <h3>${escapeHtml(group.label)} <span>${escapeHtml(formatCount(group.channels.length))}</span></h3>
     ${
       group.channels.length
         ? `<div class="shared-coalition-room-list">${group.channels
@@ -89440,7 +89446,40 @@ function renderCoalitionRoomGroup(coalition, group, canManage) {
             .join("")}</div>`
         : `<div class="shared-coalition-room-empty">No rooms are available in this category yet.</div>`
     }
-  </article>`;
+  </section>`;
+}
+
+function renderCoalitionRoomChannels(
+  directory,
+  scopeId,
+  activeConversationId = "",
+) {
+  return `<nav class="shared-coalition-room-channels" aria-label="Coalition channels">${coalitionRoomGroups(
+    directory,
+  )
+    .map(
+      (group) => `<details class="shared-coalition-room-category" open>
+      <summary>${escapeHtml(group.label)}</summary>
+      ${group.channels
+        .map((channel) => {
+          const selected = channel.conversationId === activeConversationId;
+          const unread = Math.max(0, Number(channel.unreadCount) || 0);
+          const route = buildMessagingRoomRoute(
+            "coalition",
+            scopeId,
+            channel.conversationId,
+          );
+          return `<button class="shared-coalition-room-channel${selected ? " is-active" : ""}${unread ? " has-unread" : ""}" type="button" data-action="navigate" data-route="${escapeHtml(route)}"${selected ? ' aria-current="page"' : ""}>
+          <span class="shared-coalition-room-hash" aria-hidden="true">${channel.kind === "announcement" || messagingDirectoryChannelRoomType(channel) === "announcement_only" ? renderIcon("bell") : "#"}</span>
+          <span class="shared-coalition-room-channel__name">${escapeHtml(channel.title || "Room")}</span>
+          ${unread ? `<b class="shared-coalition-room-unread">${escapeHtml(formatCount(unread))}<span class="shared-sr-only"> unread messages</span></b>` : ""}
+        </button>`;
+        })
+        .join("")}
+      ${group.channels.length ? "" : '<p class="shared-coalition-room-channel-empty">No channels yet.</p>'}
+    </details>`,
+    )
+    .join("")}</nav>`;
 }
 
 function renderCoalitionRoomsAdminPanel(coalition, membership, directory) {
@@ -89461,17 +89500,13 @@ function renderCoalitionRoomsAdminPanel(coalition, membership, directory) {
       "dashboard",
     ],
   ];
-  return `<aside class="shared-coalition-room-admin">
-    <div>
-      <span class="shared-card__meta"><span>${escapeHtml(canManage ? "Admin tools" : "Room tools")}</span></span>
-      <h2>${escapeHtml(canManage ? "Manage coalition messaging" : "Open messaging tools")}</h2>
-      <p>${escapeHtml(canManage ? "Keep room defaults, access, safety review, and automations close to the coalition workspace." : "Room administration is limited by your coalition access, but you can still open available rooms.")}</p>
-    </div>
-    <div class="shared-coalition-room-admin__actions">
+  return `<details class="shared-coalition-room-tools">
+    <summary>${renderIcon("settings")} ${escapeHtml(canManage ? "Workspace tools" : "Room tools")}</summary>
+    <div class="shared-coalition-room-tools__links">
       ${actions
         .map(
           ([label, copy, route, icon]) =>
-            `<button class="shared-coalition-room-admin__button" type="button" data-action="navigate" data-route="${escapeHtml(route)}">
+            `<button class="shared-coalition-room-tools__link" type="button" data-action="navigate" data-route="${escapeHtml(route)}">
               <span>${renderIcon(icon)}</span>
               <strong>${escapeHtml(label)}</strong>
               <small>${escapeHtml(copy)}</small>
@@ -89479,7 +89514,7 @@ function renderCoalitionRoomsAdminPanel(coalition, membership, directory) {
         )
         .join("")}
     </div>
-  </aside>`;
+  </details>`;
 }
 
 function renderCoalitionRooms(coalition, membership, detail) {
@@ -89492,42 +89527,22 @@ function renderCoalitionRooms(coalition, membership, detail) {
   };
   const channels = Array.isArray(directory.channels) ? directory.channels : [];
   const groups = coalitionRoomGroups(directory);
-  const unreadCount = channels.reduce(
-    (total, channel) => total + (Number(channel.unreadCount) || 0),
-    0,
-  );
-  const memberReach = Math.max(
-    detail.members.length,
-    ...channels.map((channel) => Number(channel.participantCount) || 0),
-    0,
-  );
   const canManage = directory.canManage || membership.isLeader;
   const serverRoute = buildMessagingServerRoute(
     "coalition",
     coalition.coalitionId,
   );
-  return `<div class="shared-coalition-section shared-coalition-rooms">
-    <div class="shared-coalition-metrics">
-      ${renderCoalitionMetric("Rooms", formatCount(channels.length), "cyan")}
-      ${renderCoalitionMetric("Categories", formatCount(groups.length))}
-      ${renderCoalitionMetric("Unread", unreadCount ? formatCount(unreadCount) : "Clear")}
-      ${renderCoalitionMetric("Reach", formatCount(memberReach))}
-    </div>
-    <article class="shared-coalition-panel shared-coalition-panel--accent shared-coalition-rooms-hero">
-      <div>
-        <span class="shared-card__meta"><span>Coalition rooms</span><span>${escapeHtml(canManage ? "Manager access" : "Member access")}</span></span>
-        <h2>Room command center</h2>
-        <p>${escapeHtml(canManage ? "Review live coalition rooms, jump into priority channels, and open workspace administration without leaving the coalition workspace." : "Open the coalition rooms available to your team access and keep mission, governance, and field conversations close to the workspace.")}</p>
-      </div>
-      <div class="shared-coalition-rooms-hero__actions">
-        <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="${escapeHtml(serverRoute)}">Open all rooms</button>
-        <button class="shared-feed-chip" type="button" data-action="coalition-rooms-refresh"${disabledAttr(workspace.loading)}>${workspace.loading ? "Refreshing..." : "Refresh"}</button>
-      </div>
-    </article>
-    ${workspace.error ? `<div class="shared-page__error">${escapeHtml(workspace.error)}</div>` : ""}
-    ${workspace.loading && !channels.length ? '<div class="shared-page__loading">Loading coalition rooms...</div>' : ""}
-    <div class="shared-coalition-rooms-grid">
-      <div class="shared-coalition-room-groups">
+  return `<div class="shared-coalition-section shared-coalition-rooms shared-coalition-room-browser">
+    <aside class="shared-coalition-room-browser__sidebar">
+      <div class="shared-coalition-room-server"><strong>${escapeHtml(coalition.name || coalition.title || "Coalition")}</strong><span>Team conversations</span></div>
+      ${renderCoalitionRoomChannels(directory, coalition.coalitionId)}
+      ${renderCoalitionRoomsAdminPanel(coalition, membership, directory)}
+    </aside>
+    <div class="shared-coalition-room-browser__main">
+      <header class="shared-coalition-room-browser__header"><div><h2>Rooms</h2><p>Find your team. Join the conversation.</p></div><div class="shared-coalition-room-browser__actions"><button class="shared-coalition-room-icon-button" type="button" data-action="navigate" data-route="${escapeHtml(`${serverRoute}/settings`)}" aria-label="Workspace settings">${renderIcon("settings")}</button><button class="shared-coalition-room-icon-button" type="button" data-action="coalition-rooms-refresh"${disabledAttr(workspace.loading)} aria-label="${workspace.loading ? "Refreshing rooms" : "Refresh rooms"}"><span aria-hidden="true">↻</span></button></div></header>
+      ${workspace.error ? `<div class="shared-page__error">${escapeHtml(workspace.error)}</div>` : ""}
+      ${workspace.loading && !channels.length ? '<div class="shared-page__loading">Loading coalition rooms...</div>' : ""}
+      <div class="shared-coalition-room-browser__directory">
         ${
           channels.length
             ? groups
@@ -89535,20 +89550,18 @@ function renderCoalitionRooms(coalition, membership, detail) {
                   renderCoalitionRoomGroup(coalition, group, canManage),
                 )
                 .join("")
-            : `<article class="shared-coalition-panel shared-coalition-room-empty-panel">
+            : `<article class="shared-coalition-room-empty-panel">
                 <span>${renderIcon("messages")}</span>
                 <div>
-                  <h2>No coalition rooms loaded yet.</h2>
-                  <p>Refresh rooms or open the messaging workspace to create the first coalition channels.</p>
+                  <h2>${workspace.loading ? "Loading rooms" : "Your conversations start here"}</h2>
+                  <p>${canManage ? "Create a room for your team." : "Rooms will appear here when you have access."}</p>
                 </div>
                 <div class="shared-coalition-room-card__actions">
-                  <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="coalition-rooms-refresh"${disabledAttr(workspace.loading)}>Refresh rooms</button>
-                  <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(serverRoute)}">Open messaging workspace</button>
+                  ${canManage ? `<button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="${escapeHtml(`${serverRoute}/settings/channels`)}">Create a room</button>` : ""}
                 </div>
               </article>`
         }
       </div>
-      ${renderCoalitionRoomsAdminPanel(coalition, membership, directory)}
     </div>
   </div>`;
 }
@@ -89881,26 +89894,16 @@ function renderCoalitionCalendar(detail, coalition, membership) {
   const resource =
     detail.calendarWorkspace || createCandidateDashboardCalendarState();
   const items = resource.loaded ? resource.items : detail.calendar;
-  const canManage = canManageCoalitionCalendar(membership);
-  const confirmedCount = items.filter(
-    (item) => item.status === "confirmed",
-  ).length;
   if (!canViewCoalitionCalendar(membership)) {
     return `<div class="shared-page__empty">This coalition role does not include calendar access.</div>`;
   }
   return `<div class="shared-coalition-section shared-campaign-calendar shared-coalition-calendar">
     ${renderCoalitionCalendarCommandCenter(resource, coalition, membership)}
-    <div class="shared-coalition-metrics">
-      ${renderCoalitionMetric("Loaded items", formatCount(items.length), "cyan")}
-      ${renderCoalitionMetric("Confirmed", formatCount(confirmedCount))}
-      ${renderCoalitionMetric("Connections", formatCount(resource.connections.length))}
-      ${renderCoalitionMetric("Access", canManage ? "Manage" : "View")}
-    </div>
     <article class="shared-campaign-panel">
       <div class="shared-campaign-panel__header">
         <div>
           <h2>Coalition calendar</h2>
-          <p>Filter the shared coalition schedule and keep meetings, field holds, promotion windows, and synced availability in one browser view.</p>
+          <p>Find meetings, shifts and shared availability.</p>
         </div>
         <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, "missions"))}">Missions</button>
       </div>
@@ -90570,22 +90573,22 @@ function renderCoalitionVoterMapViewportForm(map) {
   return `<form class="shared-coalition-voter-map-viewport-form" data-route-form="coalition-voter-map-badges-query">
     <div class="shared-coalition-voter-map-viewport-grid">
       <label>
-        <span>Center lat</span>
+        <span>Latitude</span>
         <input name="centerLat" type="number" step="0.00001" min="-90" max="90" value="${escapeHtml(viewport.centerLat || "")}"${disabledAttr(pending)} required />
       </label>
       <label>
-        <span>Center lng</span>
+        <span>Longitude</span>
         <input name="centerLng" type="number" step="0.00001" min="-180" max="180" value="${escapeHtml(viewport.centerLng || "")}"${disabledAttr(pending)} required />
       </label>
       <label>
-        <span>Radius miles</span>
+        <span>Radius (miles)</span>
         <input name="radiusMiles" type="number" step="1" min="1" max="2500" value="${escapeHtml(viewport.radiusMiles || "50")}"${disabledAttr(pending)} required />
       </label>
     </div>
     <div class="shared-coalition-voter-map-actions">
-      <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(pending)}>${pending ? "Loading..." : "Load badges"}</button>
-      <button class="shared-feed-chip" type="button" data-action="coalition-voter-map-badges-scope"${disabledAttr(pending)}>Use scope</button>
-      <button class="shared-feed-chip" type="button" data-action="coalition-voter-map-badges-refresh"${disabledAttr(pending)}>${pending ? "Refreshing..." : "Refresh badges"}</button>
+      <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(pending)}>${pending ? "Loading..." : "Load members"}</button>
+      <button class="shared-feed-chip" type="button" data-action="coalition-voter-map-badges-scope"${disabledAttr(pending)}>Use coalition area</button>
+      <button class="shared-feed-chip" type="button" data-action="coalition-voter-map-badges-refresh"${disabledAttr(pending)}>${pending ? "Refreshing..." : "Refresh"}</button>
     </div>
   </form>`;
 }
@@ -90762,7 +90765,7 @@ function renderCoalitionVoterMapMapPanel(coalition, access, workspace) {
       <div class="shared-coalition-panel__header">
         <div>
           <h2>Coalition map</h2>
-          <p>Load the same geocoded coalition directory badges the app overlays on the voter map, then select a member to inspect assignment context.</p>
+          <p>View coalition directory locations and check territory assignments.</p>
         </div>
         <div class="shared-card__actions">
           <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, "missions"))}">Missions</button>
@@ -94105,7 +94108,7 @@ function renderCoalitionGovernance(detail, coalition, membership) {
       <div class="shared-coalition-panel__header">
         <div>
           <h2>Governance Center</h2>
-          <p>Create constitutions, petition proposals, schedule votes, submit ballots, and inspect results from one working browser console.</p>
+          <p>Review rules, proposals, and votes.</p>
         </div>
         <div class="shared-coalition-governance-actions">
           <button class="shared-feed-chip" type="button" data-action="coalition-governance-refresh"${disabledAttr(detail.loading)}>Refresh</button>
@@ -94122,14 +94125,16 @@ function renderCoalitionGovernance(detail, coalition, membership) {
         </div>
       </div>
     </article>
-    ${renderCoalitionGovernanceCommandCenter(
-      detail,
-      coalition,
-      membership,
-      routeInfo,
-      canManageConstitution,
-      canCreateProposal,
-    )}
+    <details class="coalition-ui-disclosure"><summary>Governance tools & access</summary>
+      ${renderCoalitionGovernanceCommandCenter(
+        detail,
+        coalition,
+        membership,
+        routeInfo,
+        canManageConstitution,
+        canCreateProposal,
+      )}
+    </details>
     ${renderCoalitionGovernanceRouteNav(coalition, routeInfo)}
     ${workspace.constitutionOpen ? renderCoalitionConstitutionForm(workspace) : ""}
     ${workspace.proposalOpen ? renderCoalitionProposalForm(workspace, Boolean(detail.constitution)) : ""}
@@ -94969,7 +94974,7 @@ function renderOrganizationGovernancePlaceholder(routeInfo) {
     <div class="shared-coalition-panel__header">
       <div>
         <h2>${escapeHtml(labels[routeInfo.key] || "Governance route")}</h2>
-        <p>This committed app route now resolves in the website shell. The browser view keeps users oriented while the detailed native-only workflow remains in the app.</p>
+        <p>Open the Polis app to use this feature.</p>
       </div>
       <button class="shared-feed-chip" type="button" data-action="open-app-shell">Open app</button>
     </div>
@@ -95457,8 +95462,11 @@ function renderCoalitionDetailPage() {
   }
   const detail = state.pages.coalitions.detail;
   const listItem = findCoalitionListItem(coalitionId);
-  const coalition = detail.coalition || listItem?.coalition;
-  const membership = detail.membership || listItem?.membership;
+  const matchingDetail = detail.coalition?.coalitionId === coalitionId;
+  const coalition =
+    (matchingDetail ? detail.coalition : null) || listItem?.coalition;
+  const membership =
+    (matchingDetail ? detail.membership : null) || listItem?.membership;
   const activeSection = coalitionSectionForRoute(route);
   const isOverviewSection = activeSection === COALITION_DEFAULT_SECTION;
   const workspaceClasses = [
@@ -95479,15 +95487,19 @@ function renderCoalitionDetailPage() {
   }
   return `<section class="${workspaceClasses}">
     ${renderTopChrome()}
-    <div class="shared-page__content">
-      <div class="shared-page__back-row">
-        <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/coalitions">All coalitions</button>
+    <div class="coalition-ui-layout">
+      <aside class="coalition-ui-sidebar">
+        <div class="coalition-ui-sidebar__identity">${renderCoalitionAvatar(coalition)}<strong>${escapeHtml(coalition.name)}</strong></div>
+        ${renderCoalitionTabs(coalition, membership, activeSection)}
+        <button class="coalition-ui-all" data-action="navigate" data-route="/coalitions">All coalitions</button>
+        <button class="coalition-ui-all coalition-ui-app" data-action="open-app-shell">Open app</button>
+      </aside>
+      <div class="shared-page__content coalition-ui-content">
+        <details class="coalition-ui-mobile-nav"><summary>Coalition menu</summary>${renderCoalitionTabs(coalition, membership, activeSection)}<button class="coalition-ui-all" data-action="open-app-shell">Open app</button></details>
+        ${renderCoalitionHero(coalition, membership)}
+        ${detail.error ? `<div class="shared-page__error">${escapeHtml(detail.error)}</div>` : ""}
+        ${renderCoalitionSection(detail, coalition, membership, activeSection)}
       </div>
-      ${renderCoalitionHero(coalition, membership)}
-      ${renderCoalitionCommandStrip(coalition, membership)}
-      ${detail.error ? `<div class="shared-page__error">${escapeHtml(detail.error)}</div>` : ""}
-      ${renderCoalitionTabs(coalition, membership, activeSection)}
-      ${renderCoalitionSection(detail, coalition, membership, activeSection)}
     </div>
   </section>`;
 }
@@ -104232,6 +104244,13 @@ function renderMessagingWorkspaceChannelRows(
   subroute,
   activeConversationId,
 ) {
+  if (subroute?.scopeType === "coalition") {
+    return renderCoalitionRoomChannels(
+      directory || {},
+      subroute.scopeId,
+      activeConversationId,
+    );
+  }
   const channels = Array.isArray(directory?.channels) ? directory.channels : [];
   return renderMessagingWorkspaceRows(
     channels,
@@ -111548,6 +111567,33 @@ function renderMessagingRoomContextPanel({
     conversation.isEncrypted ? "Encrypted" : "Standard",
     canManage ? "Manager access" : "Member view",
   ].filter(Boolean);
+  if (subroute.scopeType === "coalition") {
+    return `<aside class="shared-messaging-room-context shared-coalition-chat__members" aria-label="Room members">
+      <div class="shared-coalition-chat__members-heading"><h3>In this room</h3><span>${escapeHtml(formatCount(memberCount))}</span></div>
+      ${roomMembers?.error ? `<div class="shared-page__error">${escapeHtml(roomMembers.error)}</div>` : ""}
+      <div class="shared-messaging-room-context__member-list">${
+        members.length
+          ? members
+              .slice(0, 12)
+              .map((member) => {
+                const roles = Array.isArray(member.roles) ? member.roles : [];
+                const role =
+                  roles
+                    .map(messagingMemberRoleLabel)
+                    .filter(Boolean)
+                    .join(", ") ||
+                  member.username ||
+                  "Room member";
+                return `<div class="shared-messaging-room-context__member">${renderMessagingWorkspaceAvatar({ label: member.effectiveName || member.username || "Member", imageUrl: member.avatarUrl })}<span><strong>${escapeHtml(member.effectiveName || member.username || "Member")}</strong><small>${escapeHtml(role)}</small></span></div>`;
+              })
+              .join("")
+          : `<p class="shared-coalition-room-channel-empty">${roomMembers?.loading ? "Loading members…" : "No members listed."}</p>`
+      }</div>
+      ${members.length > 12 ? `<p class="shared-coalition-room-channel-empty">${escapeHtml(`${formatCount(members.length - 12)} more members`)}</p>` : ""}
+      <button class="shared-coalition-room-context-link" type="button" data-action="navigate" data-route="${escapeHtml(buildMessagingRoomRoute(subroute.scopeType, subroute.scopeId, subroute.conversationId, "/settings"))}">Room details</button>
+      <details class="shared-coalition-room-tools shared-coalition-room-tools--context"><summary>About this room</summary><div class="shared-coalition-chat__room-summary"><p>${escapeHtml(categoryLabel)}</p><p>${escapeHtml(activityLabel)}</p><p>${escapeHtml(unreadLabel)}</p>${conversation.isEncrypted ? `<p>${renderIcon("lock")} Encrypted</p>` : ""}<button class="shared-coalition-room-context-link" type="button" data-action="navigate" data-route="${escapeHtml(buildMessagingRoomRoute(subroute.scopeType, subroute.scopeId, subroute.conversationId, "/settings/permissions"))}">Room access</button><button class="shared-coalition-room-context-link" type="button" data-action="navigate" data-route="${escapeHtml(buildMessagingServerRoute(subroute.scopeType, subroute.scopeId, "/members"))}">Workspace members</button><button class="shared-coalition-room-context-link" type="button" data-action="refresh-current-route">Refresh</button></div></details>
+    </aside>`;
+  }
   return `<aside class="shared-messaging-room-context" aria-label="Room details">
     <section class="shared-messaging-room-context__hero">
       ${renderMessagingWorkspaceAvatar({
@@ -111675,6 +111721,7 @@ function renderMessagingThreadMessage(
     conversation = null,
     isPinned = false,
     highlighted = false,
+    roomStyle = false,
   } = {},
 ) {
   const type = normalizeString(message.type || "text").toLowerCase();
@@ -111712,7 +111759,7 @@ function renderMessagingThreadMessage(
       : "";
   return `<article class="shared-message${isSelf ? " is-self" : ""}${compact ? " is-compact" : ""}${message.isDeleted ? " is-deleted" : ""}${isPinned ? " is-pinned" : ""}${actionsOpen ? " is-actions-open" : ""}${highlighted ? " is-highlighted" : ""}" data-message-id="${escapeHtml(messageId)}">
     ${
-      !isSelf && !compact
+      (!isSelf || roomStyle) && !compact
         ? renderMessagingWorkspaceAvatar({
             label,
             imageUrl: message.senderAvatarUrl,
@@ -113551,6 +113598,7 @@ function renderMessagingWorkspaceThread({
   directory = null,
   roomMembers = null,
 }) {
+  const isCoalitionRoom = roomActions && subroute?.scopeType === "coalition";
   if (!conversation) {
     return renderMessagingWorkspacePanel({
       title: "Select a conversation",
@@ -113627,6 +113675,7 @@ function renderMessagingWorkspaceThread({
               conversation,
               isPinned,
               highlighted,
+              roomStyle: isCoalitionRoom,
             },
           )}`;
         })
@@ -113800,14 +113849,18 @@ function renderMessagingWorkspaceThread({
       <button class="shared-feed-chip shared-feed-chip--primary shared-messaging-composer__send" type="submit"${disabledAttr(composerDisabled)} aria-label="${escapeHtml(editingMessageId ? "Save edited message" : pendingReply ? "Send reply" : "Send message")}">${renderIcon(editingMessageId ? "check" : pendingReply ? "reply" : "send")}<span>${escapeHtml(sendButtonLabel)}</span></button>`
       }
     </form>`;
-  const threadMarkup = `<article class="shared-messaging-panel shared-messaging-panel--thread">
+  const threadMarkup = `<article class="shared-messaging-panel shared-messaging-panel--thread${isCoalitionRoom ? " shared-coalition-chat__thread" : ""}">
     <div class="shared-messaging-thread-header">
       <button class="shared-messaging-thread-header__mobile-back" data-action="navigate" data-route="${escapeHtml(threadReturnRoute)}">${renderIcon("messages")}<span>${escapeHtml(threadReturnLabel)}</span></button>
       <div class="shared-messaging-thread-header__identity">
-        ${renderMessagingWorkspaceAvatar({
-          label: displayTitle,
-          imageUrl: displayAvatar,
-        })}
+        ${
+          isCoalitionRoom
+            ? '<span class="shared-coalition-room-hash" aria-hidden="true">#</span>'
+            : renderMessagingWorkspaceAvatar({
+                label: displayTitle,
+                imageUrl: displayAvatar,
+              })
+        }
         <div>
           <p>${escapeHtml(kindLabel)}</p>
           <h2>${escapeHtml(displayTitle)}</h2>
@@ -113821,7 +113874,7 @@ function renderMessagingWorkspaceThread({
         ${conversationIsMuted ? `<span>${renderIcon("soundOff")}${escapeHtml("Muted")}</span>` : ""}
         ${conversation.isEncrypted ? `<span>${renderIcon("lock")}${escapeHtml("Encrypted")}</span>` : ""}
       </div>
-      ${headerActionMarkup ? `<div class="shared-messaging-thread-header__actions">${headerActionMarkup}</div>` : ""}
+      ${headerActionMarkup ? (isCoalitionRoom ? `<details class="shared-coalition-room-tools shared-coalition-room-tools--thread"><summary>${renderIcon("more")}<span class="shared-sr-only">Room tools</span></summary><div class="shared-coalition-room-tools__popover">${headerActionMarkup}<button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(buildMessagingRoomRoute(subroute.scopeType, subroute.scopeId, subroute.conversationId, "/settings/pins"))}">${renderIcon("save")}<span>Pinned messages</span></button></div></details>` : `<div class="shared-messaging-thread-header__actions">${headerActionMarkup}</div>`) : ""}
     </div>
     ${conversationState.error ? `<div class="shared-page__error shared-messaging-thread-error">${escapeHtml(conversationState.error)}</div>` : ""}
     <div class="shared-message-list">${conversationState.loading && !conversationState.loaded ? '<div class="shared-page__loading">Loading messages...</div>' : messageMarkup}</div>
@@ -113884,6 +113937,25 @@ function renderMessagingWorkspaceShell({
       ? " shared-messaging-workspace--inbox-home"
       : ""
   }`;
+  if (subroute?.scopeType === "coalition" && subroute?.scopeId) {
+    const serverRoute = buildMessagingServerRoute(
+      "coalition",
+      subroute.scopeId,
+    );
+    const settingsOpen =
+      subroute.view !== "server" && subroute.view !== "server-room";
+    return `<div class="shared-messaging-workspace shared-coalition-chat${subroute.view === "server" ? " shared-coalition-chat--directory" : settingsOpen ? " shared-coalition-chat--settings" : ""}${workspaceClassName}">
+      <aside class="shared-messaging-sidebar shared-coalition-chat__sidebar">
+        <button class="shared-coalition-room-back" type="button" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(subroute.scopeId, "rooms"))}"><span aria-hidden="true">←</span><span>Coalition</span></button>
+        <div class="shared-coalition-room-server"><strong>${escapeHtml(sidebarTitle)}</strong><span>Team conversations</span></div>
+        <button class="shared-coalition-room-all${subroute.view === "server" ? " is-active" : ""}" type="button" data-action="navigate" data-route="${escapeHtml(serverRoute)}">${renderIcon("messages")}<span>All rooms</span></button>
+        <div class="shared-coalition-chat__channels">${sidebarBody}</div>
+        <details class="shared-coalition-room-tools shared-coalition-room-tools--workspace"${settingsOpen ? " open" : ""}><summary>${renderIcon("settings")} Workspace tools</summary>${sidebarActions}</details>
+        <div class="shared-coalition-chat__account"><button type="button" data-action="navigate" data-route="/messages">${renderIcon("messages")}<span>Messages</span></button>${renderMessagingWorkspaceStatus()}</div>
+      </aside>
+      <main class="shared-messaging-main">${mainBody}</main>
+    </div>`;
+  }
   return `<div class="shared-messaging-workspace${workspaceClassName}">
     ${renderMessagingWorkspaceRail(subroute)}
     <aside class="shared-messaging-sidebar">
@@ -114766,13 +114838,31 @@ function renderMessagingPage() {
       sidebarBody: channelRows,
       mainBody: renderMessagingWorkspacePanel({
         title: currentServer?.title || "Rooms",
-        subtitle: canManageDirectory
-          ? `Manage ${scopeLabel.toLowerCase()} rooms, categories, team access, people, and safety review from the browser.`
-          : `Open ${scopeLabel.toLowerCase()} rooms available to your role.`,
+        subtitle:
+          subroute.scopeType === "coalition"
+            ? "Choose a channel to join the conversation."
+            : canManageDirectory
+              ? `Manage ${scopeLabel.toLowerCase()} rooms, categories, team access, people, and safety review from the browser.`
+              : `Open ${scopeLabel.toLowerCase()} rooms available to your role.`,
         actions: canManageDirectory
           ? `<button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="${escapeHtml(buildMessagingServerRoute(subroute.scopeType, subroute.scopeId, "/settings/channels"))}">Manage directory</button>`
           : "",
-        body: `${commandPanel}${directoryBody}`,
+        body:
+          subroute.scopeType === "coalition"
+            ? `<div class="shared-coalition-room-server-directory">${
+                channels.length
+                  ? coalitionRoomGroups(directory || {})
+                      .map((group) =>
+                        renderCoalitionRoomGroup(
+                          { coalitionId: subroute.scopeId },
+                          group,
+                          canManageDirectory,
+                        ),
+                      )
+                      .join("")
+                  : '<div class="shared-messaging-empty">No rooms are available yet.</div>'
+              }</div>${commandPanel ? `<details class="shared-coalition-room-tools shared-coalition-room-tools--directory"><summary>${renderIcon("create")} Create rooms and categories</summary>${commandPanel}</details>` : ""}`
+            : `${commandPanel}${directoryBody}`,
       }),
     });
   } else if (
@@ -115071,7 +115161,7 @@ function renderMessagingPage() {
     messaging.permissionTarget.error,
   ]);
 
-  return `<section class="shared-page shared-messaging-page">
+  return `<section class="shared-page shared-messaging-page${subroute.scopeType === "coalition" ? " shared-messaging-page--coalition" : ""}">
     ${renderTopChrome()}
     <div class="shared-page__content shared-messaging-page__content">
       ${errorMarkup}
@@ -127503,8 +127593,8 @@ function renderApp() {
         ${renderRouteStage()}
       </div>
       ${renderToast()}`
-      : `<div class="shared-feed-shell">
-        ${renderRail()}
+      : `<div class="shared-feed-shell${isCoalitionPresentationRoute() ? " shared-feed-shell--coalition polis-coalition-ui" : ""}">
+        ${isCoalitionPresentationRoute() ? "" : renderRail()}
         ${renderRouteStage()}
       </div>
       ${renderCommentsPanel()}
@@ -136373,13 +136463,23 @@ async function bootstrapAuth() {
 async function bootstrapFilesNavigation() {
   state.filesNavigation.loaded = true;
   state.filesNavigation.enabled = false;
+  state.filesNavigation.workspaces = [];
   if (!state.auth.session) return;
+  const identity = getAuthenticatedUser(state.auth.session)?.userId;
   try {
     const payload = await fetchJson("/api/files/workspaces", { auth: true });
+    if (
+      !identity ||
+      getAuthenticatedUser(state.auth.session)?.userId !== identity
+    )
+      return;
     const workspaces = Array.isArray(payload?.workspaces)
       ? payload.workspaces
       : [];
-    state.filesNavigation.enabled = workspaces.some(isFilesWorkspaceAccessible);
+    state.filesNavigation.workspaces = workspaces.filter(
+      isFilesWorkspaceAccessible,
+    );
+    state.filesNavigation.enabled = state.filesNavigation.workspaces.length > 0;
   } catch {
     // Files stays hidden when entitlement discovery is unavailable.
   }

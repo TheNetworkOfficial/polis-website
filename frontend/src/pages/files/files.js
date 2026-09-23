@@ -748,6 +748,21 @@ async function bootstrap() {
       render();
       return;
     }
+    const requestedWorkspace = new URLSearchParams(window.location.search).get(
+      "workspace",
+    );
+    if (requestedWorkspace !== null) {
+      const requested = state.workspaces.find(
+        (item) => item.filesWorkspaceId === requestedWorkspace,
+      );
+      if (!requested) {
+        state.status = "forbidden";
+        render();
+        return;
+      }
+      await selectWorkspace(requested, { preserveRoute: true });
+      return;
+    }
     const preferredId = readStorage(STORED_WORKSPACE_KEY);
     const preferred =
       state.workspaces.find(
@@ -1387,7 +1402,7 @@ function renderSidebar() {
     state.workspaceDescriptor?.pendingCounts ||
     {};
   return `<aside class="files-sidebar" aria-label="Files navigation">
-    <a href="/feed" class="files-brand" aria-label="Polis feed"><img src="${polisLogoUrl}" alt="" /><span>POLIS</span></a>
+    <a href="/feed" class="files-brand" aria-label="Polis feed"><img src="${polisLogoUrl}" alt="" /><span>Polis</span></a>
     ${renderWorkspaceSwitcher()}
     <nav class="files-nav">
       ${navItem({ path: "/files", key: "home", label: "Files home", iconName: "home" })}
@@ -1398,14 +1413,14 @@ function renderSidebar() {
       ${navItem({ path: "/files/uploads", key: "uploads", label: "Uploads", iconName: "upload", badge: state.uploadQueue.filter((item) => item.status === "uploading").length })}
     </nav>
     <div class="files-sidebar__section">
-      <div class="files-sidebar__label"><span>Roots</span>${can("canManage", "files_manage") ? '<button data-action="new-folder" aria-label="New root folder">+</button>' : ""}</div>
+      <div class="files-sidebar__label"><span>Folders</span>${can("canManage", "files_manage") ? '<button data-action="new-folder" aria-label="New root folder">+</button>' : ""}</div>
       ${
         workspaceRoots()
           .map(
             (folder) =>
               `<button class="files-root-link" data-open-folder="${escapeHtml(entityId(folder))}">${icon("folder")}<span>${escapeHtml(entityName(folder))}</span></button>`,
           )
-          .join("") || '<p class="files-sidebar__empty">No roots yet</p>'
+          .join("") || '<p class="files-sidebar__empty">No folders yet</p>'
       }
     </div>
     <div class="files-sidebar__footer">
@@ -1427,9 +1442,14 @@ function renderMobileNav() {
 
 function renderHeader() {
   const selected = state.selection.size;
+  const searchable =
+    isCurrentFolderView() ||
+    (state.route.kind === "view" &&
+      !["recommended", "uploads"].includes(state.route.key));
   return `<header class="files-header">
     <div class="files-header__mobile-brand"><img src="${polisLogoUrl}" alt="Polis" />${renderWorkspaceSwitcher()}</div>
-    <div class="files-header__title"><p class="files-eyebrow">${escapeHtml(workspaceLabel(state.workspaceDescriptor))}</p><h1>${escapeHtml(routeTitle())}</h1></div>
+    <div class="files-header__title ${searchable ? "files-header__title--searchable" : ""}"><p class="files-eyebrow">${escapeHtml(workspaceLabel(state.workspaceDescriptor))}</p><h1>${escapeHtml(routeTitle())}</h1></div>
+    ${searchable ? renderSearch() : ""}
     <div class="files-header__actions">
       ${hostReferencesEnabled() ? `<button class="files-button files-button--secondary" data-action="open-host-reference">${icon("folder")}Attach a Files folder</button>` : ""}
       ${selected && postDraftCreationEnabled() ? `<button class="files-button files-button--secondary" data-action="open-post">${icon("post")}Create post <span>${selected}</span></button>` : ""}
@@ -1513,7 +1533,6 @@ function visibleFolderAssets() {
 
 function renderToolbar({ count = state.items.length } = {}) {
   const folderView = isCurrentFolderView();
-  const search = folderView ? state.folderFilter : state.search;
   const sort = folderView ? state.folderSort : state.sort;
   const selectable = folderView
     ? visibleFolderAssets().filter(isPostSelectableMedia)
@@ -1522,10 +1541,6 @@ function renderToolbar({ count = state.items.length } = {}) {
     selectable.length > 0 &&
     selectable.every((item) => state.selection.has(entityId(item)));
   return `<div class="files-toolbar">
-    <form class="files-search" data-form="search" role="search">
-      ${icon("search")}<label class="sr-only" for="files-search-input">${folderView ? "Filter loaded files" : "Search this view"}</label>
-      <input id="files-search-input" name="search" value="${escapeHtml(search)}" placeholder="${folderView ? "Filter loaded files by name" : "Search names, context, or people"}" />
-    </form>
     <span class="files-toolbar__count">${folderView ? `${count} shown · ${state.folderData.assets.length} loaded` : `${count} item${count === 1 ? "" : "s"}`}</span>
     ${selectable.length ? `<button class="files-toolbar__bulk" data-action="select-all" aria-pressed="${allSelected}">${allSelected ? "Clear selection" : "Select all media"}</button>${state.selection.size ? `<button class="files-toolbar__bulk" data-action="bulk-download">Download selected</button>` : ""}` : ""}
     <label class="files-sort"><span class="sr-only">${folderView ? "Sort loaded files" : "Sort"}</span><select data-action="sort">
@@ -1538,6 +1553,15 @@ function renderToolbar({ count = state.items.length } = {}) {
       <button data-layout="grid" class="${state.layout === "grid" ? "is-active" : ""}" aria-label="Grid view" aria-pressed="${state.layout === "grid"}">${icon("grid")}</button>
     </div>
   </div>`;
+}
+
+function renderSearch() {
+  const folderView = isCurrentFolderView();
+  const search = folderView ? state.folderFilter : state.search;
+  return `<form class="files-search" data-form="search" role="search">
+    ${icon("search")}<label class="sr-only" for="files-search-input">${folderView ? "Filter loaded files" : "Search this view"}</label>
+    <input id="files-search-input" name="search" type="search" value="${escapeHtml(search)}" placeholder="${folderView ? "Filter loaded files by name" : "Search names, context, or people"}" />
+  </form>`;
 }
 
 function safePostPath(path, postId = "") {
@@ -1821,7 +1845,7 @@ function renderItems(
   if (state.contentStatus === "loading") return renderSkeletons();
   if (state.contentStatus === "error") return renderInlineError();
   const listing = items.length
-    ? `<div class="files-items files-items--${state.layout}">${items.map(renderItem).join("")}</div>`
+    ? `<div class="files-listing">${state.layout === "list" ? '<div class="files-list-heading" aria-hidden="true"><span>Name</span><span>Last updated</span><span></span></div>' : ""}<div class="files-items files-items--${state.layout}">${items.map(renderItem).join("")}</div></div>`
     : renderEmpty(emptyTitle, emptyBody);
   if (!listingSupportsPagination()) return listing;
   const pagination = state.paginationError
@@ -1917,18 +1941,18 @@ function renderHome() {
   const roots = workspaceRoots();
   return `<section class="files-page files-page--home">
     <div class="files-welcome">
-      <div><p class="files-eyebrow">Secure, contextual, connected</p><h2>Everything your team needs—without hunting for it.</h2><p>Current material stays clear, history stays preserved, and sharing follows the roles you already manage in Polis.</p></div>
+      <div><h2>Team files</h2><p>Find, organize and share your team’s work.</p></div>
       ${can("canManage", "files_manage") ? '<button class="files-button files-button--secondary" data-action="new-folder">New folder</button>' : ""}
     </div>
-    ${roots.length ? `<section class="files-section"><div class="files-section__heading"><div><p class="files-eyebrow">Your roots</p><h2>Campaign & official files</h2></div></div><div class="files-root-grid">${roots.map((folder) => `<button class="files-root-card" data-open-folder="${escapeHtml(entityId(folder))}"><span class="files-root-card__icon">${icon("folder")}</span><span><strong>${escapeHtml(entityName(folder))}</strong><small>${escapeHtml(folder?.description || `${Number(folder?.itemCount || 0)} items`)}</small></span>${icon("chevron")}</button>`).join("")}</div></section>` : ""}
-    ${state.suggestions.length ? `<section class="files-section"><div class="files-section__heading"><div><p class="files-eyebrow">Polis found a match</p><h2>Recommended next steps</h2></div><button class="files-link-button" data-nav="/files/recommended">See all</button></div><div class="files-suggestions">${state.suggestions.slice(0, 2).map(renderSuggestionCard).join("")}</div></section>` : ""}
-    <section class="files-section"><div class="files-section__heading"><div><p class="files-eyebrow">Workspace</p><h2>Recently updated</h2></div></div>${renderToolbar()}${renderItems(state.items, "Your Files space is ready", "Upload something new or choose a setup preset to begin organizing your work.")}</section>
+    ${roots.length ? `<section class="files-section"><div class="files-section__heading"><h2>Folders</h2></div><div class="files-root-grid">${roots.map((folder) => `<button class="files-root-card" data-open-folder="${escapeHtml(entityId(folder))}"><span class="files-root-card__icon">${icon("folder")}</span><span><strong>${escapeHtml(entityName(folder))}</strong><small>${escapeHtml(folder?.description || `${Number(folder?.itemCount || 0)} items`)}</small></span>${icon("chevron")}</button>`).join("")}</div></section>` : ""}
+    <section class="files-section files-section--listing"><div class="files-section__heading"><h2>Recently updated</h2></div>${renderToolbar()}${renderItems(state.items, "Your Files space is ready", "Upload a file or create a folder to get started.")}</section>
+    ${state.suggestions.length ? `<section class="files-section files-recommendations"><div class="files-section__heading"><h2>Recommended next steps</h2><button class="files-link-button" data-nav="/files/recommended">See all</button></div><div class="files-suggestions">${state.suggestions.slice(0, 2).map(renderSuggestionCard).join("")}</div></section>` : ""}
   </section>`;
 }
 
 function renderView() {
   if (state.route.key === "recommended") {
-    return `<section class="files-page"><div class="files-page-intro"><p class="files-eyebrow">Context-aware help</p><h2>Recommended</h2><p>Polis matches district, election, event, and media context. Nothing is shared or posted until an authorized person confirms it.</p></div>${state.contentStatus === "loading" ? renderSkeletons() : state.suggestions.length ? `<div class="files-suggestions">${state.suggestions.map(renderSuggestionCard).join("")}</div>` : renderEmpty("You’re all caught up", "New context matches and media opportunities will appear here.")}</section>`;
+    return `<section class="files-page"><div class="files-page-intro"><h2>Recommended</h2><p>Review matches before sharing or posting.</p></div>${state.contentStatus === "loading" ? renderSkeletons() : state.suggestions.length ? `<div class="files-suggestions">${state.suggestions.map(renderSuggestionCard).join("")}</div>` : renderEmpty("You’re all caught up", "New context matches and media opportunities will appear here.")}</section>`;
   }
   if (state.route.key === "uploads") return renderUploadsPage();
   const empty = {
@@ -1948,7 +1972,7 @@ function renderView() {
     "Nothing here",
     "Files will appear here when available.",
   ];
-  return `<section class="files-page"><div class="files-page-intro"><p class="files-eyebrow">${escapeHtml(workspaceLabel(state.workspaceDescriptor))}</p><h2>${escapeHtml(routeTitle())}</h2><p>${state.route.key === "review" ? "Approve or refuse proposed changes without exposing draft work as current." : "Find the material you need across connected, permissioned workspaces."}</p></div>${state.route.key === "review" ? renderIncomingGrantRequests() : ""}${renderToolbar()}${renderItems(state.items, empty[0], empty[1])}</section>`;
+  return `<section class="files-page"><div class="files-page-intro"><h2>${escapeHtml(routeTitle())}</h2><p>${state.route.key === "review" ? "Review proposed changes and access requests." : state.route.key === "shared" ? "Files shared with you and your roles." : "Your team’s latest files."}</p></div>${state.route.key === "review" ? renderIncomingGrantRequests() : ""}${renderToolbar()}${renderItems(state.items, empty[0], empty[1])}</section>`;
 }
 
 function renderIncomingGrantRequests() {

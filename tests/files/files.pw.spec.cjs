@@ -1639,13 +1639,13 @@ test("Back and Forward clear cross-folder media captions and open action forms",
 
 test("Files home is entitled, contextual, responsive, and supports list/grid", async ({
   page,
-}) => {
+}, testInfo) => {
   await seedSession(page);
   const captures = await mockFiles(page);
   await page.goto("/files");
   await expect(
     page.getByRole("heading", {
-      name: "Everything your team needs—without hunting for it.",
+      name: "Team files",
     }),
   ).toBeVisible();
   await expect(
@@ -1659,6 +1659,11 @@ test("Files home is entitled, contextual, responsive, and supports list/grid", a
   await expect(
     page.getByRole("button", { name: "Disable these" }),
   ).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath("files-desktop.png"),
+    fullPage: true,
+    animations: "disabled",
+  });
   await page.getByRole("button", { name: "Edit" }).click();
   await expect(
     page.getByRole("heading", { name: "Edit before accepting" }),
@@ -1717,6 +1722,61 @@ test("Files home is entitled, contextual, responsive, and supports list/grid", a
   await expect(
     page.getByRole("button", { name: "Recent", exact: true }),
   ).toBeFocused();
+  await page.screenshot({
+    path: testInfo.outputPath("files-mobile.png"),
+    fullPage: true,
+    animations: "disabled",
+  });
+});
+
+test("explicit Files workspace links override the cached workspace and never fall back when unavailable", async ({
+  page,
+}) => {
+  await seedSession(page);
+  const otherWorkspace = workspace({
+    principal: {
+      type: "organization",
+      sourceType: "organization",
+      id: "other-org",
+      displayName: "Another team",
+    },
+  });
+  const requestedWorkspace = workspace();
+  await page.addInitScript((cached) => {
+    localStorage.setItem("polisFilesWorkspace.v1", cached);
+  }, otherWorkspace.filesWorkspaceId);
+  const captures = await mockFiles(page, {
+    workspace: requestedWorkspace,
+    workspaces: [otherWorkspace, requestedWorkspace],
+  });
+
+  await page.goto(
+    `/files?workspace=${encodeURIComponent(requestedWorkspace.filesWorkspaceId)}`,
+  );
+  await expect(page.getByRole("heading", { name: "Team files" })).toBeVisible();
+  expect(captures.requests).toContainEqual(
+    expect.objectContaining({
+      method: "GET",
+      path: "/api/files/workspaces/organization/org-1",
+    }),
+  );
+  expect(
+    captures.requests.some(({ path }) =>
+      path.includes("/workspaces/organization/other-org"),
+    ),
+  ).toBe(false);
+
+  captures.requests.length = 0;
+  await page.goto("/files?workspace=files%3Av1%3Aorganization%3Aunavailable");
+  await expect(
+    page.getByRole("heading", { name: "You don’t have Files access" }),
+  ).toBeVisible();
+  expect(
+    captures.requests.some(({ path }) =>
+      path.startsWith("/api/files/workspaces/"),
+    ),
+  ).toBe(false);
+  await expect(page.locator(".files-content")).toHaveCount(0);
 });
 
 test("workspace listings load later pages without duplicates", async ({
@@ -3822,7 +3882,7 @@ test("setup presets keep rule prompts on and AI off by default", async ({
   await page.getByRole("button", { name: "Create my Files space" }).click();
   await expect(
     page.getByRole("heading", {
-      name: "Everything your team needs—without hunting for it.",
+      name: "Team files",
     }),
   ).toBeVisible();
   expect(captures.initializations[0]).toEqual({
@@ -4037,7 +4097,7 @@ test("official workspace bootstrap uses the official source alias id", async ({
   await page.goto("/files");
   await expect(
     page.getByRole("heading", {
-      name: "Everything your team needs—without hunting for it.",
+      name: "Team files",
     }),
   ).toBeVisible();
   expect(captures.requests).toContainEqual(
@@ -4458,7 +4518,7 @@ test("mismatched-user upload checkpoints purge before reconciliation", async ({
   await page.goto("/files");
   await expect(
     page.getByRole("heading", {
-      name: "Everything your team needs—without hunting for it.",
+      name: "Team files",
     }),
   ).toBeVisible();
   expect(
@@ -4591,7 +4651,7 @@ test("stale setup refreshes the workspace fence and requires an intentional retr
   await page.getByRole("button", { name: "Create my Files space" }).click();
   await expect(
     page.getByRole("heading", {
-      name: "Everything your team needs—without hunting for it.",
+      name: "Team files",
     }),
   ).toBeVisible();
 
@@ -4980,7 +5040,7 @@ test("direct host-reference detail is eligible-workspace scoped, keyboard naviga
   await page.keyboard.press("Enter");
   await expect(
     page.getByRole("heading", {
-      name: "Everything your team needs—without hunting for it.",
+      name: "Team files",
     }),
   ).toBeVisible();
   await page.goBack();

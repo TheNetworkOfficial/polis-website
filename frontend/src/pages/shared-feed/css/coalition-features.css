@@ -1,0 +1,741 @@
+/* Coalition feature surfaces use the same theme tokens as the new workspace.
+   Every rule is route-scoped; campaign pages and the deployed Texting Hub retain
+   their own styles. Existing controls, status messages and app handoffs remain. */
+
+.polis-coalition-ui
+  :is(
+    .shared-coalition-voter-map-grid,
+    .shared-coalition-territory-admin,
+    .shared-coalition-cta-grid,
+    .shared-coalition-cta-transport-grid,
+    .shared-coalition-governance-grid,
+    .shared-campaign-registry-grid
+  ) {
+  grid-template-columns: minmax(0, 1.5fr) minmax(280px, 1fr);
+  gap: 22px;
+}
+
+.polis-coalition-ui
+  :is(
+    .shared-coalition-voter-map-map,
+    .shared-coalition-map-side-stack,
+    .shared-coalition-territory-admin-page,
+    .shared-coalition-governance-main,
+    .shared-coalition-governance-side,
+    .shared-coalition-governance-list,
+    .shared-coalition-governance-focus-stack,
+    .shared-coalition-amplify-list,
+    .shared-coalition-cta-workspace,
+    .shared-coalition-cta-event-list,
+    .shared-campaign-mission-workspace,
+    .shared-campaign-calendar-main,
+    .shared-campaign-calendar-side,
+    .shared-petitions-workspace
+  ) {
+  min-width: 0;
+  gap: 20px;
+}
+
+/* Simple white/navy cards replace the older layered command-center surfaces. */
+.polis-coalition-ui
+  :is(
+    .shared-campaign-missions-hero,
+    .shared-campaign-mission-admin-command,
+    .shared-campaign-mission-staff-command,
+    .shared-campaign-mission-create,
+    .shared-campaign-mission-template-editor,
+    .shared-campaign-mission-card,
+    .shared-campaign-mission-workload,
+    .shared-campaign-mission-template,
+    .shared-campaign-mission-preset,
+    .shared-campaign-mission-timeline-card,
+    .shared-campaign-calendar-command,
+    .shared-campaign-registry-command,
+    .shared-coalition-governance-proposal,
+    .shared-coalition-governance-vote,
+    .shared-coalition-governance-speaker-card,
+    .shared-coalition-amplify-card,
+    .shared-coalition-cta-event,
+    .shared-coalition-cta-transport-group,
+    .shared-petition-card,
+    .shared-petition-field
+  ) {
+  color: var(--coalition-text);
+  background: var(--coalition-surface);
+  border: 1px solid var(--coalition-border);
+  border-radius: var(--coalition-radius);
+  box-shadow: none;
+}
+
+.polis-coalition-ui
+  :is(
+    .shared-campaign-missions-hero,
+    .shared-campaign-mission-admin-command,
+    .shared-campaign-mission-staff-command,
+    .shared-campaign-mission-create,
+    .shared-campaign-calendar-command,
+    .shared-campaign-registry-command,
+    .shared-coalition-governance-proposal,
+    .shared-coalition-governance-vote,
+    .shared-coalition-amplify-card,
+    .shared-coalition-cta-event,
+    .shared-coalition-cta-transport-group
+  ) {
+  padding: 24px;
+  gap: 18px;
+}
+
+.polis-coalition-ui
+  :is(
+    .shared-coalition-governance-command-card,
+    .shared-coalition-amplify-command-card,
+    .shared-coalition-cta-command-card,
+    .shared-campaign-calendar-command-action,
+    .shared-campaign-mission-command-chip,
+    .shared-campaign-mission-target-option,
+    .shared-coalition-territory-tab
+  ) {
+  min-height: 76px;
+  padding: 14px 16px;
+  border-color: var(--coalition-border);
+  background: var(--coalition-surface-alt);
+  color: var(--coalition-text);
+  border-radius: 15px;
+  box-shadow: none;
+}
+
+.polis-coalition-ui
+  :is(
+    .shared-coalition-governance-command-card,
+    .shared-coalition-amplify-command-card,
+    .shared-coalition-cta-command-card,
+    .shared-campaign-calendar-command-action
+  )
+  :is(strong, em) {
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.polis-coalition-ui
+  :is(
+    .shared-coalition-governance-command-card,
+    .shared-coalition-amplify-command-card,
+    .shared-coalition-cta-command-card,
+    .shared-campaign-calendar-command-action
+  )
+  small {
+  font-size: 0.78rem;
+  font-weight: 450;
+  line-height: 1.5;
+}
+
+.polis-coalition-ui
+  :is(
+    .shared-coalition-governance-command-grid,
+    .shared-coalition-amplify-command-grid,
+    .shared-coalition-cta-command-grid,
+    .shared-campaign-mission-admin-command__queues
+  ) {
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 176px), 1fr));
+}
+
+.polis-coalition-ui
+  :is(
+    .shared-campaign-calendar-command__metrics div,
+    .shared-campaign-mission-admin-command__metrics div,
+    .shared-campaign-mission-staff-command__metrics div,
+    .shared-campaign-registry-command__metrics span,
+    .shared-coalition-governance-results__metrics div,
+    .shared-coalition-governance-stv-summary div,
+    .shared-coalition-cta-transport-stats div
+  ) {
+  padding: 16px;
+  background: var(--coalition-surface-alt);
+  border-color: var(--coalition-border);
+  border-radius: 16px;
+}
+
+.polis-coalition-ui
+  :is(
+    .shared-campaign-calendar-command__metrics,
+    .shared-campaign-mission-admin-command__metrics,
+    .shared-campaign-mission-staff-command__metrics,
+    .shared-campaign-registry-command__metrics,
+    .shared-coalition-governance-results__metrics,
+    .shared-coalition-cta-transport-stats
+  )
+  strong {
+  font-size: clamp(1.5rem, 2.4vw, 2.1rem);
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.045em;
+}
+
+/* These compact supporting rows keep operational detail available without
+   competing with each page's main task. No status or evidence is hidden. */
+.polis-coalition-ui
+  :is(
+    .shared-coalition-voter-map-district,
+    .shared-coalition-voter-map-territory,
+    .shared-coalition-map-member-row,
+    .shared-coalition-territory-unitset,
+    .shared-coalition-territory-assignment,
+    .shared-campaign-registry-row,
+    .shared-campaign-calendar-item,
+    .shared-campaign-calendar-connection,
+    .shared-campaign-calendar-external,
+    .shared-campaign-calendar-provider,
+    .shared-campaign-calendar-board__slot,
+    .shared-campaign-mission-card__task,
+    .shared-coalition-governance-rule-grid div,
+    .shared-coalition-governance-irv-round,
+    .shared-coalition-governance-stv-round,
+    .shared-organization-governance-roster-card,
+    .shared-coalition-amplify-response,
+    .shared-coalition-amplify-copy
+  ) {
+  background: var(--coalition-surface-alt);
+  border-color: var(--coalition-border);
+  color: var(--coalition-text);
+  border-radius: 15px;
+  box-shadow: none;
+}
+
+.polis-coalition-ui
+  :is(
+    .shared-campaign-mission-target-picker,
+    .shared-campaign-registry-form-section,
+    .shared-campaign-registry-filters,
+    .shared-coalition-governance-form-section,
+    .shared-coalition-governance-markdown,
+    .shared-coalition-governance-results,
+    .shared-coalition-governance-proposal-brief,
+    .shared-coalition-governance-builder-guide > div,
+    .shared-coalition-governance-vote-window,
+    .shared-coalition-territory-progress,
+    .shared-coalition-cta-transport-fieldset,
+    .shared-coalition-amplify-sharekit,
+    .shared-coalition-amplify-platforms,
+    .shared-petition-builder-cover
+  ) {
+  background: var(--coalition-surface-alt);
+  border-color: var(--coalition-border);
+  border-radius: 16px;
+  box-shadow: none;
+}
+
+.polis-coalition-ui
+  :is(
+    .shared-coalition-voter-map-search,
+    .shared-coalition-voter-map-viewport-grid,
+    .shared-coalition-territory-form,
+    .shared-coalition-territory-select,
+    .shared-coalition-cta-form,
+    .shared-coalition-cta-pickup-form,
+    .shared-coalition-governance-form,
+    .shared-coalition-governance-schedule,
+    .shared-organization-governance-floor-form,
+    .shared-campaign-registry-filters,
+    .shared-campaign-registry-manual,
+    .shared-campaign-registry-import-form,
+    .shared-campaign-registry-import-start,
+    .shared-campaign-mission-form-grid,
+    .shared-campaign-calendar-form,
+    .shared-campaign-calendar-filters,
+    .shared-coalition-amplify-priority,
+    .shared-coalition-amplify-response,
+    .shared-petition-builder,
+    .shared-petition-response-filters
+  )
+  :is(
+    input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+    select,
+    textarea
+  ) {
+  background: var(--coalition-surface);
+  border: 1px solid var(--coalition-border);
+  border-radius: 11px;
+  color: var(--coalition-text);
+  font: inherit;
+  font-weight: 450;
+  min-height: 44px;
+  padding: 11px 12px;
+}
+
+.polis-coalition-ui
+  :is(
+    .shared-coalition-voter-map-search,
+    .shared-coalition-voter-map-viewport-grid,
+    .shared-coalition-territory-form,
+    .shared-coalition-territory-select,
+    .shared-coalition-cta-form,
+    .shared-coalition-cta-pickup-form,
+    .shared-coalition-governance-form,
+    .shared-coalition-governance-schedule,
+    .shared-campaign-registry-filters,
+    .shared-campaign-registry-manual,
+    .shared-campaign-registry-import-form,
+    .shared-campaign-mission-form-grid,
+    .shared-campaign-calendar-form,
+    .shared-campaign-calendar-filters,
+    .shared-coalition-amplify-priority,
+    .shared-coalition-amplify-response,
+    .shared-petition-builder,
+    .shared-petition-response-filters
+  )
+  label
+  > span {
+  color: var(--coalition-muted);
+  font-size: 0.8rem;
+  font-weight: 550;
+  line-height: 1.45;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* Field maps retain their real map surface and member locations. */
+.polis-coalition-ui .shared-coalition-browser-map {
+  border-color: var(--coalition-border);
+  border-radius: 19px;
+}
+
+.polis-coalition-ui .shared-coalition-browser-map__surface {
+  min-height: 360px;
+}
+
+.polis-coalition-ui .shared-coalition-map-member-row {
+  padding: 14px;
+  text-align: left;
+}
+
+.polis-coalition-ui
+  :is(
+    .shared-coalition-map-member-row.is-active,
+    .shared-coalition-territory-tab.is-active,
+    .shared-coalition-territory-unitset.is-selected,
+    .shared-coalition-governance-command-card.is-active,
+    .shared-coalition-cta-command-card.is-active,
+    .shared-campaign-mission-command-chip.is-active,
+    .shared-campaign-mission-target-option.is-active,
+    .shared-petition-card.is-active
+  ) {
+  border-color: var(--coalition-primary);
+  background: var(--coalition-primary-soft);
+}
+
+.polis-coalition-ui .shared-coalition-territory-assignment__meta span {
+  background: var(--coalition-surface);
+}
+
+.polis-coalition-ui
+  :is(
+    .shared-coalition-territory-progress__bar,
+    .shared-coalition-governance-progress
+  ) {
+  height: 7px;
+  background: var(--coalition-border);
+}
+
+.polis-coalition-ui
+  :is(
+    .shared-coalition-territory-progress__bar,
+    .shared-coalition-governance-progress
+  )
+  > span {
+  background: var(--coalition-success);
+}
+
+.polis-coalition-ui .shared-campaign-registry-row {
+  padding: 18px;
+}
+
+.polis-coalition-ui .shared-campaign-registry-import-form input[type="file"] {
+  max-width: 100%;
+  padding: 20px;
+  border: 1px dashed var(--coalition-border);
+  border-radius: 14px;
+  background: var(--coalition-surface-alt);
+  color: var(--coalition-text);
+}
+
+.polis-coalition-ui
+  .shared-coalition-voter-map-search__address
+  .shared-event-address-lookup__results {
+  background: var(--coalition-surface);
+  border: 1px solid var(--coalition-border);
+  box-shadow: 0 12px 30px rgb(10 25 50 / 12%);
+}
+
+/* Missions retain board, workload, timeline and template controls. */
+.polis-coalition-ui .shared-campaign-mission-board {
+  gap: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 290px), 1fr));
+}
+
+.polis-coalition-ui .shared-campaign-mission-card__open {
+  padding: 18px;
+}
+
+.polis-coalition-ui .shared-campaign-mission-card__body strong {
+  font-size: 1rem;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+.polis-coalition-ui .shared-campaign-mission-card__metrics {
+  border-color: var(--coalition-border);
+  background: var(--coalition-surface-alt);
+}
+
+.polis-coalition-ui
+  :is(
+    .shared-campaign-mission-admin-command__metrics span,
+    .shared-campaign-mission-staff-command__metrics span,
+    .shared-campaign-calendar-command__metrics span,
+    .shared-campaign-calendar-command__metrics small,
+    .shared-campaign-mission-command-chip span
+  ) {
+  font-size: 0.76rem;
+  font-weight: 550;
+  text-transform: none;
+}
+
+/* Calendar puts the actual month board first, with readable event accents. */
+.polis-coalition-ui .shared-campaign-calendar-grid {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 22px;
+}
+
+.polis-coalition-ui .shared-campaign-calendar-side {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+}
+
+.polis-coalition-ui .shared-campaign-calendar-board__month {
+  gap: 5px;
+}
+
+.polis-coalition-ui .shared-campaign-calendar-board__day {
+  background: var(--coalition-surface);
+  border-color: var(--coalition-border);
+  border-radius: 12px;
+  padding: 10px 8px;
+  min-height: 128px;
+}
+
+.polis-coalition-ui .shared-campaign-calendar-board__day.is-selected {
+  border-color: var(--coalition-primary);
+  background: var(--coalition-primary-soft);
+}
+
+.polis-coalition-ui .shared-campaign-calendar-board__event {
+  background: var(--coalition-primary-soft);
+  border-left-color: var(--coalition-primary);
+  border-radius: 7px;
+}
+
+.polis-coalition-ui .shared-campaign-calendar-board__event.is-pending {
+  border-left-color: var(--coalition-warning);
+  background: color-mix(
+    in srgb,
+    var(--coalition-warning) 10%,
+    var(--coalition-surface)
+  );
+}
+
+.polis-coalition-ui
+  :is(
+    .shared-campaign-calendar-board__date strong,
+    .shared-campaign-calendar-board__event strong
+  ) {
+  font-weight: 550;
+}
+
+.polis-coalition-ui
+  :is(
+    .shared-campaign-calendar-board__mode,
+    .shared-campaign-calendar-day-group
+  ) {
+  background: var(--coalition-surface-alt);
+  border-color: var(--coalition-border);
+}
+
+.polis-coalition-ui
+  :is(
+    .shared-campaign-calendar-item.is-focused,
+    .shared-campaign-calendar-board__slot.is-focused
+  ) {
+  background: var(--coalition-primary-soft);
+  border-color: var(--coalition-primary);
+}
+
+/* Governance keeps ballot and certification evidence prominent and readable. */
+.polis-coalition-ui .shared-coalition-governance-markdown {
+  padding: 24px;
+  line-height: 1.75;
+}
+
+.polis-coalition-ui .shared-coalition-governance-markdown p {
+  max-width: 76ch;
+  margin: 0 0 1em;
+  color: var(--coalition-text);
+}
+
+.polis-coalition-ui .shared-coalition-governance-results {
+  padding: 20px;
+}
+
+.polis-coalition-ui .shared-coalition-governance-result-bars i {
+  background: var(--coalition-primary);
+}
+
+.polis-coalition-ui .shared-coalition-governance-ballot {
+  border-color: var(--coalition-border);
+  background: var(--coalition-surface-alt);
+  border-radius: 16px;
+}
+
+.polis-coalition-ui
+  :is(
+    .shared-coalition-governance-ballot fieldset,
+    .shared-coalition-governance-rank-item,
+    .shared-coalition-governance-type-card,
+    .shared-organization-governance-check,
+    .shared-coalition-amplify-platforms label
+  ) {
+  border-color: var(--coalition-border);
+  background: var(--coalition-surface);
+  color: var(--coalition-text);
+  border-radius: 12px;
+}
+
+.polis-coalition-ui .shared-coalition-governance-rank-item {
+  padding: 14px;
+}
+
+.polis-coalition-ui .shared-coalition-governance-rank-button {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.polis-coalition-ui .shared-organization-governance-audit-output pre {
+  border: 1px solid var(--coalition-border);
+  background: var(--coalition-surface-alt);
+  color: var(--coalition-text);
+  padding: 18px;
+  font-size: 0.78rem;
+  line-height: 1.65;
+  max-width: 100%;
+  overflow: auto;
+}
+
+/* Petition authoring and responses stay distinct from public signing routes. */
+.polis-coalition-ui .shared-petition-card {
+  padding: 20px;
+  gap: 18px;
+  align-items: start;
+}
+
+.polis-coalition-ui .shared-petition-card__cover {
+  width: 104px;
+  border-color: var(--coalition-border);
+  background: var(--coalition-surface-alt);
+  border-radius: 12px;
+}
+
+.polis-coalition-ui .shared-petition-field {
+  padding: 20px;
+}
+
+.polis-coalition-ui .shared-petition-response-table {
+  border: 1px solid var(--coalition-border);
+  border-radius: 14px;
+  gap: 0;
+}
+
+.polis-coalition-ui .shared-petition-response-table__row {
+  min-height: 58px;
+  padding: 12px 16px;
+  border-color: var(--coalition-border);
+}
+
+.polis-coalition-ui .shared-petition-response-table__row.is-header {
+  background: var(--coalition-surface-alt);
+  color: var(--coalition-muted);
+  font-size: 0.75rem;
+  font-weight: 550;
+  text-transform: none;
+}
+
+.polis-coalition-ui .shared-petition-response-table__row.is-flagged {
+  background: color-mix(
+    in srgb,
+    var(--coalition-warning) 10%,
+    var(--coalition-surface)
+  );
+}
+
+/* Share copy remains selectable; actions retain their existing permissions. */
+.polis-coalition-ui .shared-coalition-amplify-copy p {
+  font-size: 0.94rem;
+  line-height: 1.65;
+}
+
+.polis-coalition-ui
+  .shared-coalition-amplify-platforms
+  label:has(input:checked) {
+  background: var(--coalition-primary-soft);
+  border-color: var(--coalition-primary);
+}
+
+.polis-coalition-ui .shared-coalition-amplify-card.is-done {
+  border-color: var(--coalition-success);
+}
+
+.polis-coalition-ui
+  :is(
+    .shared-coalition-governance-command-card,
+    .shared-coalition-cta-command-card,
+    .shared-campaign-calendar-command-action,
+    .shared-campaign-mission-command-chip,
+    .shared-campaign-mission-target-option,
+    .shared-coalition-territory-tab,
+    .shared-coalition-map-member-row,
+    .shared-campaign-calendar-board__day
+  ):focus-visible {
+  outline: 2px solid var(--coalition-primary);
+  outline-offset: 3px;
+}
+
+@media (max-width: 1120px) {
+  .polis-coalition-ui
+    :is(
+      .shared-coalition-voter-map-grid,
+      .shared-coalition-territory-admin,
+      .shared-coalition-cta-grid,
+      .shared-coalition-cta-transport-grid,
+      .shared-coalition-governance-grid,
+      .shared-campaign-registry-grid,
+      .shared-campaign-calendar-command
+    ) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .polis-coalition-ui .shared-coalition-governance-side {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 760px) {
+  .polis-coalition-ui
+    :is(
+      .shared-campaign-calendar-side,
+      .shared-campaign-mission-admin-command,
+      .shared-campaign-mission-staff-command__main,
+      .shared-campaign-mission-form-grid,
+      .shared-coalition-voter-map-search__grid,
+      .shared-coalition-voter-map-viewport-grid,
+      .shared-coalition-territory-form--dense,
+      .shared-coalition-territory-select,
+      .shared-coalition-cta-form-grid,
+      .shared-coalition-governance-rule-form-grid,
+      .shared-coalition-governance-form,
+      .shared-coalition-governance-rule-grid,
+      .shared-coalition-governance-proposal__top,
+      .shared-coalition-governance-vote__top,
+      .shared-coalition-amplify-card__top,
+      .shared-coalition-amplify-priority,
+      .shared-petition-builder-cover,
+      .shared-petition-builder__header,
+      .shared-petition-field__grid,
+      .shared-petition-response-filters
+    ) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .polis-coalition-ui
+    :is(
+      .shared-coalition-governance-command__header,
+      .shared-coalition-amplify-command__header,
+      .shared-coalition-cta-command__header
+    ) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .polis-coalition-ui
+    :is(
+      .shared-campaign-missions-hero,
+      .shared-campaign-mission-admin-command,
+      .shared-campaign-mission-staff-command,
+      .shared-campaign-mission-create,
+      .shared-campaign-calendar-command,
+      .shared-campaign-registry-command,
+      .shared-coalition-governance-proposal,
+      .shared-coalition-governance-vote,
+      .shared-coalition-amplify-card,
+      .shared-coalition-cta-event,
+      .shared-coalition-cta-transport-group,
+      .shared-petition-card,
+      .shared-petition-field
+    ) {
+    padding: 18px;
+  }
+
+  .polis-coalition-ui .shared-campaign-missions-hero {
+    flex-direction: column;
+  }
+
+  .polis-coalition-ui
+    :is(
+      .shared-coalition-governance-command__status,
+      .shared-coalition-governance-vote-actions,
+      .shared-coalition-amplify-actions,
+      .shared-coalition-cta-actions,
+      .shared-campaign-calendar-command__actions
+    ) {
+    justify-content: flex-start;
+  }
+
+  .polis-coalition-ui .shared-campaign-calendar-board__month {
+    grid-template-columns: repeat(7, minmax(74px, 1fr));
+    overflow-x: auto;
+    padding: 3px 3px 12px;
+    scrollbar-width: thin;
+  }
+
+  .polis-coalition-ui .shared-campaign-calendar-board__day {
+    min-height: 102px;
+    padding: 8px 6px;
+  }
+
+  .polis-coalition-ui .shared-coalition-governance-results__metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .polis-coalition-ui .shared-petition-card {
+    grid-template-columns: 72px minmax(0, 1fr);
+  }
+
+  .polis-coalition-ui .shared-petition-card__cover {
+    width: 72px;
+  }
+
+  .polis-coalition-ui .shared-petition-card > .shared-card__actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+}
+
+/* Coalition calendars use an agenda with one existing creation form. */
+.polis-coalition-ui .shared-coalition-calendar .shared-campaign-calendar-side {
+  grid-template-columns: minmax(0, 1fr);
+}
+@media (min-width: 1000px) {
+  .polis-coalition-ui
+    .shared-coalition-calendar
+    .shared-campaign-calendar-grid {
+    grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+    align-items: start;
+  }
+}
