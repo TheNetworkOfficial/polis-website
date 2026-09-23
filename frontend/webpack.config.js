@@ -268,6 +268,16 @@ function staticCoalitionsShell(filename) {
   });
 }
 
+function staticFilesShell(filename) {
+  return new HtmlWebpackPlugin({
+    template: "./src/pages/files/files.html",
+    filename,
+    chunks: ["files"],
+    publicPath: "/",
+    favicon: "./src/assets/images/polis/Polis.png",
+  });
+}
+
 function staticOrganizationGovernanceShell(filename) {
   return new HtmlWebpackPlugin({
     templateContent: buildStaticSharedFeedShellHtml({
@@ -1003,6 +1013,7 @@ const deleteAccountDefineEnv = {
   __CTA_APP_DEEP_LINK_BASE_URL__: JSON.stringify(
     process.env.CTA_APP_DEEP_LINK_BASE_URL || "",
   ),
+  __POLIS_FILES_API_BASE_URL__: JSON.stringify(webAppApiBaseUrl),
 };
 
 module.exports = {
@@ -1024,6 +1035,7 @@ module.exports = {
     textBankingReturn:
       "./src/pages/text-banking-return/text-banking-return.js",
     "shared-feed": "./src/pages/shared-feed/shared-feed.js",
+    files: "./src/pages/files/files.js",
     notFound: "./src/pages/404/404.js",
   },
   output: {
@@ -1177,6 +1189,8 @@ module.exports = {
       publicPath: "/",
       favicon: "./src/assets/images/polis/Polis.png",
     }),
+    staticFilesShell("files/index.html"),
+    staticFilesShell("route-shells/files.html"),
     staticCtaInviteShell("cta-invite/index.html"),
     staticSettingsVoterIntelligenceShell("settings/voter-intelligence/index.html"),
     staticMessagesShell("messages.html"),
@@ -1202,7 +1216,11 @@ module.exports = {
   ],
   devServer: {
     historyApiFallback: {
-      rewrites: [...publicPageRouteRewrites, ...sharedAppRouteRewrites],
+      rewrites: [
+        ...publicPageRouteRewrites,
+        { from: /^\/files(?:\/.*)?$/u, to: "/files/index.html" },
+        ...sharedAppRouteRewrites,
+      ],
     },
     proxy: [
       {
