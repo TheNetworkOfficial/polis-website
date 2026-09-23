@@ -132,11 +132,25 @@ export function createTextingWorkspacePage({
     const refreshBilling = async () => {
       view.billing = (await api("/billing/summary")).billing;
     };
+    const refreshSendStatus = async () => {
+      const workspace = (await api("/workspace")).workspace;
+      if (
+        workspace?.scopeKey !== `coalition:${organizationId}` ||
+        workspace.provider !== "prompt" ||
+        workspace.manualOnly !== true ||
+        !["configured", "provision_required"].includes(workspace.status)
+      )
+        throw new Error("Workspace status could not be verified.");
+      view.workspace = workspace;
+      if (workspace.status === "configured") await refreshBilling();
+      else view.billing = null;
+    };
     return {
       api,
       guard,
       fail,
       refreshBilling,
+      refreshSendStatus,
       context,
       can,
       view: () => view,
@@ -235,14 +249,7 @@ export function createTextingWorkspacePage({
       version = sequence,
       r = runtime(key, version);
     try {
-      const workspace = (await r.api("/workspace")).workspace;
-      if (
-        workspace?.scopeKey !== view.workspace.scopeKey ||
-        workspace.manualOnly !== true
-      )
-        throw new Error("Workspace status could not be verified.");
-      view.workspace = workspace;
-      if (workspace.status === "configured") await r.refreshBilling();
+      await r.refreshSendStatus();
     } catch (error) {
       if (current(key, version)) fail(error);
     } finally {
@@ -340,7 +347,14 @@ export function createTextingWorkspacePage({
           `${count(w.pilot.remainingMessages)} messages and ${money(w.pilot.remainingSpendMicros)} remain. Only approved test recipients can be contacted.`,
         );
     }
-    const busyLabel = section === "contacts" ? "Updating import…" : "Saving…";
+    const busyLabel =
+      section === "contacts"
+        ? "Updating import…"
+        : section === "send"
+          ? view.campaigns?.pendingAction === "sending"
+            ? "Sending…"
+            : "Updating session…"
+          : "Saving…";
     return `<div data-workspace-key="${e(view.key)}" aria-busy="${view.busy ? "true" : "false"}">${view.error ? `<div class="pt-notice" role="alert">${e(view.error)}</div>` : ""}${view.message ? notice(view.message) : ""}${view.busy && !view.contacts?.starting ? `<div class="pt-workspace-working" role="status">${busyLabel}</div>` : ""}${html}</div>`;
   }
   function owned(target) {
