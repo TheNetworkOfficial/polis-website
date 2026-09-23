@@ -51,5 +51,19 @@ handoffs remain, including features whose full workflow is available in the app.
 The coalition calendar continues using its existing agenda and creation workflow;
 this refresh does not add a calendar service, voice rooms, or a map editor.
 
-Prepared on `codex/coalition-ui-20260923`, based on `fc91d60`. No GitHub push,
-production deployment, or app-store release is part of this implementation result.
+The user subsequently authorized push and website deployment. Canonical UI and
+Files-startup safeguard commits are on GitHub main. The live production release is
+`6a4ddcf8d763b4b001cd528e784f105ce545e588` on
+`codex/coalition-web-live-20260923`, integrating Text Banking's separately deployed
+`5795d9a` import-progress fix. Those import modules and tests are unchanged.
+
+Ten combined browser cases passed on the production integration, including the
+import recovery test and the existing Texting flow while Files discovery is held
+pending. The standalone Files entrypoint uses verified public API/auth settings.
+
+Active nginx static root:
+`/var/www/polis-website-releases/coalition-ui-20260923/frontend/dist`.
+Deployment used a graceful nginx reload, retained all incumbent assets, and left
+the Node/API process and its dynamic-template override unchanged. External routes,
+overlay hashes and public runtime configuration were verified. Prior releases
+remain available for rollback. No native app-store release is included.
