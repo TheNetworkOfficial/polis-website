@@ -1,30 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFile } from "node:fs/promises";
 import { webcrypto } from "node:crypto";
+import { moduleUrl } from "./module-fixture.mjs";
 
-const source = (
-  await readFile(
-    new URL(
-      "../../frontend/src/pages/shared-feed/scripts/textingIntake.js",
-      import.meta.url,
-    ),
-    "utf8",
-  )
-)
-  .replace(/^import .*;\r?\n/gm, "")
-  .replace(
-    "export const WEBSITE_GUIDELINES_VERSION",
-    'const guidelinesUrl = "/guidelines.pdf";\nexport const WEBSITE_GUIDELINES_VERSION',
-  );
 const {
   validateTextingIntake,
   decodeTextingIntake,
   createTextingIntakePage,
   intakeStepForField,
-} = await import(
-  `data:text/javascript;base64,${Buffer.from(source).toString("base64")}`
-);
+} = await import(await moduleUrl("textingIntake"));
 const fields = {
   firstName: "Alex",
   lastName: "Morgan",

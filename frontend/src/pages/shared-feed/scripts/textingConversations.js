@@ -12,6 +12,7 @@ import {
   checkedUrl,
   uuid,
   messagePrice,
+  messageFundingReady,
 } from "./textingWorkspaceUi";
 
 const when = (value) =>
@@ -159,9 +160,7 @@ export function createConversations(r) {
         c.canReply === true &&
         !c.suppressed &&
         !hold &&
-        r.billing()?.sendingBlocked === false &&
-        price !== null &&
-        r.billing().availableMicros >= price;
+        messageFundingReady(r.workspace(), r.billing(), s.reply || "");
     return (
       head(
         "CONVERSATION",
@@ -186,7 +185,7 @@ export function createConversations(r) {
                 )}<p>${e(message.content)}</p></div><small class="pt-muted">${message.direction === "outbound" ? "Sent" : "Received"} · ${e(when(message.createdAtMs))} · ${e(label(message.status))}</small></article>`,
           )
           .join("") || `<p class="pt-muted">No recorded messages yet.</p>`
-      }</div>${s.cursor ? button("conversations-more", "More messages", { secondary: true }) : ""}${c.suppressed ? notice("This person opted out", "Sending is blocked for this recipient.") : hold || c.replyState === "provider_outcome_unknown" ? notice("Reply needs review", "Do not resend. The saved outcome must be confirmed first.") : `<form data-workspace-form="reply">${textarea("reply", "Reply", s.reply || "", true)}<div class="pt-row"><span class="pt-muted">Text reply · ${price === null ? "Rate unavailable" : money(price)}</span><button class="pt-btn" type="submit"${!canReply || r.busy() ? " disabled" : ""}>Send reply</button></div>${!c.canReply ? `<p class="pt-muted">Replies are paused until this conversation is eligible for a response.</p>` : ""}</form>`}</section><aside class="pt-card"><h2>Contact details</h2><div class="pt-row"><span>Phone</span><strong>${e(c.phone)}</strong></div><div class="pt-row"><span>Texting status</span><strong>${c.suppressed ? "Opted out" : "No opt-out recorded"}</strong></div><p class="pt-muted">A reply does not establish written opt-in.</p>${c.canSuppress && !c.suppressed ? button("conversation-suppress", "Record opt-out", { secondary: true, disabled: r.busy() }) : ""}${c.suppressed && c.providerSyncState ? `<p class="pt-muted">Vendor opt-out: ${e(label(c.providerSyncState))}</p>` : ""}${c.canSyncSuppression ? button("conversation-sync", "Check vendor opt-out", { secondary: true, disabled: r.busy() }) : ""}${go("campaigns", "View campaign", c.campaignId, true)}</aside></div>`
+      }</div>${s.cursor ? button("conversations-more", "More messages", { secondary: true }) : ""}${c.suppressed ? notice("This person opted out", "Sending is blocked for this recipient.") : hold || c.replyState === "provider_outcome_unknown" ? notice("Reply needs review", "Do not resend. The saved outcome must be confirmed first.") : `<form data-workspace-form="reply">${textarea("reply", "Reply", s.reply || "", true)}<div class="pt-row"><span class="pt-muted">Text reply${r.can("manageBilling") ? ` · ${price === null ? "Rate unavailable" : money(price)}` : ""}</span><button class="pt-btn" type="submit"${!canReply || r.busy() ? " disabled" : ""}>Send reply</button></div>${!c.canReply ? `<p class="pt-muted">Replies are paused until this conversation is eligible for a response.</p>` : ""}</form>`}</section><aside class="pt-card"><h2>Contact details</h2><div class="pt-row"><span>Phone</span><strong>${e(c.phone)}</strong></div><div class="pt-row"><span>Texting status</span><strong>${c.suppressed ? "Opted out" : "No opt-out recorded"}</strong></div><p class="pt-muted">A reply does not establish written opt-in.</p>${c.canSuppress && !c.suppressed ? button("conversation-suppress", "Record opt-out", { secondary: true, disabled: r.busy() }) : ""}${c.suppressed && c.providerSyncState ? `<p class="pt-muted">Vendor opt-out: ${e(label(c.providerSyncState))}</p>` : ""}${c.canSyncSuppression ? button("conversation-sync", "Check vendor opt-out", { secondary: true, disabled: r.busy() }) : ""}${go("campaigns", "View campaign", c.campaignId, true)}</aside></div>`
     );
   }
   async function submit(kind, form) {
@@ -194,8 +193,7 @@ export function createConversations(r) {
     const s = state(),
       c = s.conversation,
       key = `reply:${c.conversationId}`,
-      content = String(new FormData(form).get("reply") || "").trim(),
-      amount = messagePrice(r.billing(), content);
+      content = String(new FormData(form).get("reply") || "").trim();
     if (
       !content ||
       content.length > 1600 ||
@@ -203,12 +201,10 @@ export function createConversations(r) {
       c.suppressed ||
       r.sendHeld(key) ||
       !r.workspace()?.canSend ||
-      r.billing()?.sendingBlocked ||
-      amount === null ||
-      r.billing().availableMicros < amount
+      !messageFundingReady(r.workspace(), r.billing(), content)
     )
       throw new Error(
-        "This reply is not eligible to send. Check the saved status and balance.",
+        "This reply is not eligible to send. Check the saved status.",
       );
     const actionId = uuid(),
       messageIds = new Set(

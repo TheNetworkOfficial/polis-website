@@ -54,6 +54,16 @@ function purchaseLabel(status) {
   );
 }
 
+function requireBillingAdmin(billing) {
+  if (billing?.canManageBilling !== true) {
+    const error = new Error("billing_access_denied");
+    error.status = 403;
+    throw error;
+  }
+  if (billing.currency !== "usd") throw new Error("billing_unavailable");
+  return billing;
+}
+
 /** Organization-scoped view; server confirmation is the only source of funding state. */
 export function createTextingBalancePage({ request, context, changed }) {
   let view = {};
@@ -147,7 +157,7 @@ export function createTextingBalancePage({ request, context, changed }) {
         auth: true,
       });
       if (!current(key, version)) return;
-      view.billing = summary.billing;
+      view.billing = requireBillingAdmin(summary.billing);
       if (!view.billing?.canManageBilling) {
         view.purchase = null;
         view.purchaseId = "";
@@ -214,9 +224,7 @@ export function createTextingBalancePage({ request, context, changed }) {
         auth: true,
       });
       if (!current(key, version)) return;
-      if (!result.billing || result.billing.currency !== "usd")
-        throw new Error("billing_unavailable");
-      view.billing = result.billing;
+      view.billing = requireBillingAdmin(result.billing);
       if (view.billing.canManageBilling) {
         await history();
         await checkPurchase();
@@ -253,8 +261,7 @@ export function createTextingBalancePage({ request, context, changed }) {
         auth: true,
       });
       if (!current(key, version)) return;
-      if (!result.billing || result.billing.currency !== "usd")
-        throw new Error("billing_unavailable");
+      requireBillingAdmin(result.billing);
       const oldPack = view.billing?.packs?.find(
         (item) => item.id === view.selectedPack,
       );
@@ -550,7 +557,10 @@ export function createTextingBalancePage({ request, context, changed }) {
   }
 
   function render() {
-    const billing = identity() === view.key ? view.billing : null;
+    const billing =
+      identity() === view.key && view.billing?.canManageBilling === true
+        ? view.billing
+        : null;
     const section =
       billing?.canManageBilling &&
       (view.section !== "add-funds" || billing.canPurchase)
@@ -583,6 +593,10 @@ export function createTextingBalancePage({ request, context, changed }) {
   const getMeta = () => ({
     organizationName:
       identity() === view.key ? view.billing?.organizationName || "" : "",
+    capabilities: {
+      manageBilling:
+        identity() === view.key && view.billing?.canManageBilling === true,
+    },
   });
   return { load, render, reset, refresh, show, getMeta };
 }

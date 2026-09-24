@@ -6488,6 +6488,7 @@ function renderCurrentTextingPage() {
   return renderTextingShell({
     ...current,
     organizationName: meta.organizationName || "",
+    manageBilling: meta.capabilities?.manageBilling === true,
     userName:
       user?.displayName || user?.username || user?.name || "Your account",
     logoUrl: resolveSharedAssetUrl(polisLogoUrl),

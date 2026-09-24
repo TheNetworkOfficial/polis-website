@@ -111,6 +111,18 @@ export function messagePrice(billing, text, media = false) {
   const total = base + extra * (rate || 0);
   return Number.isSafeInteger(total) ? total : null;
 }
+/** Non-admin summaries deliberately omit prices; the server still checks the
+ * exact message cost atomically when a human confirms the send. */
+export function messageFundingReady(workspace, billing, text, media = false) {
+  if (billing?.sendingBlocked !== false) return false;
+  if (workspace?.capabilities?.manageBilling !== true) return true;
+  const cost = messagePrice(billing, text, media);
+  return (
+    cost !== null &&
+    Number.isSafeInteger(billing.availableMicros) &&
+    billing.availableMicros >= cost
+  );
+}
 export function queueCanConfirm(
   item,
   workspace,
@@ -118,8 +130,7 @@ export function queueCanConfirm(
   mediaLoaded = false,
   now = Date.now(),
 ) {
-  const p = item?.preview,
-    cost = p && messagePrice(billing, p.message, !!p.attachmentUrl);
+  const p = item?.preview;
   return (
     workspace?.canSend === true &&
     workspace?.capabilities?.manualQueue === true &&
@@ -135,7 +146,6 @@ export function queueCanConfirm(
     typeof p.message === "string" &&
     p.message.length > 0 &&
     (!p.attachmentUrl || (checkedUrl(p.attachmentUrl) && mediaLoaded)) &&
-    cost !== null &&
-    billing.availableMicros >= cost
+    messageFundingReady(workspace, billing, p.message, !!p.attachmentUrl)
   );
 }

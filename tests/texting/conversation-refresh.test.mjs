@@ -33,6 +33,7 @@ const billing = {
   reservedMicros: 0,
   settledMicros: 0,
   sendingBlocked: false,
+  canManageBilling: true,
   smsUpToTwoSegmentsMicros: 35000,
   smsAdditionalSegmentMicros: 15000,
   mmsMicros: 45000,
@@ -43,7 +44,7 @@ const workspace = {
   status: "configured",
   scopeKey: "coalition:org-one",
   canSend: true,
-  capabilities: {},
+  capabilities: { manageBilling: true },
 };
 const conversation = {
   conversationId: "conversation-one",
@@ -118,6 +119,7 @@ function conversationHarness(api) {
     context: () => ({ resourceId: conversation.conversationId }),
     workspace: () => workspace,
     billing: () => billing,
+    can: (name) => workspace.capabilities[name] === true,
     busy: () => false,
     changed: () => {},
     toast: () => {},

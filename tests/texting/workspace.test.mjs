@@ -24,6 +24,13 @@ const { uploadContactFile, createContacts } = await import(
   await moduleUrl("textingContacts")
 );
 const { createCampaigns } = await import(await moduleUrl("textingCampaigns"));
+const { createConversations } = await import(
+  await moduleUrl("textingConversations")
+);
+const { createTextingBalancePage } = await import(
+  await moduleUrl("textingBalance")
+);
+const { renderTextingShell } = await import(await moduleUrl("textingShell"));
 const { createTextingWorkspacePage } = await import(
   await moduleUrl("textingWorkspace")
 );
@@ -34,6 +41,7 @@ const billing = {
   reservedMicros: 0,
   settledMicros: 0,
   sendingBlocked: false,
+  canManageBilling: true,
   smsUpToTwoSegmentsMicros: 35000,
   smsAdditionalSegmentMicros: 15000,
   mmsMicros: 45000,
@@ -45,6 +53,7 @@ const workspace = {
   scopeKey: "coalition:org-one",
   canSend: true,
   capabilities: {
+    manageBilling: true,
     manualQueue: true,
     createCampaigns: true,
     uploadImports: true,
@@ -126,6 +135,182 @@ test("manual confirmation requires exact preview, current receipt, loaded media 
   assert.equal(!!ui.queueCanConfirm(m, workspace, billing, true), true);
   m.preview.attachmentUrl = "javascript:alert(1)";
   assert.equal(!!ui.queueCanConfirm(m, workspace, billing, true), false);
+});
+
+test("volunteers use server sending status without receiving financial fields", () => {
+  const volunteer = {
+    ...workspace,
+    capabilities: { ...workspace.capabilities, manageBilling: false },
+  };
+  const operational = {
+    canManageBilling: false,
+    canPurchase: false,
+    sendingBlocked: false,
+    blockedReasons: [],
+  };
+  assert.equal(!!ui.queueCanConfirm(item(), volunteer, operational), true);
+  assert.equal(ui.messageFundingReady(volunteer, operational, "Reply"), true);
+  assert.equal(
+    !!ui.queueCanConfirm(item(), volunteer, {
+      ...operational,
+      sendingBlocked: true,
+    }),
+    false,
+  );
+  assert.equal(!!ui.queueCanConfirm(item(), volunteer, null), false);
+  assert.equal(
+    !!ui.queueCanConfirm(
+      { ...item(), state: "provider_outcome_unknown" },
+      volunteer,
+      operational,
+    ),
+    false,
+  );
+  assert.equal(
+    !!ui.queueCanConfirm(
+      { ...item(), expiresAtMs: Date.now() - 1 },
+      volunteer,
+      operational,
+    ),
+    false,
+  );
+  assert.equal(ui.messageFundingReady(workspace, operational, "Reply"), false);
+});
+
+test("non-admin home, pilot, campaigns and replies hide even legacy financial values", async () => {
+  documentStub();
+  const volunteer = {
+    ...workspace,
+    sendingMode: "pilot",
+    pilot: { remainingMessages: 5, remainingSpendMicros: 465000 },
+    capabilities: { ...workspace.capabilities, manageBilling: false },
+  };
+  const oldSummary = { ...billing, canManageBilling: false };
+  const page = createTextingWorkspacePage({
+    context: () => ({
+      organizationId: "org-one",
+      userId: "volunteer",
+      section: "home",
+    }),
+    changed: () => {},
+    navigate: () => {},
+    request: async (url) =>
+      url.endsWith("/workspace")
+        ? { ok: true, workspace: volunteer }
+        : url.endsWith("/summary")
+          ? { ok: true, billing: oldSummary }
+          : { ok: true, items: [] },
+  });
+  await page.load();
+  assert.match(page.render(), /5 messages remain/);
+  assert.doesNotMatch(
+    page.render(),
+    /TEXTING BALANCE|View balance|Pending charges|Completed usage|\$[0-9]/,
+  );
+  page.reset();
+  const campaign = {
+    campaignId: "campaign-one",
+    name: "Campaign",
+    status: "draft",
+    templateText: "Reply STOP to opt out.",
+    budgetMicros: 70000,
+    reservedMicros: 35000,
+    settledMicros: 35000,
+    assignedUserIds: [],
+    canFetchQueue: true,
+  };
+  const state = {
+    campaigns: { campaign, draft: campaign, queue: { items: [item()] } },
+    conversations: {
+      conversation: {
+        conversationId: "one",
+        phone: "+12025550124",
+        canReply: true,
+      },
+      messages: [],
+      reply: "Received",
+    },
+  };
+  const r = {
+    view: () => state,
+    can: (key) => key !== "manageBilling",
+    workspace: () => volunteer,
+    billing: () => oldSummary,
+    context: () => ({ resourceId: "campaign-one" }),
+    busy: () => false,
+    sendHeld: () => false,
+  };
+  const campaigns = createCampaigns(r);
+  for (const section of ["campaigns", "results", "send"]) {
+    assert.doesNotMatch(
+      campaigns.render(section),
+      /Campaign limit|Pending charges|Completed usage|Available funds|Rate unavailable|\$[0-9]/,
+    );
+  }
+  state.campaigns.editing = true;
+  assert.doesNotMatch(
+    campaigns.render("campaigns"),
+    /Spending limit|per message|Rate awaiting verification|\$[0-9]/,
+  );
+  const conversation = createConversations(r).render();
+  assert.doesNotMatch(conversation, /Rate unavailable|\$[0-9]/);
+  assert.match(conversation, /type="submit">Send reply/);
+  const shell = (options) =>
+    renderTextingShell({
+      organizationId: "org-one",
+      section: "home",
+      content: "",
+      ...options,
+    });
+  assert.doesNotMatch(shell({}), /texting-balance/);
+  assert.match(shell({ manageBilling: true }), /texting-balance/);
+});
+
+test("direct Balance routes reject volunteers and erase finances after admin downgrade", async () => {
+  documentStub();
+  const savedWindow = globalThis.window;
+  globalThis.window = {
+    location: {
+      href: "https://polis.example/organizations/org-one/texting-balance",
+    },
+  };
+  let admin = false;
+  const calls = [];
+  const page = createTextingBalancePage({
+    context: () => ({ organizationId: "org-one", userId: "current-user" }),
+    changed: () => {},
+    request: async (url) => {
+      calls.push(url);
+      return url.endsWith("/summary")
+        ? { billing: { ...billing, currency: "usd", canManageBilling: admin } }
+        : { transactions: [], nextCursor: null };
+    },
+  });
+  try {
+    await page.load();
+    assert.match(page.render(), /do not have access/);
+    assert.doesNotMatch(
+      page.render(),
+      /texting-available|AVAILABLE TO SEND|\$[0-9]/,
+    );
+    assert.equal(calls.length, 1);
+    assert.equal(page.getMeta().capabilities.manageBilling, false);
+    admin = true;
+    await page.load();
+    assert.match(page.render(), /texting-available/);
+    assert.equal(page.getMeta().capabilities.manageBilling, true);
+    admin = false;
+    await page.refresh();
+    assert.match(page.render(), /do not have access/);
+    assert.doesNotMatch(
+      page.render(),
+      /texting-available|AVAILABLE TO SEND|\$[0-9]/,
+    );
+    assert.equal(page.getMeta().capabilities.manageBilling, false);
+  } finally {
+    page.reset();
+    globalThis.window = savedWindow;
+  }
 });
 
 test("multipart uploads bind digest, omit credentials and reject foreign destinations", async () => {

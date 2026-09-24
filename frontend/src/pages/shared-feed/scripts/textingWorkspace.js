@@ -89,7 +89,8 @@ export function createTextingWorkspacePage({
   }
   const can = (name) =>
     view.workspace?.status === "configured" &&
-    view.workspace.capabilities?.[name] === true;
+    view.workspace.capabilities?.[name] === true &&
+    (name !== "manageBilling" || view.billing?.canManageBilling === true);
   function fail(error) {
     if (error?.status === 401 || error?.status === 403) {
       for (const module of Object.values(modules)) module.dispose?.();
@@ -280,6 +281,13 @@ export function createTextingWorkspacePage({
   function financialNotice() {
     const b = view.billing;
     if (!b) return "";
+    if (!can("manageBilling"))
+      return b.sendingBlocked === true
+        ? notice(
+            "Sending is paused",
+            "An organization administrator can review the texting setup.",
+          )
+        : "";
     const rates = [b.smsUpToTwoSegmentsMicros, b.mmsMicros].filter(
       (n) => Number.isSafeInteger(n) && n > 0,
     );
@@ -299,17 +307,17 @@ export function createTextingWorkspacePage({
     const w = view.workspace,
       b = view.billing,
       campaigns = list(view.homeCampaigns),
-      ready = w.canSend === true;
+      ready = w.canSend === true && b?.sendingBlocked === false;
     return (
       head(
         context().organizationName || "YOUR ORGANIZATION",
         "Good conversations start here.",
         "Your people. Your voice. One message at a time.",
-        can("createCampaigns")
+        can("createCampaigns") && can("manageBilling")
           ? go("campaigns", "New campaign", "new")
           : go("campaigns", "View campaigns"),
       ) +
-      `<div class="pt-grid pt-grid--two"><section class="pt-card pt-workspace-hero"><div class="pt-eyebrow">BETTER, TOGETHER</div><h2>${ready ? "Make the next connection." : "Get ready for your first conversation."}</h2><p>${ready ? "Pick a campaign and give each message a personal moment." : "Your drafts and contact lists stay ready while texting setup is completed."}</p>${go("campaigns", ready ? "Open campaigns" : "Prepare a campaign")}</section><section class="pt-card"><div class="pt-eyebrow">TEXTING BALANCE</div><div class="pt-workspace-large">${money(b?.availableMicros)}</div><p class="pt-muted">Available to message</p>${go("balance", "View balance", "", true)}</section></div><div class="pt-grid pt-grid--three">${stat("Sending", ready ? (w.sendingMode === "pilot" ? "Controlled test" : "Available") : "Paused")}${stat("Pending charges", money(b?.reservedMicros))}${stat("Completed usage", money(b?.settledMicros))}</div><section class="pt-card"><div class="pt-row"><h2>Your campaigns</h2>${go("campaigns", "View all", "", true)}</div>${campaigns.length ? campaigns.map((c) => `<div class="pt-row"><div><strong>${e(c.name)}</strong><p class="pt-muted">${e(label(c.status))}</p></div>${go("campaigns", "Open", c.campaignId, true)}</div>`).join("") : `<p class="pt-muted">Create a campaign when your contact list is ready.</p>`}</section><div class="pt-grid pt-grid--two">${can("uploadImports") ? `<section class="pt-card"><h2>Bring your people</h2><p class="pt-muted">Upload and review a contact list.</p>${go("contacts", "Open contacts", "", true)}</section>` : ""}<section class="pt-card"><h2>Keep listening</h2><p class="pt-muted">Replies and opt-outs stay available when sends are paused.</p>${go("inbox", "Open inbox", "", true)}</section></div>`
+      `<div class="pt-grid pt-grid--two"><section class="pt-card pt-workspace-hero"><div class="pt-eyebrow">BETTER, TOGETHER</div><h2>${ready ? "Make the next connection." : "Get ready for your first conversation."}</h2><p>${ready ? "Pick a campaign and give each message a personal moment." : "Your drafts and contact lists stay ready while texting setup is completed."}</p>${go("campaigns", ready ? "Open campaigns" : "Prepare a campaign")}</section>${can("manageBilling") ? `<section class="pt-card"><div class="pt-eyebrow">TEXTING BALANCE</div><div class="pt-workspace-large">${money(b?.availableMicros)}</div><p class="pt-muted">Available to message</p>${go("balance", "View balance", "", true)}</section>` : ""}</div><div class="pt-grid pt-grid--three">${stat("Sending", ready ? (w.sendingMode === "pilot" ? "Controlled test" : "Available") : "Paused")}${can("manageBilling") ? `${stat("Pending charges", money(b?.reservedMicros))}${stat("Completed usage", money(b?.settledMicros))}` : ""}</div><section class="pt-card"><div class="pt-row"><h2>Your campaigns</h2>${go("campaigns", "View all", "", true)}</div>${campaigns.length ? campaigns.map((c) => `<div class="pt-row"><div><strong>${e(c.name)}</strong><p class="pt-muted">${e(label(c.status))}</p></div>${go("campaigns", "Open", c.campaignId, true)}</div>`).join("") : `<p class="pt-muted">Create a campaign when your contact list is ready.</p>`}</section><div class="pt-grid pt-grid--two">${can("uploadImports") ? `<section class="pt-card"><h2>Bring your people</h2><p class="pt-muted">Upload and review a contact list.</p>${go("contacts", "Open contacts", "", true)}</section>` : ""}<section class="pt-card"><h2>Keep listening</h2><p class="pt-muted">Replies and opt-outs stay available when sends are paused.</p>${go("inbox", "Open inbox", "", true)}</section></div>`
     );
   }
   function render() {
@@ -346,7 +354,7 @@ export function createTextingWorkspacePage({
       if (w.sendingMode === "pilot" && w.pilot)
         html += notice(
           "Controlled test",
-          `${count(w.pilot.remainingMessages)} messages and ${money(w.pilot.remainingSpendMicros)} remain. Only approved test recipients can be contacted.`,
+          `${count(w.pilot.remainingMessages)} messages${can("manageBilling") ? ` and ${money(w.pilot.remainingSpendMicros)}` : ""} remain. Only approved test recipients can be contacted.`,
         );
     }
     const busyLabel =
@@ -490,7 +498,10 @@ export function createTextingWorkspacePage({
     getMeta: () => ({
       organizationName:
         view.billing?.organizationName || context()?.organizationName,
-      capabilities: view.workspace?.capabilities || {},
+      capabilities: {
+        ...view.workspace?.capabilities,
+        manageBilling: can("manageBilling"),
+      },
     }),
   };
 }

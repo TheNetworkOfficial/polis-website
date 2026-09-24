@@ -17,6 +17,9 @@ All deep links require normal Polis authentication. Organization entry is availa
 
 - Registration includes the Campaign Verify token and expiration, required-field validation, website guidelines and explicit review authorization. Saved token values are never returned to the browser.
 - Prices, packs, tax disclosures, billing authorization, receipt identity and payment confirmation remain server-owned. Opening checkout or its return URL never credits funds.
+- Balance navigation, financial figures and billing details require the server's organization-admin billing capability. Volunteers use the redacted sending status; prices and balances are not required in their browser to confirm an eligible message.
+- Texting Settings loads organization daily sending hours from `/delivery-schedule`. Administrators save clock times with the current revision. The reviewed provider timezone is displayed read-only. Campaigns can inherit those hours or use a narrower daily window; draft, prepared and paused campaigns use a separate revision-checked schedule PATCH so saved message content is preserved. Changing hours never activates a campaign or schedules automatic messages.
+- Active, Paused and Archived campaign views use server-side filtering and retain cursor pagination, including an empty filtered page with older history available. Archiving preserves campaign records, messages and results.
 - Contact uploads use checksummed, signed multipart storage requests without account credentials. Mapping review, consent and source provenance remain explicit.
 - Provider work occurs only after an explicit action. Every initial send requires its own current authoritative recipient/message preview and confirmation. Unknown send outcomes remain held without automatic retries.
 - Replies retain permission, opt-out, spending and approval restrictions. Funding cannot activate messaging.
