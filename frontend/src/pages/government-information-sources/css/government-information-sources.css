@@ -2,6 +2,7 @@
 
 .about-stack a {
   text-decoration: underline;
+  overflow-wrap: anywhere;
 }
 .about-stack li {
   margin-bottom: 0.6rem;
