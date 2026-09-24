@@ -20,6 +20,7 @@ All deep links require normal Polis authentication. Organization entry is availa
 - Contact uploads use checksummed, signed multipart storage requests without account credentials. Mapping review, consent and source provenance remain explicit.
 - Provider work occurs only after an explicit action. Every initial send requires its own current authoritative recipient/message preview and confirmation. Unknown send outcomes remain held without automatic retries.
 - Replies retain permission, opt-out, spending and approval restrictions. Funding cannot activate messaging.
+- After an accepted reply, the conversation refreshes its saved messages and sending allowance. A short, bounded series of read-only checks catches delayed delivery callbacks; it never repeats a send. Returning to the conversation refreshes saved messages while preserving an unsent draft.
 - Customer state and late responses are fenced to the signed-in user, organization and current view.
 - Metrics unavailable from the current API are not invented; results show recorded campaign status and spending.
 

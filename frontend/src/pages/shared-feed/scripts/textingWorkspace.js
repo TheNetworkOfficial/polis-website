@@ -250,6 +250,8 @@ export function createTextingWorkspacePage({
       r = runtime(key, version);
     try {
       await r.refreshSendStatus();
+      if (context().section === "conversation" && context().resourceId)
+        await modules.conversations.refresh(context().resourceId);
     } catch (error) {
       if (current(key, version)) fail(error);
     } finally {
