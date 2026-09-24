@@ -18,12 +18,24 @@ const when = (value) =>
   Number.isSafeInteger(value) ? new Date(value).toLocaleString() : "";
 export function createConversations(r) {
   const state = () => (r.view().conversations ||= {});
-  async function load(resource, { append = false } = {}) {
+  let pollTimer,
+    pollReads = 0,
+    pollDeadline = 0,
+    pendingReply,
+    disposed = false,
+    refreshing = false;
+  function dispose() {
+    disposed = true;
+    clearTimeout(pollTimer);
+  }
+  async function read(resource, { append = false } = {}) {
     const s = state();
     if (resource) {
       const result = await r.api(
         `/conversations/${id(resource)}${append && s.cursor ? `?cursor=${id(s.cursor)}` : ""}`,
       );
+      if (disposed) return;
+      r.guard();
       if (result.conversation?.conversationId !== resource)
         throw new Error("Conversation could not be verified.");
       s.conversation = result.conversation;
@@ -32,12 +44,98 @@ export function createConversations(r) {
         ...list(result.messages),
       ];
       s.cursor = result.nextCursor;
+      if (
+        pendingReply &&
+        s.messages.some(
+          (message) =>
+            message.direction === "outbound" &&
+            message.content === pendingReply.content &&
+            message.messageId != null &&
+            !pendingReply.messageIds.has(String(message.messageId)) &&
+            ["DELIVERED", "FAILED", "UNDELIVERED", "REJECTED"].includes(
+              String(message.status).toUpperCase(),
+            ),
+        )
+      )
+        pendingReply = null;
     } else {
       const result = await r.api(
         `/conversations${append && s.cursor ? `?cursor=${id(s.cursor)}` : ""}`,
       );
+      if (disposed) return;
+      r.guard();
       s.items = [...(append ? s.items || [] : []), ...list(result.items)];
       s.cursor = result.nextCursor;
+    }
+  }
+  /** Poll saved messages only; a delayed callback never repeats a reply POST. */
+  function scheduleUpdate(resource) {
+    clearTimeout(pollTimer);
+    const remaining = pollDeadline - Date.now();
+    if (
+      disposed ||
+      !pendingReply ||
+      !resource ||
+      pollReads >= 6 ||
+      remaining <= 0
+    )
+      return;
+    pollTimer = setTimeout(
+      async () => {
+        if (disposed || document.hidden || Date.now() > pollDeadline) return;
+        try {
+          r.guard();
+        } catch {
+          dispose();
+          return;
+        }
+        if (r.busy()) {
+          scheduleUpdate(resource);
+          return;
+        }
+        pollReads++;
+        await refresh(resource);
+      },
+      Math.min(10000, remaining),
+    );
+  }
+  async function load(resource, options = {}) {
+    await read(resource, options);
+  }
+  async function refresh(resource) {
+    if (refreshing || disposed || !resource) return;
+    refreshing = true;
+    try {
+      r.guard();
+      if (state().sendStatusNeedsRead) {
+        await r.refreshSendStatus();
+        if (disposed) return;
+        state().sendStatusNeedsRead = false;
+      }
+      await read(resource);
+      if (!disposed) state().refreshError = false;
+    } catch (error) {
+      try {
+        r.guard();
+      } catch {
+        dispose();
+        return;
+      }
+      if (disposed) return;
+      if (error?.status === 401 || error?.status === 403) {
+        dispose();
+        r.fail(error);
+        r.changed();
+        return;
+      }
+      // A read failure does not change an already accepted send outcome.
+      state().refreshError = true;
+    } finally {
+      refreshing = false;
+      if (!disposed) {
+        scheduleUpdate(resource);
+        r.changed();
+      }
     }
   }
   function render() {
@@ -71,7 +169,7 @@ export function createConversations(r) {
         c.displayName ? c.phone : "",
         go("inbox", "All conversations", "", true),
       ) +
-      `<div class="pt-grid pt-grid--two"><section class="pt-card"><div class="pt-row"><span class="pt-tag">${c.suppressed ? "Opted out" : e(label(c.status))}</span>${button("conversations-refresh", "Refresh", { secondary: true })}</div><div class="pt-workspace-thread">${
+      `${s.refreshError ? notice("Updates are delayed", "Refresh to check the saved messages. Do not resend an accepted reply.") : ""}<div class="pt-grid pt-grid--two"><section class="pt-card"><div class="pt-row"><span class="pt-tag">${c.suppressed ? "Opted out" : e(label(c.status))}</span>${button("conversations-refresh", "Refresh", { secondary: true })}</div><div class="pt-workspace-thread">${
         list(s.messages)
           .map(
             (message) =>
@@ -112,7 +210,10 @@ export function createConversations(r) {
       throw new Error(
         "This reply is not eligible to send. Check the saved status and balance.",
       );
-    const actionId = uuid();
+    const actionId = uuid(),
+      messageIds = new Set(
+        list(s.messages).map((message) => String(message.messageId)),
+      );
     r.holdSend(key);
     const result = (
       await r.api(`/conversations/${id(c.conversationId)}/reply`, {
@@ -125,17 +226,25 @@ export function createConversations(r) {
     if (result.state === "accepted") {
       r.releaseSend(key);
       s.reply = "";
+      pendingReply = { content, messageIds };
+      pollReads = 0;
+      pollDeadline = Date.now() + 60000;
       r.toast("Reply accepted. Delivery updates will appear here.");
     } else r.toast("Reply outcome needs review. Do not resend.");
-    await load(c.conversationId);
-    await r.refreshBilling();
+    s.sendStatusNeedsRead = true;
+    await refresh(c.conversationId);
     return true;
   }
   async function action(name) {
     const s = state(),
       c = s.conversation;
     if (name === "conversations-refresh" || name === "conversations-more") {
-      await load(r.context().resourceId, { append: name.endsWith("-more") });
+      if (name === "conversations-refresh" && r.context().resourceId) {
+        s.sendStatusNeedsRead = true;
+        await refresh(r.context().resourceId);
+      } else {
+        await load(r.context().resourceId, { append: name.endsWith("-more") });
+      }
       return true;
     }
     if (name === "conversation-suppress") {
@@ -182,5 +291,5 @@ export function createConversations(r) {
     }
     return false;
   }
-  return { load, render, submit, action, change };
+  return { load, render, submit, action, change, refresh, dispose };
 }
