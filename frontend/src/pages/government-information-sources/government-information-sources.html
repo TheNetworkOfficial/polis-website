@@ -17,115 +17,122 @@
         <h1>Government and election information sources</h1>
         <p>
           Polis is an independent civic-engagement platform operated by Lux
-          Corp. This page identifies sources for government or election-related
-          information that may appear in Polis.
-        </p>
-        <p>
-          Polis is not affiliated with, authorized by, or endorsed by any listed
-          government, election authority, or third-party provider.
+          Corp. Polis does not represent any government entity and is not
+          affiliated with, authorized by, or endorsed by any government.
         </p>
       </section>
-
       <section class="container card about-stack">
-        <h2>Federal and geographic sources</h2>
-        <ul>
-          <li>
-            Congress: <a href="https://api.congress.gov/">Congress API</a> and
-            <a href="https://www.congress.gov/">Congress.gov</a>
-          </li>
-          <li>
-            <a href="https://www.senate.gov/legislative/votes_new.htm"
-              >U.S. Senate legislative and roll-call information</a
-            >
-          </li>
-          <li>
-            Federal candidate and campaign finance:
-            <a href="https://api.open.fec.gov/">FEC API</a> and
-            <a href="https://www.fec.gov/data/">FEC data</a>
-          </li>
-          <li>
-            Congressional district and geographic information:
-            <a
-              href="https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/Legislative/MapServer"
-              >Census TIGERweb</a
-            >
-            and <a href="https://www.census.gov/">Census.gov</a>
-          </li>
-          <li>
-            Election and polling-place information returned through
-            <a href="https://developers.google.com/civic-information"
-              >Google Civic Information</a
-            >
-          </li>
-        </ul>
-      </section>
-
-      <section class="container card about-stack">
-        <h2>Third-party civic data</h2>
+        <h2>Federal government information</h2>
         <p>
-          CivicEngine may provide civic data enrichment. See the
-          <a href="https://www.civicengine.com/">CivicEngine website</a>.
-          CivicEngine is a third-party service, not a government agency or
-          official election authority.
+          Congressional members, federal bills, public laws, and House roll-call
+          votes come from the U.S. Congress through the Congress.gov API:
+          <a href="https://api.congress.gov/">https://api.congress.gov/</a>
         </p>
-      </section>
-
-      <section class="container card about-stack">
-        <h2>State and local election sources</h2>
         <p>
-          Polis uses the applicable official source for the jurisdiction and
-          election. Reviewed source pages include:
+          Senate roll-call votes come from the United States Senate:
+          <a href="https://www.senate.gov/legislative/votes_new.htm"
+            >https://www.senate.gov/legislative/votes_new.htm</a
+          >
         </p>
-        <ul>
-          <li>
-            <a href="https://www.sos.ca.gov/elections"
-              >California Secretary of State</a
-            >
-          </li>
-          <li>
-            <a href="https://electionresults.iowa.gov/"
-              >Iowa election results</a
-            >
-          </li>
-          <li>
-            <a href="https://sosmt.gov/elections">Montana Secretary of State</a>
-          </li>
-          <li>
-            <a href="https://www.nj.gov/state/elections/"
-              >New Jersey Division of Elections</a
-            >
-          </li>
-          <li>
-            <a href="https://www.sos.nm.gov/voting-and-elections/"
-              >New Mexico Secretary of State</a
-            >
-          </li>
-          <li>
-            <a href="https://sdsos.gov/elections-voting/"
-              >South Dakota Secretary of State</a
-            >
-          </li>
-          <li>
-            <a href="https://www.usa.gov/state-election-office"
-              >Official state election-office directory</a
-            >
-          </li>
-        </ul>
         <p>
-          State and county feeds may be unavailable, delayed, incomplete,
-          unofficial for live display, or limited to particular contests. Polis
-          does not certify election results or declare winners.
+          Federal candidate registrations and campaign-finance records come from
+          the Federal Election Commission:
+          <a href="https://www.fec.gov/data/">https://www.fec.gov/data/</a> and
+          <a href="https://api.open.fec.gov/">https://api.open.fec.gov/</a>
         </p>
-      </section>
-
-      <section class="container card about-stack">
-        <h2>User-generated material</h2>
+        <h2>Government geographic information</h2>
         <p>
-          Polis community polls, ratings, discussions, and “How would you vote?”
-          responses are user-generated opinions. They are not government
-          information, official votes, election results, or government
-          statements.
+          Address-to-district matching uses the U.S. Census Bureau Geocoder:
+          <a href="https://geocoding.geo.census.gov/geocoder/"
+            >https://geocoding.geo.census.gov/geocoder/</a
+          >
         </p>
+        <p>
+          Congressional and state legislative district boundaries come from the
+          Census Bureau TIGERweb Legislative service:
+          <a
+            href="https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/Legislative/MapServer"
+            >https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/Legislative/MapServer</a
+          >
+        </p>
+        <p>
+          State and county boundaries come from the Census Bureau TIGERweb
+          State/County service:
+          <a
+            href="https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/State_County/MapServer"
+            >https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/State_County/MapServer</a
+          >
+        </p>
+        <p>
+          County identifiers and names use the Census Bureau county reference
+          data:
+          <a
+            href="https://www2.census.gov/geo/docs/reference/codes/files/national_county.txt"
+            >https://www2.census.gov/geo/docs/reference/codes/files/national_county.txt</a
+          >
+        </p>
+        <h2>Candidate and election information by state</h2>
+        <p>
+          Montana candidate filings and rosters come from the Montana Secretary
+          of State Candidate Filing service:
+          <a
+            href="https://candidatefiling.mt.gov/candidatefiling/CandidateHomepage.aspx"
+            >https://candidatefiling.mt.gov/candidatefiling/CandidateHomepage.aspx</a
+          >
+        </p>
+        <p>
+          Montana election results come from the Secretary of State
+          election-results portal and results archive:
+          <a href="https://electionresults.mt.gov/ResultsList.aspx"
+            >https://electionresults.mt.gov/ResultsList.aspx</a
+          >
+          <a href="https://sosmt.gov/elections/results/"
+            >https://sosmt.gov/elections/results/</a
+          >
+        </p>
+        <p>
+          California election results come from the Secretary of State results
+          feeds and certified-results archive:
+          <a href="https://media.sos.ca.gov/media/json-endpoints.csv"
+            >https://media.sos.ca.gov/media/json-endpoints.csv</a
+          >
+          <a
+            href="https://www.sos.ca.gov/elections/prior-elections/statewide-election-results"
+            >https://www.sos.ca.gov/elections/prior-elections/statewide-election-results</a
+          >
+        </p>
+        <p>
+          Iowa election results come from the official statewide results portal:
+          <a href="https://electionresults.iowa.gov/IA/"
+            >https://electionresults.iowa.gov/IA/</a
+          >
+        </p>
+        <h2>Coverage and limitations</h2>
+        <p>
+          Election-result coverage is limited to supported contests in Montana,
+          California, and Iowa; it is not nationwide coverage. Data may be
+          delayed, unavailable, or incomplete. Live election-night totals are
+          preliminary, not certified final results. Consult the responsible
+          election authority for official information.
+        </p>
+        <p>
+          The New Jersey, New Mexico, and South Dakota results integrations are
+          not currently providing contest totals in the reviewed production
+          configuration. They are not represented here as active result sources.
+          Google Civic Information and CivicEngine are not the selected
+          production district-election information provider; the selected
+          provider is Congress.gov.
+        </p>
+        <h2>User and organization content</h2>
+        <p>
+          Community posts, candidate or organization statements, ratings, polls,
+          and internal organization votes are supplied by users or
+          organizations. They are not government statements or public-election
+          ballots. General map imagery, address suggestions, and street imagery
+          are navigation aids, distinct from the government district and
+          election data identified above.
+        </p>
+        <p>For questions about Polis, contact lux.corp.app@gmail.com.</p>
       </section>
     </main>
     <div id="footer-placeholder"></div>
