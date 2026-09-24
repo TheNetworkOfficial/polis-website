@@ -14,6 +14,7 @@ import {
   messagePrice,
   messageFundingReady,
 } from "./textingWorkspaceUi";
+import { prepareTextingAccess } from "./textingAccess";
 
 const when = (value) =>
   Number.isSafeInteger(value) ? new Date(value).toLocaleString() : "";
@@ -168,7 +169,7 @@ export function createConversations(r) {
         c.displayName ? c.phone : "",
         go("inbox", "All conversations", "", true),
       ) +
-      `${s.refreshError ? notice("Updates are delayed", "Refresh to check the saved messages. Do not resend an accepted reply.") : ""}<div class="pt-grid pt-grid--two"><section class="pt-card"><div class="pt-row"><span class="pt-tag">${c.suppressed ? "Opted out" : e(label(c.status))}</span>${button("conversations-refresh", "Refresh", { secondary: true })}</div><div class="pt-workspace-thread">${
+      `${s.preparingAccess ? notice("Preparing your texting access…") : ""}${s.refreshError ? notice("Updates are delayed", "Refresh to check the saved messages. Do not resend an accepted reply.") : ""}<div class="pt-grid pt-grid--two"><section class="pt-card"><div class="pt-row"><span class="pt-tag">${c.suppressed ? "Opted out" : e(label(c.status))}</span>${button("conversations-refresh", "Refresh", { secondary: true })}</div><div class="pt-workspace-thread">${
         list(s.messages)
           .map(
             (message) =>
@@ -206,6 +207,7 @@ export function createConversations(r) {
       throw new Error(
         "This reply is not eligible to send. Check the saved status.",
       );
+    await prepareTextingAccess(r, s, c.campaignId);
     const actionId = uuid(),
       messageIds = new Set(
         list(s.messages).map((message) => String(message.messageId)),

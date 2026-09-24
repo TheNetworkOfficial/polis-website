@@ -18,7 +18,7 @@ import { createContacts } from "./textingContacts";
 import { createCampaigns } from "./textingCampaigns";
 import { createConversations } from "./textingConversations";
 
-/** Authenticated customer workspace. Every async result is fenced to both user and route. No provider work runs during reads. */
+/** Authenticated customer workspace. Every async result is fenced to both user and route. Texting access setup runs only in send and reply flows. */
 export function createTextingWorkspacePage({
   request,
   context,
@@ -358,13 +358,15 @@ export function createTextingWorkspacePage({
         );
     }
     const busyLabel =
-      section === "contacts"
-        ? "Updating import…"
-        : section === "send"
-          ? view.campaigns?.pendingAction === "sending"
-            ? "Sending…"
-            : "Updating session…"
-          : "Saving…";
+      view.campaigns?.preparingAccess || view.conversations?.preparingAccess
+        ? "Preparing your texting access…"
+        : section === "contacts"
+          ? "Updating import…"
+          : section === "send"
+            ? view.campaigns?.pendingAction === "sending"
+              ? "Sending…"
+              : "Updating session…"
+            : "Saving…";
     return `<div data-workspace-key="${e(view.key)}" aria-busy="${view.busy ? "true" : "false"}">${view.error ? `<div class="pt-notice" role="alert">${e(view.error)}</div>` : ""}${view.message ? notice(view.message) : ""}${view.busy && !view.contacts?.starting ? `<div class="pt-workspace-working" role="status">${busyLabel}</div>` : ""}${html}</div>`;
   }
   function owned(target) {

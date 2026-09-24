@@ -133,6 +133,7 @@ function conversationHarness(api) {
     refreshSendStatus: async () => {},
     refreshBilling: async () => {},
     api: async (route, body) => {
+      if (route === "/texter/ensure") return { texter: { state: "ready" } };
       calls.push({ route, body });
       return api(route, body);
     },
@@ -166,6 +167,8 @@ test("accepted replies refresh spending counters and recover delayed delivery wi
     changed: () => {},
     navigate: () => {},
     request: async (url, options) => {
+      if (url.endsWith("/texter/ensure"))
+        return { ok: true, texter: { state: "ready" } };
       calls.push({ url, options });
       if (url.endsWith("/workspace"))
         return {

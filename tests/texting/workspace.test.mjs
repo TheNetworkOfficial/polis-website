@@ -819,6 +819,8 @@ test("sending feedback remains pending until confirmation, then refreshes pilot 
           ok: true,
           billing: { ...billing, availableMicros: sent ? 965000 : 1000000 },
         };
+      if (url.endsWith("/texter/ensure"))
+        return { ok: true, texter: { state: "ready" } };
       if (url.endsWith("/queue"))
         return { ok: true, items: [item(), { ...item(), itemId: "item-two" }] };
       if (url.endsWith("/confirm"))

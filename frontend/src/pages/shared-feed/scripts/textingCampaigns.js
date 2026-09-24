@@ -26,6 +26,7 @@ import {
   scheduleSummary,
   readSchedule,
 } from "./textingSchedule";
+import { prepareTextingAccess, saveAssignmentChanges } from "./textingAccess";
 
 const localInput = (ms) => {
   if (!Number.isSafeInteger(ms)) return "";
@@ -134,7 +135,7 @@ export function createCampaigns(r) {
         "Choose people who already have texting access.",
         go("campaigns", "Back", c.campaignId, true),
       ) +
-      `<section class="pt-card"><form data-workspace-form="members" class="pt-fields">${field("query", "Find a teammate", s.query || "", { required: true, extra: 'minlength="2"' })}<div class="pt-actions"><button class="pt-btn pt-btn--secondary" type="submit">Search</button></div></form><p class="pt-muted">${selected.size} selected</p>${[...new Set([...selected, ...found.map((m) => m.userId)])].map((userId) => `<label class="pt-row pt-workspace-check"><span><strong>${e(known.get(userId) || "Assigned member")}</strong>${known.has(userId) ? "" : `<small class="pt-muted">${e(userId)}</small>`}</span><input type="checkbox" data-workspace-member="${e(userId)}"${selected.has(userId) ? " checked" : ""}></label>`).join("")}<div class="pt-actions">${button("assignments-save", "Save team", { disabled: r.busy() })}</div><p class="pt-muted">Assignment does not grant organization permissions.</p></section>`
+      `<section class="pt-card"><form data-workspace-form="members" class="pt-fields">${field("query", "Find a teammate", s.query || "", { required: true, extra: 'minlength="2"' })}<div class="pt-actions"><button class="pt-btn pt-btn--secondary" type="submit">Search</button></div></form><p class="pt-muted">${selected.size} selected</p>${[...new Set([...list(c.assignedUserIds), ...selected, ...found.map((m) => m.userId)])].map((userId) => `<label class="pt-row pt-workspace-check"><span><strong>${e(known.get(userId) || "Assigned member")}</strong>${known.has(userId) ? "" : `<small class="pt-muted">${e(userId)}</small>`}</span><input type="checkbox" data-workspace-member="${e(userId)}"${selected.has(userId) ? " checked" : ""}${r.busy() || s.assignmentsNeedRead || !r.can("createCampaigns") || c.status === "archived" ? " disabled" : ""}></label>`).join("")}<div class="pt-actions">${button("assignments-save", "Save team", { disabled: r.busy() || s.assignmentsNeedRead || !r.can("createCampaigns") || c.status === "archived" })}${s.assignmentsNeedRead ? button("assignments-refresh", "Check saved assignments", { secondary: true, disabled: r.busy() }) + notice("Your selections are kept", "Check saved assignments before trying again.") : ""}</div><p class="pt-muted">Assignment does not grant organization permissions.</p></section>`
     );
   }
   function queue(s) {
@@ -154,7 +155,7 @@ export function createCampaigns(r) {
         go("campaigns", "Leave session", c.campaignId, true),
       ) +
       (!q
-        ? `<section class="pt-card"><h2>Your next conversation</h2><p class="pt-muted">Get your assigned recipients when you’re ready.</p>${button("queue-load", "Get my next messages", { disabled: !c.canFetchQueue || !r.can("manualQueue") || r.busy() })}${reasons(c.blockedReasons)}</section>`
+        ? `<section class="pt-card"><h2>Your next conversation</h2><p class="pt-muted">Get your assigned recipients when you’re ready.</p>${button("queue-load", s.preparingAccess ? "Preparing your texting access…" : "Get my next messages", { disabled: !c.canFetchQueue || !r.can("manualQueue") || r.busy() })}${reasons(c.blockedReasons)}</section>`
         : item
           ? `<div class="pt-grid pt-grid--two"><section class="pt-card"><div class="pt-row"><div><h2>${e(p?.contactDisplayName || "Recipient")}</h2><p class="pt-muted">${e(p?.contactPhone || "Recipient unavailable")}</p></div><span class="pt-tag">${e(label(pending ? s.pendingAction : held ? "needs_review" : item.state))}</span></div><div class="pt-eyebrow">FINAL MESSAGE</div><div class="pt-workspace-bubble">${p?.attachmentUrl ? (checkedUrl(p.attachmentUrl) ? `<img data-workspace-queue-image="${e(item.itemId)}" src="${e(checkedUrl(p.attachmentUrl))}" alt="Final message attachment" referrerpolicy="no-referrer">` : notice("Attachment unavailable")) : ""}<p>${e(p?.message || "Final text unavailable")}</p></div>${held && !pending ? notice("Delivery needs review", "Do not send again. Its charge stays reserved until the outcome is confirmed.") : ""}${reasons(item.blockedReasons)}${item.expiresAtMs <= Date.now() ? notice("Preview expired", "Check the campaign status before continuing.") : ""}<div class="pt-row"><span>${p?.attachmentUrl ? "MMS" : "SMS"}${r.can("manageBilling") ? ` · ${price === null ? "Rate unavailable" : money(price)}` : ""}</span><div class="pt-actions">${button("queue-skip", "Skip recipient", { secondary: true, disabled: r.busy() || held || item.state !== "awaiting_confirmation" })}${button("queue-confirm", pending && s.pendingAction === "sending" ? "Sending…" : `Send to ${p?.contactDisplayName || p?.contactPhone || "recipient"}`, { disabled: r.busy() || held || !queueCanConfirm(item, r.workspace(), r.billing(), s.imageLoaded === item.itemId) })}</div></div><p class="pt-muted">Sends this message to this person only.</p></section><aside class="pt-card"><div class="pt-eyebrow">YOUR SESSION</div>${stat("Messages confirmed this session", count(s.sent || 0))}${r.can("manageBilling") ? `<div class="pt-row"><span>Available funds</span><strong>${money(r.billing()?.availableMicros)}</strong></div>` : ""}${go("inbox", "Open inbox", "", true)}</aside></div>`
           : `<section class="pt-card"><h2>${q.state === "allocation_unknown" ? "Session needs review" : "You’re caught up"}</h2><p class="pt-muted">${q.state === "allocation_unknown" ? "Your assigned messages could not be confirmed. An administrator must check the saved status." : "Get another group when you’re ready."}</p>${q.state !== "allocation_unknown" ? button("queue-load", "Get more messages", { disabled: !c.canFetchQueue || r.busy() }) : ""}${reasons(q.blockedReasons)}</section>`)
@@ -369,13 +370,40 @@ export function createCampaigns(r) {
       return true;
     }
     if (name === "assignments-save") {
-      s.campaign = (
-        await r.api(`/campaigns/${id(c.campaignId)}/assignments`, {
-          expectedRevision: c.revision,
-          userIds: [...s.selected],
-        })
-      ).campaign;
+      if (
+        !r.can("createCampaigns") ||
+        s.assignmentsNeedRead ||
+        c.status === "archived"
+      )
+        return true;
+      try {
+        await saveAssignmentChanges(r.api, c, s.selected, (saved) => {
+          s.campaign = saved;
+        });
+      } catch (error) {
+        s.assignmentsNeedRead = true;
+        throw error;
+      }
       r.toast("Team saved");
+      return true;
+    }
+    if (name === "assignments-refresh") {
+      const previous = new Set(list(c.assignedUserIds)),
+        add = [...s.selected].filter((userId) => !previous.has(userId)),
+        remove = [...previous].filter((userId) => !s.selected.has(userId));
+      const saved = (await r.api(`/campaigns/${id(c.campaignId)}`)).campaign;
+      if (
+        saved?.campaignId !== c.campaignId ||
+        !Array.isArray(saved.assignedUserIds)
+      )
+        throw new Error("Campaign assignments could not be verified.");
+      s.campaign = saved;
+      s.selected = new Set(
+        [...saved.assignedUserIds, ...add].filter(
+          (userId) => !remove.includes(userId),
+        ),
+      );
+      s.assignmentsNeedRead = false;
       return true;
     }
     if (name.startsWith("transition-")) {
@@ -405,6 +433,7 @@ export function createCampaigns(r) {
     if (name === "queue-load") {
       if (!r.can("manualQueue") || !c?.canFetchQueue)
         throw new Error("This campaign is not ready for texting.");
+      await prepareTextingAccess(r, s, c.campaignId);
       s.queue = await r.api(`/campaigns/${id(c.campaignId)}/queue`, {});
       s.imageLoaded = null;
       r.armExpiry(list(s.queue.items)[0]?.expiresAtMs);
@@ -484,6 +513,13 @@ export function createCampaigns(r) {
       return true;
     }
     if (target.dataset.workspaceMember) {
+      if (
+        !r.can("createCampaigns") ||
+        r.busy() ||
+        s.assignmentsNeedRead ||
+        s.campaign?.status === "archived"
+      )
+        return true;
       if (target.checked) s.selected.add(target.dataset.workspaceMember);
       else s.selected.delete(target.dataset.workspaceMember);
       return true;
