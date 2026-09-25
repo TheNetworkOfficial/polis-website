@@ -1,3 +1,5 @@
+import { generateBrowserMessagingDevice } from "./messagingDeviceProof.mjs";
+
 const DB_NAME = "polis-web-messaging";
 const DB_VERSION = 1;
 const DB_STORE_NAME = "kv";
@@ -241,64 +243,152 @@ async function removePersistentValue(key) {
   removeLocalValue(key);
 }
 
-function buildOneTimePreKeys(count = 24) {
-  return Array.from({ length: count }, (_, index) => ({
-    prekeyId: `otk_${index + 1}_${randomBase64Url(6)}`,
-    publicKey: randomBase64Url(32),
-  }));
+async function readSecureDevice(key) {
+  const database = await openMessagingDatabase();
+  if (!database) throw new Error("messaging_browser_storage_required");
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(DB_STORE_NAME, "readonly");
+    const request = transaction.objectStore(DB_STORE_NAME).get(key);
+    request.onsuccess = () => resolve(request.result?.value ?? null);
+    request.onerror = () =>
+      reject(new Error("messaging_browser_storage_unavailable"));
+    transaction.onabort = () =>
+      reject(new Error("messaging_browser_storage_unavailable"));
+  }).finally(() => database.close());
 }
 
-function createDeviceMaterial() {
-  const deviceId =
-    typeof window.crypto.randomUUID === "function"
-      ? window.crypto.randomUUID()
-      : `web-${randomBase64Url(12)}`;
-  return {
-    deviceId,
-    platform: "web",
-    deviceLabel:
-      normalizeString(window.navigator?.platform) || "Browser device",
-    identityKey: randomBase64Url(32),
-    signingKey: randomBase64Url(32),
-    signedPreKey: {
-      prekeyId: `spk_${randomBase64Url(6)}`,
-      publicKey: randomBase64Url(32),
-      signature: randomBase64Url(64),
-    },
-    oneTimePreKeys: buildOneTimePreKeys(),
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-  };
+async function writeSecureDevice(key, value, { createOnly = false } = {}) {
+  const database = await openMessagingDatabase();
+  if (!database) throw new Error("messaging_browser_storage_required");
+  try {
+    await new Promise((resolve, reject) => {
+      const transaction = database.transaction(DB_STORE_NAME, "readwrite");
+      const store = transaction.objectStore(DB_STORE_NAME);
+      const request = createOnly
+        ? store.add({ key, value })
+        : store.put({ key, value });
+      let failure = null;
+      request.onerror = () => {
+        failure = request.error;
+      };
+      transaction.oncomplete = () => resolve();
+      transaction.onabort = () =>
+        reject(
+          failure ||
+            transaction.error ||
+            new Error("messaging_browser_storage_unavailable"),
+        );
+    });
+    return value;
+  } catch (error) {
+    if (createOnly && error?.name === "ConstraintError")
+      return readSecureDevice(key);
+    throw new Error("messaging_browser_storage_unavailable");
+  } finally {
+    database.close();
+  }
 }
 
 /**
- * Lightweight browser-side messaging device and recovery store. The browser
- * persists state in IndexedDB when available, with localStorage as a fallback.
+ * Account-scoped browser keys. Legacy unscoped records remain untouched;
+ * upgrading a browser creates a new device and never transfers server trust.
  */
-export function createMessagingBrowserDevice() {
+export function createMessagingBrowserDevice({
+  getUserId,
+  secureStorage = { read: readSecureDevice, write: writeSecureDevice },
+} = {}) {
   let deviceStatePromise = null;
+  let stateUserId = null;
+  let setupAccount = null;
+
+  function accountId() {
+    const userId = normalizeString(getUserId?.());
+    if (!userId) throw new Error("messaging_account_required");
+    return userId;
+  }
+
+  function stateKey(key, userId) {
+    return `${key}:proof-v1:${encodeURIComponent(userId)}`;
+  }
+
+  function assertAccount(userId) {
+    if (accountId() !== userId) throw new Error("messaging_account_changed");
+  }
+
+  async function createNewDevice(userId) {
+    const device = await generateBrowserMessagingDevice(
+      window.crypto,
+      normalizeString(window.navigator?.platform) || "Browser device",
+    );
+    assertAccount(userId);
+    const stored = await secureStorage.write(
+      stateKey(DEVICE_STATE_KEY, userId),
+      device,
+      { createOnly: true },
+    );
+    assertAccount(userId);
+    return stored;
+  }
 
   async function loadState() {
-    if (deviceStatePromise) {
+    const userId = accountId();
+    if (deviceStatePromise && stateUserId === userId) {
       return deviceStatePromise;
     }
+    stateUserId = userId;
     deviceStatePromise = Promise.all([
+      secureStorage.read(stateKey(DEVICE_STATE_KEY, userId)),
+      readPersistentValue(stateKey(RECOVERY_STATE_KEY, userId)),
+      readPersistentValue(stateKey(CACHE_STATE_KEY, userId)),
       readPersistentValue(DEVICE_STATE_KEY),
-      readPersistentValue(RECOVERY_STATE_KEY),
-      readPersistentValue(CACHE_STATE_KEY),
-    ]).then(([device, recovery, cache]) => ({
-      device:
-        device && typeof device === "object" ? device : createDeviceMaterial(),
-      recovery: recovery && typeof recovery === "object" ? recovery : null,
-      cache: cache && typeof cache === "object" ? cache : {},
-    }));
+    ]).then(async ([device, recovery, cache, legacyDevice]) => {
+      assertAccount(userId);
+      if (!device && legacyDevice) {
+        setupAccount = userId;
+        throw new Error("messaging_browser_setup_required");
+      }
+      const current = device || (await createNewDevice(userId));
+      if (
+        current?.materialVersion !== 2 ||
+        current?.signingPrivateKey?.type !== "private" ||
+        current.signingPrivateKey.algorithm?.name !== "Ed25519"
+      )
+        throw new Error("messaging_browser_keys_unavailable");
+      return {
+        userId,
+        device: current,
+        recovery: recovery && typeof recovery === "object" ? recovery : null,
+        cache: cache && typeof cache === "object" ? cache : {},
+      };
+    });
+    const pending = deviceStatePromise;
+    pending.catch(() => {
+      if (deviceStatePromise === pending) deviceStatePromise = null;
+    });
     return deviceStatePromise;
+  }
+
+  async function prepareNewBrowserDevice() {
+    const userId = accountId();
+    const existing = await secureStorage.read(
+      stateKey(DEVICE_STATE_KEY, userId),
+    );
+    assertAccount(userId);
+    if (!existing) await createNewDevice(userId);
+    setupAccount = null;
+    if (stateUserId === userId) deviceStatePromise = null;
+    return currentDevice();
   }
 
   async function saveDevice(device) {
     const current = await loadState();
     current.device = device;
-    await writePersistentValue(DEVICE_STATE_KEY, device);
+    assertAccount(current.userId);
+    await secureStorage.write(
+      stateKey(DEVICE_STATE_KEY, current.userId),
+      device,
+    );
+    assertAccount(current.userId);
     return current.device;
   }
 
@@ -306,19 +396,19 @@ export function createMessagingBrowserDevice() {
     const current = await loadState();
     current.recovery = recovery;
     if (recovery) {
-      await writePersistentValue(RECOVERY_STATE_KEY, recovery);
+      await writePersistentValue(
+        stateKey(RECOVERY_STATE_KEY, current.userId),
+        recovery,
+      );
     } else {
-      await removePersistentValue(RECOVERY_STATE_KEY);
+      await removePersistentValue(stateKey(RECOVERY_STATE_KEY, current.userId));
     }
     return current.recovery;
   }
 
   async function currentDevice() {
     const current = await loadState();
-    if (!normalizeString(current.device?.deviceId)) {
-      current.device = createDeviceMaterial();
-      await saveDevice(current.device);
-    }
+    assertAccount(current.userId);
     return current.device;
   }
 
@@ -339,15 +429,27 @@ export function createMessagingBrowserDevice() {
       deviceLabel: device.deviceLabel,
       identityKey: device.identityKey,
       signingKey: device.signingKey,
-      signedPreKey: device.signedPreKey,
+      signedPreKey: {
+        prekeyId: device.signedPreKey.prekeyId,
+        publicKey: device.signedPreKey.publicKey,
+        signature: device.signedPreKey.signature,
+      },
       oneTimePreKeys: Array.isArray(device.oneTimePreKeys)
-        ? device.oneTimePreKeys
+        ? device.oneTimePreKeys.map(({ prekeyId, publicKey }) => ({
+            prekeyId,
+            publicKey,
+          }))
         : [],
     };
   }
 
   async function buildTrustedDeviceTransferPayload(targetDevice = {}) {
     const device = await currentDevice();
+    if (device.materialVersion === 2) {
+      throw new Error(
+        "Approve devices from the updated Polis app. This browser cannot transfer encrypted messaging keys.",
+      );
+    }
     return {
       envelope: {
         version: "web-v1",
@@ -365,6 +467,11 @@ export function createMessagingBrowserDevice() {
   }
 
   async function importTrustedDeviceTransferPayload(envelope = {}) {
+    if ((await currentDevice()).materialVersion === 2) {
+      throw new Error(
+        "Complete device linking in the updated Polis app. This browser cannot import encrypted messaging keys.",
+      );
+    }
     const normalizedEnvelope =
       envelope && typeof envelope === "object" ? envelope : {};
     if (!normalizedEnvelope.deviceMaterial) {
@@ -393,6 +500,11 @@ export function createMessagingBrowserDevice() {
     rotate = false,
   } = {}) {
     const device = await currentDevice();
+    if (device.materialVersion === 2) {
+      throw new Error(
+        "Set up or rotate messaging recovery in the updated Polis app. This browser cannot create an encrypted message backup.",
+      );
+    }
     const recoveryCode = buildRecoveryCode();
     const recoveryRoot = randomBase64Url(32);
     const salt = bytesToBase64Url(randomBytes(16));
@@ -467,6 +579,11 @@ export function createMessagingBrowserDevice() {
   }
 
   async function currentRecoveryRestoreProof() {
+    if ((await currentDevice()).materialVersion === 2) {
+      throw new Error(
+        "Verify messaging recovery in the updated Polis app. This browser does not hold your recovery keys.",
+      );
+    }
     const current = await loadState();
     return normalizeString(current.recovery?.restoreProof) || null;
   }
@@ -502,6 +619,11 @@ export function createMessagingBrowserDevice() {
     recoveryCode,
     recoveryBundle,
   } = {}) {
+    if ((await currentDevice()).materialVersion === 2) {
+      throw new Error(
+        "Restore messaging in the updated Polis app. This browser cannot recover old encrypted messages or import recovery keys.",
+      );
+    }
     const bundle =
       recoveryBundle && typeof recoveryBundle === "object"
         ? recoveryBundle
@@ -548,7 +670,10 @@ export function createMessagingBrowserDevice() {
   async function clearCache() {
     const current = await loadState();
     current.cache = {};
-    await writePersistentValue(CACHE_STATE_KEY, current.cache);
+    await writePersistentValue(
+      stateKey(CACHE_STATE_KEY, current.userId),
+      current.cache,
+    );
   }
 
   return {
@@ -563,6 +688,10 @@ export function createMessagingBrowserDevice() {
     currentRecoveryRestoreProof,
     importTrustedDeviceTransferPayload,
     markRecoveryVerified,
+    prepareNewBrowserDevice,
+    requiresSetup() {
+      return setupAccount === normalizeString(getUserId?.());
+    },
     restoreFromRecoveryBundle,
     revealRecoveryCode,
   };
@@ -573,8 +702,10 @@ export function createMessagingBrowserDevice() {
  * inbox/conversation subscriptions, typing events, heartbeat, and reconnects.
  */
 export function createMessagingSocketClient({
+  getAccountId,
   getAuthToken,
-  getDeviceId,
+  getDeviceProof,
+  onProtocolError,
   onEvent,
   onStateChange,
 } = {}) {
@@ -589,6 +720,9 @@ export function createMessagingSocketClient({
   let reconnectTimer = null;
   let heartbeatTimer = null;
   let disconnectTimer = null;
+  let openingGeneration = 0;
+  let accountId = "";
+  let setupRequired = false;
   const conversationSubscriptions = new Set();
 
   function emitState() {
@@ -619,7 +753,11 @@ export function createMessagingSocketClient({
   }
 
   function send(payload) {
-    if (connectionState !== "connected" || !channel) {
+    if (
+      connectionState !== "connected" ||
+      !channel ||
+      accountId !== normalizeString(getAccountId?.())
+    ) {
       return;
     }
     try {
@@ -630,12 +768,19 @@ export function createMessagingSocketClient({
   }
 
   function scheduleReconnect() {
-    if (disposed || activeSessionCount <= 0 || !wsUrl) {
+    if (
+      disposed ||
+      setupRequired ||
+      activeSessionCount <= 0 ||
+      !wsUrl ||
+      accountId !== normalizeString(getAccountId?.())
+    ) {
       return;
     }
     if (channel) {
-      channel.close();
+      const previous = channel;
       channel = null;
+      previous.close();
     }
     window.clearInterval(heartbeatTimer);
     heartbeatTimer = null;
@@ -653,23 +798,58 @@ export function createMessagingSocketClient({
   }
 
   async function open() {
-    if (disposed || !wsUrl) {
+    if (disposed || setupRequired || !wsUrl) {
       setConnectionState("disconnected");
       return;
     }
+    const generation = ++openingGeneration;
+    const openingAccount = normalizeString(getAccountId?.());
+    const isCurrent = () =>
+      !disposed &&
+      generation === openingGeneration &&
+      openingAccount &&
+      openingAccount === normalizeString(getAccountId?.());
+    const requireSetup = () => {
+      if (!isCurrent()) return;
+      setupRequired = true;
+      disconnect().catch(() => {});
+      onProtocolError?.();
+    };
     try {
       const token =
         typeof getAuthToken === "function" ? await getAuthToken() : "";
+      if (!isCurrent()) return;
       if (!normalizeString(token)) {
         setConnectionState("disconnected");
         return;
       }
-      channel = new window.WebSocket(wsUrl);
-      channel.addEventListener("message", (event) => {
+      const socket = new window.WebSocket(wsUrl);
+      channel = socket;
+      socket.addEventListener("message", (event) => {
+        if (!isCurrent() || channel !== socket) return;
         try {
           const payload = JSON.parse(String(event.data || "{}"));
           const type = normalizeString(payload?.type);
           if (!type) {
+            return;
+          }
+          if (type === "ERROR" && payload.code === "DEVICE_SETUP_REQUIRED") {
+            requireSetup();
+            return;
+          }
+          if (type === "READY") {
+            setConnectionState("connected");
+            clearReconnectMetadata();
+            window.clearInterval(heartbeatTimer);
+            heartbeatTimer = window.setInterval(
+              () => send({ type: "HEARTBEAT" }),
+              20000,
+            );
+            if (inboxSubscriptionCount > 0) send({ type: "SUBSCRIBE_INBOX" });
+            conversationSubscriptions.forEach((conversationId) =>
+              send({ type: "SUBSCRIBE_CONVERSATION", conversationId }),
+            );
+          } else if (connectionState !== "connected") {
             return;
           }
           if (typeof onEvent === "function") {
@@ -679,48 +859,68 @@ export function createMessagingSocketClient({
           // Ignore malformed socket payloads.
         }
       });
-      channel.addEventListener("close", () => scheduleReconnect());
-      channel.addEventListener("error", () => scheduleReconnect());
-      channel.addEventListener(
+      socket.addEventListener("close", (event) => {
+        if (!isCurrent() || channel !== socket) return;
+        if (event.code === 4003) requireSetup();
+        else scheduleReconnect();
+      });
+      socket.addEventListener("error", () => {
+        if (isCurrent() && channel === socket) scheduleReconnect();
+      });
+      socket.addEventListener(
         "open",
         async () => {
-          setConnectionState("connected");
-          clearReconnectMetadata();
-          const deviceId =
-            typeof getDeviceId === "function" ? await getDeviceId() : "";
-          send({
-            type: "AUTH",
-            token,
-            ...(normalizeString(deviceId) ? { deviceId } : {}),
-          });
-          window.clearInterval(heartbeatTimer);
-          heartbeatTimer = window.setInterval(() => {
-            send({ type: "HEARTBEAT" });
-          }, 20000);
-          if (inboxSubscriptionCount > 0) {
-            send({ type: "SUBSCRIBE_INBOX" });
+          try {
+            if (!isCurrent() || channel !== socket) return;
+            const proof = await getDeviceProof?.();
+            if (!isCurrent() || channel !== socket) return;
+            if (!proof?.deviceId || !proof?.deviceProof) {
+              requireSetup();
+              return;
+            }
+            socket.send(
+              JSON.stringify({
+                type: "AUTH",
+                token,
+                deviceId: proof.deviceId,
+                deviceProof: proof.deviceProof,
+              }),
+            );
+          } catch (error) {
+            if (!isCurrent() || channel !== socket) return;
+            if (
+              /^messaging_(browser_|proof_|protection_|account_)/.test(
+                error?.message || "",
+              ) ||
+              [401, 403].includes(error?.status)
+            )
+              requireSetup();
+            else scheduleReconnect();
           }
-          conversationSubscriptions.forEach((conversationId) => {
-            send({
-              type: "SUBSCRIBE_CONVERSATION",
-              conversationId,
-            });
-          });
         },
         { once: true },
       );
     } catch {
-      scheduleReconnect();
+      if (isCurrent()) scheduleReconnect();
     }
   }
 
   async function ensureConnected(nextUrl) {
+    const nextAccount = normalizeString(getAccountId?.());
+    if (accountId !== nextAccount) {
+      await disconnect();
+      conversationSubscriptions.clear();
+      accountId = nextAccount;
+      setupRequired = false;
+    }
     const normalized = normalizeString(nextUrl || wsUrl);
     if (normalized) {
       wsUrl = normalized;
     }
     if (
       !wsUrl ||
+      !accountId ||
+      setupRequired ||
       connectionState === "connected" ||
       connectionState === "connecting"
     ) {
@@ -733,6 +933,7 @@ export function createMessagingSocketClient({
   }
 
   async function disconnect() {
+    openingGeneration += 1;
     window.clearTimeout(disconnectTimer);
     window.clearTimeout(reconnectTimer);
     window.clearInterval(heartbeatTimer);
@@ -742,12 +943,13 @@ export function createMessagingSocketClient({
     clearReconnectMetadata();
     setConnectionState("disconnected");
     if (channel) {
+      const previous = channel;
+      channel = null;
       try {
-        channel.close();
+        previous.close();
       } catch {
         // ignore close failures
       }
-      channel = null;
     }
   }
 
@@ -848,6 +1050,10 @@ export function createMessagingSocketClient({
   }
 
   return {
+    retryAfterSetup() {
+      setupRequired = false;
+      return ensureConnected();
+    },
     connect: ensureConnected,
     disconnect,
     dispose,
@@ -855,6 +1061,7 @@ export function createMessagingSocketClient({
     getStateSnapshot() {
       return {
         connectionState,
+        setupRequired,
         wsUrl,
         disconnectedAt,
         reconnectAttemptCount,
