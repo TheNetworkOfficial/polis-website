@@ -46,6 +46,7 @@ test("redesigned workspace uses explicit single-recipient sends, recorded replie
     sendingMode: "accepted",
     blockedReasons: [],
     capabilities: {
+      manageBilling: true,
       uploadImports: true,
       createCampaigns: true,
       manualQueue: true,
@@ -66,6 +67,14 @@ test("redesigned workspace uses explicit single-recipient sends, recorded replie
     sendingBlocked: false,
     canManageBilling: true,
   };
+  let schedule = {
+    revision: 4,
+    timeZone: "America/Denver",
+    startTime: "08:00",
+    endTime: "20:00",
+    status: "verified",
+    timeZoneEditable: false,
+  };
   const campaign = {
     campaignId: "campaign-one",
     name: "Saturday meetup",
@@ -85,6 +94,7 @@ test("redesigned workspace uses explicit single-recipient sends, recorded replie
     canActivate: false,
     deliveryNotBeforeMs: Date.now() - 60000,
     deliveryBeforeMs: Date.now() + 86400000,
+    effectiveDeliverySchedule: schedule,
   };
   const conversation = {
     conversationId: "conversation-one",
@@ -137,16 +147,52 @@ test("redesigned workspace uses explicit single-recipient sends, recorded replie
       await filesDiscoveryHold;
       return respond({ workspaces: [] });
     }
+    if (path === "/api/text-banking/prompt-intake/coalition%3Aorg-1")
+      return respond({ ok: true, intake: null });
     if (!path.startsWith(PREFIX)) return respond({});
     const suffix = path.slice(PREFIX.length);
     if (request.method() !== "GET")
       writes.push({ path: suffix, body: request.postDataJSON() });
     if (suffix === "/workspace") return respond({ ok: true, workspace });
     if (suffix === "/billing/summary") return respond({ ok: true, billing });
-    if (suffix === "/campaigns")
-      return respond({ ok: true, items: [campaign] });
+    if (suffix === "/delivery-schedule") {
+      if (request.method() === "PUT")
+        schedule = {
+          ...schedule,
+          ...request.postDataJSON(),
+          revision: schedule.revision + 1,
+        };
+      return respond({ ok: true, schedule, canManage: true });
+    }
+    if (suffix === "/campaigns") {
+      const view = new URL(request.url()).searchParams.get("view");
+      return respond({
+        ok: true,
+        items:
+          !view ||
+          view === campaign.status ||
+          (view === "active" &&
+            !["paused", "archived"].includes(campaign.status))
+            ? [campaign]
+            : [],
+      });
+    }
     if (suffix === "/campaigns/campaign-one")
       return respond({ ok: true, campaign });
+    if (suffix === "/campaigns/campaign-one/transition") {
+      campaign.status =
+        request.postDataJSON().action === "pause" ? "paused" : "archived";
+      campaign.canFetchQueue = false;
+      campaign.revision++;
+      return respond({ ok: true, campaign });
+    }
+    if (suffix === "/campaigns/campaign-one/delivery-schedule") {
+      campaign.deliverySchedule = request.postDataJSON().deliverySchedule;
+      campaign.effectiveDeliverySchedule =
+        campaign.deliverySchedule || schedule;
+      campaign.revision++;
+      return respond({ ok: true, campaign });
+    }
     if (suffix === "/audiences") return respond({ ok: true, audiences: [] });
     if (suffix === "/campaigns/campaign-one/queue")
       return respond({
@@ -258,5 +304,89 @@ test("redesigned workspace uses explicit single-recipient sends, recorded replie
     page.getByRole("button", { name: "Send reply", exact: true }),
   ).toHaveCount(0);
   expect(writes.filter((x) => x.path.endsWith("/suppress"))).toHaveLength(1);
+  await page.goto(`${BASE}/organizations/org-1/texting/campaigns/campaign-one`);
+  page.once("dialog", (dialog) => dialog.accept());
+  await page
+    .getByRole("button", { name: "Pause campaign", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Save campaign hours" }),
+  ).toBeVisible();
+  await page
+    .getByRole("combobox", { name: "Daily sending hours", exact: true })
+    .selectOption("custom");
+  await page.getByLabel("Daily start", { exact: true }).fill("09:00");
+  await page.getByLabel("Daily end", { exact: true }).fill("19:00");
+  await page.getByRole("button", { name: "Save campaign hours" }).click();
+  await expect(
+    page.getByText("Campaign sending hours saved.", { exact: true }),
+  ).toBeVisible();
+  expect(
+    writes.find((x) => x.path === "/campaigns/campaign-one/delivery-schedule")
+      .body,
+  ).toEqual({
+    expectedRevision: 2,
+    deliverySchedule: {
+      timeZone: "America/Denver",
+      startTime: "09:00",
+      endTime: "19:00",
+    },
+  });
+  await page.screenshot({
+    path: testInfo.outputPath("campaign-hours-desktop.png"),
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 320, height: 860 });
+  await page.screenshot({
+    path: testInfo.outputPath("campaign-hours-mobile.png"),
+    fullPage: true,
+  });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Archive", exact: true }).click();
+  await page
+    .getByRole("button", { name: "All campaigns", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Archived", exact: true }).click();
+  await expect(
+    page.getByText("Saturday meetup", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(
+      "Archived campaigns keep their messages, results and history.",
+    ),
+  ).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath("archived-campaigns-mobile.png"),
+    fullPage: true,
+  });
+  await page.getByRole("link", { name: "Settings", exact: true }).click();
+  await expect(
+    page.getByLabel("Reviewed timezone", { exact: true }),
+  ).toHaveValue("America/Denver");
+  await expect(
+    page.getByLabel("Reviewed timezone", { exact: true }),
+  ).toHaveAttribute("readonly", "");
+  await page.getByLabel("Daily start", { exact: true }).fill("08:30");
+  await page.getByRole("button", { name: "Save organization hours" }).click();
+  await expect(
+    page.getByText("Organization sending hours saved.", { exact: true }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath("organization-hours-mobile.png"),
+    fullPage: true,
+  });
+  expect(writes.find((x) => x.path === "/delivery-schedule").body).toEqual({
+    expectedRevision: 4,
+    timeZone: "America/Denver",
+    startTime: "08:30",
+    endTime: "20:00",
+  });
+  expect(writes.filter((x) => x.path.endsWith("/confirm"))).toHaveLength(1);
+  expect(writes.filter((x) => x.path.endsWith("/reply"))).toHaveLength(1);
   expect(errors).toEqual([]);
 });

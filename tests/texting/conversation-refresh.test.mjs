@@ -33,6 +33,7 @@ const billing = {
   reservedMicros: 0,
   settledMicros: 0,
   sendingBlocked: false,
+  canManageBilling: true,
   smsUpToTwoSegmentsMicros: 35000,
   smsAdditionalSegmentMicros: 15000,
   mmsMicros: 45000,
@@ -43,7 +44,7 @@ const workspace = {
   status: "configured",
   scopeKey: "coalition:org-one",
   canSend: true,
-  capabilities: {},
+  capabilities: { manageBilling: true },
 };
 const conversation = {
   conversationId: "conversation-one",
@@ -118,6 +119,7 @@ function conversationHarness(api) {
     context: () => ({ resourceId: conversation.conversationId }),
     workspace: () => workspace,
     billing: () => billing,
+    can: (name) => workspace.capabilities[name] === true,
     busy: () => false,
     changed: () => {},
     toast: () => {},
@@ -131,6 +133,7 @@ function conversationHarness(api) {
     refreshSendStatus: async () => {},
     refreshBilling: async () => {},
     api: async (route, body) => {
+      if (route === "/texter/ensure") return { texter: { state: "ready" } };
       calls.push({ route, body });
       return api(route, body);
     },
@@ -164,6 +167,8 @@ test("accepted replies refresh spending counters and recover delayed delivery wi
     changed: () => {},
     navigate: () => {},
     request: async (url, options) => {
+      if (url.endsWith("/texter/ensure"))
+        return { ok: true, texter: { state: "ready" } };
       calls.push({ url, options });
       if (url.endsWith("/workspace"))
         return {

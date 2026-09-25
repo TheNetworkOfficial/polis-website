@@ -87,6 +87,7 @@ export function renderTextingShell({
   userName,
   logoUrl,
   content,
+  manageBilling = false,
 }) {
   const setup = section === "registration";
   const active =
@@ -101,6 +102,7 @@ export function renderTextingShell({
       ? ["home", "settings"]
       : ["home", "campaigns", "contacts", "inbox", "balance", "settings"]
   )
+    .filter((key) => key !== "balance" || manageBilling === true)
     .map((key) =>
       link(
         textingRoute(organizationId, key),

@@ -355,15 +355,24 @@ test("designated acceptance purchase shows its real amount and beta terms, then 
   await expect(page.locator("main")).not.toContainText("support@polisapp.io");
 });
 
-test("members cannot purchase or request history, and revoked access clears financial details", async ({
+test("members cannot access balance or request history, and revoked access clears financial details", async ({
   page,
 }) => {
+  await page.route("**/*", (route) =>
+    new URL(route.request().url()).origin === new URL(BASE_URL).origin
+      ? route.fallback()
+      : route.abort(),
+  );
   const { state, calls } = await setup(page, {
     admin: false,
     funds: 100000000,
   });
   await page.goto(`${PAGE}?purchase=purchase_1&checkout=returned`);
-  await expect(page.getByTestId("texting-available")).toHaveText("$100.00");
+  await expect(page.getByRole("alert")).toContainText("do not have access");
+  await expect(page.getByTestId("texting-available")).toHaveCount(0);
+  await expect(
+    page.getByRole("link", { name: "Balance", exact: true }),
+  ).toHaveCount(0);
   await expect(
     page.getByRole("heading", { name: "Add texting funds" }),
   ).toHaveCount(0);

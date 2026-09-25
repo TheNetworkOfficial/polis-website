@@ -1,5 +1,10 @@
 import "../css/texting-intake.css";
 import guidelinesUrl from "../../../assets/text-banking/polis-website-registration-guidelines.pdf";
+import {
+  scheduleFields,
+  scheduleSummary,
+  readSchedule,
+} from "./textingSchedule";
 
 export const WEBSITE_GUIDELINES_VERSION = "polis-10dlc-website-2026-09-17";
 const EDITABLE = new Set([
@@ -295,6 +300,8 @@ export function createTextingIntakePage({
     key === identity() && view.key === key && version === sequence;
   const endpoint = (organizationId) =>
     `/api/text-banking/prompt-intake/${encodeURIComponent(`coalition:${organizationId}`)}`;
+  const serviceEndpoint = () =>
+    `/api/text-banking/prompt/scopes/${encodeURIComponent(`coalition:${context().organizationId}`)}`;
   const uuid = () => globalThis.crypto.randomUUID();
   const locked = () =>
     view.working ||
@@ -351,7 +358,15 @@ export function createTextingIntakePage({
       reset();
       return;
     }
-    if (view.key === key && !force && (view.loading || view.loaded)) return;
+    if (view.key === key && !force && (view.loading || view.loaded)) {
+      if (
+        view.loaded &&
+        context()?.section === "settings" &&
+        !view.settingsLoaded
+      )
+        await loadSettings(key, sequence);
+      return;
+    }
     if (view.key === key && (view.dirty || view.uncertain) && force)
       return checkSaved();
     reset();
@@ -365,6 +380,10 @@ export function createTextingIntakePage({
       if (!active(key, version)) return;
       accept(response);
       view.started = Boolean(response.intake);
+      if (context()?.section === "settings") {
+        await loadSettings(key, version);
+      }
+      if (!active(key, version)) return;
       view.loaded = true;
     } catch {
       if (active(key, version))
@@ -376,6 +395,70 @@ export function createTextingIntakePage({
         changed();
       }
     }
+  }
+  async function loadSettings(key, version) {
+    const [workspace, delivery] = await Promise.all([
+      request(`${serviceEndpoint()}/workspace`, { auth: true }).catch(
+        () => null,
+      ),
+      request(`${serviceEndpoint()}/delivery-schedule`, { auth: true }).catch(
+        () => null,
+      ),
+    ]);
+    if (!active(key, version)) return;
+    view.manageBilling =
+      workspace?.workspace?.capabilities?.manageBilling === true;
+    view.delivery = delivery?.ok === true ? delivery : null;
+    view.settingsLoaded = true;
+    changed();
+  }
+  async function saveSendingHours(form, reconcile = false) {
+    if (view.scheduleSaving || view.delivery?.canManage !== true) return;
+    const key = view.key,
+      version = sequence;
+    try {
+      const saved = view.delivery.schedule;
+      if (reconcile && saved?.status !== "needs_review") return;
+      const schedule = reconcile
+        ? {
+            timeZone: saved.timeZone,
+            startTime: saved.startTime,
+            endTime: saved.endTime,
+          }
+        : readSchedule(form, saved);
+      view.scheduleSaving = true;
+      view.scheduleError = "";
+      changed();
+      const result = await request(`${serviceEndpoint()}/delivery-schedule`, {
+        auth: true,
+        method: "PUT",
+        body: {
+          expectedRevision: view.delivery.schedule.revision,
+          ...schedule,
+        },
+      });
+      if (!active(key, version)) return;
+      if (result?.ok !== true || result.schedule?.status !== "verified")
+        throw new Error("Refresh to check the saved sending hours.");
+      view.delivery = result;
+      view.notice = "Organization sending hours saved.";
+    } catch (error) {
+      if (active(key, version)) {
+        view.scheduleError = error?.status
+          ? "The saved hours need to be checked. Refresh hours before making another change."
+          : error?.message || "Refresh to check the saved sending hours.";
+        if ([401, 403].includes(error?.status)) view.delivery = null;
+      }
+    } finally {
+      if (active(key, version)) {
+        view.scheduleSaving = false;
+        changed();
+      }
+    }
+  }
+  function sendingHours() {
+    const delivery = view.delivery;
+    return `<section class="pt-card"><h2>Default sending hours</h2>${view.scheduleError ? `<p role="alert">${escape(view.scheduleError)}</p>` : ""}${delivery?.canManage === true ? `<form data-intake-schedule>${scheduleFields(delivery.schedule)}${delivery.schedule?.status === "needs_review" ? `<p class="pt-muted">Saved request: ${escape(scheduleSummary(delivery.schedule))}. Check these saved hours before editing again.</p>${button("check-hours", "Check saved hours", view.scheduleSaving, true)}` : ""}<div class="pt-actions"><button type="submit" class="pt-btn"${view.scheduleSaving || delivery.schedule?.status !== "verified" ? " disabled" : ""}>${view.scheduleSaving ? "Saving hours…" : "Save organization hours"}</button>${button("refresh-hours", "Refresh hours", view.scheduleSaving, true)}</div></form>` : `<p class="pt-muted">${escape(scheduleSummary(delivery?.schedule))}</p><p class="pt-muted">An organization administrator manages the daily sending hours.</p>`}</section>`;
   }
   function packet() {
     const replacing =
@@ -642,7 +725,7 @@ export function createTextingIntakePage({
         changes_required: "Changes needed",
         ready_for_handoff: "Ready to submit",
       }[intake?.status] || (intake ? "Draft" : "Not started");
-    return `<header class="pt-page-head"><div><div class="pt-eyebrow">TEXTING SETTINGS</div><h1>The essentials, in one place.</h1><p>Registration details for your organization.</p></div></header><div class="pt-grid pt-grid--two"><section class="pt-card"><h2>Registration</h2><div class="pt-row"><strong>${escape(intake?.packet.legalEntityName || context()?.organizationName || "Your organization")}</strong><span class="pt-tag">${label}</span></div>${intake ? `<div class="pt-row"><span>Campaign Verify</span><span>${intake.campaignVerify?.hasToken ? `Stored securely<br><small>Expires ${escape(intake.campaignVerify.expiresOn)}</small>` : "Not saved"}</span></div><div class="pt-row"><span>Registration contact</span><span>${escape(`${intake.packet.firstName || ""} ${intake.packet.lastName || ""}`)}<br><small>${escape(intake.packet.email)}</small></span></div>${details(intake)}` : ""}<div class="pt-actions">${button("registration", intake && !EDITABLE.has(intake.status) ? "View registration" : "Continue registration", false, true)}</div>${guidelinesLink()}</section><section class="pt-card"><h2>Texting service</h2><div class="pt-row"><span>Messaging mode</span><strong>Individual manual send</strong></div><p class="pt-muted">Service activation, approved numbers and funding are checked separately from registration.</p>${button("home", "View service status", false, true)}<div class="pt-actions">${button("balance", "Texting balance", false, true)}<a href="/texting-payment-terms" class="pt-intake-link">Payment terms</a></div></section></div>`;
+    return `<header class="pt-page-head"><div><div class="pt-eyebrow">TEXTING SETTINGS</div><h1>The essentials, in one place.</h1><p>Registration details for your organization.</p></div></header><div class="pt-grid pt-grid--two"><section class="pt-card"><h2>Registration</h2><div class="pt-row"><strong>${escape(intake?.packet.legalEntityName || context()?.organizationName || "Your organization")}</strong><span class="pt-tag">${label}</span></div>${intake ? `<div class="pt-row"><span>Campaign Verify</span><span>${intake.campaignVerify?.hasToken ? `Stored securely<br><small>Expires ${escape(intake.campaignVerify.expiresOn)}</small>` : "Not saved"}</span></div><div class="pt-row"><span>Registration contact</span><span>${escape(`${intake.packet.firstName || ""} ${intake.packet.lastName || ""}`)}<br><small>${escape(intake.packet.email)}</small></span></div>${details(intake)}` : ""}<div class="pt-actions">${button("registration", intake && !EDITABLE.has(intake.status) ? "View registration" : "Continue registration", false, true)}</div>${guidelinesLink()}</section><section class="pt-card"><h2>Texting service</h2><div class="pt-row"><span>Messaging mode</span><strong>Individual manual send</strong></div><p class="pt-muted">Service activation, approved numbers and funding are checked separately from registration.</p>${button("home", "View service status", false, true)}<div class="pt-actions">${view.manageBilling === true ? button("balance", "Texting balance", false, true) : ""}<a href="/texting-payment-terms" class="pt-intake-link">Payment terms</a></div></section></div>`;
   }
   function start() {
     return `<header class="pt-page-head"><div><div class="pt-eyebrow">TEXTING</div><h1>Let’s get your team texting.</h1><p>A few details now. Conversations come next.</p></div></header><section class="pt-card pt-intake-start"><div class="pt-eyebrow">GET READY</div><h2>Register your organization.</h2><p class="pt-muted">Keep your legal details, Campaign Verify token and website handy.</p><ol class="pt-intake-path"><li><strong>Your details</strong><span>Contact, organization and sample messages</span></li><li><strong>Registration review</strong><span>Polis shares your packet with our vendors</span></li><li><strong>Activate texting</strong><span>Service setup and funding come after approval</span></li></ol>${button("start", "Start registration")}</section>`;
@@ -708,7 +791,7 @@ export function createTextingIntakePage({
       : "";
     if (!view.loaded)
       return `<div data-intake-root="${escape(view.key)}">${error}<section class="pt-card"><p>${view.loading ? "Loading registration…" : "Registration is unavailable."}</p>${!view.loading ? button("refresh", "Refresh application") : ""}</section></div>`;
-    return `<div class="pt-intake" data-intake-root="${escape(view.key)}">${error}${view.notice ? `<p role="status" class="pt-muted" data-intake-notice>${escape(view.notice)}</p>` : ""}${view.latestSaved ? `<section class="pt-card"><h2>Saved copy</h2>${view.latestSaved.intake ? details(view.latestSaved.intake) : "<p>No saved copy exists.</p>"}<p class="pt-muted">Loading this copy replaces your current unsaved edits.</p>${button("load-saved", "Replace my edits with saved copy", view.working, true)}</section>` : ""}${context().section === "settings" ? settings() : view.showGuidelines ? guidelines() : view.intake && !EDITABLE.has(view.intake.status) ? status() : !view.started ? start() : wizard()}</div>`;
+    return `<div class="pt-intake" data-intake-root="${escape(view.key)}">${error}${view.notice ? `<p role="status" class="pt-muted" data-intake-notice>${escape(view.notice)}</p>` : ""}${view.latestSaved ? `<section class="pt-card"><h2>Saved copy</h2>${view.latestSaved.intake ? details(view.latestSaved.intake) : "<p>No saved copy exists.</p>"}<p class="pt-muted">Loading this copy replaces your current unsaved edits.</p>${button("load-saved", "Replace my edits with saved copy", view.working, true)}</section>` : ""}${context().section === "settings" ? settings() + sendingHours() : view.showGuidelines ? guidelines() : view.intake && !EDITABLE.has(view.intake.status) ? status() : !view.started ? start() : wizard()}</div>`;
   }
   function eventScope(target) {
     return (
@@ -776,12 +859,27 @@ export function createTextingIntakePage({
   }
   document.addEventListener("input", edit);
   document.addEventListener("change", edit);
+  document.addEventListener("submit", (event) => {
+    const form = event.target;
+    if (!form.matches?.("[data-intake-schedule]") || !eventScope(form)) return;
+    event.preventDefault();
+    if (form.reportValidity()) void saveSendingHours(form);
+  });
   document.addEventListener("click", (event) => {
     const target = event.target?.closest?.("[data-intake-action]");
     if (!target || target.disabled || !eventScope(target)) return;
     event.preventDefault();
     const action = target.dataset.intakeAction;
+    if (action === "refresh-hours") {
+      void loadSettings(view.key, sequence);
+      return;
+    }
+    if (action === "check-hours") {
+      void saveSendingHours(null, true);
+      return;
+    }
     if (["home", "balance", "registration"].includes(action)) {
+      if (action === "balance" && view.manageBilling !== true) return;
       navigate(action);
       return;
     }
@@ -832,6 +930,7 @@ export function createTextingIntakePage({
               context()?.organizationName ||
               "",
             registrationStatus: view.intake?.status || null,
+            capabilities: { manageBilling: view.manageBilling === true },
           }
         : {},
   };

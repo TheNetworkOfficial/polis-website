@@ -21,6 +21,12 @@ import {
   queueCanConfirm,
   checkedUrl,
 } from "./textingWorkspaceUi";
+import {
+  scheduleFields,
+  scheduleSummary,
+  readSchedule,
+} from "./textingSchedule";
+import { prepareTextingAccess, saveAssignmentChanges } from "./textingAccess";
 
 const localInput = (ms) => {
   if (!Number.isSafeInteger(ms)) return "";
@@ -65,10 +71,13 @@ export function createCampaigns(r) {
       s.draft ||= newDraft();
       s.editing = true;
     } else {
-      const result = await r.api("/campaigns");
+      s.listView ||= "active";
+      const result = await r.api(`/campaigns?view=${id(s.listView)}`);
       s.items = list(result.items);
       s.cursor = result.nextCursor;
     }
+    if (resource && section === "campaigns" && r.can("createCampaigns"))
+      s.schedule = (await r.api("/delivery-schedule")).schedule;
     if (
       (resource === "new" || (resource && section === "campaigns")) &&
       r.can("uploadImports")
@@ -78,20 +87,36 @@ export function createCampaigns(r) {
       s.audienceCursor = result.nextCursor;
     }
   }
+  function campaignViews(s) {
+    return `<div class="pt-actions" aria-label="Campaign views">${["active", "paused", "archived"].map((value) => button("campaigns-view", value[0].toUpperCase() + value.slice(1), { value, secondary: value !== (s.listView || "active"), disabled: r.busy() })).join("")}</div><p class="pt-muted">${s.listView === "archived" ? "Archived campaigns keep their messages, results and history." : s.listView === "paused" ? "Paused campaigns keep their history and can be resumed when ready." : "Active campaigns and drafts ready for your next step."}</p>`;
+  }
+  function campaignHours(s) {
+    const c = s.campaign;
+    const editable =
+      r.can("createCampaigns") &&
+      ["draft", "prepared", "paused"].includes(c.status);
+    return `<section class="pt-card"><h2>Daily sending hours</h2><p class="pt-muted">${e(scheduleSummary(c.effectiveDeliverySchedule || c.deliverySchedule || s.schedule))}${c.deliverySchedule ? " · Campaign hours" : " · Organization default"}</p>${editable ? `<form data-workspace-form="campaign-hours">${scheduleFields(s.schedule, s.hoursDraft === undefined ? c.deliverySchedule : s.hoursDraft, true)}<div class="pt-actions"><button type="submit" class="pt-btn"${r.busy() || s.schedule?.status !== "verified" ? " disabled" : ""}>Save campaign hours</button></div></form>` : c.status === "active" && r.can("createCampaigns") ? '<p class="pt-muted">Pause this campaign to change its daily hours.</p>' : ""}</section>`;
+  }
   function listCards(s) {
-    return `<section class="pt-card">${list(s.items).length ? s.items.map((c) => `<div class="pt-row"><div><strong>${e(c.name)}</strong><p class="pt-muted">${e(label(c.status))} · ${money(c.settledMicros)} used</p></div>${go("campaigns", "Open", c.campaignId, true)}</div>`).join("") : `<h2>Start a conversation</h2><p class="pt-muted">Create your first campaign when your list is ready.</p>`}${s.cursor ? button("campaigns-more", "Load more", { secondary: true }) : ""}</section>`;
+    const empty =
+      s.listView === "archived"
+        ? "No archived campaigns on this page."
+        : s.listView === "paused"
+          ? "No paused campaigns on this page."
+          : "Create your first campaign when your list is ready.";
+    return `<section class="pt-card">${list(s.items).length ? s.items.map((c) => `<div class="pt-row"><div><strong>${e(c.name)}</strong><p class="pt-muted">${e(label(c.status))}${r.can("manageBilling") ? ` · ${money(c.settledMicros)} used` : ""}</p></div>${go("campaigns", "Open", c.campaignId, true)}</div>`).join("") : `<p class="pt-muted">${e(empty)}</p>`}${s.cursor ? button("campaigns-more", "Load more", { secondary: true }) : ""}</section>`;
   }
   function draftForm(s) {
     const d = s.draft,
       price = messagePrice(r.billing(), d.templateText || "", !!d.mediaId),
       image = mediaData(s.media);
-    return `<div class="pt-grid pt-grid--two"><form class="pt-card" data-workspace-form="campaign"><div class="pt-fields">${field("name", "Campaign name", d.name, { required: true })}${select("audienceId", "Contact list", [["", "Choose a reviewed list"], ...list(s.audiences).map((a) => [a.audienceId, `${a.name} · ${count(a.destinationCount)}`]), ...(d.audienceId && !list(s.audiences).some((a) => a.audienceId === d.audienceId) ? [[d.audienceId, "Saved audience"]] : [])], d.audienceId || "", true)}${textarea("templateText", "Message", d.templateText || "", true)}${field("budget", "Spending limit ($)", d.budgetMicros ? (d.budgetMicros / 1000000).toFixed(2) : "", { type: "number", required: true, extra: 'min="0.01" step="0.01"' })}</div><p class="pt-muted">Include your organization name and “Reply STOP to opt out.” Use the complete message without merge fields.</p>${details("When can volunteers send?", `<div class="pt-fields">${field("deliveryStart", "From", localInput(d.deliveryNotBeforeMs), { type: "datetime-local", required: true })}${field("deliveryEnd", "Until", localInput(d.deliveryBeforeMs), { type: "datetime-local", required: true })}</div><p class="pt-muted">Your local time. This sets the allowed window; it does not schedule automatic sends.</p>`)}<div class="pt-field"><label for="workspace-media">GIF or image (optional)</label><input id="workspace-media" type="file" accept="image/png,image/gif,.png,.gif" data-workspace-change="campaign-media"><p class="pt-muted">PNG or GIF · up to 512 KB</p></div>${d.mediaId ? `<div class="pt-row"><span>${e(label(s.media?.state || "Saved attachment"))}</span>${button("media-remove", "Remove", { secondary: true })}</div>${r.can("canPrepareProviderMedia") && s.media?.providerReady !== true ? button("media-prepare", "Prepare attachment", { secondary: true, disabled: s.mediaNeedsRead || r.busy() || !["local_ready", "provider_uploaded_pending_verification"].includes(s.media?.state) }) : ""}${s.mediaNeedsRead ? button("media-refresh", "Refresh attachment", { secondary: true }) : ""}` : ""}<div class="pt-actions"><button class="pt-btn" type="submit"${r.busy() ? " disabled" : ""}>Save campaign</button></div>${s.audienceCursor ? button("audiences-more", "Load more lists", { secondary: true }) : ""}</form><aside class="pt-card pt-workspace-preview"><div class="pt-eyebrow">MESSAGE PREVIEW</div><div class="pt-workspace-phone"><div class="pt-workspace-bubble">${image ? `<img src="${e(image)}" alt="Campaign attachment">` : ""}<p>${e(d.templateText || "Your message will appear here.")}</p></div></div><div class="pt-row"><span>${d.mediaId ? "MMS" : `SMS · ${smsSegments(d.templateText || "")} segment(s)`}</span><strong>${price === null ? "Rate awaiting verification" : `${money(price)} per message`}</strong></div><p class="pt-muted">Each person gets an individual send confirmation.</p></aside></div>`;
+    return `<div class="pt-grid pt-grid--two"><form class="pt-card" data-workspace-form="campaign"><div class="pt-fields">${field("name", "Campaign name", d.name, { required: true })}${select("audienceId", "Contact list", [["", "Choose a reviewed list"], ...list(s.audiences).map((a) => [a.audienceId, `${a.name} · ${count(a.destinationCount)}`]), ...(d.audienceId && !list(s.audiences).some((a) => a.audienceId === d.audienceId) ? [[d.audienceId, "Saved audience"]] : [])], d.audienceId || "", true)}${textarea("templateText", "Message", d.templateText || "", true)}${r.can("manageBilling") ? field("budget", "Spending limit ($)", d.budgetMicros ? (d.budgetMicros / 1000000).toFixed(2) : "", { type: "number", required: true, extra: 'min="0.01" step="0.01"' }) : ""}</div><p class="pt-muted">Include your organization name and “Reply STOP to opt out.” Use the complete message without merge fields.</p>${details("When can volunteers send?", `<div class="pt-fields">${field("deliveryStart", "From", localInput(d.deliveryNotBeforeMs), { type: "datetime-local", required: true })}${field("deliveryEnd", "Until", localInput(d.deliveryBeforeMs), { type: "datetime-local", required: true })}</div><p class="pt-muted">Your local time. This sets the allowed window; it does not schedule automatic sends.</p>`)}${scheduleFields(s.schedule, d.deliverySchedule, true)}<div class="pt-field"><label for="workspace-media">GIF or image (optional)</label><input id="workspace-media" type="file" accept="image/png,image/gif,.png,.gif" data-workspace-change="campaign-media"><p class="pt-muted">PNG or GIF · up to 512 KB</p></div>${d.mediaId ? `<div class="pt-row"><span>${e(label(s.media?.state || "Saved attachment"))}</span>${button("media-remove", "Remove", { secondary: true })}</div>${r.can("canPrepareProviderMedia") && s.media?.providerReady !== true ? button("media-prepare", "Prepare attachment", { secondary: true, disabled: s.mediaNeedsRead || r.busy() || !["local_ready", "provider_uploaded_pending_verification"].includes(s.media?.state) }) : ""}${s.mediaNeedsRead ? button("media-refresh", "Refresh attachment", { secondary: true }) : ""}` : ""}<div class="pt-actions"><button class="pt-btn" type="submit"${r.busy() ? " disabled" : ""}>Save campaign</button></div>${s.audienceCursor ? button("audiences-more", "Load more lists", { secondary: true }) : ""}</form><aside class="pt-card pt-workspace-preview"><div class="pt-eyebrow">MESSAGE PREVIEW</div><div class="pt-workspace-phone"><div class="pt-workspace-bubble">${image ? `<img src="${e(image)}" alt="Campaign attachment">` : ""}<p>${e(d.templateText || "Your message will appear here.")}</p></div></div><div class="pt-row"><span>${d.mediaId ? "MMS" : `SMS · ${smsSegments(d.templateText || "")} segment(s)`}</span>${r.can("manageBilling") ? `<strong>${price === null ? "Rate awaiting verification" : `${money(price)} per message`}</strong>` : ""}</div><p class="pt-muted">Each person gets an individual send confirmation.</p></aside></div>`;
   }
   function campaignDetail(s) {
     const c = s.campaign,
       manage = r.can("createCampaigns"),
       image = mediaData(s.media);
-    return `<div class="pt-grid pt-grid--three">${stat("Campaign limit", money(c.budgetMicros))}${stat("Pending charges", money(c.reservedMicros))}${stat("Completed usage", money(c.settledMicros))}</div><div class="pt-grid pt-grid--two"><section class="pt-card"><div class="pt-row"><h2>Your message</h2>${manage && ["draft", "prepared"].includes(c.status) ? button("campaign-edit", "Edit", { secondary: true }) : ""}</div><div class="pt-workspace-bubble">${image ? `<img src="${e(image)}" alt="Saved campaign attachment">` : ""}<p>${e(c.templateText)}</p></div><p class="pt-muted">${dateText(c.deliveryNotBeforeMs)} – ${dateText(c.deliveryBeforeMs)}</p></section><section class="pt-card"><h2>Ready to begin?</h2><div class="pt-row"><span>Campaign</span><strong>${e(label(c.status))}</strong></div><div class="pt-row"><span>Assigned volunteers</span><strong>${count(list(c.assignedUserIds).length)}</strong></div>${reasons(c.blockedReasons)}<div class="pt-actions">${manage ? `${go("team", "Manage team", c.campaignId, true)}${["draft", "prepared"].includes(c.status) ? button("transition-prepare", "Check readiness", { secondary: true }) : ""}${c.canActivate ? button("transition-activate", c.status === "paused" ? "Resume campaign" : "Open campaign") : ""}${c.status === "active" ? button("transition-pause", "Pause campaign", { secondary: true }) : ""}${c.status !== "archived" ? button("transition-archive", "Archive", { secondary: true }) : ""}` : ""}${c.canFetchQueue && r.can("manualQueue") ? go("send", "Start texting", c.campaignId) : ""}${go("results", "View results", c.campaignId, true)}</div>${c.status === "paused" ? notice("Sending paused", "This stops new sends from Polis. Any vendor-side work already accepted keeps its recorded status.") : ""}</section></div>`;
+    return `${r.can("manageBilling") ? `<div class="pt-grid pt-grid--three">${stat("Campaign limit", money(c.budgetMicros))}${stat("Pending charges", money(c.reservedMicros))}${stat("Completed usage", money(c.settledMicros))}</div>` : ""}<div class="pt-grid pt-grid--two"><section class="pt-card"><div class="pt-row"><h2>Your message</h2>${manage && ["draft", "prepared"].includes(c.status) ? button("campaign-edit", "Edit", { secondary: true }) : ""}</div><div class="pt-workspace-bubble">${image ? `<img src="${e(image)}" alt="Saved campaign attachment">` : ""}<p>${e(c.templateText)}</p></div><p class="pt-muted">${dateText(c.deliveryNotBeforeMs)} – ${dateText(c.deliveryBeforeMs)}</p></section><section class="pt-card"><h2>Ready to begin?</h2><div class="pt-row"><span>Campaign</span><strong>${e(label(c.status))}</strong></div><div class="pt-row"><span>Assigned volunteers</span><strong>${count(list(c.assignedUserIds).length)}</strong></div>${reasons(c.blockedReasons)}<div class="pt-actions">${manage ? `${go("team", "Manage team", c.campaignId, true)}${["draft", "prepared"].includes(c.status) ? button("transition-prepare", "Check readiness", { secondary: true }) : ""}${c.canActivate ? button("transition-activate", c.status === "paused" ? "Resume campaign" : "Open campaign") : ""}${c.status === "active" ? button("transition-pause", "Pause campaign", { secondary: true }) : ""}${c.status !== "archived" ? button("transition-archive", "Archive", { secondary: true }) : ""}` : ""}${c.canFetchQueue && r.can("manualQueue") ? go("send", "Start texting", c.campaignId) : ""}${go("results", "View results", c.campaignId, true)}</div>${c.status === "paused" ? notice("Sending paused", "This stops new sends from Polis. Any vendor-side work already accepted keeps its recorded status.") : ""}</section></div>`;
   }
   function team(s) {
     const c = s.campaign;
@@ -110,7 +135,7 @@ export function createCampaigns(r) {
         "Choose people who already have texting access.",
         go("campaigns", "Back", c.campaignId, true),
       ) +
-      `<section class="pt-card"><form data-workspace-form="members" class="pt-fields">${field("query", "Find a teammate", s.query || "", { required: true, extra: 'minlength="2"' })}<div class="pt-actions"><button class="pt-btn pt-btn--secondary" type="submit">Search</button></div></form><p class="pt-muted">${selected.size} selected</p>${[...new Set([...selected, ...found.map((m) => m.userId)])].map((userId) => `<label class="pt-row pt-workspace-check"><span><strong>${e(known.get(userId) || "Assigned member")}</strong>${known.has(userId) ? "" : `<small class="pt-muted">${e(userId)}</small>`}</span><input type="checkbox" data-workspace-member="${e(userId)}"${selected.has(userId) ? " checked" : ""}></label>`).join("")}<div class="pt-actions">${button("assignments-save", "Save team", { disabled: r.busy() })}</div><p class="pt-muted">Assignment does not grant organization permissions.</p></section>`
+      `<section class="pt-card"><form data-workspace-form="members" class="pt-fields">${field("query", "Find a teammate", s.query || "", { required: true, extra: 'minlength="2"' })}<div class="pt-actions"><button class="pt-btn pt-btn--secondary" type="submit">Search</button></div></form><p class="pt-muted">${selected.size} selected</p>${[...new Set([...list(c.assignedUserIds), ...selected, ...found.map((m) => m.userId)])].map((userId) => `<label class="pt-row pt-workspace-check"><span><strong>${e(known.get(userId) || "Assigned member")}</strong>${known.has(userId) ? "" : `<small class="pt-muted">${e(userId)}</small>`}</span><input type="checkbox" data-workspace-member="${e(userId)}"${selected.has(userId) ? " checked" : ""}${r.busy() || s.assignmentsNeedRead || !r.can("createCampaigns") || c.status === "archived" ? " disabled" : ""}></label>`).join("")}<div class="pt-actions">${button("assignments-save", "Save team", { disabled: r.busy() || s.assignmentsNeedRead || !r.can("createCampaigns") || c.status === "archived" })}${s.assignmentsNeedRead ? button("assignments-refresh", "Check saved assignments", { secondary: true, disabled: r.busy() }) + notice("Your selections are kept", "Check saved assignments before trying again.") : ""}</div><p class="pt-muted">Assignment does not grant organization permissions.</p></section>`
     );
   }
   function queue(s) {
@@ -130,9 +155,9 @@ export function createCampaigns(r) {
         go("campaigns", "Leave session", c.campaignId, true),
       ) +
       (!q
-        ? `<section class="pt-card"><h2>Your next conversation</h2><p class="pt-muted">Get your assigned recipients when you’re ready.</p>${button("queue-load", "Get my next messages", { disabled: !c.canFetchQueue || !r.can("manualQueue") || r.busy() })}${reasons(c.blockedReasons)}</section>`
+        ? `<section class="pt-card"><h2>Your next conversation</h2><p class="pt-muted">Get your assigned recipients when you’re ready.</p>${button("queue-load", s.preparingAccess ? "Preparing your texting access…" : "Get my next messages", { disabled: !c.canFetchQueue || !r.can("manualQueue") || r.busy() })}${reasons(c.blockedReasons)}</section>`
         : item
-          ? `<div class="pt-grid pt-grid--two"><section class="pt-card"><div class="pt-row"><div><h2>${e(p?.contactDisplayName || "Recipient")}</h2><p class="pt-muted">${e(p?.contactPhone || "Recipient unavailable")}</p></div><span class="pt-tag">${e(label(pending ? s.pendingAction : held ? "needs_review" : item.state))}</span></div><div class="pt-eyebrow">FINAL MESSAGE</div><div class="pt-workspace-bubble">${p?.attachmentUrl ? (checkedUrl(p.attachmentUrl) ? `<img data-workspace-queue-image="${e(item.itemId)}" src="${e(checkedUrl(p.attachmentUrl))}" alt="Final message attachment" referrerpolicy="no-referrer">` : notice("Attachment unavailable")) : ""}<p>${e(p?.message || "Final text unavailable")}</p></div>${held && !pending ? notice("Delivery needs review", "Do not send again. Its charge stays reserved until the outcome is confirmed.") : ""}${reasons(item.blockedReasons)}${item.expiresAtMs <= Date.now() ? notice("Preview expired", "Check the campaign status before continuing.") : ""}<div class="pt-row"><span>${p?.attachmentUrl ? "MMS" : "SMS"} · ${price === null ? "Rate unavailable" : money(price)}</span><div class="pt-actions">${button("queue-skip", "Skip recipient", { secondary: true, disabled: r.busy() || held || item.state !== "awaiting_confirmation" })}${button("queue-confirm", pending && s.pendingAction === "sending" ? "Sending…" : `Send to ${p?.contactDisplayName || p?.contactPhone || "recipient"}`, { disabled: r.busy() || held || !queueCanConfirm(item, r.workspace(), r.billing(), s.imageLoaded === item.itemId) })}</div></div><p class="pt-muted">Sends this message to this person only.</p></section><aside class="pt-card"><div class="pt-eyebrow">YOUR SESSION</div>${stat("Messages confirmed this session", count(s.sent || 0))}<div class="pt-row"><span>Available funds</span><strong>${money(r.billing()?.availableMicros)}</strong></div>${go("inbox", "Open inbox", "", true)}</aside></div>`
+          ? `<div class="pt-grid pt-grid--two"><section class="pt-card"><div class="pt-row"><div><h2>${e(p?.contactDisplayName || "Recipient")}</h2><p class="pt-muted">${e(p?.contactPhone || "Recipient unavailable")}</p></div><span class="pt-tag">${e(label(pending ? s.pendingAction : held ? "needs_review" : item.state))}</span></div><div class="pt-eyebrow">FINAL MESSAGE</div><div class="pt-workspace-bubble">${p?.attachmentUrl ? (checkedUrl(p.attachmentUrl) ? `<img data-workspace-queue-image="${e(item.itemId)}" src="${e(checkedUrl(p.attachmentUrl))}" alt="Final message attachment" referrerpolicy="no-referrer">` : notice("Attachment unavailable")) : ""}<p>${e(p?.message || "Final text unavailable")}</p></div>${held && !pending ? notice("Delivery needs review", "Do not send again. Its charge stays reserved until the outcome is confirmed.") : ""}${reasons(item.blockedReasons)}${item.expiresAtMs <= Date.now() ? notice("Preview expired", "Check the campaign status before continuing.") : ""}<div class="pt-row"><span>${p?.attachmentUrl ? "MMS" : "SMS"}${r.can("manageBilling") ? ` · ${price === null ? "Rate unavailable" : money(price)}` : ""}</span><div class="pt-actions">${button("queue-skip", "Skip recipient", { secondary: true, disabled: r.busy() || held || item.state !== "awaiting_confirmation" })}${button("queue-confirm", pending && s.pendingAction === "sending" ? "Sending…" : `Send to ${p?.contactDisplayName || p?.contactPhone || "recipient"}`, { disabled: r.busy() || held || !queueCanConfirm(item, r.workspace(), r.billing(), s.imageLoaded === item.itemId) })}</div></div><p class="pt-muted">Sends this message to this person only.</p></section><aside class="pt-card"><div class="pt-eyebrow">YOUR SESSION</div>${stat("Messages confirmed this session", count(s.sent || 0))}${r.can("manageBilling") ? `<div class="pt-row"><span>Available funds</span><strong>${money(r.billing()?.availableMicros)}</strong></div>` : ""}${go("inbox", "Open inbox", "", true)}</aside></div>`
           : `<section class="pt-card"><h2>${q.state === "allocation_unknown" ? "Session needs review" : "You’re caught up"}</h2><p class="pt-muted">${q.state === "allocation_unknown" ? "Your assigned messages could not be confirmed. An administrator must check the saved status." : "Get another group when you’re ready."}</p>${q.state !== "allocation_unknown" ? button("queue-load", "Get more messages", { disabled: !c.canFetchQueue || r.busy() }) : ""}${reasons(q.blockedReasons)}</section>`)
     );
   }
@@ -151,7 +176,7 @@ export function createCampaigns(r) {
           head(
             "RESULTS",
             "Campaign activity",
-            "Choose a campaign to review its saved status and spending.",
+            "Choose a campaign to review its saved status.",
           ) + listCards(s)
         );
       return (
@@ -161,7 +186,7 @@ export function createCampaigns(r) {
           "Saved campaign activity",
           go("campaigns", "Back", c.campaignId, true),
         ) +
-        `<div class="pt-grid pt-grid--three">${stat("Completed usage", money(c.settledMicros))}${stat("Pending charges", money(c.reservedMicros))}${stat("Assigned volunteers", count(list(c.assignedUserIds).length))}</div><section class="pt-card"><div class="pt-row"><span>Campaign status</span><strong>${e(label(c.status))}</strong></div><p class="pt-muted">Pending charges stay reserved until vendor usage is verified. Delivery and replies are shown in each conversation.</p>${go("inbox", "Open conversations", "", true)}${reasons(c.blockedReasons)}</section>`
+        `<div class="pt-grid pt-grid--three">${r.can("manageBilling") ? `${stat("Completed usage", money(c.settledMicros))}${stat("Pending charges", money(c.reservedMicros))}` : ""}${stat("Assigned volunteers", count(list(c.assignedUserIds).length))}</div><section class="pt-card"><div class="pt-row"><span>Campaign status</span><strong>${e(label(c.status))}</strong></div><p class="pt-muted">${r.can("manageBilling") ? "Pending charges stay reserved until vendor usage is verified. " : ""}Delivery and replies are shown in each conversation.</p>${go("inbox", "Open conversations", "", true)}${reasons(c.blockedReasons)}</section>`
       );
     }
     if (!resource)
@@ -170,13 +195,16 @@ export function createCampaigns(r) {
           "CAMPAIGNS",
           "Make the next connection",
           "One message at a time.",
-          r.can("createCampaigns")
+          r.can("createCampaigns") && r.can("manageBilling")
             ? go("campaigns", "New campaign", "new")
             : "",
-        ) + listCards(s)
+        ) +
+        campaignViews(s) +
+        listCards(s)
       );
     if (resource === "new" || s.editing)
-      return r.can("createCampaigns")
+      return r.can("createCampaigns") &&
+        (resource !== "new" || r.can("manageBilling"))
         ? head(
             "CAMPAIGNS",
             resource === "new" ? "Start a conversation" : "Edit campaign",
@@ -190,27 +218,56 @@ export function createCampaigns(r) {
           s.campaign.name,
           label(s.campaign.status),
           go("campaigns", "All campaigns", "", true),
-        ) + campaignDetail(s)
+        ) +
+          campaignDetail(s) +
+          campaignHours(s)
       : "";
   }
   function readDraft(form) {
     const d = new FormData(form),
       cents = Math.round(Number(d.get("budget")) * 100);
-    if (!Number.isSafeInteger(cents) || cents < 1)
+    if (r.can("manageBilling") && (!Number.isSafeInteger(cents) || cents < 1))
       throw new Error("Enter a valid campaign spending limit.");
     return {
       name: String(d.get("name") || "").trim(),
       audienceId: d.get("audienceId") || null,
       templateText: String(d.get("templateText") || ""),
-      budgetMicros: cents * 10000,
+      ...(r.can("manageBilling") ? { budgetMicros: cents * 10000 } : {}),
       deliveryNotBeforeMs: new Date(d.get("deliveryStart")).getTime(),
       deliveryBeforeMs: new Date(d.get("deliveryEnd")).getTime(),
+      deliverySchedule: readSchedule(form, state().schedule, true),
     };
   }
   async function submit(kind, form) {
     const s = state();
+    if (kind === "campaign-hours") {
+      const c = s.campaign;
+      if (
+        !r.can("createCampaigns") ||
+        !["draft", "prepared", "paused"].includes(c?.status)
+      )
+        throw new Error(
+          "Pause this campaign before changing its sending hours.",
+        );
+      const deliverySchedule = readSchedule(form, s.schedule, true);
+      s.hoursDraft = deliverySchedule;
+      s.campaign = (
+        await r.api(
+          `/campaigns/${id(c.campaignId)}/delivery-schedule`,
+          {
+            expectedRevision: c.revision,
+            deliverySchedule,
+          },
+          "PATCH",
+        )
+      ).campaign;
+      s.hoursDraft = undefined;
+      s.draft = { ...s.campaign };
+      r.toast("Campaign sending hours saved.");
+      return true;
+    }
     if (kind === "campaign") {
-      if (!r.can("createCampaigns"))
+      if (!r.can("createCampaigns") || (!s.campaign && !r.can("manageBilling")))
         throw new Error("Campaign editing is restricted.");
       const draft = readDraft(form);
       if (
@@ -248,11 +305,21 @@ export function createCampaigns(r) {
     }
     return false;
   }
-  async function action(name) {
+  async function action(name, value) {
     const s = state(),
       c = s.campaign;
+    if (name === "campaigns-view") {
+      if (!["active", "paused", "archived"].includes(value)) return false;
+      const result = await r.api(`/campaigns?view=${id(value)}`);
+      s.items = list(result.items);
+      s.cursor = result.nextCursor;
+      s.listView = value;
+      return true;
+    }
     if (name === "campaigns-more") {
-      const result = await r.api(`/campaigns?cursor=${id(s.cursor)}`);
+      const result = await r.api(
+        `/campaigns?view=${id(s.listView || "active")}&cursor=${id(s.cursor)}`,
+      );
       s.items.push(...list(result.items));
       s.cursor = result.nextCursor;
       return true;
@@ -303,13 +370,40 @@ export function createCampaigns(r) {
       return true;
     }
     if (name === "assignments-save") {
-      s.campaign = (
-        await r.api(`/campaigns/${id(c.campaignId)}/assignments`, {
-          expectedRevision: c.revision,
-          userIds: [...s.selected],
-        })
-      ).campaign;
+      if (
+        !r.can("createCampaigns") ||
+        s.assignmentsNeedRead ||
+        c.status === "archived"
+      )
+        return true;
+      try {
+        await saveAssignmentChanges(r.api, c, s.selected, (saved) => {
+          s.campaign = saved;
+        });
+      } catch (error) {
+        s.assignmentsNeedRead = true;
+        throw error;
+      }
       r.toast("Team saved");
+      return true;
+    }
+    if (name === "assignments-refresh") {
+      const previous = new Set(list(c.assignedUserIds)),
+        add = [...s.selected].filter((userId) => !previous.has(userId)),
+        remove = [...previous].filter((userId) => !s.selected.has(userId));
+      const saved = (await r.api(`/campaigns/${id(c.campaignId)}`)).campaign;
+      if (
+        saved?.campaignId !== c.campaignId ||
+        !Array.isArray(saved.assignedUserIds)
+      )
+        throw new Error("Campaign assignments could not be verified.");
+      s.campaign = saved;
+      s.selected = new Set(
+        [...saved.assignedUserIds, ...add].filter(
+          (userId) => !remove.includes(userId),
+        ),
+      );
+      s.assignmentsNeedRead = false;
       return true;
     }
     if (name.startsWith("transition-")) {
@@ -339,6 +433,7 @@ export function createCampaigns(r) {
     if (name === "queue-load") {
       if (!r.can("manualQueue") || !c?.canFetchQueue)
         throw new Error("This campaign is not ready for texting.");
+      await prepareTextingAccess(r, s, c.campaignId);
       s.queue = await r.api(`/campaigns/${id(c.campaignId)}/queue`, {});
       s.imageLoaded = null;
       r.armExpiry(list(s.queue.items)[0]?.expiresAtMs);
@@ -404,7 +499,27 @@ export function createCampaigns(r) {
   }
   function change(target) {
     const s = state();
+    const hoursForm = target.closest('[data-workspace-form="campaign-hours"]');
+    if (hoursForm && target.name) {
+      const values = new FormData(hoursForm);
+      s.hoursDraft =
+        values.get("dailyHoursMode") === "custom"
+          ? {
+              timeZone: s.schedule?.timeZone,
+              startTime: values.get("sendingStart"),
+              endTime: values.get("sendingEnd"),
+            }
+          : null;
+      return true;
+    }
     if (target.dataset.workspaceMember) {
+      if (
+        !r.can("createCampaigns") ||
+        r.busy() ||
+        s.assignmentsNeedRead ||
+        s.campaign?.status === "archived"
+      )
+        return true;
       if (target.checked) s.selected.add(target.dataset.workspaceMember);
       else s.selected.delete(target.dataset.workspaceMember);
       return true;
@@ -420,6 +535,14 @@ export function createCampaigns(r) {
         budgetMicros: Math.round(Number(values.get("budget")) * 100) * 10000,
         deliveryNotBeforeMs: new Date(values.get("deliveryStart")).getTime(),
         deliveryBeforeMs: new Date(values.get("deliveryEnd")).getTime(),
+        deliverySchedule:
+          values.get("dailyHoursMode") === "custom"
+            ? {
+                timeZone: s.schedule?.timeZone,
+                startTime: values.get("sendingStart"),
+                endTime: values.get("sendingEnd"),
+              }
+            : null,
       };
       return true;
     }

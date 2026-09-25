@@ -34,6 +34,7 @@ import {
   createMessagingBrowserDevice,
   createMessagingSocketClient,
 } from "./scripts/webMessaging.js";
+import { createMessagingProofTransport } from "./scripts/messagingDeviceProof.mjs";
 import { isFilesWorkspaceAccessible } from "../files/scripts/filesEntitlements.js";
 import { createTextingBalancePage } from "./scripts/textingBalance.js";
 import { createTextingIntakePage } from "./scripts/textingIntake.js";
@@ -5622,15 +5623,26 @@ function requestTextPrompt(options = {}) {
   });
 }
 
-const messagingDevice = createMessagingBrowserDevice();
+const messagingDevice = createMessagingBrowserDevice({
+  getUserId: () => state.auth.user?.userId,
+});
+const messagingProof = createMessagingProofTransport({
+  getUserId: () => state.auth.user?.userId,
+  sendRequest: fetchJsonRaw,
+  deviceStore: messagingDevice,
+});
 const messagingSocket = createMessagingSocketClient({
+  getAccountId: () => state.auth.user?.userId,
   async getAuthToken() {
     return normalizeString(
       state.auth.session?.idToken || state.auth.session?.accessToken,
     );
   },
-  async getDeviceId() {
-    return messagingDevice.currentDeviceId();
+  getDeviceProof: () => messagingProof.realtimeAuth(),
+  onProtocolError() {
+    state.pages.messaging.error =
+      "This browser needs messaging approval. Link it from a trusted device or use recovery in the updated Polis app.";
+    scheduleRender();
   },
   onEvent(event) {
     handleMessagingSocketEvent(event);
@@ -6488,6 +6500,7 @@ function renderCurrentTextingPage() {
   return renderTextingShell({
     ...current,
     organizationName: meta.organizationName || "",
+    manageBilling: meta.capabilities?.manageBilling === true,
     userName:
       user?.displayName || user?.username || user?.name || "Your account",
     logoUrl: resolveSharedAssetUrl(polisLogoUrl),
@@ -9293,7 +9306,11 @@ function ensureActiveIndexInBounds() {
   );
 }
 
-async function fetchJson(
+function fetchJson(path, options = {}) {
+  return messagingProof.request(path, options);
+}
+
+async function fetchJsonRaw(
   path,
   {
     auth = false,
@@ -11306,6 +11323,8 @@ function isLikelyAuthRequestFailure(error) {
 }
 
 function clearStaleAuthSession() {
+  messagingProof.reset();
+  messagingSocket.disconnect().catch(() => {});
   clearProfileAvatarUpload({ abort: true });
   clearSharedFeedSession();
   state.auth.session = null;
@@ -101332,6 +101351,21 @@ function messagingServiceErrorMessage(
   if (!normalized) {
     return fallback;
   }
+  if (normalized === "messaging_browser_setup_required") {
+    return "Set up this browser as a new messaging device, then approve it from a trusted device or use recovery in the updated Polis app.";
+  }
+  if (normalized === "messaging_browser_crypto_unsupported") {
+    return "This browser does not support the keys required for messaging protection. Use a current supported browser or the Polis app.";
+  }
+  if (
+    normalized.startsWith("messaging_browser_storage_") ||
+    normalized === "messaging_browser_keys_unavailable"
+  ) {
+    return "Polis could not access this browser's secure messaging keys. Check browser storage permissions or use the Polis app.";
+  }
+  if (normalized === "messaging_protection_unavailable") {
+    return "Polis could not confirm messaging protection. Connect and try again.";
+  }
   if (normalized === "video_backend_base_url_missing") {
     return "Messaging sync is unavailable because this local website is missing its API base URL.";
   }
@@ -115178,6 +115212,7 @@ function renderMessagingPage() {
     ${renderTopChrome()}
     <div class="shared-page__content shared-messaging-page__content">
       ${errorMarkup}
+      ${renderBrowserMessagingSetupNotice()}
       ${messaging.loading ? '<div class="shared-page__loading">Loading messaging...</div>' : ""}
       ${workspaceMarkup}
     </div>
@@ -121360,7 +121395,7 @@ function renderSettingsSecurityHub() {
         </div>
         <div>
           <h3>Recovery</h3>
-          <p>Enroll, rotate, verify, or restore encrypted message history from a saved key.</p>
+          <p>Use the updated Polis app to set up recovery or restore encrypted message history. This browser can show your recovery status.</p>
         </div>
         <small>${escapeHtml(`Encrypted backup ${settingsSecurityBackupLabel(messaging.recovery)}.`)}</small>
         <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/settings/security/restore">Open recovery</button>
@@ -121593,15 +121628,26 @@ function renderSettingsSecurityRestore() {
   </div>`;
 }
 
+function renderBrowserMessagingSetupNotice() {
+  if (messagingDevice.requiresSetup()) {
+    return `<div class="shared-page__hint"><p>This browser needs a new secure messaging device. Your existing browser records will be preserved. The new device needs normal approval and does not recover old encrypted messages.</p><button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="messaging-browser-setup">Set up this browser</button></div>`;
+  }
+  if (messagingSocket.getStateSnapshot().setupRequired) {
+    return `<div class="shared-page__hint"><p>This browser needs messaging approval. Complete approval or recovery in the Polis app, then check again.</p><button class="shared-feed-chip" type="button" data-action="messaging-browser-check-approval">Check approval</button></div>`;
+  }
+  return "";
+}
+
 function renderSettingsSecurityCenter() {
+  const notice = renderBrowserMessagingSetupNotice();
   const securitySubpath = getSettingsSecuritySubpath();
   if (securitySubpath.split("/")[0] === "device-link") {
-    return renderSettingsSecurityDeviceLink();
+    return notice + renderSettingsSecurityDeviceLink();
   }
   if (securitySubpath === "restore") {
-    return renderSettingsSecurityRestore();
+    return notice + renderSettingsSecurityRestore();
   }
-  return renderSettingsSecurityHub();
+  return notice + renderSettingsSecurityHub();
 }
 
 function renderSettingsBalancesPausedPanel() {
@@ -132438,6 +132484,33 @@ async function handleRootClick(event) {
       leaveMessagingGroupConversation(conversationId, userId).catch(() => {
         showToast("Group leave failed.");
       });
+    }
+    return;
+  }
+
+  if (action === "messaging-browser-check-approval") {
+    await messagingSocket.retryAfterSetup();
+    return;
+  }
+
+  if (action === "messaging-browser-setup") {
+    try {
+      await messagingDevice.prepareNewBrowserDevice();
+      messagingProof.resetDevice();
+      state.pages.messaging.initialized = false;
+      state.pages.messaging.device.registered = false;
+      await ensureMessagingInitialized({ force: true });
+      await messagingSocket.retryAfterSetup();
+      showToast(
+        "Browser device created. Complete approval from a trusted device or recovery in the Polis app.",
+      );
+      scheduleRender();
+    } catch (error) {
+      showToast(
+        error?.message === "messaging_browser_crypto_unsupported"
+          ? "Use a current browser with secure messaging key support."
+          : "Secure browser setup could not finish. Check browser storage and try again.",
+      );
     }
     return;
   }
