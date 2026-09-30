@@ -16,7 +16,9 @@ export async function moduleUrl(name) {
       /^import guidelinesUrl from "[^"\n]+\.pdf";\r?\n/gm,
       'const guidelinesUrl = "/guidelines.pdf";\n',
     );
-  for (const match of [...source.matchAll(/from "\.\/(texting\w+)"/g)])
+  for (const match of [
+    ...source.matchAll(/from "\.\/((?:texting|organization)\w+)"/g),
+  ])
     source = source.replaceAll(match[0], `from "${await moduleUrl(match[1])}"`);
   const url = `data:text/javascript;base64,${Buffer.from(source).toString("base64")}`;
   urls.set(name, url);

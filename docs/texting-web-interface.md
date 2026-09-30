@@ -27,8 +27,36 @@ All deep links require normal Polis authentication. Organization entry is availa
 - Customer state and late responses are fenced to the signed-in user, organization and current view.
 - Metrics unavailable from the current API are not invented; results show recorded campaign status and spending.
 
+## Optional opt-in texting
+
+The first workspace read negotiates `capabilities.neutralWorkspaceApi`; supported
+sessions then use `/api/text-banking/workspaces/:scope`. Older servers continue
+using the existing endpoints. The optional feature is disabled by default.
+
+Settings includes a three-step secondary registration for administrators,
+separate verification credentials, a quoted setup charge and recurring number
+cost, and explicit approval of those charges. Unknown writes are checked by GET
+before another change. Approval does not enable dual stream texting by itself.
+The mode action is labeled **Return to single stream texting**.
+
+Contacts can map documented consent fields alongside their source information.
+An imported consent label alone remains a claim. Campaigns display server-owned
+route counts and estimates. Queue items and conversations use neutral `stream`
+identities to choose their rates; replies keep their recorded stream. A send
+error never causes a request to another stream. Uncertain sends stay held for
+administrator review. Unit prices retain four decimal places.
+
+Focused coverage includes `tests/texting/dual-stream.test.mjs` and
+`tests/files/texting-dual-stream.pw.spec.cjs`.
+
 ## Focused verification
 
 Run `node --test tests/texting/*.test.mjs` and `npx playwright test --config=playwright.texting.config.cjs`, then the repository lint and production frontend build. Browser fixtures mock backend requests and do not pay or send messages. Avoid running the dev server and production build in the same worktree concurrently because webpack cleans their shared output directory.
 
 The approved live purchase and controlled carrier acceptance remain separate from mocked website verification. Native app releases are outside this website change.
+
+The admin review panel reads saved delivery evidence without resending or accepting
+a caller-supplied outcome. Protected opt-in MMS previews use campaign-scoped media
+reads; inbound attachments are opened through local authenticated paths. Unit
+rates retain four decimal places. The existing stream keeps its current API until
+the server explicitly advertises the neutral workspace capability.

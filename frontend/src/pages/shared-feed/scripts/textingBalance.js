@@ -1,3 +1,4 @@
+import { rateMoney } from "./textingWorkspaceUi";
 import "../css/texting-balance.css";
 
 const TERMINAL = new Set([
@@ -15,7 +16,7 @@ const money = (value, divisor = 100) =>
     : new Intl.NumberFormat("en-US", {
         style: "currency",
         currency: "USD",
-        maximumFractionDigits: divisor === 1000000 ? 3 : 2,
+        maximumFractionDigits: divisor === 1000000 ? 4 : 2,
       }).format(value / divisor);
 const escape = (value) =>
   String(value ?? "").replace(
@@ -79,7 +80,7 @@ export function createTextingBalancePage({ request, context, changed }) {
   const current = (key, version) =>
     identity() === key && view.key === key && sequence === version;
   const path = (organizationId, suffix) =>
-    `/api/text-banking/prompt/scopes/${encodeURIComponent(`coalition:${organizationId}`)}/billing/${suffix}`;
+    `/api/text-banking/${view.neutralApi ? "workspaces" : "prompt/scopes"}/${encodeURIComponent(`coalition:${organizationId}`)}/billing/${suffix}`;
 
   function reset() {
     clearTimeout(timer);
@@ -220,6 +221,18 @@ export function createTextingBalancePage({ request, context, changed }) {
     };
     changed();
     try {
+      const scope = `coalition:${organizationId}`;
+      const workspace = await request(
+        `/api/text-banking/prompt/scopes/${encodeURIComponent(scope)}/workspace`,
+        { auth: true },
+      ).catch((error) => {
+        if ([401, 403].includes(error?.status)) throw error;
+        return null;
+      });
+      if (!current(key, version)) return;
+      view.neutralApi =
+        workspace?.workspace?.scopeKey === scope &&
+        workspace?.workspace?.capabilities?.neutralWorkspaceApi === true;
       const result = await request(path(organizationId, "summary"), {
         auth: true,
       });
@@ -489,7 +502,7 @@ export function createTextingBalancePage({ request, context, changed }) {
           ${termsUrl ? `<a href="${escape(termsUrl)}" target="_blank" rel="noopener noreferrer">Read payment terms ↗</a>` : "<p>Payment terms must be available before checkout can open.</p>"}
           <label class="texting-balance__terms"><input type="checkbox" data-texting-terms ${view.acceptedTerms ? "checked" : ""} ${view.saving ? "disabled" : ""}><span>I agree to the payment terms and authorize this organization's purchase.</span></label>
           <button class="texting-balance__button texting-balance__button--primary texting-balance__button--full" data-texting-action="checkout" ${!view.acceptedTerms || !termsUrl || view.saving ? "disabled" : ""}>${view.saving ? "Opening checkout…" : "Continue to secure checkout"}</button>
-          <p class="texting-balance__fine texting-balance__secure">Payment is completed securely with Stripe.</p>
+          <p class="texting-balance__fine texting-balance__secure">Payment is completed through secure checkout.</p>
           ${view.checkoutError ? `<p class="texting-balance__notice" role="alert">${escape(view.checkoutError)}</p>` : ""}
         </section>`
           : `<section class="texting-balance__card texting-balance__placeholder"><span aria-hidden="true">＋</span><h2>Ready when you are</h2><p>Select an amount to review the total.</p></section>`
@@ -551,7 +564,7 @@ export function createTextingBalancePage({ request, context, changed }) {
         <div><span>Pending charges</span><strong>${money(billing.reservedMicros, 1000000)}</strong></div>
         <div><span>Completed usage</span><strong>${money(billing.settledMicros, 1000000)}</strong></div>
         <p class="texting-balance__fine">Pending charges are held for messages awaiting settlement.</p>
-        ${ratesVerified ? `<details class="texting-balance__details"><summary>View your messaging rates</summary><p>${money(billing.smsUpToTwoSegmentsMicros, 1000000)} per SMS including up to two segments.<br>${money(billing.smsAdditionalSegmentMicros, 1000000)} per additional SMS segment.<br>${money(billing.mmsMicros, 1000000)} per complete MMS.</p><p>Longer SMS messages use additional funds. Your payment terms describe other applicable messaging charges.</p></details>` : ""}
+        ${ratesVerified ? `<details class="texting-balance__details"><summary>View your messaging rates</summary><p>${rateMoney(billing.smsUpToTwoSegmentsMicros)} per SMS including up to two segments.<br>${rateMoney(billing.smsAdditionalSegmentMicros)} per additional SMS segment.<br>${rateMoney(billing.mmsMicros)} per complete MMS.</p>${billing.optInRates?.rateStatus === "verified" ? `<p><strong>Opt-in texting</strong><br>${rateMoney(billing.optInRates.smsSegmentMicros)} per SMS segment.<br>${rateMoney(billing.optInRates.mmsMicros)} per complete MMS.</p>` : ""}<p>Longer SMS messages use additional funds. Your payment terms describe other applicable messaging charges.</p></details>` : ""}
       </section>
     </div>${renderHistory(billing, true)}`;
   }

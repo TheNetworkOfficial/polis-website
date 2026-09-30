@@ -13,7 +13,9 @@ async function moduleUrl(name) {
   if (urls.has(name)) return urls.get(name);
   let source = await readFile(path.join(scripts, `${name}.js`), "utf8");
   source = source.replace(/^import\s+"[^"\n]+\.css";\r?\n/gm, "");
-  for (const match of [...source.matchAll(/from "\.\/(texting\w+)"/g)])
+  for (const match of [
+    ...source.matchAll(/from "\.\/((?:texting|organization)\w+)"/g),
+  ])
     source = source.replaceAll(match[0], `from "${await moduleUrl(match[1])}"`);
   const url = `data:text/javascript;base64,${Buffer.from(source).toString("base64")}`;
   urls.set(name, url);
@@ -293,7 +295,9 @@ test("direct Balance routes reject volunteers and erase finances after admin dow
       page.render(),
       /texting-available|AVAILABLE TO SEND|\$[0-9]/,
     );
-    assert.equal(calls.length, 1);
+    assert.equal(calls.length, 2);
+    assert.ok(calls[0].endsWith("/workspace"));
+    assert.ok(calls[1].endsWith("/summary"));
     assert.equal(page.getMeta().capabilities.manageBilling, false);
     admin = true;
     await page.load();

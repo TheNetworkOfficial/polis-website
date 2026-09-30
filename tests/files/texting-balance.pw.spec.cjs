@@ -253,7 +253,7 @@ test("return URL cannot credit funds; verified funding shows principal, receipt 
   );
   await expect(page.getByTestId("texting-available")).toHaveText("$100.00");
   await expect(page.locator(".texting-balance")).toContainText(
-    "$0.015 per additional SMS segment",
+    "$0.0150 per additional SMS segment",
   );
   await expect(
     page

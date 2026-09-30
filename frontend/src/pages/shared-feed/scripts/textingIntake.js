@@ -1,5 +1,6 @@
 import "../css/texting-intake.css";
 import guidelinesUrl from "../../../assets/text-banking/polis-website-registration-guidelines.pdf";
+import { createTextingOptIn } from "./textingOptIn";
 import {
   scheduleFields,
   scheduleSummary,
@@ -90,7 +91,10 @@ const escape = (value) =>
       ],
   );
 const vendorText = (value) =>
-  String(value ?? "").replace(/\bPrompt(?:\.io)?(?:'s)?\b/gi, "our vendors");
+  String(value ?? "").replace(
+    /\b(?:Prompt(?:\.io)?|Telnyx)(?:'s)?\b/gi,
+    "our vendors",
+  );
 const emptyFields = () =>
   Object.fromEntries(
     Object.keys(LABELS).map((key) => [key, key === "country" ? "US" : ""]),
@@ -220,7 +224,7 @@ export function validateTextingIntake(
       /[\u0000-\u001f\u007f]/u.test(token))
   )
     errors["campaignVerify.token"] =
-      "Enter the complete Campaign Verify token, not the one-time PIN.";
+      "Enter the complete verification token, not the one-time PIN.";
   const time = Date.parse(`${expiresOn}T00:00:00.000Z`);
   if (
     !/^\d{4}-\d{2}-\d{2}$/.test(expiresOn) ||
@@ -289,6 +293,7 @@ export function createTextingIntakePage({
   navigate,
 }) {
   let view = {};
+  const optIn = createTextingOptIn({ request, context, changed });
   let sequence = 0;
   const identity = () => {
     const current = context();
@@ -301,7 +306,7 @@ export function createTextingIntakePage({
   const endpoint = (organizationId) =>
     `/api/text-banking/prompt-intake/${encodeURIComponent(`coalition:${organizationId}`)}`;
   const serviceEndpoint = () =>
-    `/api/text-banking/prompt/scopes/${encodeURIComponent(`coalition:${context().organizationId}`)}`;
+    `/api/text-banking/${view.neutralApi ? "workspaces" : "prompt/scopes"}/${encodeURIComponent(`coalition:${context().organizationId}`)}`;
   const uuid = () => globalThis.crypto.randomUUID();
   const locked = () =>
     view.working ||
@@ -321,6 +326,7 @@ export function createTextingIntakePage({
   function reset() {
     sequence += 1;
     view = {};
+    optIn.reset();
   }
   function accept(response) {
     decodeTextingIntake(response);
@@ -408,7 +414,31 @@ export function createTextingIntakePage({
     if (!active(key, version)) return;
     view.manageBilling =
       workspace?.workspace?.capabilities?.manageBilling === true;
+    if (
+      workspace?.workspace?.capabilities?.manageBilling === undefined &&
+      workspace?.workspace?.capabilities?.neutralWorkspaceApi !== true &&
+      workspace?.workspace?.contractVersion !== 2
+    ) {
+      const billing = await request(`${serviceEndpoint()}/billing/summary`, {
+        auth: true,
+      }).catch(() => null);
+      if (!active(key, version)) return;
+      view.manageBilling = billing?.billing?.canManageBilling === true;
+    }
     view.delivery = delivery?.ok === true ? delivery : null;
+    view.neutralApi =
+      workspace?.workspace?.capabilities?.neutralWorkspaceApi === true ||
+      workspace?.workspace?.contractVersion === 2;
+    if (view.neutralApi)
+      await optIn.load({
+        enabled:
+          workspace?.workspace?.dualStreamEnabled === true ||
+          workspace?.workspace?.capabilities?.dualStreamEnabled === true,
+        canManage:
+          workspace?.workspace?.capabilities?.manageOptInTexting === true,
+        prefill: view.intake?.packet || {},
+      });
+    if (!active(key, version)) return;
     view.settingsLoaded = true;
     changed();
   }
@@ -458,6 +488,7 @@ export function createTextingIntakePage({
   }
   function sendingHours() {
     const delivery = view.delivery;
+    if (!delivery) return "";
     return `<section class="pt-card"><h2>Default sending hours</h2>${view.scheduleError ? `<p role="alert">${escape(view.scheduleError)}</p>` : ""}${delivery?.canManage === true ? `<form data-intake-schedule>${scheduleFields(delivery.schedule)}${delivery.schedule?.status === "needs_review" ? `<p class="pt-muted">Saved request: ${escape(scheduleSummary(delivery.schedule))}. Check these saved hours before editing again.</p>${button("check-hours", "Check saved hours", view.scheduleSaving, true)}` : ""}<div class="pt-actions"><button type="submit" class="pt-btn"${view.scheduleSaving || delivery.schedule?.status !== "verified" ? " disabled" : ""}>${view.scheduleSaving ? "Saving hours…" : "Save organization hours"}</button>${button("refresh-hours", "Refresh hours", view.scheduleSaving, true)}</div></form>` : `<p class="pt-muted">${escape(scheduleSummary(delivery?.schedule))}</p><p class="pt-muted">An organization administrator manages the daily sending hours.</p>`}</section>`;
   }
   function packet() {
@@ -694,7 +725,7 @@ export function createTextingIntakePage({
       )
       .join(
         "",
-      )}<div><dt>Campaign Verify</dt><dd>${intake.campaignVerify?.hasToken ? `Token stored securely · expires ${escape(intake.campaignVerify.expiresOn)}` : "Token not saved"}</dd></div><div><dt>Sharing authorization</dt><dd>${intake.packet.authorityConfirmed ? "Confirmed" : "Not confirmed"}</dd></div></dl></details>`;
+      )}<div><dt>Verification</dt><dd>${intake.campaignVerify?.hasToken ? `Token stored securely · expires ${escape(intake.campaignVerify.expiresOn)}` : "Token not saved"}</dd></div><div><dt>Sharing authorization</dt><dd>${intake.packet.authorityConfirmed ? "Confirmed" : "Not confirmed"}</dd></div></dl></details>`;
   }
   function status() {
     const intake = view.intake;
@@ -725,10 +756,10 @@ export function createTextingIntakePage({
         changes_required: "Changes needed",
         ready_for_handoff: "Ready to submit",
       }[intake?.status] || (intake ? "Draft" : "Not started");
-    return `<header class="pt-page-head"><div><div class="pt-eyebrow">TEXTING SETTINGS</div><h1>The essentials, in one place.</h1><p>Registration details for your organization.</p></div></header><div class="pt-grid pt-grid--two"><section class="pt-card"><h2>Registration</h2><div class="pt-row"><strong>${escape(intake?.packet.legalEntityName || context()?.organizationName || "Your organization")}</strong><span class="pt-tag">${label}</span></div>${intake ? `<div class="pt-row"><span>Campaign Verify</span><span>${intake.campaignVerify?.hasToken ? `Stored securely<br><small>Expires ${escape(intake.campaignVerify.expiresOn)}</small>` : "Not saved"}</span></div><div class="pt-row"><span>Registration contact</span><span>${escape(`${intake.packet.firstName || ""} ${intake.packet.lastName || ""}`)}<br><small>${escape(intake.packet.email)}</small></span></div>${details(intake)}` : ""}<div class="pt-actions">${button("registration", intake && !EDITABLE.has(intake.status) ? "View registration" : "Continue registration", false, true)}</div>${guidelinesLink()}</section><section class="pt-card"><h2>Texting service</h2><div class="pt-row"><span>Messaging mode</span><strong>Individual manual send</strong></div><p class="pt-muted">Service activation, approved numbers and funding are checked separately from registration.</p>${button("home", "View service status", false, true)}<div class="pt-actions">${view.manageBilling === true ? button("balance", "Texting balance", false, true) : ""}<a href="/texting-payment-terms" class="pt-intake-link">Payment terms</a></div></section></div>`;
+    return `<header class="pt-page-head"><div><div class="pt-eyebrow">TEXTING SETTINGS</div><h1>The essentials, in one place.</h1><p>Registration details for your organization.</p></div></header><div class="pt-grid pt-grid--two"><section class="pt-card"><h2>Registration</h2><div class="pt-row"><strong>${escape(intake?.packet.legalEntityName || context()?.organizationName || "Your organization")}</strong><span class="pt-tag">${label}</span></div>${intake ? `<div class="pt-row"><span>Verification</span><span>${intake.campaignVerify?.hasToken ? `Stored securely<br><small>Expires ${escape(intake.campaignVerify.expiresOn)}</small>` : "Not saved"}</span></div><div class="pt-row"><span>Registration contact</span><span>${escape(`${intake.packet.firstName || ""} ${intake.packet.lastName || ""}`)}<br><small>${escape(intake.packet.email)}</small></span></div>${details(intake)}` : ""}<div class="pt-actions">${button("registration", intake && !EDITABLE.has(intake.status) ? "View registration" : "Continue registration", false, true)}</div>${guidelinesLink()}</section><section class="pt-card"><h2>Texting service</h2><div class="pt-row"><span>Messaging mode</span><strong>Individual manual send</strong></div><p class="pt-muted">Service activation, approved numbers and funding are checked separately from registration.</p>${button("home", "View service status", false, true)}<div class="pt-actions">${view.manageBilling === true ? button("balance", "Texting balance", false, true) : ""}<a href="/texting-payment-terms" class="pt-intake-link">Payment terms</a></div></section></div>`;
   }
   function start() {
-    return `<header class="pt-page-head"><div><div class="pt-eyebrow">TEXTING</div><h1>Let’s get your team texting.</h1><p>A few details now. Conversations come next.</p></div></header><section class="pt-card pt-intake-start"><div class="pt-eyebrow">GET READY</div><h2>Register your organization.</h2><p class="pt-muted">Keep your legal details, Campaign Verify token and website handy.</p><ol class="pt-intake-path"><li><strong>Your details</strong><span>Contact, organization and sample messages</span></li><li><strong>Registration review</strong><span>Polis shares your packet with our vendors</span></li><li><strong>Activate texting</strong><span>Service setup and funding come after approval</span></li></ol>${button("start", "Start registration")}</section>`;
+    return `<header class="pt-page-head"><div><div class="pt-eyebrow">TEXTING</div><h1>Let’s get your team texting.</h1><p>A few details now. Conversations come next.</p></div></header><section class="pt-card pt-intake-start"><div class="pt-eyebrow">GET READY</div><h2>Register your organization.</h2><p class="pt-muted">Keep your legal details, verification token and website handy.</p><ol class="pt-intake-path"><li><strong>Your details</strong><span>Contact, organization and sample messages</span></li><li><strong>Registration review</strong><span>Polis shares your packet with our vendors</span></li><li><strong>Activate texting</strong><span>Service setup and funding come after approval</span></li></ol>${button("start", "Start registration")}</section>`;
   }
   function wizard() {
     const fields =
@@ -754,7 +785,7 @@ export function createTextingIntakePage({
             `<h3 class="pt-wide">Campaign verification</h3>` +
             field("filingUrl", { wide: true, type: "url" }) +
             field("filingInstructions", { wide: true }) +
-            `<label class="pt-field pt-wide"><span>Campaign Verify token</span><input data-intake-field="campaignVerify.token" type="password" autocomplete="new-password" maxlength="4096" value="${escape(view.token)}" placeholder="${view.savedVerify?.hasToken ? "Saved securely · leave blank to keep" : "Complete authorization token"}" ${locked() ? "disabled" : ""}><small>${view.savedVerify?.hasToken ? "Saved tokens are never displayed. Enter a replacement only if needed." : "Use the full token, not the one-time PIN."}</small><small class="pt-intake-error" id="intake-error-campaignVerify.token">${escape(view.touched.has("campaignVerify.token") ? errors()["campaignVerify.token"] || "" : "")}</small></label><label class="pt-field"><span>Token expiration date</span><input data-intake-field="campaignVerify.expiresOn" type="date" value="${escape(view.expiresOn)}" ${locked() ? "disabled" : ""}><small>Must be in the future.</small><small class="pt-intake-error" id="intake-error-campaignVerify.expiresOn">${escape(view.touched.has("campaignVerify.expiresOn") ? errors()["campaignVerify.expiresOn"] || "" : "")}</small></label>`
+            `<label class="pt-field pt-wide"><span>verification token</span><input data-intake-field="campaignVerify.token" type="password" autocomplete="new-password" maxlength="4096" value="${escape(view.token)}" placeholder="${view.savedVerify?.hasToken ? "Saved securely · leave blank to keep" : "Complete authorization token"}" ${locked() ? "disabled" : ""}><small>${view.savedVerify?.hasToken ? "Saved tokens are never displayed. Enter a replacement only if needed." : "Use the full token, not the one-time PIN."}</small><small class="pt-intake-error" id="intake-error-campaignVerify.token">${escape(view.touched.has("campaignVerify.token") ? errors()["campaignVerify.token"] || "" : "")}</small></label><label class="pt-field"><span>Token expiration date</span><input data-intake-field="campaignVerify.expiresOn" type="date" value="${escape(view.expiresOn)}" ${locked() ? "disabled" : ""}><small>Must be in the future.</small><small class="pt-intake-error" id="intake-error-campaignVerify.expiresOn">${escape(view.touched.has("campaignVerify.expiresOn") ? errors()["campaignVerify.expiresOn"] || "" : "")}</small></label>`
           : view.step === 2
             ? field("useCaseDescription", { textarea: true, wide: true }) +
               `<p class="pt-muted pt-wide">Each sample must identify your organization, include its website and explain how to opt out with STOP.</p>` +
@@ -777,7 +808,7 @@ export function createTextingIntakePage({
                 )
                 .join(
                   "",
-                )}<div><dt>Campaign Verify</dt><dd>${view.token ? "Token entered" : view.savedVerify?.hasToken ? "Token stored securely" : "Token required"} · ${escape(view.expiresOn)}</dd></div></dl></details>`;
+                )}<div><dt>Verification</dt><dd>${view.token ? "Token entered" : view.savedVerify?.hasToken ? "Token stored securely" : "Token required"} · ${escape(view.expiresOn)}</dd></div></dl></details>`;
     return `<header class="pt-page-head"><div><div class="pt-eyebrow">REGISTRATION · STEP ${view.step + 1} OF 4</div><h1>${HEADINGS[view.step]}</h1><p>${SUBHEADINGS[view.step]}</p></div></header><ol class="pt-intake-steps" aria-label="Registration steps">${STEPS.map((label, index) => `<li ${index === view.step ? 'aria-current="step"' : ""} class="${index < view.step ? "is-complete" : ""}"><span>${index < view.step ? "✓" : index + 1}</span>${label}</li>`).join("")}</ol>${view.intake?.status === "changes_required" && view.intake.reviewMessage ? `<p class="pt-notice">${escape(vendorText(view.intake.reviewMessage))}</p>` : ""}<section class="pt-card"><div class="pt-fields">${fields}</div><p class="pt-intake-validation" data-intake-step-error>${escape(stepErrors()[0]?.[1] || "")}</p><div class="pt-intake-footer">${button("back", "Back", view.working || view.step === 0, true)}<div class="pt-actions">${button("save", view.working ? "Saving…" : "Save draft", locked() || (!view.dirty && view.revision > 0), true)}${view.step < 3 ? button("next", "Continue", locked() || stepErrors().length > 0) : button("review", "Submit application", locked() || Object.keys(errors()).length > 0)}</div></div><p class="pt-muted pt-intake-save-note">${view.dirty ? "Unsaved changes" : view.revision ? "Draft saved" : "Save draft to keep your progress."}</p></section>`;
   }
   function guidelines() {
@@ -791,7 +822,7 @@ export function createTextingIntakePage({
       : "";
     if (!view.loaded)
       return `<div data-intake-root="${escape(view.key)}">${error}<section class="pt-card"><p>${view.loading ? "Loading registration…" : "Registration is unavailable."}</p>${!view.loading ? button("refresh", "Refresh application") : ""}</section></div>`;
-    return `<div class="pt-intake" data-intake-root="${escape(view.key)}">${error}${view.notice ? `<p role="status" class="pt-muted" data-intake-notice>${escape(view.notice)}</p>` : ""}${view.latestSaved ? `<section class="pt-card"><h2>Saved copy</h2>${view.latestSaved.intake ? details(view.latestSaved.intake) : "<p>No saved copy exists.</p>"}<p class="pt-muted">Loading this copy replaces your current unsaved edits.</p>${button("load-saved", "Replace my edits with saved copy", view.working, true)}</section>` : ""}${context().section === "settings" ? settings() + sendingHours() : view.showGuidelines ? guidelines() : view.intake && !EDITABLE.has(view.intake.status) ? status() : !view.started ? start() : wizard()}</div>`;
+    return `<div class="pt-intake" data-intake-root="${escape(view.key)}">${error}${view.notice ? `<p role="status" class="pt-muted" data-intake-notice>${escape(view.notice)}</p>` : ""}${view.latestSaved ? `<section class="pt-card"><h2>Saved copy</h2>${view.latestSaved.intake ? details(view.latestSaved.intake) : "<p>No saved copy exists.</p>"}<p class="pt-muted">Loading this copy replaces your current unsaved edits.</p>${button("load-saved", "Replace my edits with saved copy", view.working, true)}</section>` : ""}${context().section === "settings" ? settings() + optIn.render() + sendingHours() : view.showGuidelines ? guidelines() : view.intake && !EDITABLE.has(view.intake.status) ? status() : !view.started ? start() : wizard()}</div>`;
   }
   function eventScope(target) {
     return (

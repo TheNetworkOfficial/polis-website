@@ -6,16 +6,30 @@ export const escapeText = (value) =>
         c
       ],
   );
-export const label = (value) =>
+export const customerText = (value) =>
   String(value ?? "")
-    .replace(/^prompt_/, "")
-    .replace(/_/g, " ");
+    .replace(/\b(?:prompt|telnyx)_/gi, "texting_")
+    .replace(/\b(?:Prompt(?:\.io)?|Telnyx)(?:'s)?\b/gi, "texting service");
+export const label = (value) =>
+  customerText(String(value ?? "").replace(/^(?:prompt|telnyx)_/, "")).replace(
+    /_/g,
+    " ",
+  );
 export const money = (value) =>
   Number.isSafeInteger(value)
     ? new Intl.NumberFormat("en-US", {
         style: "currency",
         currency: "USD",
-        maximumFractionDigits: 3,
+        maximumFractionDigits: 4,
+      }).format(value / 1000000)
+    : "Unavailable";
+export const rateMoney = (value) =>
+  Number.isSafeInteger(value)
+    ? new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency: "USD",
+        minimumFractionDigits: 4,
+        maximumFractionDigits: 4,
       }).format(value / 1000000)
     : "Unavailable";
 export const count = (value) =>
@@ -93,8 +107,24 @@ export function smsSegments(value) {
   }
   return units <= 160 ? 1 : Math.ceil(units / 153);
 }
-export function messagePrice(billing, text, media = false) {
+export const streamLabel = (stream) =>
+  stream === "opt_in" ? "Opt-in texting" : "Standard texting";
+
+export function messagePrice(
+  billing,
+  text,
+  media = false,
+  stream = "standard",
+) {
   if (billing?.rateStatus !== "verified") return null;
+  if (stream === "opt_in") {
+    const tariff = billing.optInRates;
+    if (tariff?.rateStatus !== "verified") return null;
+    const rate = media ? tariff.mmsMicros : tariff.smsSegmentMicros;
+    if (!Number.isSafeInteger(rate) || rate < 1) return null;
+    const total = rate * (media ? 1 : smsSegments(text));
+    return Number.isSafeInteger(total) ? total : null;
+  }
   if (media)
     return Number.isSafeInteger(billing.mmsMicros) && billing.mmsMicros > 0
       ? billing.mmsMicros
@@ -113,10 +143,16 @@ export function messagePrice(billing, text, media = false) {
 }
 /** Non-admin summaries deliberately omit prices; the server still checks the
  * exact message cost atomically when a human confirms the send. */
-export function messageFundingReady(workspace, billing, text, media = false) {
+export function messageFundingReady(
+  workspace,
+  billing,
+  text,
+  media = false,
+  stream = "standard",
+) {
   if (billing?.sendingBlocked !== false) return false;
   if (workspace?.capabilities?.manageBilling !== true) return true;
-  const cost = messagePrice(billing, text, media);
+  const cost = messagePrice(billing, text, media, stream);
   return (
     cost !== null &&
     Number.isSafeInteger(billing.availableMicros) &&
@@ -145,7 +181,31 @@ export function queueCanConfirm(
     /^\+[1-9]\d{7,14}$/.test(p.contactPhone) &&
     typeof p.message === "string" &&
     p.message.length > 0 &&
-    (!p.attachmentUrl || (checkedUrl(p.attachmentUrl) && mediaLoaded)) &&
-    messageFundingReady(workspace, billing, p.message, !!p.attachmentUrl)
+    (!(p.attachmentUrl || p.mediaId) ||
+      (mediaLoaded &&
+        ((item.stream === "opt_in" &&
+          /^[A-Za-z0-9_-]{1,100}$/.test(p.mediaId || "")) ||
+          checkedUrl(p.attachmentUrl)))) &&
+    messageFundingReady(
+      workspace,
+      billing,
+      p.message,
+      !!(p.attachmentUrl || p.mediaId),
+      item.stream,
+    )
   );
+}
+
+/** Only bounded image bytes from authenticated Polis media endpoints become inline images. */
+export function protectedMediaData(media) {
+  return media &&
+    ["image/png", "image/gif", "image/jpeg", "image/webp"].includes(
+      media.mimeType,
+    ) &&
+    typeof media.dataBase64 === "string" &&
+    media.dataBase64.length > 0 &&
+    media.dataBase64.length <= 7_000_000 &&
+    /^[A-Za-z0-9+/]+={0,2}$/.test(media.dataBase64)
+    ? `data:${media.mimeType};base64,${media.dataBase64}`
+    : "";
 }

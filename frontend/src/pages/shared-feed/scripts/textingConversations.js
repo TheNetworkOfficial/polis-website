@@ -1,7 +1,7 @@
 import {
   escapeText as e,
   label,
-  money,
+  rateMoney,
   id,
   list,
   button,
@@ -10,8 +10,10 @@ import {
   textarea,
   notice,
   checkedUrl,
+  protectedMediaData,
   uuid,
   messagePrice,
+  streamLabel,
   messageFundingReady,
 } from "./textingWorkspaceUi";
 import { prepareTextingAccess } from "./textingAccess";
@@ -140,6 +142,25 @@ export function createConversations(r) {
       }
     }
   }
+  function attachments(message, s) {
+    if (s.conversation?.stream !== "opt_in") return "";
+    return list(message.attachments)
+      .map((attachment) => {
+        const key = JSON.stringify([
+          String(message.messageId),
+          String(attachment.attachmentId),
+        ]);
+        const image = protectedMediaData(s.protectedAttachments?.[key]);
+        return image
+          ? `<img src="${e(image)}" alt="Message attachment" loading="lazy">`
+          : button("conversation-attachment", "View attachment", {
+              secondary: true,
+              disabled: r.busy(),
+              value: key,
+            });
+      })
+      .join("");
+  }
   function render() {
     const s = state(),
       c = s.conversation;
@@ -155,13 +176,19 @@ export function createConversations(r) {
       );
     if (!c) return "";
     const hold = r.sendHeld(`reply:${c.conversationId}`),
-      price = messagePrice(r.billing(), s.reply || ""),
+      price = messagePrice(r.billing(), s.reply || "", false, c.stream),
       canReply =
         r.workspace()?.canSend === true &&
         c.canReply === true &&
         !c.suppressed &&
         !hold &&
-        messageFundingReady(r.workspace(), r.billing(), s.reply || "");
+        messageFundingReady(
+          r.workspace(),
+          r.billing(),
+          s.reply || "",
+          false,
+          c.stream,
+        );
     return (
       head(
         "CONVERSATION",
@@ -183,10 +210,10 @@ export function createConversations(r) {
                 )
                 .join(
                   "",
-                )}<p>${e(message.content)}</p></div><small class="pt-muted">${message.direction === "outbound" ? "Sent" : "Received"} · ${e(when(message.createdAtMs))} · ${e(label(message.status))}</small></article>`,
+                )}${attachments(message, s)}<p>${e(message.content)}</p></div><small class="pt-muted">${message.direction === "outbound" ? "Sent" : "Received"} · ${e(when(message.createdAtMs))} · ${e(label(message.status))}</small></article>`,
           )
           .join("") || `<p class="pt-muted">No recorded messages yet.</p>`
-      }</div>${s.cursor ? button("conversations-more", "More messages", { secondary: true }) : ""}${c.suppressed ? notice("This person opted out", "Sending is blocked for this recipient.") : hold || c.replyState === "provider_outcome_unknown" ? notice("Reply needs review", "Do not resend. The saved outcome must be confirmed first.") : `<form data-workspace-form="reply">${textarea("reply", "Reply", s.reply || "", true)}<div class="pt-row"><span class="pt-muted">Text reply${r.can("manageBilling") ? ` · ${price === null ? "Rate unavailable" : money(price)}` : ""}</span><button class="pt-btn" type="submit"${!canReply || r.busy() ? " disabled" : ""}>Send reply</button></div>${!c.canReply ? `<p class="pt-muted">Replies are paused until this conversation is eligible for a response.</p>` : ""}</form>`}</section><aside class="pt-card"><h2>Contact details</h2><div class="pt-row"><span>Phone</span><strong>${e(c.phone)}</strong></div><div class="pt-row"><span>Texting status</span><strong>${c.suppressed ? "Opted out" : "No opt-out recorded"}</strong></div><p class="pt-muted">A reply does not establish written opt-in.</p>${c.canSuppress && !c.suppressed ? button("conversation-suppress", "Record opt-out", { secondary: true, disabled: r.busy() }) : ""}${c.suppressed && c.providerSyncState ? `<p class="pt-muted">Vendor opt-out: ${e(label(c.providerSyncState))}</p>` : ""}${c.canSyncSuppression ? button("conversation-sync", "Check vendor opt-out", { secondary: true, disabled: r.busy() }) : ""}${go("campaigns", "View campaign", c.campaignId, true)}</aside></div>`
+      }</div>${s.cursor ? button("conversations-more", "More messages", { secondary: true }) : ""}${c.suppressed ? notice("This person opted out", "Sending is blocked for this recipient.") : hold || c.replyState === "provider_outcome_unknown" ? notice("Reply needs review", "Do not resend. The saved outcome must be confirmed first.") : `<form data-workspace-form="reply">${textarea("reply", "Reply", s.reply || "", true)}<div class="pt-row"><span class="pt-muted">Text reply${r.can("manageBilling") ? ` · ${price === null ? "Rate unavailable" : rateMoney(price)}` : ""}</span><button class="pt-btn" type="submit"${!canReply || r.busy() ? " disabled" : ""}>Send reply</button></div>${!c.canReply ? `<p class="pt-muted">Replies are paused until this conversation is eligible for a response.</p>` : ""}</form>`}</section><aside class="pt-card"><h2>Contact details</h2>${c.stream ? `<p class="pt-muted">${e(streamLabel(c.stream))}${c.senderPhone || c.fromNumber ? ` · ${e(c.senderPhone || c.fromNumber)}` : ""}</p>` : ""}<div class="pt-row"><span>Phone</span><strong>${e(c.phone)}</strong></div><div class="pt-row"><span>Texting status</span><strong>${c.suppressed ? "Opted out" : "No opt-out recorded"}</strong></div><p class="pt-muted">A reply does not establish written opt-in.</p>${c.canSuppress && !c.suppressed ? button("conversation-suppress", "Record opt-out", { secondary: true, disabled: r.busy() }) : ""}${c.suppressed && c.providerSyncState ? `<p class="pt-muted">Vendor opt-out: ${e(label(c.providerSyncState))}</p>` : ""}${c.canSyncSuppression ? button("conversation-sync", "Check vendor opt-out", { secondary: true, disabled: r.busy() }) : ""}${go("campaigns", "View campaign", c.campaignId, true)}</aside></div>`
     );
   }
   async function submit(kind, form) {
@@ -202,7 +229,7 @@ export function createConversations(r) {
       c.suppressed ||
       r.sendHeld(key) ||
       !r.workspace()?.canSend ||
-      !messageFundingReady(r.workspace(), r.billing(), content)
+      !messageFundingReady(r.workspace(), r.billing(), content, false, c.stream)
     )
       throw new Error(
         "This reply is not eligible to send. Check the saved status.",
@@ -233,9 +260,33 @@ export function createConversations(r) {
     await refresh(c.conversationId);
     return true;
   }
-  async function action(name) {
+  async function action(name, value) {
     const s = state(),
       c = s.conversation;
+    if (name === "conversation-attachment") {
+      const [messageId, attachmentId] = JSON.parse(value);
+      const message = list(s.messages).find(
+        (entry) => String(entry.messageId) === messageId,
+      );
+      if (
+        c?.stream !== "opt_in" ||
+        !/^[A-Za-z0-9_-]{1,100}$/.test(messageId) ||
+        !/^\d{1,2}$/.test(attachmentId) ||
+        !list(message?.attachments).some(
+          (entry) => String(entry.attachmentId) === attachmentId,
+        )
+      )
+        throw new Error("Attachment is unavailable.");
+      const result = await r.api(
+        `/conversations/${id(c.conversationId)}/messages/${id(messageId)}/attachments/${id(attachmentId)}`,
+      );
+      r.guard();
+      if (!protectedMediaData(result.media))
+        throw new Error("Attachment is unavailable.");
+      s.protectedAttachments ||= {};
+      s.protectedAttachments[value] = result.media;
+      return true;
+    }
     if (name === "conversations-refresh" || name === "conversations-more") {
       if (name === "conversations-refresh" && r.context().resourceId) {
         s.sendStatusNeedsRead = true;

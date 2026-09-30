@@ -29,6 +29,16 @@ const columns = [
   ["sourceId", "Voter / source ID"],
   ["consentStatus", "Consent status"],
 ];
+const evidenceColumns = [
+  ["consentedAt", "Opt-in date and time"],
+  ["acquisitionMethod", "How opt-in was collected"],
+  ["disclosureText", "Consent wording"],
+  ["proofReference", "Evidence reference"],
+  ["senderScopeKey", "Organization scope"],
+  ["sourceRecordId", "Consent source record"],
+  ["smsSpecific", "SMS-specific consent"],
+  ["messagingPurpose", "Consent purpose (political)"],
+];
 const bytes = (n) =>
   Number.isSafeInteger(n) ? `${(n / 1048576).toFixed(1)} MB` : "—";
 const transferMessages = {
@@ -406,7 +416,7 @@ export function createContacts(r) {
   function mappingForm(s) {
     const map = s.mapping,
       options = [["", "Not mapped"], ...list(map.headers).map((v) => [v, v])];
-    return `<form data-workspace-form="mapping" class="pt-card"><div class="pt-eyebrow">STEP 2 OF 3</div><h2>Match your columns</h2><p class="pt-muted">Pick the mobile number column. Map First name and Last name for the names sent to Prompt.io. Full name can also be retained for local review, but cannot replace those fields for a vendor transfer. Names are not inferred from phone numbers.</p><p class="pt-muted">For L2 exports, use VoterTelephones_CellPhoneFormatted, Voters_FirstName and Voters_LastName when those columns are present.</p><div class="pt-fields">${columns.map(([key, title]) => select(`column_${key}`, title, options, map.fields?.[key] || "", key === "phone")).join("")}</div>${details(
+    return `<form data-workspace-form="mapping" class="pt-card"><div class="pt-eyebrow">STEP 2 OF 3</div><h2>Match your columns</h2><p class="pt-muted">Pick the mobile number column. Map First name and Last name for the names sent to Prompt.io. Full name can also be retained for local review, but cannot replace those fields for a vendor transfer. Names are not inferred from phone numbers.</p><p class="pt-muted">For L2 exports, use VoterTelephones_CellPhoneFormatted, Voters_FirstName and Voters_LastName when those columns are present.</p><div class="pt-fields">${columns.map(([key, title]) => select(`column_${key}`, title, options, map.fields?.[key] || "", key === "phone")).join("")}</div>${r.workspace()?.capabilities?.neutralWorkspaceApi === true || r.workspace()?.contractVersion === 2 ? details("Recorded opt-in (optional)", `<p class="pt-muted">Map the evidence behind an opt-in. A consent label alone does not verify permission.</p><div class="pt-fields">${evidenceColumns.map(([key, title]) => select(`column_${key}`, title, options, map.fields?.[key] || "")).join("")}</div>`) : ""}${details(
       "Source and consent",
       `<div class="pt-fields">${sourceFields(map.source)}${select(
         "defaultCountryCode",
@@ -553,7 +563,13 @@ export function createContacts(r) {
     const d = new FormData(form),
       fields = {},
       consentValues = {};
-    for (const [name] of columns)
+    const supportsEvidence =
+      r.workspace()?.capabilities?.neutralWorkspaceApi === true ||
+      r.workspace()?.contractVersion === 2;
+    for (const [name] of [
+      ...columns,
+      ...(supportsEvidence ? evidenceColumns : []),
+    ])
       if (d.get(`column_${name}`)) fields[name] = d.get(`column_${name}`);
     for (const [key, status] of [
       ["consentIn", "opted_in"],
