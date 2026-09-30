@@ -1045,7 +1045,7 @@ function renderWebShellPage({
     <meta name="twitter:description" content="${escapeAttribute(safeDescription)}" />
     <link rel="canonical" href="${escapeAttribute(canonicalUrl)}" />
     <link rel="icon" type="image/png" href="/Polis.png" />
-    <link rel="stylesheet" href="/css/shared-feed.css?v=contact-book-14a593af" />
+    <link rel="stylesheet" href="/css/shared-feed.css?v=contact-book-performance-8b1f511" />
     ${extraMeta}
     <style>
       :root {
@@ -1173,7 +1173,7 @@ function renderWebShellPage({
       window.__POLIS_WEB_APP__ = ${inlineConfig};
       window.__POLIS_SHARED_FEED__ = window.__POLIS_WEB_APP__;
     </script>
-    <script defer src="/scripts/shared-feed.js?v=contact-book-14a593af"></script>
+    <script defer src="/scripts/shared-feed.js?v=contact-book-performance-8b1f511"></script>
     <noscript>
       <div class="shared-feed-shell-fallback">
         <div class="shared-feed-shell-fallback__card">
