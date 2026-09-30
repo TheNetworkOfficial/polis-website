@@ -604,6 +604,141 @@ function importHarness(api) {
   };
 }
 
+test("contact review loads real names and phones with bounded read-only pagination", async () => {
+  const calls = [];
+  const job = {
+    ...importJob("staged", 3),
+    progress: { rowsStaged: 50355, rowsRejected: 0, partitionsPrepared: 3 },
+    actions: { canReadRecords: true, canReadReports: true },
+  };
+  const first = {
+    recordNumber: 2,
+    name: "Example <Contact>",
+    phone: "+12025550124",
+    included: true,
+    status: "included",
+    reasons: [],
+  };
+  const second = {
+    recordNumber: 52,
+    name: null,
+    phone: "+12025550125",
+    included: false,
+    status: "duplicate",
+    reasons: ["duplicate_phone"],
+  };
+  const h = importHarness(async (path, body) => {
+    calls.push({ path, body });
+    if (path === "/imports/import-one") return { import: job };
+    if (path === "/imports/import-one/records?limit=50")
+      return { rows: [first], nextCursor: "fixture.cursor", canSend: false };
+    if (path === "/imports/import-one/records?limit=50&cursor=fixture.cursor")
+      return { rows: [second], nextCursor: null, canSend: false };
+    if (path === "/imports/import-one/report")
+      return { rows: [], nextCursor: "issues.cursor" };
+    if (path === "/imports/import-one/report?cursor=issues.cursor")
+      return {
+        rows: [{ recordNumber: 99, code: "invalid_phone" }],
+        nextCursor: null,
+      };
+    assert.fail(`Unexpected fixture path: ${path}`);
+  });
+  await h.page.load("import-one");
+  let html = h.page.render();
+  assert.match(html, /Example &lt;Contact&gt;/);
+  assert.match(html, /\+12025550124/);
+  assert.match(html, /Included in staged list/);
+  assert.match(html, /Rows processed/);
+  assert.match(html, /Local batches/);
+  assert.doesNotMatch(html, /<h2>Import issues<\/h2>/);
+  await h.page.action("records-next");
+  html = h.page.render();
+  assert.match(html, /No mapped name/);
+  assert.match(html, /Duplicate source row/);
+  assert.match(html, /duplicate phone/);
+  assert.doesNotMatch(html, /Example &lt;Contact&gt;/);
+  assert.equal(h.view.contacts.records.rows.length, 1);
+  await h.page.action("records-previous");
+  assert.equal(h.view.contacts.records.rows[0].recordNumber, 2);
+  await h.page.action("import-report");
+  html = h.page.render();
+  assert.match(html, /No issues in the checked part/);
+  assert.match(html, /Check next part/);
+  assert.match(html, /Example &lt;Contact&gt;/);
+  await h.page.action("import-report-more");
+  assert.match(h.page.render(), /invalid phone/);
+  assert.equal(
+    calls.every((call) => call.body === undefined),
+    true,
+  );
+  h.page.dispose();
+});
+
+test("contact records fail visibly without replacing the previous page or starting preparation", async () => {
+  let fail = false;
+  const calls = [];
+  const job = { ...importJob("staged", 3), actions: { canReadRecords: true } };
+  const h = importHarness(async (path, body) => {
+    calls.push({ path, body });
+    if (path === "/imports/import-one") return { import: job };
+    if (fail) throw new TypeError("fixture read interrupted");
+    return {
+      rows: [
+        {
+          recordNumber: 2,
+          name: "Example Person",
+          phone: "+12025550124",
+          included: true,
+          status: "included",
+          reasons: [],
+        },
+      ],
+      nextCursor: "fixture.next",
+      canSend: false,
+    };
+  });
+  await h.page.load("import-one");
+  fail = true;
+  await h.page.action("records-next");
+  assert.match(h.page.render(), /Contact review unavailable/);
+  assert.match(h.page.render(), /Example Person/);
+  assert.equal(h.view.contacts.records.cursor, null);
+  assert.equal(
+    calls.every(
+      (call) => call.body === undefined && !call.path.includes("provider-sync"),
+    ),
+    true,
+  );
+  h.page.dispose();
+});
+
+test("contact review rejects an unexpected response and drops late results after disposal", async () => {
+  const job = { ...importJob("staged", 3), actions: { canReadRecords: true } };
+  const malformed = importHarness(async (path) =>
+    path === "/imports/import-one"
+      ? { import: job }
+      : { rows: [], canSend: true },
+  );
+  await malformed.page.load("import-one");
+  assert.match(malformed.page.render(), /Contact review unavailable/);
+  assert.equal(malformed.view.contacts.records, undefined);
+  malformed.page.dispose();
+  let finish;
+  const late = importHarness(async (path) =>
+    path === "/imports/import-one"
+      ? { import: job }
+      : new Promise((resolve) => {
+          finish = resolve;
+        }),
+  );
+  const pending = late.page.load("import-one");
+  await flush();
+  late.page.dispose();
+  finish({ rows: [], nextCursor: null, canSend: false });
+  await pending;
+  assert.equal(late.view.contacts.records, undefined);
+});
+
 test("import keeps a stable starting view and recovers a failed status read without another POST", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const calls = [];
@@ -715,16 +850,39 @@ test("a disposed import cannot replace saved state with a late status response",
   assert.equal(h.view.contacts.job.status, "awaiting_mapping");
 });
 
-test("a lost preparation response reconciles by reads without another contact transfer", async (t) => {
+const transferProposal = () => ({
+  proposalId: "fixture-proposal",
+  expiresAtMs: Date.now() + 600000,
+  manifestSha256: "a".repeat(64),
+  mappingDigest: "b".repeat(64),
+  recipientCount: 50347,
+  includeNames: true,
+  mappedNameFields: {
+    firstName: "Voters_FirstName",
+    lastName: "Voters_LastName",
+  },
+  provider: {
+    orgId: 321,
+    bindingId: "primary",
+    bindingVersion: 3,
+    connectionIdentitySha256: "c".repeat(64),
+  },
+});
+
+test("a lost approved preparation response reconciles by reads without another contact transfer", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
-  const oldWindow = globalThis.window;
-  globalThis.window = { confirm: () => true };
-  t.after(() => {
-    globalThis.window = oldWindow;
-  });
   const job = { ...importJob("staged", 3), audienceId: "audience-one" };
+  const proposal = transferProposal();
   const view = {
-    contacts: { job, transfer: { state: "not_started", canAdvance: true } },
+    contacts: {
+      job,
+      transfer: {
+        state: "not_started",
+        canAdvance: true,
+        approvalProposal: proposal,
+        blockedReasons: ["prompt_provider_transfer_approval_required"],
+      },
+    },
   };
   const calls = [];
   let transferReads = 0;
@@ -760,9 +918,23 @@ test("a lost preparation response reconciles by reads without another contact tr
     },
   });
   await page.action("transfer-start");
+  assert.equal(calls.length, 0);
+  page.change({
+    dataset: { workspaceChange: "transfer-approved" },
+    checked: true,
+  });
+  await page.action("transfer-approve");
+  assert.deepEqual(calls[0].body, {
+    approval: {
+      approved: true,
+      proposalId: proposal.proposalId,
+      expiresAtMs: proposal.expiresAtMs,
+      includeNames: true,
+    },
+  });
   assert.match(page.render(), /Checking list preparation/);
   assert.doesNotMatch(page.render(), /Failed to fetch/);
-  await assert.rejects(page.action("transfer-start"), /Refresh/);
+  await assert.rejects(page.action("transfer-approve"), /Review/);
   t.mock.timers.tick(5000);
   await flush();
   assert.equal(view.contacts.transfer.state, "in_progress");
@@ -775,6 +947,152 @@ test("a lost preparation response reconciles by reads without another contact tr
   await flush();
   assert.equal(calls.filter((c) => c.body).length, 1);
   assert.equal(calls.length, 5);
+  page.dispose();
+});
+
+test("transfer review, unchecked approval, dismissal and stale proposals cannot write", async () => {
+  const job = { ...importJob("staged", 3), audienceId: "audience-one" };
+  let proposal = transferProposal();
+  const view = {
+    contacts: {
+      job,
+      transfer: {
+        state: "not_started",
+        canAdvance: true,
+        approvalProposal: proposal,
+        blockedReasons: ["prompt_provider_transfer_approval_required"],
+      },
+    },
+  };
+  const calls = [];
+  const page = createContacts({
+    view: () => view,
+    context: () => ({
+      resourceId: job.importId,
+      organizationName: "Example Civic Team",
+    }),
+    can: () => true,
+    busy: () => false,
+    changed: () => {},
+    guard: () => {},
+    api: async (path, body) => {
+      calls.push({ path, body });
+      return {
+        transfer: {
+          state: "not_started",
+          canAdvance: true,
+          approvalProposal: proposal,
+        },
+      };
+    },
+  });
+  await page.action("transfer-start");
+  let html = page.render();
+  assert.match(html, /Transfer 50,347 contacts/);
+  assert.match(html, /Example Civic Team/);
+  assert.match(html, /Prompt.io.*organization 321/);
+  assert.match(html, /Voters_FirstName/);
+  assert.match(html, /Review and approve the transfer on the website/);
+  assert.match(html, /data-workspace-action="transfer-approve"[^>]*disabled/);
+  await assert.rejects(page.action("transfer-approve"), /approval checkbox/);
+  page.change({
+    dataset: { workspaceChange: "transfer-approved" },
+    checked: true,
+  });
+  await page.action("transfer-dismiss");
+  await assert.rejects(page.action("transfer-approve"), /approval checkbox/);
+  await page.action("transfer-start");
+  page.change({
+    dataset: { workspaceChange: "transfer-approved" },
+    checked: true,
+  });
+  proposal = { ...transferProposal(), proposalId: "fixture-new-proposal" };
+  await page.action("transfer-refresh");
+  assert.equal(view.contacts.approvalChecked, false);
+  await assert.rejects(page.action("transfer-approve"), /approval checkbox/);
+  await page.action("transfer-start");
+  page.change({
+    dataset: { workspaceChange: "transfer-approved" },
+    checked: true,
+  });
+  view.contacts.transfer.approvalProposal.expiresAtMs = Date.now() - 1;
+  await assert.rejects(page.action("transfer-approve"), /approval checkbox/);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].body, undefined);
+  page.dispose();
+});
+
+test("cancel preparation requires its own explicit action and does not submit approval", async () => {
+  const job = { ...importJob("staged", 3), audienceId: "audience-one" };
+  const view = {
+    contacts: {
+      job,
+      transfer: {
+        state: "in_progress",
+        canAdvance: false,
+        canCancel: true,
+        backgroundActive: true,
+      },
+    },
+  };
+  const calls = [];
+  const page = createContacts({
+    view: () => view,
+    context: () => ({ resourceId: job.importId }),
+    can: () => true,
+    busy: () => false,
+    changed: () => {},
+    guard: () => {},
+    api: async (path, body) => {
+      calls.push({ path, body });
+      return {
+        transfer: {
+          state: "reconciliation_hold",
+          canAdvance: false,
+          canCancel: false,
+        },
+      };
+    },
+  });
+  await assert.rejects(
+    page.action("transfer-cancel-confirm"),
+    /before canceling/,
+  );
+  await page.action("transfer-cancel");
+  assert.equal(calls.length, 0);
+  assert.match(page.render(), /does not delete contacts already stored/);
+  await page.action("transfer-cancel-confirm");
+  assert.deepEqual(calls, [
+    { path: "/audiences/audience-one/provider-sync/cancel", body: {} },
+  ]);
+  assert.match(page.render(), /Preparation is on hold/);
+  assert.doesNotMatch(page.render(), /Approval required before transfer/);
+  page.dispose();
+});
+
+test("stalled preparation is shown as needing attention rather than running", () => {
+  const view = {
+    contacts: {
+      job: { ...importJob("staged", 3), audienceId: "audience-one" },
+      transfer: {
+        state: "in_progress",
+        canAdvance: false,
+        canCancel: true,
+        backgroundActive: true,
+        backgroundStalled: true,
+        backgroundError: "prompt_provider_transfer_stalled",
+      },
+    },
+  };
+  const page = createContacts({
+    view: () => view,
+    context: () => ({ resourceId: view.contacts.job.importId }),
+    can: () => true,
+    busy: () => false,
+  });
+  assert.match(page.render(), /Preparation has stopped progressing/);
+  assert.doesNotMatch(page.render(), /Preparation is running/);
+  assert.match(page.render(), /Cancel preparation/);
   page.dispose();
 });
 

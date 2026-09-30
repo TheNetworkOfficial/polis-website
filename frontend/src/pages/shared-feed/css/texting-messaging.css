@@ -118,6 +118,9 @@
   letter-spacing: 0.08em;
   color: var(--polis-text-muted);
 }
+.pt-workspace-contact-table {
+  min-width: 640px;
+}
 .pt-workspace-thread {
   display: flex;
   flex-direction: column;

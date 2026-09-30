@@ -12,7 +12,6 @@ import {
   select,
   notice,
   details,
-  reasons,
   uuid,
 } from "./textingWorkspaceUi";
 
@@ -32,6 +31,29 @@ const columns = [
 ];
 const bytes = (n) =>
   Number.isSafeInteger(n) ? `${(n / 1048576).toFixed(1)} MB` : "—";
+const transferMessages = {
+  prompt_provider_transfer_approval_required:
+    "Review and approve the transfer on the website",
+  prompt_provider_transfer_approval_changed:
+    "The transfer details changed. Refresh preparation status and review them again",
+  prompt_provider_mapped_names_required:
+    "Map First name and Last name before preparing this list for Prompt.io",
+  prompt_provider_transfer_reconciliation_required:
+    "Existing contacts at Prompt.io need review before this list can be transferred again",
+  prompt_provider_names_mismatch:
+    "Mapped names differ from the contacts at Prompt.io. Preparation is on hold for review",
+  prompt_provider_transfer_cancelled:
+    "Preparation was canceled. Contacts already transferred remain at Prompt.io until removed separately",
+  prompt_provider_upload_removed:
+    "The unapproved upload was removed from Prompt.io. Contacts remain in Polis. Review and approve a new transfer when ready.",
+  prompt_provider_contact_erasure_required:
+    "Prompt.io must confirm removal of the retained contact records before this list can be transferred again.",
+  prompt_provider_transfer_stalled:
+    "The queued preparation step has not advanced",
+  prompt_provider_transfer_dispatch_failed:
+    "The next preparation step could not be queued. Refresh to check the saved status",
+};
+const transferReason = (code) => transferMessages[code] || label(code);
 const sourceFields = (source = {}) =>
   `${field("sourceName", "List source", source.name || "", { required: true, extra: 'placeholder="L2, VAN, state voter file…"' })}${field("namespace", "Source namespace", source.namespace || "", { required: true, extra: 'placeholder="Provider + state + export year"' })}${select("purpose", "Permitted use", purposes, source.permittedPurpose || "unreviewed")}`;
 const sourceOf = (data) => ({
@@ -147,6 +169,46 @@ export function createContacts(r) {
     disposed = true;
     clearTimeout(pollTimer);
   }
+  function setTransfer(s, transfer) {
+    s.transfer = transfer;
+    if (
+      s.approvalProposalId !== transfer?.approvalProposal?.proposalId ||
+      !approvalProposal(s)
+    ) {
+      s.approvalOpen = false;
+      s.approvalChecked = false;
+      s.approvalProposalId = null;
+    }
+    if (transfer?.canCancel !== true) s.cancelPreparationOpen = false;
+  }
+  function approvalProposal(s) {
+    const proposal = s.transfer?.approvalProposal;
+    return proposal &&
+      typeof proposal.proposalId === "string" &&
+      proposal.proposalId.length > 0 &&
+      Number.isSafeInteger(proposal.expiresAtMs) &&
+      proposal.expiresAtMs > Date.now() &&
+      Number.isSafeInteger(proposal.recipientCount) &&
+      proposal.recipientCount > 0 &&
+      proposal.includeNames === true &&
+      /^[a-f0-9]{64}$/.test(proposal.manifestSha256 || "") &&
+      /^[a-f0-9]{64}$/.test(proposal.mappingDigest || "") &&
+      proposal.mappedNameFields &&
+      !Array.isArray(proposal.mappedNameFields) &&
+      ["firstName", "lastName"].some(
+        (key) =>
+          typeof proposal.mappedNameFields[key] === "string" &&
+          proposal.mappedNameFields[key].length > 0,
+      ) &&
+      Number.isSafeInteger(proposal.provider?.orgId) &&
+      proposal.provider.orgId > 0 &&
+      typeof proposal.provider.bindingId === "string" &&
+      Number.isSafeInteger(proposal.provider.bindingVersion) &&
+      proposal.provider.bindingVersion > 0 &&
+      /^[a-f0-9]{64}$/.test(proposal.provider.connectionIdentitySha256 || "")
+      ? proposal
+      : null;
+  }
   const needsUpdate = (s) =>
     s.checkingSubmission ||
     s.transferNeedsRead ||
@@ -197,12 +259,106 @@ export function createContacts(r) {
       s.reviewed = false;
     }
     if (!s.preview) s.mapping = structuredClone(job.mapping || {});
+    if (job.actions?.canReadRecords && s.records?.importId !== resource)
+      await readRecords(resource);
     if (job.audienceId && r.can("canPrepareProviderAudience")) {
-      s.transfer = (
-        await r.api(`/audiences/${id(job.audienceId)}/provider-sync`)
-      ).transfer;
+      setTransfer(
+        s,
+        (await r.api(`/audiences/${id(job.audienceId)}/provider-sync`))
+          .transfer,
+      );
       s.transferNeedsRead = false;
     }
+  }
+  async function readRecords(resource, cursor = null, previousCursors = []) {
+    const s = state();
+    s.recordsLoading = true;
+    s.recordsError = null;
+    r.changed();
+    try {
+      const result = await r.api(
+        `/imports/${id(resource)}/records?limit=50${cursor ? `&cursor=${id(cursor)}` : ""}`,
+      );
+      if (disposed) return;
+      if (
+        result.canSend !== false ||
+        !Array.isArray(result.rows) ||
+        result.rows.length > 50 ||
+        (result.nextCursor != null && typeof result.nextCursor !== "string") ||
+        result.rows.some(
+          (row) =>
+            !Number.isSafeInteger(row.recordNumber) ||
+            row.recordNumber < 1 ||
+            (row.name != null && typeof row.name !== "string") ||
+            (row.phone != null && typeof row.phone !== "string") ||
+            typeof row.included !== "boolean" ||
+            !["included", "excluded", "duplicate", "invalid"].includes(
+              row.status,
+            ) ||
+            row.included !== (row.status === "included") ||
+            !Array.isArray(row.reasons) ||
+            row.reasons.some((reason) => typeof reason !== "string"),
+        )
+      )
+        throw new Error("The saved contact records could not be verified.");
+      s.records = {
+        importId: resource,
+        rows: result.rows,
+        cursor,
+        previousCursors,
+        nextCursor: result.nextCursor,
+      };
+    } catch (error) {
+      if (disposed) return;
+      if (error?.status === 401 || error?.status === 403) throw error;
+      s.recordsError =
+        "Contact records could not be loaded. Your import is preserved. Use Refresh contacts to try again.";
+    } finally {
+      if (!disposed) {
+        s.recordsLoading = false;
+        r.changed();
+      }
+    }
+  }
+  function recordsPanel(s) {
+    if (!s.job.actions?.canReadRecords) return "";
+    const records = s.records,
+      busy = r.busy() || s.recordsLoading,
+      statusLabels = {
+        included: "Included in staged list",
+        excluded: "Not included",
+        duplicate: "Duplicate source row",
+        invalid: "Invalid record",
+      };
+    return `<section class="pt-card"><div class="pt-row"><h2>Contact review</h2>${button("records-refresh", "Refresh contacts", { secondary: true, disabled: busy })}</div><p class="pt-muted">Actual imported records. Inclusion in the staged list does not approve a transfer or send a message.</p>${s.recordsError ? notice("Contact review unavailable", s.recordsError) : ""}${s.recordsLoading ? '<p role="status">Loading contact records…</p>' : ""}${records ? `<p class="pt-muted">Page ${count(records.previousCursors.length + 1)} · ${count(records.rows.length)} records shown</p><div class="pt-workspace-table-wrap"><table class="pt-workspace-table pt-workspace-contact-table"><thead><tr><th>Row</th><th>Name</th><th>Phone</th><th>Status</th><th>Details</th></tr></thead><tbody>${records.rows.map((row) => `<tr><td>${e(row.recordNumber)}</td><td>${e(row.name || "No mapped name")}</td><td>${e(row.phone || "No valid phone")}</td><td>${e(statusLabels[row.status])}</td><td>${e(row.reasons.map(label).join(", ") || "—")}</td></tr>`).join("")}</tbody></table></div>${!records.rows.length ? '<p class="pt-muted">No contact records on this page.</p>' : ""}<div class="pt-actions">${button("records-previous", "Previous contacts", { secondary: true, disabled: busy || !records.previousCursors.length })}${button("records-next", "Next contacts", { secondary: true, disabled: busy || !records.nextCursor })}</div>` : ""}</section>`;
+  }
+  function transferPanel(s) {
+    if (!s.transfer) return "";
+    const transfer = s.transfer,
+      proposal = approvalProposal(s),
+      partitions = list(transfer.partitions),
+      blocked = [
+        ...new Set([
+          ...list(transfer.blockedReasons),
+          ...partitions.map((part) => part.blockedReason).filter(Boolean),
+          ...(transfer.backgroundError ? [transfer.backgroundError] : []),
+        ]),
+      ],
+      busy = r.busy() || s.transferNeedsRead,
+      organization =
+        r.billing?.()?.organizationName ||
+        r.context().organizationName ||
+        "this organization",
+      mapped = proposal?.mappedNameFields || {},
+      mappedNames = columns.filter(
+        ([key]) =>
+          ["firstName", "lastName", "fullName"].includes(key) && mapped[key],
+      );
+    return `<section class="pt-card"><div class="pt-row"><div><h2>${transfer.state === "verified" ? "List ready with vendor" : "Prepare list for texting"}</h2><p class="pt-muted">${e(label(transfer.state))}</p></div>${button("transfer-refresh", "Refresh preparation status", { secondary: true, disabled: r.busy() })}</div>${s.transferNeedsRead ? notice("Checking list preparation", "We are checking the saved result. Contacts will not be submitted again automatically.") : ""}<p class="pt-muted">Vendor verification is separate from local import processing. Each part contains at most 20,000 contacts. No messages are sent.</p>${partitions.map((part) => `<div class="pt-row"><span>Part ${e(part.partitionIndex + 1)}</span><span>${count(part.verifiedCount)} / ${count(part.contactCount)} verified</span></div>`).join("")}${transfer.backgroundStalled ? notice("Preparation has stopped progressing", "The last queued step has not advanced. Refresh preparation status to check for an update, or cancel preparation to stop future work.") : transfer.backgroundActive ? notice("Preparation is running", "Use Refresh preparation status to check saved progress.") : ""}${blocked.length ? notice("Preparation needs attention", blocked.map(transferReason).join(". ")) : ""}${transfer.state === "reconciliation_hold" ? notice("Preparation is on hold", "This list needs review before any further transfer. Refresh preparation status checks the saved result.") : transfer.state !== "verified" && !transfer.backgroundActive && !proposal ? notice("Approval required before transfer", "Refresh preparation status to load the current transfer review. No contacts will be transferred by opening or refreshing this page.") : ""}${button("transfer-start", "Review transfer", { disabled: transfer.canAdvance !== true || !proposal || busy })}${s.approvalOpen && proposal && s.approvalProposalId === proposal.proposalId ? `<section class="pt-card" aria-label="Review transfer approval"><h3>Approve this contact transfer</h3><p>Transfer ${count(proposal.recipientCount)} contacts to ${e(organization)}’s <strong>Prompt.io</strong> account, organization ${e(proposal.provider.orgId)}.</p><p>Data included: <strong>mapped names and mobile phone numbers</strong>.</p><p class="pt-muted">${mappedNames.length ? mappedNames.map(([key, title]) => `${e(title)}: ${e(mapped[key])}`).join(" · ") : "No name columns are mapped. Contacts without a mapped name will remain unnamed."}</p><p>This transfers the reviewed list to the vendor. It does not send any text messages.</p><label class="pt-workspace-check"><input type="checkbox" data-workspace-change="transfer-approved"${s.approvalChecked ? " checked" : ""}${busy ? " disabled" : ""}>I approve transferring these ${count(proposal.recipientCount)} contacts, including mapped names and phone numbers, to Prompt.io organization ${e(proposal.provider.orgId)}.</label><div class="pt-actions">${button("transfer-approve", "Approve transfer to Prompt.io", { disabled: busy || !s.approvalChecked || transfer.canAdvance !== true })}${button("transfer-dismiss", "Not now", { secondary: true, disabled: r.busy() })}</div></section>` : ""}</section>`;
+  }
+  function cancelPreparationPanel(s) {
+    if (s.transfer?.canCancel !== true) return "";
+    return `<section class="pt-card">${button("transfer-cancel", "Cancel preparation", { secondary: true, disabled: r.busy() || s.transferNeedsRead })}${s.cancelPreparationOpen ? `<div role="group" aria-label="Confirm preparation cancellation"><p>Stop future preparation work for this list? This does not delete contacts already stored with Prompt.io.</p><div class="pt-actions">${button("transfer-cancel-confirm", "Yes, cancel preparation", { disabled: r.busy() || s.transferNeedsRead })}${button("transfer-cancel-dismiss", "Keep preparation", { secondary: true, disabled: r.busy() })}</div></div>` : ""}</section>`;
   }
   async function refreshImport(resource) {
     if (refreshing || disposed) return;
@@ -250,7 +406,7 @@ export function createContacts(r) {
   function mappingForm(s) {
     const map = s.mapping,
       options = [["", "Not mapped"], ...list(map.headers).map((v) => [v, v])];
-    return `<form data-workspace-form="mapping" class="pt-card"><div class="pt-eyebrow">STEP 2 OF 3</div><h2>Match your columns</h2><p class="pt-muted">Pick the mobile number column. Map other fields you want to keep.</p><div class="pt-fields">${columns.map(([key, title]) => select(`column_${key}`, title, options, map.fields?.[key] || "", key === "phone")).join("")}</div>${details(
+    return `<form data-workspace-form="mapping" class="pt-card"><div class="pt-eyebrow">STEP 2 OF 3</div><h2>Match your columns</h2><p class="pt-muted">Pick the mobile number column. Map First name and Last name for the names sent to Prompt.io. Full name can also be retained for local review, but cannot replace those fields for a vendor transfer. Names are not inferred from phone numbers.</p><p class="pt-muted">For L2 exports, use VoterTelephones_CellPhoneFormatted, Voters_FirstName and Voters_LastName when those columns are present.</p><div class="pt-fields">${columns.map(([key, title]) => select(`column_${key}`, title, options, map.fields?.[key] || "", key === "phone")).join("")}</div>${details(
       "Source and consent",
       `<div class="pt-fields">${sourceFields(map.source)}${select(
         "defaultCountryCode",
@@ -279,13 +435,13 @@ export function createContacts(r) {
   }
   function preview(s) {
     const p = s.preview;
-    return `<section class="pt-card"><div class="pt-eyebrow">SAMPLE REVIEW</div><h2>Check before importing</h2><div class="pt-grid pt-grid--three">${stat("Sample records", count(p.totalRows))}${stat("Valid phones", count(p.counts?.validPhones))}${stat("Opted out", count(p.counts?.optedOut))}</div><div class="pt-workspace-table-wrap"><table class="pt-workspace-table"><thead><tr><th>Row</th><th>Phone</th><th>Consent</th><th>Result</th></tr></thead><tbody>${list(
+    return `<section class="pt-card"><div class="pt-eyebrow">SAMPLE REVIEW</div><h2>Check before importing</h2><div class="pt-grid pt-grid--three">${stat("Sample records", count(p.totalRows))}${stat("Valid phones", count(p.counts?.validPhones))}${stat("Opted out", count(p.counts?.optedOut))}</div><div class="pt-workspace-table-wrap"><table class="pt-workspace-table pt-workspace-contact-table"><thead><tr><th>Row</th><th>Name</th><th>Phone</th><th>Consent</th><th>Result</th></tr></thead><tbody>${list(
       p.rows,
     )
       .slice(0, 12)
       .map(
         (row) =>
-          `<tr><td>${e(row.recordNumber)}</td><td>${e(row.phone || "No phone")}</td><td>${e(label(row.consentStatus))}</td><td>${e(label(row.disposition))}</td></tr>`,
+          `<tr><td>${e(row.recordNumber)}</td><td>${e(row.name || "No mapped name")}</td><td>${e(row.phone || "No phone")}</td><td>${e(label(row.consentStatus))}</td><td>${e(label(row.disposition))}</td></tr>`,
       )
       .join(
         "",
@@ -371,7 +527,7 @@ export function createContacts(r) {
         ? `<section class="pt-card" role="status"><h2>${s.starting ? "Starting your import…" : "Checking your saved import…"}</h2><p class="pt-muted">${s.starting ? "Your reviewed columns are being saved. No messages are sent." : "The request may still be processing. We are checking its status without submitting it again."}</p>${!s.starting ? button("import-refresh", "Check status", { secondary: true, disabled: r.busy() }) : ""}</section>`
         : j.actions?.canReviewMapping
           ? mappingForm(s)
-          : `<div class="pt-grid pt-grid--three">${stat("Imported", count(j.progress?.rowsStaged))}${stat("Rejected", count(j.progress?.rowsRejected))}${stat("Batches prepared", count(j.progress?.partitionsPrepared))}</div><section class="pt-card"><div class="pt-row"><h2>${j.status === "staged" ? "Contacts imported" : j.status === "failed" ? "Import needs attention" : j.status === "cancelled" ? "Import canceled" : "Import progress"}</h2>${button("import-refresh", "Refresh", { secondary: true })}</div>${j.status === "uploading" ? `<progress class="pt-workspace-progress" value="${e(s.bytes || j.progress?.bytesUploaded || 0)}" max="${e(j.file.sizeBytes)}"></progress><p class="pt-muted">${bytes(s.bytes || j.progress?.bytesUploaded || 0)} of ${bytes(j.file.sizeBytes)}</p><label class="pt-field"><span>Select the original file to resume</span><input type="file" accept=".csv,.tsv,.txt" data-workspace-change="resume-file"></label>${button("upload-resume", "Resume upload", { disabled: !s.file || r.busy() })}${button("upload-stop", "Stop upload", { secondary: true, disabled: !r.busy() })}` : `<p class="pt-muted">${j.status === "staged" ? "Duplicates, invalid numbers and opt-outs have been checked. Preparing a list does not send messages." : j.status === "failed" ? "Processing stopped. Review the issue below before continuing." : j.status === "cancelled" ? "This import was canceled. These contacts will not be used for new campaigns." : "Processing continues in the background. This page checks for updates automatically."}</p>`}${j.error ? notice("Import needs attention", label(j.error.code)) : ""}<div class="pt-actions">${j.actions?.canComplete ? button("import-complete", "Finish upload") : ""}${j.actions?.canRetry && (!processing.has(j.status) || j.error || s.updatesPaused) ? button("import-retry", "Resume processing", { secondary: true }) : ""}${j.actions?.canRecover ? button("import-recover", "Recover processing", { secondary: true }) : ""}${j.actions?.canReadReports ? button("import-report", "Review records", { secondary: true }) : ""}${j.actions?.canCancel ? button("import-cancel", "Cancel import", { secondary: true }) : ""}</div></section>`) +
+          : `<div class="pt-grid pt-grid--three">${stat("Rows processed", count(j.progress?.rowsStaged))}${stat("Rows rejected", count(j.progress?.rowsRejected))}${stat("Local batches", count(j.progress?.partitionsPrepared))}</div><section class="pt-card"><div class="pt-row"><h2>${j.status === "staged" ? "Contacts imported" : j.status === "failed" ? "Import needs attention" : j.status === "cancelled" ? "Import canceled" : "Import progress"}</h2>${button("import-refresh", "Refresh", { secondary: true })}</div>${j.status === "uploading" ? `<progress class="pt-workspace-progress" value="${e(s.bytes || j.progress?.bytesUploaded || 0)}" max="${e(j.file.sizeBytes)}"></progress><p class="pt-muted">${bytes(s.bytes || j.progress?.bytesUploaded || 0)} of ${bytes(j.file.sizeBytes)}</p><label class="pt-field"><span>Select the original file to resume</span><input type="file" accept=".csv,.tsv,.txt" data-workspace-change="resume-file"></label>${button("upload-resume", "Resume upload", { disabled: !s.file || r.busy() })}${button("upload-stop", "Stop upload", { secondary: true, disabled: !r.busy() })}` : `<p class="pt-muted">${j.status === "staged" ? "Local processing is complete. Review the contacts below. Vendor preparation is a separate approval step." : j.status === "failed" ? "Processing stopped. Review the issue below before continuing." : j.status === "cancelled" ? "This import was canceled. These contacts will not be used for new campaigns." : "Processing continues in the background. This page checks for updates automatically."}</p>`}${j.error ? notice("Import needs attention", label(j.error.code)) : ""}<div class="pt-actions">${j.actions?.canComplete ? button("import-complete", "Finish upload") : ""}${j.actions?.canRetry && (!processing.has(j.status) || j.error || s.updatesPaused) ? button("import-retry", "Resume processing", { secondary: true }) : ""}${j.actions?.canRecover ? button("import-recover", "Recover processing", { secondary: true }) : ""}${j.actions?.canReadReports ? button("import-report", "Review import issues", { secondary: true }) : ""}${j.actions?.canCancel ? button("import-cancel", "Cancel import", { secondary: true }) : ""}</div></section>`) +
       (s.refreshError || s.updatesPaused
         ? notice(
             s.updatesPaused
@@ -385,20 +541,11 @@ export function createContacts(r) {
       (s.updatesPaused && s.checkingSubmission && j.actions?.canReviewMapping
         ? `<section class="pt-card"><p class="pt-muted">No saved import start has been confirmed. Reopen the saved mapping to review it before submitting again.</p>${button("reload", "Review saved mapping", { secondary: true })}</section>`
         : "") +
-      (s.transfer
-        ? `<section class="pt-card"><div class="pt-row"><div><h2>${s.transfer.state === "verified" ? "List ready with vendor" : "Prepare list for texting"}</h2><p class="pt-muted">${e(label(s.transfer.state))}</p></div>${button("transfer-refresh", "Refresh", { secondary: true })}</div>${s.transferNeedsRead ? notice("Checking list preparation", "We are checking the saved result. Contacts will not be submitted again automatically.") : ""}<p class="pt-muted">Each part contains at most 20,000 contacts. No messages are sent.</p>${list(
-            s.transfer.partitions,
-          )
-            .map(
-              (p) =>
-                `<div class="pt-row"><span>Part ${e(p.partitionIndex + 1)}</span><span>${count(p.verifiedCount)} / ${count(p.contactCount)} verified</span></div>`,
-            )
-            .join(
-              "",
-            )}${button("transfer-start", "Prepare contacts", { disabled: s.transfer.canAdvance !== true || s.transferNeedsRead || r.busy() })}${reasons(s.transfer.blockedReasons)}</section>`
-        : "") +
+      recordsPanel(s) +
+      transferPanel(s) +
+      cancelPreparationPanel(s) +
       (s.report
-        ? `<section class="pt-card"><h2>Contact review</h2><div class="pt-workspace-table-wrap"><table class="pt-workspace-table"><thead><tr><th>Row</th><th>Result</th><th>Details</th></tr></thead><tbody>${s.report.rows.map((row) => `<tr><td>${e(row.recordNumber)}</td><td>${e(label(row.disposition || row.status))}</td><td>${e(list(row.reasons).map(label).join(", "))}</td></tr>`).join("")}</tbody></table></div>${s.report.nextCursor ? button("import-report-more", "More records", { secondary: true }) : ""}</section>`
+        ? `<section class="pt-card"><h2>Import issues</h2><p class="pt-muted">This report lists parsing and source-policy issues. The contact table above also shows duplicates and records excluded from the staged list.</p>${s.report.rows.length ? `<div class="pt-workspace-table-wrap"><table class="pt-workspace-table"><thead><tr><th>Row</th><th>Result</th><th>Details</th></tr></thead><tbody>${s.report.rows.map((row) => `<tr><td>${e(row.recordNumber)}</td><td>${e(label(row.disposition || row.status || "Issue"))}</td><td>${e([...new Set([...list(row.reasons), ...(row.code ? [row.code] : [])])].map(label).join(", "))}</td></tr>`).join("")}</tbody></table></div>` : `<p class="pt-muted">${s.report.nextCursor ? "No issues in the checked part of this import. Check the next part to continue." : "No import issues were reported."}</p>`}${s.report.nextCursor ? button("import-report-more", "Check next part", { secondary: true }) : ""}</section>`
         : "")
     );
   }
@@ -511,6 +658,24 @@ export function createContacts(r) {
       await refreshImport(j.importId);
       return true;
     }
+    if (
+      ["records-refresh", "records-next", "records-previous"].includes(name)
+    ) {
+      if (!j.actions?.canReadRecords || s.recordsLoading) return true;
+      const current = s.records;
+      if (name === "records-next") {
+        if (!current?.nextCursor) return true;
+        await readRecords(j.importId, current.nextCursor, [
+          ...current.previousCursors,
+          current.cursor,
+        ]);
+      } else if (name === "records-previous") {
+        if (!current?.previousCursors.length) return true;
+        const previous = [...current.previousCursors];
+        await readRecords(j.importId, previous.pop(), previous);
+      } else await readRecords(j.importId);
+      return true;
+    }
     if (name === "mapping-save") {
       if (!s.preview || !s.reviewed || !s.settings?.fields.phone)
         throw new Error("Review the mapping first.");
@@ -577,33 +742,106 @@ export function createContacts(r) {
       };
       return true;
     }
-    if (name === "transfer-refresh" || name === "transfer-start") {
-      const write = name === "transfer-start";
+    if (name === "transfer-dismiss") {
+      s.approvalOpen = false;
+      s.approvalChecked = false;
+      s.approvalProposalId = null;
+      return true;
+    }
+    if (name === "transfer-start") {
+      const proposal = approvalProposal(s);
+      if (
+        !r.can("canPrepareProviderAudience") ||
+        !s.transfer?.canAdvance ||
+        s.transferNeedsRead ||
+        !proposal
+      )
+        throw new Error(
+          "Refresh preparation status before reviewing this transfer.",
+        );
+      s.approvalOpen = true;
+      s.approvalChecked = false;
+      s.approvalProposalId = proposal.proposalId;
+      r.armExpiry?.(proposal.expiresAtMs);
+      return true;
+    }
+    if (name === "transfer-cancel") {
+      if (
+        !r.can("canPrepareProviderAudience") ||
+        s.transfer?.canCancel !== true ||
+        s.transferNeedsRead
+      )
+        throw new Error(
+          "Refresh preparation status to check whether it can be canceled.",
+        );
+      s.cancelPreparationOpen = true;
+      return true;
+    }
+    if (name === "transfer-cancel-dismiss") {
+      s.cancelPreparationOpen = false;
+      return true;
+    }
+    if (
+      [
+        "transfer-refresh",
+        "transfer-approve",
+        "transfer-cancel-confirm",
+      ].includes(name)
+    ) {
+      const write = name === "transfer-approve",
+        cancel = name === "transfer-cancel-confirm",
+        proposal = approvalProposal(s);
       if (
         write &&
         (!r.can("canPrepareProviderAudience") ||
           !s.transfer?.canAdvance ||
+          s.transferNeedsRead ||
+          !proposal ||
+          !s.approvalOpen ||
+          !s.approvalChecked ||
+          s.approvalProposalId !== proposal.proposalId)
+      )
+        throw new Error(
+          "Review the current transfer and select its approval checkbox first.",
+        );
+      if (
+        cancel &&
+        (!r.can("canPrepareProviderAudience") ||
+          s.transfer?.canCancel !== true ||
+          !s.cancelPreparationOpen ||
           s.transferNeedsRead)
       )
-        throw new Error("Refresh the list preparation status first.");
-      if (
-        write &&
-        !window.confirm(
-          "Prepare this reviewed list with your organization's texting vendor? This transfers contacts but sends no messages.",
-        )
-      )
-        return true;
+        throw new Error("Refresh preparation status before canceling.");
+      const body = write
+        ? {
+            approval: {
+              approved: true,
+              proposalId: proposal.proposalId,
+              expiresAtMs: proposal.expiresAtMs,
+              includeNames: true,
+            },
+          }
+        : cancel
+          ? {}
+          : undefined;
+      s.approvalOpen = false;
+      s.approvalChecked = false;
+      s.approvalProposalId = null;
+      s.cancelPreparationOpen = false;
       s.transferNeedsRead = true;
       pollReads = 0;
       s.updatesPaused = false;
       r.changed();
       try {
-        s.transfer = (
-          await r.api(
-            `/audiences/${id(j.audienceId)}/provider-sync`,
-            write ? {} : undefined,
-          )
-        ).transfer;
+        setTransfer(
+          s,
+          (
+            await r.api(
+              `/audiences/${id(j.audienceId)}/provider-sync${cancel ? "/cancel" : ""}`,
+              body,
+            )
+          ).transfer,
+        );
         s.transferNeedsRead = false;
       } catch (error) {
         r.guard();
@@ -632,6 +870,17 @@ export function createContacts(r) {
     }
     if (name === "mapping-reviewed") {
       s.reviewed = target.checked;
+      return true;
+    }
+    if (name === "transfer-approved") {
+      const proposal = approvalProposal(s);
+      s.approvalChecked = Boolean(
+        target.checked &&
+          s.approvalOpen &&
+          proposal &&
+          s.approvalProposalId === proposal.proposalId &&
+          !s.transferNeedsRead,
+      );
       return true;
     }
     if (target.closest('[data-workspace-form="mapping"]')) {
