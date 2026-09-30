@@ -90,7 +90,11 @@ export function createTextingWorkspacePage({
   }
   const can = (name) =>
     view.workspace?.status === "configured" &&
-    view.workspace.capabilities?.[name] === true &&
+    (view.workspace.capabilities?.[name] === true ||
+      (name === "manageBilling" &&
+        view.workspace.capabilities?.manageBilling === undefined &&
+        !view.neutralApi &&
+        view.billing?.canManageBilling === true)) &&
     (name !== "manageBilling" || view.billing?.canManageBilling === true);
   function fail(error) {
     if (error?.status === 401 || error?.status === 403) {

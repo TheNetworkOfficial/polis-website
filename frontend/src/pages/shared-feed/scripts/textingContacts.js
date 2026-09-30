@@ -415,7 +415,13 @@ export function createContacts(r) {
     const d = new FormData(form),
       fields = {},
       consentValues = {};
-    for (const [name] of [...columns, ...evidenceColumns])
+    const supportsEvidence =
+      r.workspace()?.capabilities?.neutralWorkspaceApi === true ||
+      r.workspace()?.contractVersion === 2;
+    for (const [name] of [
+      ...columns,
+      ...(supportsEvidence ? evidenceColumns : []),
+    ])
       if (d.get(`column_${name}`)) fields[name] = d.get(`column_${name}`);
     for (const [key, status] of [
       ["consentIn", "opted_in"],

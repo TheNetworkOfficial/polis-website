@@ -6,6 +6,14 @@ export async function prepareTextingAccess(
   wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 ) {
   if (!campaignId) throw new Error("Campaign access could not be verified.");
+  const workspace = r.workspace?.();
+  if (
+    workspace &&
+    workspace.contractVersion !== 2 &&
+    workspace.capabilities?.neutralWorkspaceApi !== true &&
+    workspace.capabilities?.canEnsureTexter !== true
+  )
+    return;
   state.preparingAccess = true;
   r.changed();
   try {

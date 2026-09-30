@@ -81,8 +81,15 @@ export function createCampaigns(r) {
       s.items = list(result.items);
       s.cursor = result.nextCursor;
     }
-    if (resource && section === "campaigns" && r.can("createCampaigns"))
-      s.schedule = (await r.api("/delivery-schedule")).schedule;
+    if (resource && section === "campaigns" && r.can("createCampaigns")) {
+      try {
+        s.schedule = (await r.api("/delivery-schedule")).schedule;
+      } catch (error) {
+        if (r.view().neutralApi || ![404, 410].includes(error?.status))
+          throw error;
+        s.scheduleUnsupported = true;
+      }
+    }
     if (
       (resource === "new" || (resource && section === "campaigns")) &&
       r.can("uploadImports")
@@ -96,6 +103,7 @@ export function createCampaigns(r) {
     return `<div class="pt-actions" aria-label="Campaign views">${["active", "paused", "archived"].map((value) => button("campaigns-view", value[0].toUpperCase() + value.slice(1), { value, secondary: value !== (s.listView || "active"), disabled: r.busy() })).join("")}</div><p class="pt-muted">${s.listView === "archived" ? "Archived campaigns keep their messages, results and history." : s.listView === "paused" ? "Paused campaigns keep their history and can be resumed when ready." : "Active campaigns and drafts ready for your next step."}</p>`;
   }
   function campaignHours(s) {
+    if (s.scheduleUnsupported) return "";
     const c = s.campaign;
     const editable =
       r.can("createCampaigns") &&
@@ -121,7 +129,7 @@ export function createCampaigns(r) {
         "opt_in",
       ),
       image = mediaData(s.media);
-    return `<div class="pt-grid pt-grid--two"><form class="pt-card" data-workspace-form="campaign"><div class="pt-fields">${field("name", "Campaign name", d.name, { required: true })}${select("audienceId", "Contact list", [["", "Choose a reviewed list"], ...list(s.audiences).map((a) => [a.audienceId, `${a.name} · ${count(a.destinationCount)}`]), ...(d.audienceId && !list(s.audiences).some((a) => a.audienceId === d.audienceId) ? [[d.audienceId, "Saved audience"]] : [])], d.audienceId || "", true)}${textarea("templateText", "Message", d.templateText || "", true)}${r.can("manageBilling") ? field("budget", "Spending limit ($)", d.budgetMicros ? (d.budgetMicros / 1000000).toFixed(2) : "", { type: "number", required: true, extra: 'min="0.01" step="0.01"' }) : ""}</div><p class="pt-muted">Include your organization name and “Reply STOP to opt out.” Use the complete message without merge fields.</p>${details("When can volunteers send?", `<div class="pt-fields">${field("deliveryStart", "From", localInput(d.deliveryNotBeforeMs), { type: "datetime-local", required: true })}${field("deliveryEnd", "Until", localInput(d.deliveryBeforeMs), { type: "datetime-local", required: true })}</div><p class="pt-muted">Your local time. This sets the allowed window; it does not schedule automatic sends.</p>`)}${scheduleFields(s.schedule, d.deliverySchedule, true)}<div class="pt-field"><label for="workspace-media">GIF or image (optional)</label><input id="workspace-media" type="file" accept="image/png,image/gif,.png,.gif" data-workspace-change="campaign-media"><p class="pt-muted">PNG or GIF · up to 512 KB</p></div>${d.mediaId ? `<div class="pt-row"><span>${e(label(s.media?.state || "Saved attachment"))}</span>${button("media-remove", "Remove", { secondary: true })}</div>${r.can("canPrepareProviderMedia") && s.media?.providerReady !== true ? button("media-prepare", "Prepare attachment", { secondary: true, disabled: s.mediaNeedsRead || r.busy() || !["local_ready", "provider_uploaded_pending_verification"].includes(s.media?.state) }) : ""}${s.mediaNeedsRead ? button("media-refresh", "Refresh attachment", { secondary: true }) : ""}` : ""}<div class="pt-actions"><button class="pt-btn" type="submit"${r.busy() ? " disabled" : ""}>Save campaign</button></div>${s.audienceCursor ? button("audiences-more", "Load more lists", { secondary: true }) : ""}</form><aside class="pt-card pt-workspace-preview"><div class="pt-eyebrow">MESSAGE PREVIEW</div><div class="pt-workspace-phone"><div class="pt-workspace-bubble">${image ? `<img src="${e(image)}" alt="Campaign attachment">` : ""}<p>${e(d.templateText || "Your message will appear here.")}</p></div></div><div class="pt-row"><span>${d.mediaId ? "MMS" : `SMS · ${smsSegments(d.templateText || "")} segment(s)`}</span>${r.can("manageBilling") ? `<strong>${price === null ? "Rate awaiting verification" : `${rateMoney(price)}${optInPrice === null ? " per message" : " standard"}`}</strong>` : ""}</div>${r.can("manageBilling") && optInPrice !== null ? `<div class="pt-row"><span>Opt-in message</span><strong>${rateMoney(optInPrice)}</strong></div>` : ""}<p class="pt-muted">Each person gets an individual send confirmation.</p></aside></div>`;
+    return `<div class="pt-grid pt-grid--two"><form class="pt-card" data-workspace-form="campaign"><div class="pt-fields">${field("name", "Campaign name", d.name, { required: true })}${select("audienceId", "Contact list", [["", "Choose a reviewed list"], ...list(s.audiences).map((a) => [a.audienceId, `${a.name} · ${count(a.destinationCount)}`]), ...(d.audienceId && !list(s.audiences).some((a) => a.audienceId === d.audienceId) ? [[d.audienceId, "Saved audience"]] : [])], d.audienceId || "", true)}${textarea("templateText", "Message", d.templateText || "", true)}${r.can("manageBilling") ? field("budget", "Spending limit ($)", d.budgetMicros ? (d.budgetMicros / 1000000).toFixed(2) : "", { type: "number", required: true, extra: 'min="0.01" step="0.01"' }) : ""}</div><p class="pt-muted">Include your organization name and “Reply STOP to opt out.” Use the complete message without merge fields.</p>${details("When can volunteers send?", `<div class="pt-fields">${field("deliveryStart", "From", localInput(d.deliveryNotBeforeMs), { type: "datetime-local", required: true })}${field("deliveryEnd", "Until", localInput(d.deliveryBeforeMs), { type: "datetime-local", required: true })}</div><p class="pt-muted">Your local time. This sets the allowed window; it does not schedule automatic sends.</p>`)}${s.scheduleUnsupported ? "" : scheduleFields(s.schedule, d.deliverySchedule, true)}<div class="pt-field"><label for="workspace-media">GIF or image (optional)</label><input id="workspace-media" type="file" accept="image/png,image/gif,.png,.gif" data-workspace-change="campaign-media"><p class="pt-muted">PNG or GIF · up to 512 KB</p></div>${d.mediaId ? `<div class="pt-row"><span>${e(label(s.media?.state || "Saved attachment"))}</span>${button("media-remove", "Remove", { secondary: true })}</div>${r.can("canPrepareProviderMedia") && s.media?.providerReady !== true ? button("media-prepare", "Prepare attachment", { secondary: true, disabled: s.mediaNeedsRead || r.busy() || !["local_ready", "provider_uploaded_pending_verification"].includes(s.media?.state) }) : ""}${s.mediaNeedsRead ? button("media-refresh", "Refresh attachment", { secondary: true }) : ""}` : ""}<div class="pt-actions"><button class="pt-btn" type="submit"${r.busy() ? " disabled" : ""}>Save campaign</button></div>${s.audienceCursor ? button("audiences-more", "Load more lists", { secondary: true }) : ""}</form><aside class="pt-card pt-workspace-preview"><div class="pt-eyebrow">MESSAGE PREVIEW</div><div class="pt-workspace-phone"><div class="pt-workspace-bubble">${image ? `<img src="${e(image)}" alt="Campaign attachment">` : ""}<p>${e(d.templateText || "Your message will appear here.")}</p></div></div><div class="pt-row"><span>${d.mediaId ? "MMS" : `SMS · ${smsSegments(d.templateText || "")} segment(s)`}</span>${r.can("manageBilling") ? `<strong>${price === null ? "Rate awaiting verification" : `${rateMoney(price)}${optInPrice === null ? " per message" : " standard"}`}</strong>` : ""}</div>${r.can("manageBilling") && optInPrice !== null ? `<div class="pt-row"><span>Opt-in message</span><strong>${rateMoney(optInPrice)}</strong></div>` : ""}<p class="pt-muted">Each person gets an individual send confirmation.</p></aside></div>`;
   }
   function campaignDetail(s) {
     const c = s.campaign,
@@ -253,7 +261,9 @@ export function createCampaigns(r) {
       ...(r.can("manageBilling") ? { budgetMicros: cents * 10000 } : {}),
       deliveryNotBeforeMs: new Date(d.get("deliveryStart")).getTime(),
       deliveryBeforeMs: new Date(d.get("deliveryEnd")).getTime(),
-      deliverySchedule: readSchedule(form, state().schedule, true),
+      ...(state().scheduleUnsupported
+        ? {}
+        : { deliverySchedule: readSchedule(form, state().schedule, true) }),
     };
   }
   async function submit(kind, form) {

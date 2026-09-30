@@ -414,6 +414,17 @@ export function createTextingIntakePage({
     if (!active(key, version)) return;
     view.manageBilling =
       workspace?.workspace?.capabilities?.manageBilling === true;
+    if (
+      workspace?.workspace?.capabilities?.manageBilling === undefined &&
+      workspace?.workspace?.capabilities?.neutralWorkspaceApi !== true &&
+      workspace?.workspace?.contractVersion !== 2
+    ) {
+      const billing = await request(`${serviceEndpoint()}/billing/summary`, {
+        auth: true,
+      }).catch(() => null);
+      if (!active(key, version)) return;
+      view.manageBilling = billing?.billing?.canManageBilling === true;
+    }
     view.delivery = delivery?.ok === true ? delivery : null;
     view.neutralApi =
       workspace?.workspace?.capabilities?.neutralWorkspaceApi === true ||
