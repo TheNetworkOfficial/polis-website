@@ -14956,6 +14956,7 @@ function normalizeCandidateVoterRecord(raw = {}) {
     Date.parse(raw.consentedAtIso || raw.consented_at_iso || "") ||
     null;
   return {
+    contactId: normalizeString(raw.contactId),
     recordId: normalizeString(raw.recordId || raw.record_id || raw.id),
     displayName:
       normalizeString(raw.displayName || raw.display_name || raw.name) ||
@@ -82031,9 +82032,10 @@ function renderCandidateVoterRow(voter, options = {}) {
     </div>
     ${renderCandidateVoterPreferencePills(voter)}
     ${
-      options.notesRoute
+      options.notesRoute || options.contactRoute
         ? `<div class="shared-campaign-registry-row__actions">
-            <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(options.notesRoute)}">${renderIcon("comment")} <span>Notes</span></button>
+            ${options.notesRoute ? `<button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(options.notesRoute)}">${renderIcon("comment")} <span>Notes</span></button>` : ""}
+            ${options.contactRoute ? `<button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(options.contactRoute)}">${renderIcon("registry")} <span>Contact details</span></button>` : ""}
           </div>`
         : ""
     }
@@ -91091,6 +91093,7 @@ function renderCoalitionVoterRecordsListPanel(resource, coalitionId = "") {
       <div>
         <h2>Connected voters</h2>
         <p>Search, filter, and review coalition voter records from Polis opt-ins, manual adds, and imports.</p>
+        ${coalitionId ? `<a class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(textingRoute(coalitionId, "contacts"))}" href="${escapeHtml(textingRoute(coalitionId, "contacts"))}">Open shared contact book</a>` : ""}
       </div>
       <button class="shared-feed-chip shared-campaign-registry-icon-chip" type="button" data-action="coalition-voter-records-refresh"${disabledAttr(resource.loading)}>${renderIcon("registry")} <span>Refresh</span></button>
     </div>
@@ -91108,6 +91111,14 @@ function renderCoalitionVoterRecordsListPanel(resource, coalitionId = "") {
         ? `<div class="shared-campaign-registry-list">${resource.items
             .map((item) =>
               renderCandidateVoterRow(item, {
+                contactRoute:
+                  coalitionId && item.contactId
+                    ? textingRoute(
+                        coalitionId,
+                        "contacts",
+                        `contact:${item.contactId}`,
+                      )
+                    : "",
                 notesRoute: coalitionId
                   ? coalitionVoterMapNotesPath(coalitionId, item)
                   : "",

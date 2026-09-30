@@ -14,7 +14,8 @@ import {
   reasons,
   queueCanConfirm,
 } from "./textingWorkspaceUi";
-import { createContacts } from "./textingContacts";
+import { createOrganizationContactBook } from "./organizationContactBook";
+import { createOrganizationContactsApi } from "./organizationContactsApi";
 import { createCampaigns } from "./textingCampaigns";
 import { createConversations } from "./textingConversations";
 
@@ -97,6 +98,8 @@ export function createTextingWorkspacePage({
       view.workspace = null;
       view.billing = null;
       view.contacts = null;
+      view.contactBook = null;
+      view.recipientBook = null;
       view.campaigns = null;
       view.conversations = null;
       view.error =
@@ -148,6 +151,11 @@ export function createTextingWorkspacePage({
     };
     return {
       api,
+      contactApi: createOrganizationContactsApi({
+        request,
+        scopeKey: `coalition:${organizationId}`,
+        guard,
+      }),
       guard,
       fail,
       refreshBilling,
@@ -207,12 +215,24 @@ export function createTextingWorkspacePage({
     const version = sequence,
       r = runtime(key, version);
     modules = {
-      contacts: createContacts(r),
+      contacts: createOrganizationContactBook(r),
       campaigns: createCampaigns(r),
       conversations: createConversations(r),
     };
     changed();
     try {
+      // Organization-owned contacts are available before a texting provider is configured.
+      if (context().section === "contacts") {
+        await modules.contacts.load();
+        if (context().resourceId === "new")
+          await modules.contacts.action("book-panel", "imports");
+        else if (context().resourceId?.startsWith("contact:"))
+          await modules.contacts.action(
+            "book-detail",
+            context().resourceId.slice(8),
+          );
+        return;
+      }
       const w = (await r.api("/workspace")).workspace;
       if (
         w?.scopeKey !== `coalition:${context().organizationId}` ||
@@ -327,7 +347,9 @@ export function createTextingWorkspacePage({
     const section = context().section || "home",
       w = view.workspace;
     let html = "";
-    if (!w)
+    if (section === "contacts" && view.contactBook?.schema)
+      html = modules.contacts.render();
+    else if (!w)
       html =
         notice(
           "Workspace unavailable",
@@ -361,7 +383,7 @@ export function createTextingWorkspacePage({
       view.campaigns?.preparingAccess || view.conversations?.preparingAccess
         ? "Preparing your texting access…"
         : section === "contacts"
-          ? "Updating import…"
+          ? "Updating contacts…"
           : section === "send"
             ? view.campaigns?.pendingAction === "sending"
               ? "Sending…"
@@ -407,6 +429,12 @@ export function createTextingWorkspacePage({
     if (!form.matches?.("[data-workspace-form]") || !owned(form)) return;
     event.preventDefault();
     if (!form.reportValidity()) return;
+    // Capture the native File before the busy render replaces this form.
+    if (form.dataset.workspaceForm?.endsWith("-import-preview")) {
+      const input = form.querySelector('input[type="file"]');
+      if (input?.files?.length)
+        for (const module of Object.values(modules)) module.change(input);
+    }
     void run(async () => {
       for (const module of Object.values(modules))
         if (await module.submit(form.dataset.workspaceForm, form)) return;
@@ -423,6 +451,14 @@ export function createTextingWorkspacePage({
     let rerender = false;
     for (const module of Object.values(modules))
       rerender = module.change(target) || rerender;
+    if (target.dataset.contactChange?.endsWith("-tag-cell")) {
+      const prefix = target.dataset.contactChange.slice(0, -9);
+      void run(async () => {
+        for (const module of Object.values(modules))
+          if (await module.action(`${prefix}-tag-cell`)) return;
+      });
+      return;
+    }
     if (
       rerender &&
       !["contact-file", "resume-file"].includes(target.dataset.workspaceChange)
@@ -436,6 +472,18 @@ export function createTextingWorkspacePage({
     }
   };
   document.addEventListener("change", onChange);
+  document.addEventListener(
+    "toggle",
+    (event) => {
+      if (
+        !owned(event.target) ||
+        !event.target.dataset.contactChange?.endsWith("-disclosure")
+      )
+        return;
+      for (const module of Object.values(modules)) module.change(event.target);
+    },
+    true,
+  );
   document.addEventListener("input", (event) => {
     if (
       !owned(event.target) ||

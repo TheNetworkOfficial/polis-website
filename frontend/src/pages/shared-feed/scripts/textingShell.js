@@ -151,12 +151,22 @@ export function snapshotTextingFocus(root, identity) {
       ".texting-workspace input,.texting-workspace textarea,.texting-workspace select",
     ),
   ];
+  const form = active.closest("[data-workspace-form]");
+  const matchingForms = form
+    ? [...root.querySelectorAll("[data-workspace-form]")].filter(
+        (item) => item.dataset.workspaceForm === form.dataset.workspaceForm,
+      )
+    : [];
   return {
     identity,
     path: location.pathname,
     id: active.id,
     name: active.name,
     index: fields.indexOf(active),
+    form: form?.dataset.workspaceForm || null,
+    formIndex: matchingForms.indexOf(form),
+    formFieldId: form?.dataset.fieldId || null,
+    formTagId: form?.dataset.tagId || null,
     openDetails: [...root.querySelectorAll(".texting-workspace details")].map(
       (details) => details.open,
     ),
@@ -183,10 +193,26 @@ export function restoreTextingFocus(root, snapshot, identity) {
       ".texting-workspace input,.texting-workspace textarea,.texting-workspace select",
     ),
   ];
+  const matchingForms = snapshot.form
+    ? [...root.querySelectorAll("[data-workspace-form]")].filter(
+        (item) => item.dataset.workspaceForm === snapshot.form,
+      )
+    : [];
+  const form = snapshot.formFieldId
+    ? matchingForms.find(
+        (item) => item.dataset.fieldId === snapshot.formFieldId,
+      )
+    : snapshot.formTagId
+      ? matchingForms.find((item) => item.dataset.tagId === snapshot.formTagId)
+      : matchingForms[snapshot.formIndex];
+  if (snapshot.form && !form) return;
+  const candidates = form
+    ? fields.filter((item) => form.contains(item))
+    : fields;
   const field = snapshot.id
-    ? fields.find((item) => item.id === snapshot.id)
+    ? candidates.find((item) => item.id === snapshot.id)
     : snapshot.name
-      ? fields.find((item) => item.name === snapshot.name)
+      ? candidates.find((item) => item.name === snapshot.name)
       : fields[snapshot.index];
   if (!field || field.disabled || field.tagName !== snapshot.tag) return;
   field.focus({ preventScroll: true });

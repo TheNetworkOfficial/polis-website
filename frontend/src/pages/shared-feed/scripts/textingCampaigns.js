@@ -10,7 +10,6 @@ import {
   head,
   stat,
   field,
-  select,
   textarea,
   notice,
   details,
@@ -27,6 +26,7 @@ import {
   readSchedule,
 } from "./textingSchedule";
 import { prepareTextingAccess, saveAssignmentChanges } from "./textingAccess";
+import { createOrganizationContactBook } from "./organizationContactBook";
 
 const localInput = (ms) => {
   if (!Number.isSafeInteger(ms)) return "";
@@ -56,6 +56,7 @@ const mediaData = (media) =>
     : "";
 
 export function createCampaigns(r) {
+  const recipients = createOrganizationContactBook(r, { mode: "selector" });
   const state = () => (r.view().campaigns ||= {});
   async function load(resource, section) {
     const s = state();
@@ -79,12 +80,11 @@ export function createCampaigns(r) {
     if (resource && section === "campaigns" && r.can("createCampaigns"))
       s.schedule = (await r.api("/delivery-schedule")).schedule;
     if (
-      (resource === "new" || (resource && section === "campaigns")) &&
-      r.can("uploadImports")
+      resource === "new" &&
+      section === "campaigns" &&
+      r.can("createCampaigns")
     ) {
-      const result = await r.api("/audiences");
-      s.audiences = list(result.audiences);
-      s.audienceCursor = result.nextCursor;
+      await recipients.load();
     }
   }
   function campaignViews(s) {
@@ -110,13 +110,13 @@ export function createCampaigns(r) {
     const d = s.draft,
       price = messagePrice(r.billing(), d.templateText || "", !!d.mediaId),
       image = mediaData(s.media);
-    return `<div class="pt-grid pt-grid--two"><form class="pt-card" data-workspace-form="campaign"><div class="pt-fields">${field("name", "Campaign name", d.name, { required: true })}${select("audienceId", "Contact list", [["", "Choose a reviewed list"], ...list(s.audiences).map((a) => [a.audienceId, `${a.name} · ${count(a.destinationCount)}`]), ...(d.audienceId && !list(s.audiences).some((a) => a.audienceId === d.audienceId) ? [[d.audienceId, "Saved audience"]] : [])], d.audienceId || "", true)}${textarea("templateText", "Message", d.templateText || "", true)}${r.can("manageBilling") ? field("budget", "Spending limit ($)", d.budgetMicros ? (d.budgetMicros / 1000000).toFixed(2) : "", { type: "number", required: true, extra: 'min="0.01" step="0.01"' }) : ""}</div><p class="pt-muted">Include your organization name and “Reply STOP to opt out.” Use the complete message without merge fields.</p>${details("When can volunteers send?", `<div class="pt-fields">${field("deliveryStart", "From", localInput(d.deliveryNotBeforeMs), { type: "datetime-local", required: true })}${field("deliveryEnd", "Until", localInput(d.deliveryBeforeMs), { type: "datetime-local", required: true })}</div><p class="pt-muted">Your local time. This sets the allowed window; it does not schedule automatic sends.</p>`)}${scheduleFields(s.schedule, d.deliverySchedule, true)}<div class="pt-field"><label for="workspace-media">GIF or image (optional)</label><input id="workspace-media" type="file" accept="image/png,image/gif,.png,.gif" data-workspace-change="campaign-media"><p class="pt-muted">PNG or GIF · up to 512 KB</p></div>${d.mediaId ? `<div class="pt-row"><span>${e(label(s.media?.state || "Saved attachment"))}</span>${button("media-remove", "Remove", { secondary: true })}</div>${r.can("canPrepareProviderMedia") && s.media?.providerReady !== true ? button("media-prepare", "Prepare attachment", { secondary: true, disabled: s.mediaNeedsRead || r.busy() || !["local_ready", "provider_uploaded_pending_verification"].includes(s.media?.state) }) : ""}${s.mediaNeedsRead ? button("media-refresh", "Refresh attachment", { secondary: true }) : ""}` : ""}<div class="pt-actions"><button class="pt-btn" type="submit"${r.busy() ? " disabled" : ""}>Save campaign</button></div>${s.audienceCursor ? button("audiences-more", "Load more lists", { secondary: true }) : ""}</form><aside class="pt-card pt-workspace-preview"><div class="pt-eyebrow">MESSAGE PREVIEW</div><div class="pt-workspace-phone"><div class="pt-workspace-bubble">${image ? `<img src="${e(image)}" alt="Campaign attachment">` : ""}<p>${e(d.templateText || "Your message will appear here.")}</p></div></div><div class="pt-row"><span>${d.mediaId ? "MMS" : `SMS · ${smsSegments(d.templateText || "")} segment(s)`}</span>${r.can("manageBilling") ? `<strong>${price === null ? "Rate awaiting verification" : `${money(price)} per message`}</strong>` : ""}</div><p class="pt-muted">Each person gets an individual send confirmation.</p></aside></div>`;
+    return `${recipients.render()}<div class="pt-grid pt-grid--two"><form class="pt-card" data-workspace-form="campaign"><div class="pt-fields">${field("name", "Campaign name", d.name, { required: true })}${d.audienceId ? `<p class="pt-muted">This campaign keeps its saved recipient selection until you review a replacement below.</p>` : ""}${textarea("templateText", "Message", d.templateText || "", true)}${r.can("manageBilling") ? field("budget", "Spending limit ($)", d.budgetMicros ? (d.budgetMicros / 1000000).toFixed(2) : "", { type: "number", required: true, extra: 'min="0.01" step="0.01"' }) : ""}</div><p class="pt-muted">Include your organization name and “Reply STOP to opt out.” Use the complete message without merge fields.</p>${details("When can volunteers send?", `<div class="pt-fields">${field("deliveryStart", "From", localInput(d.deliveryNotBeforeMs), { type: "datetime-local", required: true })}${field("deliveryEnd", "Until", localInput(d.deliveryBeforeMs), { type: "datetime-local", required: true })}</div><p class="pt-muted">Your local time. This sets the allowed window; it does not schedule automatic sends.</p>`)}${scheduleFields(s.schedule, d.deliverySchedule, true)}<div class="pt-field"><label for="workspace-media">GIF or image (optional)</label><input id="workspace-media" type="file" accept="image/png,image/gif,.png,.gif" data-workspace-change="campaign-media"><p class="pt-muted">PNG or GIF · up to 512 KB</p></div>${d.mediaId ? `<div class="pt-row"><span>${e(label(s.media?.state || "Saved attachment"))}</span>${button("media-remove", "Remove", { secondary: true })}</div>${r.can("canPrepareProviderMedia") && s.media?.providerReady !== true ? button("media-prepare", "Prepare attachment", { secondary: true, disabled: s.mediaNeedsRead || r.busy() || !["local_ready", "provider_uploaded_pending_verification"].includes(s.media?.state) }) : ""}${s.mediaNeedsRead ? button("media-refresh", "Refresh attachment", { secondary: true }) : ""}` : ""}<div class="pt-actions"><button class="pt-btn" type="submit"${r.busy() ? " disabled" : ""}>Save campaign</button></div>${s.audienceCursor ? button("audiences-more", "Load more lists", { secondary: true }) : ""}</form><aside class="pt-card pt-workspace-preview"><div class="pt-eyebrow">MESSAGE PREVIEW</div><div class="pt-workspace-phone"><div class="pt-workspace-bubble">${image ? `<img src="${e(image)}" alt="Campaign attachment">` : ""}<p>${e(d.templateText || "Your message will appear here.")}</p></div></div><div class="pt-row"><span>${d.mediaId ? "MMS" : `SMS · ${smsSegments(d.templateText || "")} segment(s)`}</span>${r.can("manageBilling") ? `<strong>${price === null ? "Rate awaiting verification" : `${money(price)} per message`}</strong>` : ""}</div><p class="pt-muted">Each person gets an individual send confirmation.</p></aside></div>`;
   }
   function campaignDetail(s) {
     const c = s.campaign,
       manage = r.can("createCampaigns"),
       image = mediaData(s.media);
-    return `${r.can("manageBilling") ? `<div class="pt-grid pt-grid--three">${stat("Campaign limit", money(c.budgetMicros))}${stat("Pending charges", money(c.reservedMicros))}${stat("Completed usage", money(c.settledMicros))}</div>` : ""}<div class="pt-grid pt-grid--two"><section class="pt-card"><div class="pt-row"><h2>Your message</h2>${manage && ["draft", "prepared"].includes(c.status) ? button("campaign-edit", "Edit", { secondary: true }) : ""}</div><div class="pt-workspace-bubble">${image ? `<img src="${e(image)}" alt="Saved campaign attachment">` : ""}<p>${e(c.templateText)}</p></div><p class="pt-muted">${dateText(c.deliveryNotBeforeMs)} – ${dateText(c.deliveryBeforeMs)}</p></section><section class="pt-card"><h2>Ready to begin?</h2><div class="pt-row"><span>Campaign</span><strong>${e(label(c.status))}</strong></div><div class="pt-row"><span>Assigned volunteers</span><strong>${count(list(c.assignedUserIds).length)}</strong></div>${reasons(c.blockedReasons)}<div class="pt-actions">${manage ? `${go("team", "Manage team", c.campaignId, true)}${["draft", "prepared"].includes(c.status) ? button("transition-prepare", "Check readiness", { secondary: true }) : ""}${c.canActivate ? button("transition-activate", c.status === "paused" ? "Resume campaign" : "Open campaign") : ""}${c.status === "active" ? button("transition-pause", "Pause campaign", { secondary: true }) : ""}${c.status !== "archived" ? button("transition-archive", "Archive", { secondary: true }) : ""}` : ""}${c.canFetchQueue && r.can("manualQueue") ? go("send", "Start texting", c.campaignId) : ""}${go("results", "View results", c.campaignId, true)}</div>${c.status === "paused" ? notice("Sending paused", "This stops new sends from Polis. Any vendor-side work already accepted keeps its recorded status.") : ""}</section></div>`;
+    return `${s.preparingRecipients ? notice("Preparing selected recipients…", "Your reviewed selection is being prepared. Refresh to check progress, then finish preparation when it is ready.") + button("campaign-refresh", "Refresh preparation", { secondary: true }) : ""}${r.can("manageBilling") ? `<div class="pt-grid pt-grid--three">${stat("Campaign limit", money(c.budgetMicros))}${stat("Pending charges", money(c.reservedMicros))}${stat("Completed usage", money(c.settledMicros))}</div>` : ""}<div class="pt-grid pt-grid--two"><section class="pt-card"><div class="pt-row"><h2>Your message</h2>${manage && ["draft", "prepared"].includes(c.status) ? button("campaign-edit", "Edit", { secondary: true }) : ""}</div><div class="pt-workspace-bubble">${image ? `<img src="${e(image)}" alt="Saved campaign attachment">` : ""}<p>${e(c.templateText)}</p></div><p class="pt-muted">${dateText(c.deliveryNotBeforeMs)} – ${dateText(c.deliveryBeforeMs)}</p></section><section class="pt-card"><h2>Ready to begin?</h2><div class="pt-row"><span>Campaign</span><strong>${e(label(c.status))}</strong></div><div class="pt-row"><span>Assigned volunteers</span><strong>${count(list(c.assignedUserIds).length)}</strong></div>${reasons(c.blockedReasons)}<div class="pt-actions">${manage ? `${go("team", "Manage team", c.campaignId, true)}${["draft", "prepared"].includes(c.status) ? button("transition-prepare", "Prepare selected recipients", { secondary: true }) : ""}${c.canActivate ? button("transition-activate", c.status === "paused" ? "Resume campaign" : "Open campaign") : ""}${c.status === "active" ? button("transition-pause", "Pause campaign", { secondary: true }) : ""}${c.status !== "archived" ? button("transition-archive", "Archive", { secondary: true }) : ""}` : ""}${c.canFetchQueue && r.can("manualQueue") ? go("send", "Start texting", c.campaignId) : ""}${go("results", "View results", c.campaignId, true)}</div>${c.status === "paused" ? notice("Sending paused", "This stops new sends from Polis. Any vendor-side work already accepted keeps its recorded status.") : ""}</section></div>`;
   }
   function team(s) {
     const c = s.campaign;
@@ -230,7 +230,7 @@ export function createCampaigns(r) {
       throw new Error("Enter a valid campaign spending limit.");
     return {
       name: String(d.get("name") || "").trim(),
-      audienceId: d.get("audienceId") || null,
+      audienceId: state().draft?.audienceId || null,
       templateText: String(d.get("templateText") || ""),
       ...(r.can("manageBilling") ? { budgetMicros: cents * 10000 } : {}),
       deliveryNotBeforeMs: new Date(d.get("deliveryStart")).getTime(),
@@ -239,6 +239,7 @@ export function createCampaigns(r) {
     };
   }
   async function submit(kind, form) {
+    if (await recipients.submit(kind, form)) return true;
     const s = state();
     if (kind === "campaign-hours") {
       const c = s.campaign;
@@ -277,6 +278,10 @@ export function createCampaigns(r) {
         throw new Error(
           "Use the complete message with STOP instructions and no merge fields.",
         );
+      if (recipients.hasSelection())
+        draft.audienceId = await recipients.bindCampaign(s.draft.campaignId);
+      if (!draft.audienceId)
+        throw new Error("Choose and review campaign recipients first.");
       s.draft = { ...s.draft, ...draft };
       const saved = s.campaign;
       const result = await r.api(
@@ -306,8 +311,14 @@ export function createCampaigns(r) {
     return false;
   }
   async function action(name, value) {
+    if (await recipients.action(name, value)) return true;
     const s = state(),
       c = s.campaign;
+    if (name === "campaign-refresh") {
+      s.campaign = (await r.api(`/campaigns/${id(c.campaignId)}`)).campaign;
+      if (s.campaign.status === "prepared") s.preparingRecipients = false;
+      return true;
+    }
     if (name === "campaigns-view") {
       if (!["active", "paused", "archived"].includes(value)) return false;
       const result = await r.api(`/campaigns?view=${id(value)}`);
@@ -332,6 +343,7 @@ export function createCampaigns(r) {
     }
     if (name === "campaign-edit") {
       if (!r.can("createCampaigns")) return true;
+      await recipients.load();
       s.editing = true;
       return true;
     }
@@ -415,19 +427,30 @@ export function createCampaigns(r) {
         return false;
       const question = {
         prepare:
-          "Check this saved campaign and its reviewed audience for manual texting?",
+          "Prepare only this campaign’s reviewed recipients with your texting provider? Only the selected phone numbers and names are transferred. This sends no messages.",
         activate:
           "Open this campaign for individual volunteer sends? No messages are sent by this action.",
         pause: "Pause new sends from this campaign in Polis?",
         archive: "Archive this campaign and stop new sends?",
       }[action];
       if (!window.confirm(question)) return true;
-      s.campaign = (
-        await r.api(`/campaigns/${id(c.campaignId)}/transition`, {
-          expectedRevision: c.revision,
-          action,
-        })
-      ).campaign;
+      try {
+        s.campaign = (
+          await r.api(`/campaigns/${id(c.campaignId)}/transition`, {
+            expectedRevision: c.revision,
+            action,
+          })
+        ).campaign;
+        s.preparingRecipients = false;
+      } catch (error) {
+        const code = error?.payload?.error || error?.code || error?.message;
+        if (
+          action !== "prepare" ||
+          code !== "prompt_contact_audience_preparing"
+        )
+          throw error;
+        s.preparingRecipients = true;
+      }
       return true;
     }
     if (name === "queue-load") {
@@ -498,6 +521,7 @@ export function createCampaigns(r) {
     return false;
   }
   function change(target) {
+    if (recipients.change(target)) return true;
     const s = state();
     const hoursForm = target.closest('[data-workspace-form="campaign-hours"]');
     if (hoursForm && target.name) {
@@ -527,23 +551,25 @@ export function createCampaigns(r) {
     const form = target.closest('[data-workspace-form="campaign"]');
     if (form && target.name) {
       const values = new FormData(form);
-      s.draft = {
-        ...s.draft,
-        name: values.get("name"),
-        templateText: values.get("templateText"),
-        audienceId: values.get("audienceId"),
-        budgetMicros: Math.round(Number(values.get("budget")) * 100) * 10000,
-        deliveryNotBeforeMs: new Date(values.get("deliveryStart")).getTime(),
-        deliveryBeforeMs: new Date(values.get("deliveryEnd")).getTime(),
-        deliverySchedule:
+      if (["name", "templateText"].includes(target.name))
+        s.draft[target.name] = target.value;
+      else if (target.name === "budget")
+        s.draft.budgetMicros = Math.round(Number(target.value) * 100) * 10000;
+      else if (target.name === "deliveryStart")
+        s.draft.deliveryNotBeforeMs = new Date(target.value).getTime();
+      else if (target.name === "deliveryEnd")
+        s.draft.deliveryBeforeMs = new Date(target.value).getTime();
+      else if (
+        ["dailyHoursMode", "sendingStart", "sendingEnd"].includes(target.name)
+      )
+        s.draft.deliverySchedule =
           values.get("dailyHoursMode") === "custom"
             ? {
                 timeZone: s.schedule?.timeZone,
                 startTime: values.get("sendingStart"),
                 endTime: values.get("sendingEnd"),
               }
-            : null,
-      };
+            : null;
       return true;
     }
     return false;
