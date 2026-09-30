@@ -30,6 +30,15 @@ const columns = [
   ["sourceId", "Voter / source ID"],
   ["consentStatus", "Consent status"],
 ];
+const evidenceColumns = [
+  ["consentedAt", "Opt-in date and time"],
+  ["acquisitionMethod", "How opt-in was collected"],
+  ["disclosureText", "Consent wording"],
+  ["proofReference", "Evidence reference"],
+  ["senderScopeKey", "Organization scope"],
+  ["sourceRecordId", "Consent source record"],
+  ["smsSpecific", "SMS-specific consent"],
+];
 const bytes = (n) =>
   Number.isSafeInteger(n) ? `${(n / 1048576).toFixed(1)} MB` : "—";
 const sourceFields = (source = {}) =>
@@ -250,7 +259,7 @@ export function createContacts(r) {
   function mappingForm(s) {
     const map = s.mapping,
       options = [["", "Not mapped"], ...list(map.headers).map((v) => [v, v])];
-    return `<form data-workspace-form="mapping" class="pt-card"><div class="pt-eyebrow">STEP 2 OF 3</div><h2>Match your columns</h2><p class="pt-muted">Pick the mobile number column. Map other fields you want to keep.</p><div class="pt-fields">${columns.map(([key, title]) => select(`column_${key}`, title, options, map.fields?.[key] || "", key === "phone")).join("")}</div>${details(
+    return `<form data-workspace-form="mapping" class="pt-card"><div class="pt-eyebrow">STEP 2 OF 3</div><h2>Match your columns</h2><p class="pt-muted">Pick the mobile number column. Map other fields you want to keep.</p><div class="pt-fields">${columns.map(([key, title]) => select(`column_${key}`, title, options, map.fields?.[key] || "", key === "phone")).join("")}</div>${r.workspace()?.capabilities?.neutralWorkspaceApi === true || r.workspace()?.contractVersion === 2 ? details("Recorded opt-in (optional)", `<p class="pt-muted">Map the evidence behind an opt-in. A consent label alone does not verify permission.</p><div class="pt-fields">${evidenceColumns.map(([key, title]) => select(`column_${key}`, title, options, map.fields?.[key] || "")).join("")}</div>`) : ""}${details(
       "Source and consent",
       `<div class="pt-fields">${sourceFields(map.source)}${select(
         "defaultCountryCode",
@@ -406,7 +415,7 @@ export function createContacts(r) {
     const d = new FormData(form),
       fields = {},
       consentValues = {};
-    for (const [name] of columns)
+    for (const [name] of [...columns, ...evidenceColumns])
       if (d.get(`column_${name}`)) fields[name] = d.get(`column_${name}`);
     for (const [key, status] of [
       ["consentIn", "opted_in"],

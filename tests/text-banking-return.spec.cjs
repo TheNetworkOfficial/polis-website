@@ -25,7 +25,7 @@ const cases = [
   },
 ];
 
-test("Stripe text-banking returns render a safe mobile handoff", async ({
+test("Texting payment returns render a safe mobile handoff", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 412, height: 915 });
@@ -41,7 +41,9 @@ test("Stripe text-banking returns render a safe mobile handoff", async ({
       page.getByRole("heading", { level: 1, name: routeCase.heading }),
     ).toBeVisible();
     await expect(page.locator("main")).toContainText(routeCase.detail);
-    await expect(page.locator("main")).toContainText("Stripe's signed webhook");
+    await expect(page.locator("main")).toContainText(
+      "signed payment confirmation",
+    );
     await expect(page.locator("main")).toContainText(
       "You can safely close this browser tab.",
     );

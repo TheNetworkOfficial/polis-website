@@ -182,3 +182,18 @@
     justify-content: flex-end;
   }
 }
+.pt-intake [data-opt-in-form] fieldset {
+  border: 0;
+  padding: 0;
+  margin: 20px 0;
+  min-width: 0;
+}
+
+.pt-intake [data-opt-in-key] {
+  margin-top: 20px;
+}
+
+.pt-intake [data-opt-in-key] dd {
+  margin: 4px 0 16px;
+  overflow-wrap: anywhere;
+}

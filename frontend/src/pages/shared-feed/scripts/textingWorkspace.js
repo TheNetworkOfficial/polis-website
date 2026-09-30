@@ -13,6 +13,7 @@ import {
   notice,
   reasons,
   queueCanConfirm,
+  customerText,
 } from "./textingWorkspaceUi";
 import { createContacts } from "./textingContacts";
 import { createCampaigns } from "./textingCampaigns";
@@ -105,7 +106,7 @@ export function createTextingWorkspacePage({
           : "Your access has changed. Refresh to check your organization permissions.";
     } else
       view.error =
-        error?.message ||
+        customerText(error?.message) ||
         "The saved status could not be confirmed. Refresh before trying again.";
   }
   function runtime(key, version) {
@@ -118,7 +119,7 @@ export function createTextingWorkspacePage({
     const api = async (suffix, body, method) => {
       guard();
       const result = await request(
-        `/api/text-banking/prompt/scopes/${id(`coalition:${organizationId}`)}${suffix}`,
+        `/api/text-banking/${view.neutralApi ? "workspaces" : "prompt/scopes"}/${id(`coalition:${organizationId}`)}${suffix}`,
         {
           auth: true,
           beforeRequest: guard,
@@ -137,12 +138,15 @@ export function createTextingWorkspacePage({
       const workspace = (await api("/workspace")).workspace;
       if (
         workspace?.scopeKey !== `coalition:${organizationId}` ||
-        workspace.provider !== "prompt" ||
+        !["prompt", "polis"].includes(workspace.provider) ||
         workspace.manualOnly !== true ||
         !["configured", "provision_required"].includes(workspace.status)
       )
         throw new Error("Workspace status could not be verified.");
       view.workspace = workspace;
+      view.neutralApi =
+        workspace.capabilities?.neutralWorkspaceApi === true ||
+        workspace.contractVersion === 2;
       if (workspace.status === "configured") await refreshBilling();
       else view.billing = null;
     };
@@ -216,12 +220,14 @@ export function createTextingWorkspacePage({
       const w = (await r.api("/workspace")).workspace;
       if (
         w?.scopeKey !== `coalition:${context().organizationId}` ||
-        w.provider !== "prompt" ||
+        !["prompt", "polis"].includes(w.provider) ||
         w.manualOnly !== true ||
         !["configured", "provision_required"].includes(w.status)
       )
         throw new Error("The customer workspace could not be verified.");
       view.workspace = w;
+      view.neutralApi =
+        w.capabilities?.neutralWorkspaceApi === true || w.contractVersion === 2;
       if (w.status !== "configured") return;
       await r.refreshBilling();
       const { section = "home", resourceId } = context();

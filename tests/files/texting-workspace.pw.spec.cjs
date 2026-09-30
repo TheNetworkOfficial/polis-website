@@ -194,6 +194,8 @@ test("redesigned workspace uses explicit single-recipient sends, recorded replie
       return respond({ ok: true, campaign });
     }
     if (suffix === "/audiences") return respond({ ok: true, audiences: [] });
+    if (suffix === "/texter/ensure")
+      return respond({ ok: true, texter: { state: "ready" } });
     if (suffix === "/campaigns/campaign-one/queue")
       return respond({
         ok: true,
@@ -292,7 +294,9 @@ test("redesigned workspace uses explicit single-recipient sends, recorded replie
   await expect(
     page.getByText("10 AM. Hope to see you there.", { exact: true }),
   ).toBeVisible();
-  expect(writes.filter((x) => x.path.endsWith("/reply"))).toHaveLength(1);
+  await expect
+    .poll(() => writes.filter((x) => x.path.endsWith("/reply")).length)
+    .toBe(1);
   page.once("dialog", (dialog) => dialog.accept());
   await page
     .getByRole("button", { name: "Record opt-out", exact: true })

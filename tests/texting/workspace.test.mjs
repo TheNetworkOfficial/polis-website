@@ -293,7 +293,9 @@ test("direct Balance routes reject volunteers and erase finances after admin dow
       page.render(),
       /texting-available|AVAILABLE TO SEND|\$[0-9]/,
     );
-    assert.equal(calls.length, 1);
+    assert.equal(calls.length, 2);
+    assert.ok(calls[0].endsWith("/workspace"));
+    assert.ok(calls[1].endsWith("/summary"));
     assert.equal(page.getMeta().capabilities.manageBilling, false);
     admin = true;
     await page.load();

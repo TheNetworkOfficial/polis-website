@@ -1,5 +1,5 @@
 const { test, expect } = require("@playwright/test");
-const BASE = process.env.POLIS_TEST_BASE_URL || "http://127.0.0.1:9074";
+const BASE = process.env.POLIS_TEST_BASE_URL || "http://127.0.0.1:9000";
 const PREFIX = "/api/text-banking/prompt/scopes/coalition%3Aorg-1";
 
 test("reviewed import stays on progress and recovers a lost status request", async ({
