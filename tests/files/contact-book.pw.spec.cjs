@@ -5,7 +5,13 @@ const PROMPT = "/api/text-banking/prompt/scopes/coalition%3Aorg-1";
 
 async function mockBook(
   page,
-  { resume = false, duplicate = false, issues = false, recovery = false } = {},
+  {
+    resume = false,
+    duplicate = false,
+    issues = false,
+    recovery = false,
+    publication,
+  } = {},
 ) {
   const token = `e30.${Buffer.from(JSON.stringify({ sub: "contact-admin", email: "admin@example.test" })).toString("base64url")}.test`;
   await page.addInitScript(
@@ -222,6 +228,7 @@ async function mockBook(
           complete: !!body?.cursor,
           total: 3,
           bookRevision: 7,
+          ...(publication ? { publication } : {}),
         });
       if (suffix === "/imports" && request.method() === "GET")
         return respond({
@@ -573,6 +580,46 @@ test("shared contact book works without provider setup, retains custom columns, 
   });
   expect(errors).toEqual([]);
   expect(calls.some((call) => call.path.startsWith(PROMPT))).toBe(false);
+});
+
+test("pending publication labels current matches and refresh removes the notice when ready", async ({
+  page,
+}, testInfo) => {
+  const publication = { status: "updating", pending: 17 };
+  const { errors } = await mockBook(page, { publication });
+  await page.goto(`${BASE}/organizations/org-1/texting/contacts`);
+  await expect(
+    page.getByText("Contacts updating", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText(/17 updates pending/)).toBeVisible();
+  await expect(
+    page.getByText("2 published matches loaded · more pages available", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", {
+      name: "Select all published matches",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({
+    path: testInfo.outputPath("publication-pending-mobile.png"),
+    fullPage: true,
+  });
+  publication.status = "ready";
+  publication.pending = 0;
+  await page
+    .getByRole("button", { name: "Refresh contacts", exact: true })
+    .click();
+  await expect(
+    page.getByText("Contacts updating", { exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Select all matching", exact: true }),
+  ).toBeVisible();
+  expect(errors).toEqual([]);
 });
 
 test("campaign selection covers all pages, preserves exclusions, and binds locally before any provider preparation", async ({

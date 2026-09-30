@@ -51,6 +51,15 @@ test("page cache bounds bytes/pages, clones data, expires and isolates access/pu
   assert.equal(cache.size, 0);
   assert.equal(cache.bytes, 0);
   cache.put("org", {}, page());
+  cache.put(
+    "org",
+    { cursor: "next" },
+    page({ publication: { status: "updating", pending: 3 } }),
+  );
+  assert.equal(cache.get("org", {}), null);
+  assert.equal(cache.get("org", { cursor: "next" }).publication.pending, 3);
+  cache.put("org", {}, page({ publication: { status: "ready", pending: 0 } }));
+  assert.equal(cache.get("org", { cursor: "next" }), null);
   cache.put("org", {}, {});
   assert.equal(cache.size, 0);
 });
@@ -244,6 +253,46 @@ const loadBook = async () => {
   );
 };
 const { createOrganizationContactBook } = await loadBook();
+
+test("publication banner labels partial results and clears after fresh ready response", async () => {
+  const view = {};
+  let ready = false;
+  const runtime = {
+    view: () => view,
+    busy: () => false,
+    guard() {},
+    changed() {},
+    contactApi: async (path) => {
+      if (path === "/schema")
+        return {
+          fields: [],
+          tags: [],
+          capabilities: { read: true, select: true },
+        };
+      if (path === "/views" || path === "/audiences") return { items: [] };
+      return {
+        ...page(),
+        complete: true,
+        total: 1,
+        publication: {
+          status: ready ? "ready" : "updating",
+          pending: ready ? 0 : 17,
+        },
+      };
+    },
+  };
+  const book = createOrganizationContactBook(runtime);
+  await book.load();
+  assert.match(book.render(), /17 updates pending/);
+  assert.match(book.render(), /1 published matches loaded/);
+  assert.match(book.render(), /Select all published matches/);
+  assert.doesNotMatch(book.render(), /1 matching contacts/);
+  ready = true;
+  await book.action("book-refresh");
+  assert.doesNotMatch(book.render(), /Contacts updating|published matches/);
+  assert.match(book.render(), /1 matching contacts/);
+  book.dispose();
+});
 
 test("fixed pages preserve selections, bound cursor memory and fence obsolete requests", async (t) => {
   const view = {};

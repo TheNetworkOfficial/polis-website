@@ -43,6 +43,7 @@ export function createContactPageCache({
       {
         ...Object.fromEntries(names.map((name) => [name, page[name]])),
         authorizationRevision: page.authorizationRevision ?? null,
+        publication: page.publication ?? null,
       },
     ]);
     if (context !== next) clear();

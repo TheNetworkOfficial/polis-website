@@ -187,6 +187,7 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
       s.total = null;
       s.complete = false;
       s.recentResults = false;
+      s.publication = null;
       s.previousCursors = [];
       s.currentCursor = null;
       s.pageNumber = 1;
@@ -234,6 +235,7 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
     s.total = result.total;
     s.bookRevision = result.bookRevision;
     s.recentResults = result.fromCache === true;
+    s.publication = result.publication;
     s.indexRequirement = null;
     s.indexJob = null;
   }
@@ -707,7 +709,7 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
     const s = state();
     if (!can("select")) return "";
     const hasSelection = s.allMatching || s.includeIds.size;
-    return `${mode === "selector" && hasSelection ? endpointControls() : ""}<div class="pt-contact-selection-bar"><span>${s.allMatching ? `All matching contacts${s.excludeIds.size ? `, excluding ${count(s.excludeIds.size)}` : ""}${s.includeIds.size ? `, plus ${count(s.includeIds.size)} individual choices` : ""}` : `${count(s.includeIds.size)} selected`}</span><div class="pt-actions">${b("select-page", "Select this page", { secondary: true })}${b("select-all", "Select all matching", { secondary: true, disabled: !s.rows.length || r.busy() })}${hasSelection ? b("select-clear", "Clear selection", { secondary: true }) + b("selection-review", "Review selection") : ""}</div></div>${hasSelection ? details("Add specific contacts", `<form data-workspace-form="${formName("add-search")}" class="pt-contact-save">${field("search", "Search the rest of your contact book", s.addSearch || "", { required: true })}<button class="pt-btn pt-btn--secondary" type="submit">Search</button></form>${list(s.addRows).length ? rowTable(s.addRows, { addition: true }) : ""}${s.addCursor ? b("add-more", "Next search page", { secondary: true }) : ""}`) : ""}${
+    return `${mode === "selector" && hasSelection ? endpointControls() : ""}<div class="pt-contact-selection-bar"><span>${s.allMatching ? `All ${s.publication?.status === "updating" ? "published matches" : "matching contacts"}${s.excludeIds.size ? `, excluding ${count(s.excludeIds.size)}` : ""}${s.includeIds.size ? `, plus ${count(s.includeIds.size)} individual choices` : ""}` : `${count(s.includeIds.size)} selected`}</span><div class="pt-actions">${b("select-page", "Select this page", { secondary: true })}${b("select-all", s.publication?.status === "updating" ? "Select all published matches" : "Select all matching", { secondary: true, disabled: !s.rows.length || r.busy() })}${hasSelection ? b("select-clear", "Clear selection", { secondary: true }) + b("selection-review", "Review selection") : ""}</div></div>${hasSelection ? details("Add specific contacts", `<form data-workspace-form="${formName("add-search")}" class="pt-contact-save">${field("search", "Search the rest of your contact book", s.addSearch || "", { required: true })}<button class="pt-btn pt-btn--secondary" type="submit">Search</button></form>${list(s.addRows).length ? rowTable(s.addRows, { addition: true }) : ""}${s.addCursor ? b("add-more", "Next search page", { secondary: true }) : ""}`) : ""}${
       mode === "book" && can("edit") && hasSelection
         ? `<form data-workspace-form="${formName("bulk-tags")}" class="pt-contact-save">${select(
             "action",
@@ -851,7 +853,7 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
 
   function renderRows() {
     const s = state();
-    return `${indexPreparation()}<section class="pt-card">${filterForm()}${viewTools()}<p class="pt-muted" role="status">${s.total != null ? `${count(s.total)} matching contacts` : `${count(s.rows.length)} contacts loaded${s.cursor ? " · more pages available" : ""}`}</p>${s.recentResults ? '<p class="pt-muted" role="status">Recent results. Refresh to check for updates.</p>' : ""}${b("refresh", "Refresh contacts", { secondary: true })}${selectionTools()}${s.rows.length ? rowTable(s.rows) : notice(s.cursor ? "No matches on this page" : "No matching contacts", s.cursor ? "Continue to check the remaining results." : "Try changing the filters or add contacts.")}${s.rows.length || s.pageNumber > 1 ? `<p class="pt-muted">Page ${count(s.pageNumber || 1)} · ${count(s.rows.length)} contacts on this page</p>` : ""}<div class="pt-actions">${s.previousCursors?.length ? b("previous", "Previous page", { secondary: true }) : ""}${s.pageNumber > 1 ? b("first", "First page", { secondary: true }) : ""}${s.cursor ? b("more", "Next page", { secondary: true }) : ""}</div></section>${selectionReview()}`;
+    return `${indexPreparation()}<section class="pt-card">${filterForm()}${viewTools()}${s.publication?.status === "updating" ? notice("Contacts updating", `${s.publication.pending > 0 ? `${count(s.publication.pending)} updates pending. ` : ""}Showing published matches. Imported or edited contacts may still be updating. Refresh to check progress.`) : ""}<p class="pt-muted" role="status">${s.publication?.status === "updating" ? `${count(s.rows.length)} published matches loaded${s.cursor ? " · more pages available" : ""}` : s.total != null ? `${count(s.total)} matching contacts` : `${count(s.rows.length)} contacts loaded${s.cursor ? " · more pages available" : ""}`}</p>${s.recentResults ? '<p class="pt-muted" role="status">Recent results. Refresh to check for updates.</p>' : ""}${b("refresh", "Refresh contacts", { secondary: true })}${selectionTools()}${s.rows.length ? rowTable(s.rows) : notice(s.publication?.status === "updating" ? "No published matches on this page" : s.cursor ? "No matches on this page" : "No matching contacts", s.publication?.status === "updating" ? "Contact updates are still publishing. Refresh to check progress." : s.cursor ? "Continue to check the remaining results." : "Try changing the filters or add contacts.")}${s.rows.length || s.pageNumber > 1 ? `<p class="pt-muted">Page ${count(s.pageNumber || 1)} · ${count(s.rows.length)} contacts on this page</p>` : ""}<div class="pt-actions">${s.previousCursors?.length ? b("previous", "Previous page", { secondary: true }) : ""}${s.pageNumber > 1 ? b("first", "First page", { secondary: true }) : ""}${s.cursor ? b("more", "Next page", { secondary: true }) : ""}</div></section>${selectionReview()}`;
   }
   function endpointControls() {
     const s = state();
