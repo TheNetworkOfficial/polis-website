@@ -44,6 +44,8 @@ const transferMessages = {
     "Mapped names differ from the contacts at Prompt.io. Preparation is on hold for review",
   prompt_provider_transfer_cancelled:
     "Preparation was canceled. Contacts already transferred remain at Prompt.io until removed separately",
+  prompt_provider_upload_removed:
+    "The unapproved upload was removed from Prompt.io. Contacts remain in Polis. Review and approve a new transfer when ready.",
   prompt_provider_transfer_stalled:
     "The queued preparation step has not advanced",
   prompt_provider_transfer_dispatch_failed:
