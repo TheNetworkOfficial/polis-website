@@ -738,9 +738,12 @@ test("contact import streams raw custom values into Polis without external trans
     .getByRole("button", { name: "Import contacts", exact: true })
     .click();
   await expect(
-    page.getByText("Contacts added to your organization’s contact book.", {
-      exact: true,
-    }),
+    page.getByText(
+      "File saved. Contact search and related views are updating.",
+      {
+        exact: true,
+      },
+    ),
   ).toBeVisible();
   const upload = calls.find((call) =>
     call.path.endsWith("/imports/import-1/rows"),
