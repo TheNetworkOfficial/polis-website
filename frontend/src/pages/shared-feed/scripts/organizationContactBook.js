@@ -68,6 +68,15 @@ const checkbox = (name, text, checked, extra = "") =>
 
 /** One controller powers the organization book and campaign selector; selections are always local. */
 export function createOrganizationContactBook(r, { mode = "book" } = {}) {
+  let queryGeneration = 0,
+    queryAbort = null,
+    disposed = false;
+  const dispose = () => {
+    disposed = true;
+    queryGeneration++;
+    queryAbort?.abort();
+    r.contactApi.invalidate?.();
+  };
   const prefix = mode === "selector" ? "recipients" : "book";
   const slot = mode === "selector" ? "recipientBook" : "contactBook";
   const state = () =>
@@ -135,19 +144,149 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
   async function schema() {
     state().schema = await api("/schema");
   }
-  async function query({ more = false } = {}) {
+  async function query({
+    more = false,
+    previous = false,
+    refresh = false,
+  } = {}) {
     const s = state();
-    const result = await api("/query", {
-      ...s.query,
-      limit: 50,
-      ...(more && s.cursor ? { cursor: s.cursor } : {}),
-    });
-    if (!more) s.rows = [];
-    s.rows.push(...list(result.items));
+    const requestedCursor = previous
+      ? s.previousCursors?.at(-1)
+      : more
+        ? s.cursor
+        : null;
+    const generation = ++queryGeneration;
+    queryAbort?.abort();
+    const controller = new AbortController();
+    queryAbort = controller;
+    let result;
+    try {
+      result = await api(
+        "/query",
+        {
+          ...s.query,
+          limit: 50,
+          ...(requestedCursor ? { cursor: requestedCursor } : {}),
+        },
+        "POST",
+        {
+          signal: controller.signal,
+          refresh,
+          isCurrent: () => !disposed && generation === queryGeneration,
+        },
+      );
+    } catch (error) {
+      if (
+        error?.name === "AbortError" ||
+        disposed ||
+        generation !== queryGeneration
+      )
+        return;
+      s.rows = [];
+      s.cursor = null;
+      s.total = null;
+      s.complete = false;
+      s.recentResults = false;
+      s.previousCursors = [];
+      s.currentCursor = null;
+      s.pageNumber = 1;
+      if ([401, 403].includes(error?.status || error?.statusCode)) {
+        s.schema = { capabilities: {} };
+        s.selectedRows = [];
+        s.addRows = [];
+        invalidateSelection();
+      }
+      if (
+        (error?.payload?.error || error?.code) ===
+        "contact_index_preparation_required"
+      ) {
+        const requirement = error.payload?.details || error.details || {};
+        if (
+          JSON.stringify(requirement) !== JSON.stringify(s.indexRequirement)
+        ) {
+          s.indexJob = null;
+          s.indexOperationId = uuid();
+        }
+        s.indexRequirement = requirement;
+      } else {
+        s.indexRequirement = null;
+        s.indexJob = null;
+      }
+      throw error;
+    }
+    if (disposed || generation !== queryGeneration) return;
+    s.previousCursors ||= [];
+    if (previous) {
+      s.previousCursors.pop();
+      s.pageNumber--;
+    } else if (more) {
+      s.previousCursors.push(s.currentCursor || null);
+      if (s.previousCursors.length > 8) s.previousCursors.shift();
+      s.pageNumber = (s.pageNumber || 1) + 1;
+    } else {
+      s.previousCursors = [];
+      s.pageNumber = 1;
+    }
+    s.currentCursor = requestedCursor;
+    s.rows = list(result.items);
     s.cursor = result.nextCursor;
     s.complete = result.complete;
     s.total = result.total;
     s.bookRevision = result.bookRevision;
+    s.recentResults = result.fromCache === true;
+    s.indexRequirement = null;
+    s.indexJob = null;
+  }
+  async function prepareIndex({ resume = false, refresh = false } = {}) {
+    const s = state(),
+      jobId = s.indexJob?.id || s.indexRequirement?.jobId;
+    if (!s.indexRequirement) return;
+    if (!refresh && !can("manage"))
+      throw new Error("A contact manager must prepare this search.");
+    if (refresh && jobId) s.indexJob = (await api(`/indexes/${id(jobId)}`)).job;
+    else if (resume && jobId) {
+      s.indexResumeOperationId ||= uuid();
+      s.indexJob = (
+        await api(`/indexes/${id(jobId)}/resume`, {
+          operationId: s.indexResumeOperationId,
+        })
+      ).job;
+      s.indexResumeOperationId = null;
+    } else {
+      s.indexOperationId ||= uuid();
+      s.indexJob = (
+        await api("/indexes/prepare", {
+          fieldId: s.indexRequirement.fieldId,
+          operation: s.indexRequirement.operation,
+          operationId: s.indexOperationId,
+        })
+      ).job;
+    }
+    r.changed();
+    for (
+      let step = 0;
+      !disposed && !refresh && s.indexJob?.status === "preparing" && step < 4;
+      step++
+    ) {
+      r.guard();
+      s.indexJob = (await api(`/indexes/${id(s.indexJob.id)}/advance`, {})).job;
+      r.changed();
+    }
+    if (s.indexJob?.status === "ready") await query({ refresh: true });
+  }
+  function indexPreparation() {
+    const s = state();
+    if (!s.indexRequirement) return "";
+    const job = s.indexJob;
+    return (
+      notice(
+        "Prepare contact search",
+        job
+          ? `${count(job.processedContacts || 0)} contacts processed · ${count(job.workUsed || 0)} of ${count(job.workBudget || 0)} work units · ${label(job.status)}. ${job.status === "paused" ? "The work budget was reached. Resume explicitly to continue." : "Results will appear after preparation finishes."}`
+          : `${s.indexRequirement.fieldId} needs ${s.indexRequirement.operation} indexing. ${can("manage") ? "Prepare this index to use the filter or sort." : "Ask a contact manager to prepare this search."}`,
+      ) +
+      `<div class="pt-actions">${can("manage") ? b("index-prepare", job?.status === "paused" ? "Resume index preparation" : job ? "Continue index preparation" : "Prepare search index") : ""}${job || s.indexRequirement.jobId ? b("index-status", "Refresh preparation status", { secondary: true }) : ""}</div>`
+    );
   }
   async function savedItems(kind) {
     const items = [],
@@ -260,7 +399,8 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
     const result = await api(
       `/selections/${id(s.selection.selectionId)}/contacts${more && s.selectedCursor ? `?cursor=${id(s.selectedCursor)}` : ""}`,
     );
-    s.selectedRows = [...(more ? s.selectedRows : []), ...list(result.items)];
+    s.selectedRows = list(result.items);
+    s.selectedPage = more ? (s.selectedPage || 1) + 1 : 1;
     s.selectedCursor = result.nextCursor;
   }
   async function bindCampaign(campaignId) {
@@ -561,13 +701,13 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
             )
             .join("")
         : ""
-    }<p><strong>${count(selection.count)}</strong> selected contacts · ${count(selection.eligibleCount || 0)} eligible for texting · ${count(selection.excludedCount || 0)} held for texting.</p>${list(s.selectedRows).length ? rowTable(s.selectedRows, { review: true }) : ""}${s.selectedCursor ? b("selected-more", "More selected contacts", { secondary: true }) : ""}${mode === "selector" ? `<p class="pt-muted">Only this reviewed selection can be prepared with your texting provider. Opt-outs are checked again before sending.</p>${checkbox(`${prefix}-reviewed`, "I reviewed these campaign recipients", s.reviewed, selection.duplicateEndpointCount ? "disabled" : "")}` : ""}</section>`;
+    }<p><strong>${count(selection.count)}</strong> selected contacts · ${count(selection.eligibleCount || 0)} eligible for texting · ${count(selection.excludedCount || 0)} held for texting.</p>${list(s.selectedRows).length ? rowTable(s.selectedRows, { review: true }) : ""}${s.selectedPage > 1 ? b("selected-first", "First selected page", { secondary: true }) : ""}${s.selectedCursor ? b("selected-more", "Next selected page", { secondary: true }) : ""}${mode === "selector" ? `<p class="pt-muted">Only this reviewed selection can be prepared with your texting provider. Opt-outs are checked again before sending.</p>${checkbox(`${prefix}-reviewed`, "I reviewed these campaign recipients", s.reviewed, selection.duplicateEndpointCount ? "disabled" : "")}` : ""}</section>`;
   }
   function selectionTools() {
     const s = state();
     if (!can("select")) return "";
     const hasSelection = s.allMatching || s.includeIds.size;
-    return `${mode === "selector" && hasSelection ? endpointControls() : ""}<div class="pt-contact-selection-bar"><span>${s.allMatching ? `All matching contacts${s.excludeIds.size ? `, excluding ${count(s.excludeIds.size)}` : ""}${s.includeIds.size ? `, plus ${count(s.includeIds.size)} individual choices` : ""}` : `${count(s.includeIds.size)} selected`}</span><div class="pt-actions">${b("select-page", "Select this page", { secondary: true })}${b("select-all", "Select all matching", { secondary: true, disabled: !s.rows.length || r.busy() })}${hasSelection ? b("select-clear", "Clear selection", { secondary: true }) + b("selection-review", "Review selection") : ""}</div></div>${hasSelection ? details("Add specific contacts", `<form data-workspace-form="${formName("add-search")}" class="pt-contact-save">${field("search", "Search the rest of your contact book", s.addSearch || "", { required: true })}<button class="pt-btn pt-btn--secondary" type="submit">Search</button></form>${list(s.addRows).length ? rowTable(s.addRows, { addition: true }) : ""}${s.addCursor ? b("add-more", "More search results", { secondary: true }) : ""}`) : ""}${
+    return `${mode === "selector" && hasSelection ? endpointControls() : ""}<div class="pt-contact-selection-bar"><span>${s.allMatching ? `All matching contacts${s.excludeIds.size ? `, excluding ${count(s.excludeIds.size)}` : ""}${s.includeIds.size ? `, plus ${count(s.includeIds.size)} individual choices` : ""}` : `${count(s.includeIds.size)} selected`}</span><div class="pt-actions">${b("select-page", "Select this page", { secondary: true })}${b("select-all", "Select all matching", { secondary: true, disabled: !s.rows.length || r.busy() })}${hasSelection ? b("select-clear", "Clear selection", { secondary: true }) + b("selection-review", "Review selection") : ""}</div></div>${hasSelection ? details("Add specific contacts", `<form data-workspace-form="${formName("add-search")}" class="pt-contact-save">${field("search", "Search the rest of your contact book", s.addSearch || "", { required: true })}<button class="pt-btn pt-btn--secondary" type="submit">Search</button></form>${list(s.addRows).length ? rowTable(s.addRows, { addition: true }) : ""}${s.addCursor ? b("add-more", "Next search page", { secondary: true }) : ""}`) : ""}${
       mode === "book" && can("edit") && hasSelection
         ? `<form data-workspace-form="${formName("bulk-tags")}" class="pt-contact-save">${select(
             "action",
@@ -711,7 +851,7 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
 
   function renderRows() {
     const s = state();
-    return `<section class="pt-card">${filterForm()}${viewTools()}<p class="pt-muted" role="status">${s.total != null ? `${count(s.total)} matching contacts` : `${count(s.rows.length)} contacts loaded${s.cursor ? " · more pages available" : ""}`}</p>${b("refresh", "Refresh contacts", { secondary: true })}${selectionTools()}${s.rows.length ? rowTable(s.rows) : notice(s.cursor ? "No matches on this page" : "No matching contacts", s.cursor ? "Continue to check the remaining results." : "Try changing the filters or add contacts.")}${s.cursor ? b("more", "Load more contacts", { secondary: true }) : ""}</section>${selectionReview()}`;
+    return `${indexPreparation()}<section class="pt-card">${filterForm()}${viewTools()}<p class="pt-muted" role="status">${s.total != null ? `${count(s.total)} matching contacts` : `${count(s.rows.length)} contacts loaded${s.cursor ? " · more pages available" : ""}`}</p>${s.recentResults ? '<p class="pt-muted" role="status">Recent results. Refresh to check for updates.</p>' : ""}${b("refresh", "Refresh contacts", { secondary: true })}${selectionTools()}${s.rows.length ? rowTable(s.rows) : notice(s.cursor ? "No matches on this page" : "No matching contacts", s.cursor ? "Continue to check the remaining results." : "Try changing the filters or add contacts.")}${s.rows.length || s.pageNumber > 1 ? `<p class="pt-muted">Page ${count(s.pageNumber || 1)} · ${count(s.rows.length)} contacts on this page</p>` : ""}<div class="pt-actions">${s.previousCursors?.length ? b("previous", "Previous page", { secondary: true }) : ""}${s.pageNumber > 1 ? b("first", "First page", { secondary: true }) : ""}${s.cursor ? b("more", "Next page", { secondary: true }) : ""}</div></section>${selectionReview()}`;
   }
   function endpointControls() {
     const s = state();
@@ -1184,7 +1324,7 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
                     "",
                   )}</div>${s.resumeImport ? "</fieldset>" : ""}${details("Sample values", `<div class="pt-workspace-table-wrap"><table class="pt-workspace-table"><thead><tr>${s.filePreview.headers.map((header) => `<th>${e(header)}</th>`).join("")}</tr></thead><tbody>${s.filePreview.rows.map((row) => `<tr>${row.map((value) => `<td>${e(value)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`)}${!s.resumeImport ? b("import-match-preview", "Review sample matches", { secondary: true }) + importMatches() : ""}${checkbox(`${prefix}-import-reviewed`, "I reviewed these columns and the source’s permitted use", s.importReviewed, !s.resumeImport && !s.importMatchPreview ? "disabled" : "")}<button type="submit" class="pt-btn"${!s.importReviewed || r.busy() ? " disabled" : ""}>${s.importJob ? "Resume import" : "Import contacts"}</button></form>`
               : ""
-          }${s.importProgress ? notice("Import progress", `${count(s.importProgress.processed)} source rows processed`) : ""}</section>`
+          }${s.importProgress ? notice("Import progress", `${count(s.importProgress.processed)} source rows durably saved this pass${s.importProgress.publication?.status === "updating" ? " · contact search updating" : ""}`) : ""}</section>`
         : "") +
       `${details("Replace a source", "<ol><li>Add or update contacts by importing the replacement file and reviewing its source matches.</li><li>Return to contacts, filter by the old import source, and review a frozen selection of the affected contacts.</li><li>Under More selection actions, choose the old source and remove its memberships from that selection.</li></ol><p class='pt-muted'>This replaces the selected source memberships and assertions. Contacts known through other sources, volunteer history, and the rest of the contact book remain available.</p>")}<section class="pt-card"><h2>Source history</h2>${imports.length ? imports.map((job) => `<article class="pt-row"><div><strong>${e(job.name || job.importId)}</strong><p>${e(label(job.status))} · ${count(job.accepted || 0)} accepted · ${count(job.conflicts || 0)} need review</p></div><div class="pt-actions">${job.status === "open" ? b("import-resume", "Resume", { secondary: true, value: job.importId }) : ""}${b("import-report", "Review records", { secondary: true, value: job.importId })}</div></article>`).join("") : '<p class="pt-muted">Your imports will appear here.</p>'}${s.importCursor ? b("imports-more", "More imports", { secondary: true }) : ""}</section>${importReport()}`
     );
@@ -1589,7 +1729,12 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
         r.toast(
           `Import finished. ${completed.import.conflicts} records need review.`,
         );
-      } else r.toast("Contacts added to your organization’s contact book.");
+      } else
+        r.toast(
+          completed.publication?.status === "ready"
+            ? "File saved. Contact search is ready."
+            : "File saved. Contact search and related views are updating.",
+        );
     } else return false;
     return true;
   }
@@ -1710,7 +1855,10 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
     if (!name.startsWith(`${prefix}-`)) return false;
     const s = state(),
       op = name.slice(prefix.length + 1);
-    if (op === "refresh") await query();
+    if (op === "refresh") await query({ refresh: true });
+    else if (op === "index-prepare")
+      await prepareIndex({ resume: s.indexJob?.status === "paused" });
+    else if (op === "index-status") await prepareIndex({ refresh: true });
     else if (op === "column-earlier" || op === "column-later") {
       const from = s.columns.indexOf(value),
         to = from + (op === "column-earlier" ? -1 : 1);
@@ -1866,6 +2014,8 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
       r.toast("Source membership removed.");
     } else if (op === "export") await downloadSelection();
     else if (op === "more") await query({ more: true });
+    else if (op === "previous") await query({ previous: true });
+    else if (op === "first") await query();
     else if (op === "field-convert") {
       s.convertField = fields().find((field) => field.fieldId === value);
       s.conversionJob = null;
@@ -2142,6 +2292,7 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
       await advanceSelection();
       if (s.selection?.status === "ready") await loadSelected();
     } else if (op === "selected-more") await loadSelected(true);
+    else if (op === "selected-first") await loadSelected();
     else if (op === "bulk-advance") await advanceBulk();
     else if (op === "add-more") {
       const result = await api("/query", {
@@ -2149,7 +2300,7 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
         limit: 20,
         cursor: s.addCursor,
       });
-      s.addRows.push(...list(result.items));
+      s.addRows = list(result.items);
       s.addCursor = result.nextCursor;
     } else if (op === "view-load" || op === "audience-load") {
       if (s.allMatching)
@@ -2328,6 +2479,7 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
     return false;
   }
   return {
+    dispose,
     load,
     render,
     submit,

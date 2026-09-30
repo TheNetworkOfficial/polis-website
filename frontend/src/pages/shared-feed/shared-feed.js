@@ -9318,6 +9318,7 @@ async function fetchJsonRaw(
     body,
     headers = {},
     includeAccessToken = false,
+    signal,
   } = {},
 ) {
   const baseUrl = getApiBaseUrl();
@@ -9350,6 +9351,7 @@ async function fetchJsonRaw(
 
   const response = await fetch(`${baseUrl}${path}`, {
     method,
+    signal,
     headers: nextHeaders,
     body:
       body === undefined || body === null

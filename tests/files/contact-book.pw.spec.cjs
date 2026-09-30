@@ -279,6 +279,10 @@ async function mockBook(
         return respond({
           import: { importId: "import-1" },
           accepted: body.rows.length,
+          processedRows: body.rows.length,
+          nextRow: body.startRow + body.rows.length,
+          remainingRows: 0,
+          complete: true,
         });
       if (suffix === "/imports/import-1/complete") {
         imported = true;

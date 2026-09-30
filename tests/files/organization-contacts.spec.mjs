@@ -6,6 +6,15 @@ const load = async (name) =>
   import(
     `data:text/javascript;base64,${Buffer.from(await readFile(new URL(`../../frontend/src/pages/shared-feed/scripts/${name}.js`, import.meta.url))).toString("base64")}`
   );
+const acknowledge = (body) =>
+  body.rows
+    ? {
+        processedRows: body.rows.length,
+        nextRow: body.startRow + body.rows.length,
+        remainingRows: 0,
+        complete: true,
+      }
+    : { import: { status: "complete" } };
 const model = await load("organizationContactsModel");
 const imports = await load("organizationContactImport");
 const { createOrganizationContactsApi } = await load("organizationContactsApi");
@@ -83,7 +92,8 @@ test("streamed imports use bounded chunks and stable retry receipts with no prov
     return {
       ok: true,
       accepted: body.rows?.length || 0,
-      import: { importId: "import-1" },
+      import: { importId: "import-1", status: "complete" },
+      ...acknowledge(body),
     };
   };
   const options = {
@@ -164,7 +174,7 @@ test("resume rejects changed headers and truncated files without closing the ori
     },
     api: async (path, body) => {
       calls.push({ path, body });
-      return {};
+      return acknowledge(body);
     },
     guard() {},
     progress() {},
@@ -200,7 +210,7 @@ test("UTF8 payload limit adaptively flushes long records and preserves absent tr
     },
     api: async (path, body) => {
       calls.push({ path, body });
-      return {};
+      return acknowledge(body);
     },
     guard() {},
     progress() {},

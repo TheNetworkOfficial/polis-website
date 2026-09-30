@@ -141,6 +141,23 @@ export function boundedContactImportPreview(payload) {
   return result;
 }
 
+/** Verify a durable prefix before releasing any buffered source row. */
+export function acknowledgedContactRows(result, startRow, submittedRows) {
+  const count = result.processedRows;
+  if (
+    !Number.isInteger(count) ||
+    count < 0 ||
+    count > submittedRows ||
+    result.nextRow !== startRow + count ||
+    result.remainingRows !== submittedRows - count ||
+    result.complete !== (count === submittedRows)
+  )
+    throw new Error(
+      "The saved row positions could not be confirmed. Retry the same file; existing receipts prevent duplicates.",
+    );
+  return count;
+}
+
 /** Retrying an interrupted file uses the same operation IDs and row positions. */
 export async function uploadSharedContactRows({
   file,
@@ -156,21 +173,30 @@ export async function uploadSharedContactRows({
     startRow = 0,
     bufferBytes = 0;
   const flush = async () => {
-    if (!buffer.length) return;
-    guard();
-    const result = await api(
-      `/imports/${encodeURIComponent(job.importId)}/rows`,
-      {
-        rows: buffer,
-        startRow,
-        operationId: `${job.operationId}:rows:${startRow}`,
-      },
-    );
-    guard();
-    startRow += buffer.length;
-    buffer = [];
-    bufferBytes = 0;
-    progress({ ...result, processed: startRow });
+    while (buffer.length) {
+      guard();
+      const result = await api(
+        `/imports/${encodeURIComponent(job.importId)}/rows`,
+        {
+          rows: buffer,
+          startRow,
+          operationId: `${job.operationId}:rows:${startRow}`,
+        },
+      );
+      guard();
+      const saved = acknowledgedContactRows(result, startRow, buffer.length);
+      startRow += saved;
+      buffer = buffer.slice(saved);
+      bufferBytes = buffer.reduce(
+        (sum, row) => sum + encodedBytes(JSON.stringify(row)) + 1,
+        0,
+      );
+      progress({ ...result, processed: startRow });
+      if (!saved)
+        throw new Error(
+          "Import processing is paused at its work limit. Resume later from the saved rows.",
+        );
+    }
   };
   for await (const row of contactFileRows(file, delimiter, encoding)) {
     if (!headers) {
@@ -202,12 +228,25 @@ export async function uploadSharedContactRows({
     if (buffer.length === 100) await flush();
   }
   await flush();
-  if (startRow < (Number(job.accepted) || 0) + (Number(job.conflicts) || 0))
+  const minimumRows = Number.isInteger(job.maxRow)
+    ? job.maxRow + 1
+    : (Number(job.accepted) || 0) + (Number(job.conflicts) || 0);
+  if (startRow < minimumRows)
     throw new Error(
       "This file is shorter than the records already saved. Reselect the original complete file to finish this import.",
     );
   guard();
-  return api(`/imports/${encodeURIComponent(job.importId)}/complete`, {
-    operationId: `${job.operationId}:complete`,
-  });
+  const result = await api(
+    `/imports/${encodeURIComponent(job.importId)}/complete`,
+    {
+      operationId: `${job.operationId}:complete`,
+      expectedRowCount: startRow,
+    },
+  );
+  guard();
+  if (result.import?.status !== "complete")
+    throw new Error(
+      "The completed file could not be confirmed. Resume this import to check its saved rows.",
+    );
+  return result;
 }
