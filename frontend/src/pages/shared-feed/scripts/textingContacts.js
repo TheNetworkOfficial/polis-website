@@ -38,6 +38,7 @@ const evidenceColumns = [
   ["senderScopeKey", "Organization scope"],
   ["sourceRecordId", "Consent source record"],
   ["smsSpecific", "SMS-specific consent"],
+  ["messagingPurpose", "Consent purpose (political)"],
 ];
 const bytes = (n) =>
   Number.isSafeInteger(n) ? `${(n / 1048576).toFixed(1)} MB` : "—";

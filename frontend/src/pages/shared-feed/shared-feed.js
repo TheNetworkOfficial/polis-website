@@ -36,6 +36,11 @@ import {
 } from "./scripts/webMessaging.js";
 import { createMessagingProofTransport } from "./scripts/messagingDeviceProof.mjs";
 import { isFilesWorkspaceAccessible } from "../files/scripts/filesEntitlements.js";
+import {
+  textingNotificationRoute,
+  textingNotificationTitle,
+  textingNotificationBody,
+} from "./scripts/textingNotifications.js";
 import { createTextingBalancePage } from "./scripts/textingBalance.js";
 import { createTextingIntakePage } from "./scripts/textingIntake.js";
 import { createTextingWorkspacePage } from "./scripts/textingWorkspace.js";
@@ -18961,6 +18966,7 @@ function normalizeNotificationKind(raw = {}) {
     raw.type || raw.notificationType || raw.notification_type,
   ).toLowerCase();
   const source = rawKind || rawType;
+  if (source === "texting") return "texting";
   if (source === "post_comment" || source === "comment") {
     return "post_comment";
   }
@@ -19028,6 +19034,7 @@ function normalizeNotificationTarget(raw = {}) {
     coalitionId: normalizeString(target.coalitionId || target.coalition_id),
     missionId: normalizeString(target.missionId || target.mission_id),
     jobId: normalizeString(target.jobId || target.job_id),
+    scopeKey: normalizeString(target.scopeKey || target.scope_key),
     scopeType: normalizeString(target.scopeType || target.scope_type),
     scopeId: normalizeString(target.scopeId || target.scope_id),
   };
@@ -99570,6 +99577,7 @@ function profileNotificationExtraCount(item) {
 }
 
 function profileNotificationTitle(item) {
+  if (item.kind === "texting") return textingNotificationTitle(item);
   if (item.kind === "account_lifecycle") {
     if (item.accountLifecycle?.title) {
       return item.accountLifecycle.title;
@@ -99694,6 +99702,7 @@ function profileNotificationInviteIsPending(item) {
 }
 
 function profileNotificationSubtitle(item) {
+  if (item.kind === "texting") return textingNotificationBody(item);
   if (item.kind === "account_lifecycle") {
     return (
       item.accountLifecycle?.body ||
@@ -99745,6 +99754,7 @@ function profileNotificationSubtitle(item) {
 }
 
 function profileNotificationIcon(item) {
+  if (item.kind === "texting") return "messages";
   if (item.kind === "post_like") return "heart";
   if (item.kind === "post_comment" || item.kind === "mention") return "comment";
   if (item.kind === "follow") return "profile";
@@ -99756,6 +99766,7 @@ function profileNotificationIcon(item) {
 }
 
 function profileNotificationKindLabel(item) {
+  if (item.kind === "texting") return "Texting";
   const labels = {
     post_like: "Like",
     post_comment: "Comment",
@@ -99770,6 +99781,7 @@ function profileNotificationKindLabel(item) {
 }
 
 function profileNotificationTargetRoute(item) {
+  if (item.kind === "texting") return textingNotificationRoute(item);
   if (item.route) {
     return item.route;
   }

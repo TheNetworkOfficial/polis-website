@@ -4,6 +4,7 @@ import {
   money,
   field,
   textarea,
+  select,
   checkedUrl,
 } from "./textingWorkspaceUi";
 
@@ -47,13 +48,75 @@ const messagingFields = [
   ["areaCode1", "Preferred area code"],
   ["areaCode2", "Second choice (optional)"],
 ];
+const entityTypes = [
+  ["", "Choose organization type"],
+  ["NON_PROFIT", "Nonprofit"],
+  ["PRIVATE_PROFIT", "Private business"],
+  ["PUBLIC_PROFIT", "Publicly traded business"],
+  ["GOVERNMENT", "Government"],
+];
+const stockExchanges = [
+  "NASDAQ",
+  "NYSE",
+  "AMEX",
+  "AMX",
+  "ASX",
+  "B3",
+  "BME",
+  "BSE",
+  "FRA",
+  "ICEX",
+  "JPX",
+  "JSE",
+  "KRX",
+  "LON",
+  "NSE",
+  "OMX",
+  "SEHK",
+  "SSE",
+  "STO",
+  "SWX",
+  "SZSE",
+  "TSX",
+  "TWSE",
+  "VSE",
+];
+const consentMethods = [
+  ["", "Choose opt-in method"],
+  ["web_form", "Website form"],
+  ["paper_form", "Paper form"],
+  ["keyword", "Text keyword"],
+  ["verbal", "Verbal consent"],
+  ["email", "Email consent"],
+];
+const conditionalFields = [
+  ["entityType", "Organization type"],
+  ["stockSymbol", "Stock symbol"],
+  ["stockExchange", "Stock exchange"],
+  ["consentMethod", "Opt-in method"],
+  ["consentEvidenceUrl", "Opt-in evidence link"],
+  ["consentScript", "Exact consent script"],
+  ["consentKeyword", "Opt-in keyword"],
+  ["consentPhone", "Opt-in phone number"],
+  ["donationProcessor", "Donation processor"],
+  ["donationAccreditationUrl", "Donation processor verification link"],
+];
+const booleanFields = [
+  "authorityConfirmed",
+  "fundraisingRequested",
+  "fundraisingDisclosureConfirmed",
+];
 const optional = new Set([
   "dba",
   "filingInstructions",
   "sampleMessage3",
   "areaCode2",
 ]);
-const applicationFields = [...organizationFields, ...messagingFields]
+const applicationFields = [
+  ...organizationFields,
+  ...messagingFields,
+  ...conditionalFields,
+]
   .map(([name]) => name)
   .concat([
     "country",
@@ -62,7 +125,7 @@ const applicationFields = [...organizationFields, ...messagingFields]
     "sampleMessage1",
     "sampleMessage2",
     "sampleMessage3",
-    "authorityConfirmed",
+    ...booleanFields,
   ]);
 const input = (name, title, value, type = "text", required = true) =>
   field(name, title, value, {
@@ -97,6 +160,36 @@ export function validateOptInStep(
     }
   }
   if (step === 1) {
+    if (!consentMethods.slice(1).some(([value]) => value === a.consentMethod))
+      return "Choose how people opt in.";
+    const requiredLinks = [];
+    if (["web_form", "paper_form", "keyword"].includes(a.consentMethod))
+      requiredLinks.push(["consentEvidenceUrl", "opt-in evidence"]);
+    if (
+      ["verbal", "email"].includes(a.consentMethod) &&
+      String(a.consentScript || "").trim().length < 40
+    )
+      return "Enter the exact consent script in at least 40 characters.";
+    if (
+      a.consentMethod === "keyword" &&
+      (!String(a.consentKeyword || "").trim() ||
+        !/^\+?[\d ()-]{10,20}$/.test(a.consentPhone || ""))
+    )
+      return "Enter the opt-in keyword and phone number.";
+    if (a.fundraisingRequested === true) {
+      if (!String(a.donationProcessor || "").trim())
+        return "Enter the donation processor.";
+      requiredLinks.push([
+        "donationAccreditationUrl",
+        "donation processor verification",
+      ]);
+      if (a.fundraisingDisclosureConfirmed !== true)
+        return "Confirm that your opt-in page and texting terms disclose donation requests.";
+    }
+    for (const [name, title] of requiredLinks) {
+      if (!checkedUrl(a[name]) || !String(a[name]).startsWith("https://"))
+        return `Enter a public HTTPS link for ${title}.`;
+    }
     if (String(a.useCaseDescription || "").trim().length < 40)
       return "Describe your messaging purpose in at least 40 characters.";
     if (String(a.consentFlow || "").trim().length < 40)
@@ -114,6 +207,14 @@ export function validateOptInStep(
       return "Enter a three-digit area code.";
   }
   if (step === 0) {
+    if (!entityTypes.slice(1).some(([value]) => value === a.entityType))
+      return "Choose the organization’s legal type.";
+    if (
+      a.entityType === "PUBLIC_PROFIT" &&
+      (!String(a.stockSymbol || "").trim() ||
+        !String(a.stockExchange || "").trim())
+    )
+      return "Enter the stock symbol and exchange.";
     if (a.taxEin && !/^\d{9}$/.test(a.taxEin.replace(/-/g, "")))
       return "Enter the nine-digit EIN.";
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(a.email || ""))
@@ -257,12 +358,13 @@ export function createTextingOptIn({ request, context, changed }) {
   function fields() {
     const a = state.application || {};
     if (state.step === 0)
-      return `<div class="pt-fields">${organizationFields.map(([name, title, type]) => input(name, name === "taxEin" && state.registration?.einLast4 ? `EIN (saved ending ${state.registration.einLast4})` : title, a[name] || "", type, !optional.has(name) && !(name === "taxEin" && state.registration?.einLast4))).join("")}</div>`;
+      return `<div class="pt-fields">${select("entityType", "Organization type", entityTypes, a.entityType || "", true)}${a.entityType === "PUBLIC_PROFIT" ? input("stockSymbol", "Stock symbol", a.stockSymbol || "") + select("stockExchange", "Stock exchange", [["", "Choose stock exchange"], ...stockExchanges.map((value) => [value, value])], a.stockExchange || "", true) : ""}${organizationFields.map(([name, title, type]) => input(name, name === "taxEin" && state.registration?.einLast4 ? `EIN (saved ending ${state.registration.einLast4})` : title, a[name] || "", type, !optional.has(name) && !(name === "taxEin" && state.registration?.einLast4))).join("")}</div>`;
     if (state.step === 1)
-      return `<div class="pt-fields">${messagingFields.map(([name, title, type]) => input(name, title, a[name] || "", type, !optional.has(name))).join("")}${textarea("useCaseDescription", "Messaging purpose", a.useCaseDescription || "", true, 4000)}${textarea("consentFlow", "How people opt in", a.consentFlow || "", true, 4000)}${textarea("sampleMessage1", "First sample message", a.sampleMessage1 || "", true)}${textarea("sampleMessage2", "Second sample message", a.sampleMessage2 || "", true)}${textarea("sampleMessage3", "Third sample (optional)", a.sampleMessage3 || "")}</div>`;
+      return `<div class="pt-fields">${messagingFields.map(([name, title, type]) => input(name, title, a[name] || "", type, !optional.has(name))).join("")}${textarea("useCaseDescription", "Messaging purpose", a.useCaseDescription || "", true, 4000)}${select("consentMethod", "Opt-in method", consentMethods, a.consentMethod || "", true)}${textarea("consentFlow", "How people opt in", a.consentFlow || "", true, 4000)}${["web_form", "paper_form", "keyword"].includes(a.consentMethod) ? input("consentEvidenceUrl", "Opt-in evidence link", a.consentEvidenceUrl || "", "url") : ""}${["verbal", "email"].includes(a.consentMethod) ? textarea("consentScript", "Exact consent script", a.consentScript || "", true, 4000) : ""}${a.consentMethod === "keyword" ? input("consentKeyword", "Opt-in keyword", a.consentKeyword || "") + input("consentPhone", "Opt-in phone number", a.consentPhone || "", "tel") : ""}<label class="pt-workspace-check"><input type="checkbox" name="fundraisingRequested"${a.fundraisingRequested ? " checked" : ""}>We will request donations by text.</label>${a.fundraisingRequested ? input("donationProcessor", "Donation processor", a.donationProcessor || "") + input("donationAccreditationUrl", "Donation processor verification link", a.donationAccreditationUrl || "", "url") + `<label class="pt-workspace-check"><input type="checkbox" name="fundraisingDisclosureConfirmed"${a.fundraisingDisclosureConfirmed ? " checked" : ""}>Our opt-in page and texting terms disclose that donations will be solicited.</label>` : ""}${textarea("sampleMessage1", "First sample message", a.sampleMessage1 || "", true)}${textarea("sampleMessage2", "Second sample message", a.sampleMessage2 || "", true)}${textarea("sampleMessage3", "Third sample (optional)", a.sampleMessage3 || "")}</div>`;
     return `<p class="pt-muted">Review your application and registration charge before submitting.</p>${state.verificationUrl ? `<p><a href="${e(state.verificationUrl)}" target="_blank" rel="noopener noreferrer">Open verification service</a></p>` : ""}<div class="pt-fields">${input("verificationToken", state.registration?.hasVerificationToken ? "Replace saved verification token (optional)" : "Verification token", state.token || "", "password", !state.registration?.hasVerificationToken)}${input("verificationExpiresOn", "Token expiration", state.expiresOn || "", "date", Boolean(state.token))}</div>${state.registration?.hasVerificationToken ? `<p class="pt-muted">Verification is stored securely.</p>` : ""}<label class="pt-workspace-check"><input type="checkbox" name="authorityConfirmed"${a.authorityConfirmed ? " checked" : ""}>I am authorized to share this organization’s information for registration review.</label><details class="pt-workspace-details"><summary>Review application</summary><dl>${[
       ...organizationFields,
       ...messagingFields,
+      ...conditionalFields,
     ]
       .filter(([name]) => name !== "taxEin")
       .map(
@@ -308,7 +410,7 @@ export function createTextingOptIn({ request, context, changed }) {
       else if (name === "verificationExpiresOn")
         state.expiresOn = String(value);
       else if (
-        name !== "authorityConfirmed" &&
+        !booleanFields.includes(name) &&
         applicationFields.includes(name)
       )
         state.application[name] = String(value).trim();
@@ -316,9 +418,10 @@ export function createTextingOptIn({ request, context, changed }) {
     if (form.elements.namedItem("chargesAccepted"))
       state.chargesAccepted =
         form.elements.namedItem("chargesAccepted").checked;
-    if (form.elements.namedItem("authorityConfirmed"))
-      state.application.authorityConfirmed =
-        form.elements.namedItem("authorityConfirmed").checked;
+    for (const name of booleanFields) {
+      if (form.elements.namedItem(name))
+        state.application[name] = form.elements.namedItem(name).checked;
+    }
     if (
       before !==
       JSON.stringify([state.application, state.token, state.expiresOn])
@@ -510,7 +613,11 @@ export function createTextingOptIn({ request, context, changed }) {
   document.addEventListener("input", (event) => {
     if (owns(event.target) && event.target.closest("[data-opt-in-form]")) {
       capture(event.target.form);
-      if (event.target.type === "checkbox") changed();
+      if (
+        event.target.type === "checkbox" ||
+        ["entityType", "consentMethod"].includes(event.target.name)
+      )
+        changed();
     }
   });
   return { load, render, reset };

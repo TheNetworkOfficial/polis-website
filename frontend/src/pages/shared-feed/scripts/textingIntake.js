@@ -488,6 +488,7 @@ export function createTextingIntakePage({
   }
   function sendingHours() {
     const delivery = view.delivery;
+    if (!delivery) return "";
     return `<section class="pt-card"><h2>Default sending hours</h2>${view.scheduleError ? `<p role="alert">${escape(view.scheduleError)}</p>` : ""}${delivery?.canManage === true ? `<form data-intake-schedule>${scheduleFields(delivery.schedule)}${delivery.schedule?.status === "needs_review" ? `<p class="pt-muted">Saved request: ${escape(scheduleSummary(delivery.schedule))}. Check these saved hours before editing again.</p>${button("check-hours", "Check saved hours", view.scheduleSaving, true)}` : ""}<div class="pt-actions"><button type="submit" class="pt-btn"${view.scheduleSaving || delivery.schedule?.status !== "verified" ? " disabled" : ""}>${view.scheduleSaving ? "Saving hours…" : "Save organization hours"}</button>${button("refresh-hours", "Refresh hours", view.scheduleSaving, true)}</div></form>` : `<p class="pt-muted">${escape(scheduleSummary(delivery?.schedule))}</p><p class="pt-muted">An organization administrator manages the daily sending hours.</p>`}</section>`;
   }
   function packet() {

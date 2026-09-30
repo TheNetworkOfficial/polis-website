@@ -4,6 +4,10 @@ const LEGACY = "/api/text-banking/prompt/scopes/coalition%3Aorg-1";
 const NEUTRAL = "/api/text-banking/workspaces/coalition%3Aorg-1";
 const application = {
   legalEntityName: "Example Civic Team",
+  entityType: "NON_PROFIT",
+  consentMethod: "web_form",
+  consentEvidenceUrl: "https://example.test/opt-in",
+  fundraisingRequested: false,
   dba: "",
   country: "US",
   entityStreetAddress: "123 Example Street",
@@ -256,11 +260,48 @@ test("optional application stays in settings, discloses charges and can return t
   await expect(card.getByLabel("Legal organization name")).toHaveValue(
     application.legalEntityName,
   );
+  await card
+    .getByRole("combobox", { name: "Organization type", exact: true })
+    .selectOption("PUBLIC_PROFIT");
+  await card.getByLabel("Stock symbol", { exact: true }).fill("EXAMPLE");
+  await card
+    .getByRole("combobox", { name: "Stock exchange", exact: true })
+    .selectOption("NASDAQ");
   await card.getByLabel("EIN", { exact: true }).fill("00-0000000");
   await card.getByRole("button", { name: "Continue", exact: true }).click();
   await expect(card.getByLabel("How people opt in")).toHaveValue(
     application.consentFlow,
   );
+  await card
+    .getByRole("combobox", { name: "Opt-in method", exact: true })
+    .selectOption("keyword");
+  await expect(
+    card.getByLabel("Opt-in keyword", { exact: true }),
+  ).toBeVisible();
+  await card
+    .getByRole("combobox", { name: "Opt-in method", exact: true })
+    .selectOption("verbal");
+  await expect(
+    card.getByLabel("Exact consent script", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    card.getByLabel("Opt-in evidence link", { exact: true }),
+  ).toHaveCount(0);
+  await card
+    .getByRole("combobox", { name: "Opt-in method", exact: true })
+    .selectOption("web_form");
+  await card.getByLabel("We will request donations by text.").check();
+  await card
+    .getByLabel("Donation processor", { exact: true })
+    .fill("Example Processor");
+  await card
+    .getByLabel("Donation processor verification link", { exact: true })
+    .fill("https://example.test/processor");
+  await card
+    .getByLabel(
+      "Our opt-in page and texting terms disclose that donations will be solicited.",
+    )
+    .check();
   await page.setViewportSize({ width: 390, height: 844 });
   await card.getByRole("button", { name: "Continue", exact: true }).click();
   await card
@@ -279,6 +320,21 @@ test("optional application stays in settings, discloses charges and can return t
     .click();
   await expect(card).toContainText("Application submitted");
   expect(h.writes.filter((x) => x.path.endsWith("/submit"))).toHaveLength(1);
+  expect(
+    h.writes.find(
+      (x) => x.path.endsWith("/opt-in-registration") && x.body?.application,
+    ).body.application,
+  ).toMatchObject({
+    entityType: "PUBLIC_PROFIT",
+    stockSymbol: "EXAMPLE",
+    stockExchange: "NASDAQ",
+    consentMethod: "web_form",
+    consentEvidenceUrl: "https://example.test/opt-in",
+    fundraisingRequested: true,
+    donationProcessor: "Example Processor",
+    donationAccreditationUrl: "https://example.test/processor",
+    fundraisingDisclosureConfirmed: true,
+  });
   expect(h.writes.find((x) => x.path.endsWith("/submit")).body).toMatchObject({
     chargesAccepted: true,
     termsVersion: "test-terms-v1",
@@ -443,5 +499,51 @@ test("opt-in MMS loads protected previews and inbound attachments through local 
   expect(reads).toContain(
     `${NEUTRAL}/conversations/oi_conversation/messages/inbound-one/attachments/0`,
   );
+  expect(h.errors).toEqual([]);
+});
+
+test("texting status notification opens its organization settings", async ({
+  page,
+}) => {
+  const h = await setup(page);
+  await page.route(`${BASE}/api/me/notifications**`, async (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify(
+        new URL(route.request().url()).pathname.endsWith("unread-count")
+          ? { unreadCount: 1 }
+          : {
+              items: [
+                {
+                  notificationId: "texting-status",
+                  kind: "texting",
+                  title: "Opt-in texting approved",
+                  body: "Review your texting setup.",
+                  preview: { textSnippet: "Your application is approved." },
+                  target: {
+                    surfaceType: "texting_settings",
+                    scopeKey: "coalition:org-1",
+                    route: "/organizations/org-1/texting/settings",
+                  },
+                  createdAt: new Date().toISOString(),
+                },
+              ],
+            },
+      ),
+    }),
+  );
+  await page.goto(`${BASE}/organizations/org-1/texting`);
+  await page.evaluate(() => {
+    history.pushState({}, "", "/profile/notifications");
+    dispatchEvent(new PopStateEvent("popstate"));
+  });
+  const notification = page.locator(
+    '[data-action="profile-notification-open"][data-notification-id="texting-status"]',
+  );
+  await expect(notification).toContainText("Opt-in texting approved");
+  await expect(notification).toContainText("Your application is approved.");
+  await notification.click();
+  await expect(page).toHaveURL(`${BASE}/organizations/org-1/texting/settings`);
+  await expect(page.locator("[data-opt-in-key]")).toBeVisible();
   expect(h.errors).toEqual([]);
 });

@@ -337,3 +337,122 @@ test("protected MMS requires decoded media before confirmation and never trusts 
   assert.equal(ui.queueCanConfirm(item, workspace, funds, true), true);
   controller.dispose();
 });
+
+test("registration requires selected consent evidence and conditional donation disclosures", () => {
+  const application = {
+    privacyPolicyUrl: "https://example.test/privacy",
+    termsUrl: "https://example.test/terms",
+    filingUrl: "https://example.test/filing",
+    areaCode1: "202",
+    useCaseDescription:
+      "Send political campaign updates to people who request them.",
+    consentFlow: "People opt in through the website form with SMS consent.",
+    sampleMessage1: "Example. Reply STOP to opt out.",
+    sampleMessage2: "Another example. Reply STOP to opt out.",
+    consentMethod: "web_form",
+    consentEvidenceUrl: "https://example.test/opt-in",
+  };
+  assert.equal(validateOptInStep(application, 1), "");
+  assert.match(
+    validateOptInStep({ ...application, consentMethod: "" }, 1),
+    /Choose how/,
+  );
+  assert.match(
+    validateOptInStep({ ...application, consentEvidenceUrl: "" }, 1),
+    /evidence/,
+  );
+  assert.match(
+    validateOptInStep({ ...application, consentMethod: "verbal" }, 1),
+    /script/,
+  );
+  assert.equal(
+    validateOptInStep(
+      {
+        ...application,
+        consentMethod: "email",
+        consentScript:
+          "Please reply to confirm that you want political SMS updates.",
+      },
+      1,
+    ),
+    "",
+  );
+  assert.match(
+    validateOptInStep({ ...application, consentMethod: "keyword" }, 1),
+    /keyword and phone/,
+  );
+  assert.match(
+    validateOptInStep({ ...application, fundraisingRequested: true }, 1),
+    /processor/,
+  );
+  assert.match(
+    validateOptInStep(
+      {
+        ...application,
+        fundraisingRequested: true,
+        donationProcessor: "Example Processor",
+        donationAccreditationUrl: "https://example.test/processor",
+      },
+      1,
+    ),
+    /disclose/,
+  );
+  assert.equal(
+    validateOptInStep(
+      {
+        ...application,
+        fundraisingRequested: true,
+        donationProcessor: "Example Processor",
+        donationAccreditationUrl: "https://example.test/processor",
+        fundraisingDisclosureConfirmed: true,
+      },
+      1,
+    ),
+    "",
+  );
+});
+
+test("texting notifications retain neutral status and derive only the scoped settings route", async () => {
+  const {
+    textingNotificationRoute,
+    textingNotificationTitle,
+    textingNotificationBody,
+  } = await import(await moduleUrl("textingNotifications"));
+  const item = {
+    kind: "texting",
+    title: "Opt-in texting approved",
+    preview: { textSnippet: "Your application is approved." },
+    target: {
+      surfaceType: "texting_settings",
+      scopeKey: "coalition:org-one",
+      route: "https://untrusted.example.test/",
+    },
+  };
+  assert.equal(
+    textingNotificationRoute(item),
+    "/organizations/org-one/texting/settings",
+  );
+  assert.equal(textingNotificationTitle(item), "Opt-in texting approved");
+  assert.equal(textingNotificationBody(item), "Your application is approved.");
+  assert.equal(
+    textingNotificationRoute({
+      ...item,
+      target: { ...item.target, scopeKey: "user:elsewhere" },
+    }),
+    "",
+  );
+  assert.equal(
+    textingNotificationRoute({
+      ...item,
+      target: { ...item.target, scopeKey: "coalition:../outside" },
+    }),
+    "",
+  );
+  assert.doesNotMatch(
+    textingNotificationBody({
+      ...item,
+      preview: { textSnippet: "Telnyx requires changes" },
+    }),
+    /Telnyx/,
+  );
+});
