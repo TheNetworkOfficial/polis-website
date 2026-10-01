@@ -217,6 +217,7 @@ export function createOrganizationContactBook(
       s.complete = false;
       s.recentResults = false;
       s.publication = null;
+      s.effectiveSort = null;
       s.previousCursors = [];
       s.currentCursor = null;
       s.pageNumber = 1;
@@ -265,6 +266,7 @@ export function createOrganizationContactBook(
     s.bookRevision = result.bookRevision;
     s.recentResults = result.fromCache === true;
     s.publication = result.publication;
+    s.effectiveSort = result.effectiveSort || null;
     s.indexRequirement = null;
     s.indexJob = null;
   }
@@ -1278,13 +1280,18 @@ export function createOrganizationContactBook(
   }
   function renderRows() {
     const s = state(),
-      updating = s.publication?.status === "updating";
+      updating = s.publication?.status === "updating",
+      sort = s.effectiveSort || s.query.sort,
+      sortSummary =
+        sort?.field === "best_match"
+          ? "Best match"
+          : `Sorted by ${columnDefinition(sort?.field)?.label || (sort?.field === "contactId" ? "contact" : "name")}, ${sort?.direction === "desc" ? "descending" : "ascending"}`;
     const summary = updating
       ? `${count(s.rows.length)} published matches loaded${s.cursor ? " · more pages available" : ""}`
       : s.total != null
         ? `${count(s.total)} matching contacts`
         : `${count(s.rows.length)} contacts on this page${s.cursor ? " · more pages available" : ""}`;
-    return `${indexPreparation()}<section class="pt-cb-book-list ${s.density === "compact" ? "is-compact" : ""}"><div class="pt-cb-view-row">${tool("overlay", s.activeView || "All contacts", "bookmark", { value: "views" })}<span>Organization contact book</span>${b("overlay", "Save view", { secondary: true, value: "views" })}</div>${filterForm()}${updating ? notice("Contacts updating", `${s.publication.pending > 0 ? `${count(s.publication.pending)} updates pending. ` : ""}Showing published matches. Imported or edited contacts may still be updating. Refresh to check progress.`) : ""}${s.recentResults ? '<p class="pt-cb-hint" role="status">Recent results. Refresh to check for updates.</p>' : ""}<div class="pt-cb-results"><span role="status">${e(summary)}</span><span>Sorted by ${e(columnDefinition(s.query.sort?.field)?.label || "name")}, ${s.query.sort?.direction === "desc" ? "descending" : "ascending"}</span>${tool("refresh", "Refresh", "refresh", { extra: 'aria-label="Refresh contacts"' })}</div>${selectionTools()}${s.rows.length ? rowTable(s.rows) : notice(updating ? "No published matches on this page" : s.cursor ? "More contacts may match" : "No matching contacts", updating ? "Contact updates are still publishing. Refresh to check progress." : s.cursor ? "Continue to check the remaining results. This page does not cover the entire contact book." : "Try changing the filters or add contacts.")}<footer class="pt-cb-pagination">${pageSizeControl()}<span>Page ${count(s.pageNumber || 1)} · ${count(s.rows.length)} contacts</span><div class="pt-actions">${b("previous", "Previous page", { secondary: true, disabled: !s.previousCursors?.length || r.busy() })}${s.pageNumber > 1 ? b("first", "First page", { secondary: true }) : ""}${b("more", "Next page", { secondary: true, disabled: !s.cursor || r.busy() })}</div></footer></section>${mode === "selector" && s.selection?.status === "ready" && s.reviewed ? notice("Recipients reviewed", `${count(s.selection.count)} contacts selected for this campaign. Only explicit provider preparation can transfer selected phone numbers.`) : ""}`;
+    return `${indexPreparation()}<section class="pt-cb-book-list ${s.density === "compact" ? "is-compact" : ""}"><div class="pt-cb-view-row">${tool("overlay", s.activeView || "All contacts", "bookmark", { value: "views" })}<span>Organization contact book</span>${b("overlay", "Save view", { secondary: true, value: "views" })}</div>${filterForm()}${updating ? notice("Contacts updating", `${s.publication.pending > 0 ? `${count(s.publication.pending)} updates pending. ` : ""}Showing published matches. Imported or edited contacts may still be updating. Refresh to check progress.`) : ""}${s.recentResults ? '<p class="pt-cb-hint" role="status">Recent results. Refresh to check for updates.</p>' : ""}<div class="pt-cb-results"><span role="status">${e(summary)}</span><span>${e(sortSummary)}</span>${tool("refresh", "Refresh", "refresh", { extra: 'aria-label="Refresh contacts"' })}</div>${selectionTools()}${s.rows.length ? rowTable(s.rows) : notice(updating ? "No published matches on this page" : s.cursor ? "More contacts may match" : "No matching contacts", updating ? "Contact updates are still publishing. Refresh to check progress." : s.cursor ? "Continue to check the remaining results. This page does not cover the entire contact book." : "Try changing the filters or add contacts.")}<footer class="pt-cb-pagination">${pageSizeControl()}<span>Page ${count(s.pageNumber || 1)} · ${count(s.rows.length)} contacts</span><div class="pt-actions">${b("previous", "Previous page", { secondary: true, disabled: !s.previousCursors?.length || r.busy() })}${s.pageNumber > 1 ? b("first", "First page", { secondary: true }) : ""}${b("more", "Next page", { secondary: true, disabled: !s.cursor || r.busy() })}</div></footer></section>${mode === "selector" && s.selection?.status === "ready" && s.reviewed ? notice("Recipients reviewed", `${count(s.selection.count)} contacts selected for this campaign. Only explicit provider preparation can transfer selected phone numbers.`) : ""}`;
   }
   function endpointControls() {
     const s = state();

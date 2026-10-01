@@ -322,6 +322,9 @@ test("fixed pages preserve selections, bound cursor memory and fence obsolete re
         })),
         nextCursor: String(n + 50),
         bookRevision: 1,
+        ...(body.search
+          ? { effectiveSort: { field: "best_match", direction: "asc" } }
+          : {}),
       };
       if (late) {
         late = false;
@@ -332,6 +335,14 @@ test("fixed pages preserve selections, bound cursor memory and fence obsolete re
   };
   const book = createOrganizationContactBook(runtime);
   await book.load();
+  view.contactBook.query.search = "neighbor";
+  await book.action("book-refresh");
+  assert.match(book.render(), /Best match/);
+  assert.doesNotMatch(book.render(), /Sorted by Name/);
+  delete view.contactBook.query.search;
+  await book.action("book-refresh");
+  assert.match(book.render(), /Sorted by Name, ascending/);
+  assert.doesNotMatch(book.render(), /Best match/);
   book.change({
     dataset: { contactChange: "book-row", contactId: "contact-0" },
     checked: true,
