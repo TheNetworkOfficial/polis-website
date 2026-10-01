@@ -20,6 +20,12 @@ async function setup(page, options = {}) {
     checkoutFailures: 0,
     checkoutUrl: "https://checkout.stripe.com/c/pay/cs_test_example",
     acceptance: false,
+    customAmount: {
+      minimumCents: 1000,
+      maximumCents: 200000,
+      serviceFeeBasisPoints: 500,
+    },
+    termsVersion: "texting-payments-2026-09-23",
     ...options,
   };
   await page.addInitScript(
@@ -50,18 +56,37 @@ async function setup(page, options = {}) {
     },
     {
       baseUrl: BASE_URL,
-      token: jwt({ sub: "billing-admin", email: "billing@example.test" }),
+      token: jwt({
+        sub: options.userId || "billing-admin",
+        email: "billing@example.test",
+      }),
     },
   );
   const purchase = () => ({
     purchaseId: "purchase_1",
-    packId: state.acceptance ? "usd_acceptance_1" : "usd_100",
+    packId: state.principalCents
+      ? "custom"
+      : state.acceptance
+        ? "usd_acceptance_1"
+        : "usd_100",
     status: state.status,
-    principalCents: state.acceptance ? 100 : 10000,
-    serviceFeeCents: state.acceptance ? 5 : 500,
+    principalCents: state.principalCents || (state.acceptance ? 100 : 10000),
+    serviceFeeCents: state.principalCents
+      ? Math.floor((state.principalCents + 10) / 20)
+      : state.acceptance
+        ? 5
+        : 500,
     taxCents: state.status === "funded" ? (state.acceptance ? 0 : 210) : null,
     totalCents:
-      state.status === "funded" ? (state.acceptance ? 105 : 10710) : null,
+      state.status === "funded"
+        ? state.principalCents
+          ? state.principalCents +
+            Math.floor((state.principalCents + 10) / 20) +
+            210
+          : state.acceptance
+            ? 105
+            : 10710
+        : null,
     createdAtMs: 1789812000000,
     receiptUrl:
       state.status === "funded"
@@ -77,7 +102,11 @@ async function setup(page, options = {}) {
         contentType: "application/json",
         body: JSON.stringify(body),
       });
-    if (!url.pathname.startsWith(API)) return respond({});
+    if (
+      !url.pathname.startsWith(API) &&
+      !url.pathname.startsWith(API.replace("org-1", "org-2"))
+    )
+      return respond({});
     calls.push({
       path: url.pathname,
       search: url.search,
@@ -111,6 +140,7 @@ async function setup(page, options = {}) {
               ? ["acceptance_purchase_completed"]
               : [],
           environment: state.acceptance ? "live" : "test",
+          customAmount: state.acceptance ? null : state.customAmount,
           packs: state.acceptance
             ? state.status === "funded"
               ? []
@@ -131,7 +161,7 @@ async function setup(page, options = {}) {
                 totalBeforeTaxCents: amount * 105,
               })),
           terms: {
-            version: "texting-payments-2026-09-23",
+            version: state.termsVersion,
             url: "https://polisapp.io/texting-payment-terms",
             supportEmail: state.acceptance
               ? "lux@luxformontana.com"
@@ -144,6 +174,11 @@ async function setup(page, options = {}) {
         },
       });
     if (url.pathname.endsWith("checkouts")) {
+      state.principalCents = request.postDataJSON()?.principalCents;
+      if (state.checkoutDelayMs)
+        await new Promise((resolve) =>
+          setTimeout(resolve, state.checkoutDelayMs),
+        );
       if (state.checkoutFailures-- > 0)
         return respond({ error: "temporary" }, 503);
       return respond({
@@ -422,4 +457,237 @@ test("canceled and failed checkouts do not change balance; untrusted checkout de
     "Checkout could not be opened",
   );
   await expect(page).toHaveURL(`${PAGE}?purchase=purchase_1&checkout=canceled`);
+});
+
+test("custom amount keeps typing focused, validates cents, and renews authorization when the amount or policy changes", async ({
+  page,
+}) => {
+  const { calls, state } = await setup(page);
+  await page.goto(PAGE);
+  await page
+    .getByRole("button", { name: "Add texting funds", exact: true })
+    .click();
+  const other = page.getByRole("button", { name: "Other", exact: true });
+  await other.click();
+  await expect(other).toHaveAttribute("aria-pressed", "true");
+  const input = page.getByRole("textbox", { name: "Amount in dollars" });
+  await expect(input).toBeFocused();
+  await input.pressSequentially("12.50");
+  await expect(input).toBeFocused();
+  await expect(input).toHaveValue("12.50");
+  expect(await input.evaluate((element) => element.selectionStart)).toBe(5);
+  const totals = page.locator(".texting-balance__review dd");
+  await expect(totals).toHaveText(["$12.50", "$0.63", "$13.13"]);
+  for (const value of [
+    "",
+    "9.99",
+    "10.001",
+    "1e2",
+    "-10",
+    "Infinity",
+    "99999999999999999999",
+    "2000.01",
+  ]) {
+    await input.fill(value);
+    await expect(input).toHaveAttribute("aria-invalid", "true");
+    await expect(page.locator("[data-texting-amount-error]")).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Continue to secure checkout" }),
+    ).toHaveCount(0);
+  }
+  for (const [value, amounts] of [
+    ["10", ["$10.00", "$0.50", "$10.50"]],
+    ["10.01", ["$10.01", "$0.50", "$10.51"]],
+  ]) {
+    await input.fill(value);
+    await expect(totals).toHaveText(amounts);
+    await expect(input).toHaveAttribute("aria-invalid", "false");
+  }
+  await page.getByRole("checkbox").check();
+  await input.fill("12.50");
+  await expect(page.getByRole("checkbox")).not.toBeChecked();
+  await page.getByRole("checkbox").check();
+  await page.getByRole("button", { name: "Refresh balance" }).click();
+  await expect(page.getByRole("checkbox")).toBeChecked();
+  await expect(input).toHaveValue("12.50");
+  state.termsVersion = "updated-terms";
+  await page.getByRole("button", { name: "Refresh balance" }).click();
+  await expect(page.getByRole("checkbox")).not.toBeChecked();
+  await page.getByRole("checkbox").check();
+  state.customAmount = { ...state.customAmount, maximumCents: 100000 };
+  await page.getByRole("button", { name: "Refresh balance" }).click();
+  await expect(page.getByRole("checkbox")).not.toBeChecked();
+  await expect(
+    page.getByText("$10.00 minimum · $1,000.00 maximum", { exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "$100.00", exact: true }).click();
+  await expect(input).toHaveCount(0);
+  await expect(totals).toHaveText(["$100.00", "$5.00", "$105.00"]);
+  await page.getByRole("checkbox").check();
+  await other.click();
+  await expect(input).toHaveValue("12.50");
+  await expect(page.getByRole("checkbox")).not.toBeChecked();
+  state.customAmount = { ...state.customAmount, maximumCents: 200000 };
+  await page.getByRole("button", { name: "Refresh balance" }).click();
+  await expect(
+    page.getByText("$10.00 minimum · $2,000.00 maximum", { exact: true }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: test.info().outputPath("custom-amount-desktop.png"),
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 360, height: 800 });
+  await page.screenshot({
+    path: test.info().outputPath("custom-amount-mobile.png"),
+    fullPage: true,
+  });
+  const dimensions = await page.evaluate(() => ({
+    width: document.documentElement.clientWidth,
+    scroll: document.documentElement.scrollWidth,
+  }));
+  expect(dimensions.scroll).toBeLessThanOrEqual(dimensions.width + 2);
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.screenshot({
+    path: test.info().outputPath("custom-amount-mobile-dark.png"),
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.screenshot({
+    path: test.info().outputPath("custom-amount-desktop-dark.png"),
+    fullPage: true,
+  });
+  expect(calls.filter((call) => call.method === "POST")).toHaveLength(0);
+  state.customAmount = null;
+  await page.getByRole("button", { name: "Refresh balance" }).click();
+  await expect(other).toHaveCount(0);
+  await expect(page.getByRole("checkbox")).toHaveCount(0);
+});
+
+test("custom checkout retries bind to normalized amount and organization, prevent double clicks, and clear only a completed amount", async ({
+  page,
+}) => {
+  const { calls, state } = await setup(page, {
+    checkoutFailures: 10,
+    checkoutDelayMs: 200,
+  });
+  const posts = () => calls.filter((call) => call.method === "POST");
+  async function openCustom(url = PAGE) {
+    await page.goto(url);
+    await page
+      .getByRole("button", { name: "Add texting funds", exact: true })
+      .click();
+    await page.getByRole("button", { name: "Other", exact: true }).click();
+  }
+  async function attempt(value) {
+    await page.getByRole("textbox", { name: "Amount in dollars" }).fill(value);
+    await page.getByRole("checkbox").check();
+    await expect(
+      page.getByRole("button", { name: "Continue to secure checkout" }),
+    ).toBeEnabled();
+    await page
+      .getByRole("button", { name: "Continue to secure checkout" })
+      .evaluate((button) => {
+        button.click();
+        button.click();
+      });
+    await expect(
+      page.getByRole("textbox", { name: "Amount in dollars" }),
+    ).toBeDisabled();
+    await expect(
+      page.getByRole("button", { name: "Other", exact: true }),
+    ).toBeDisabled();
+    await expect(page.getByRole("checkbox")).toBeDisabled();
+    await expect(page.getByRole("alert")).toContainText(
+      "Retry to recover the same purchase",
+    );
+  }
+  await openCustom();
+  await attempt("10");
+  await attempt("10.00");
+  expect(posts()).toHaveLength(2);
+  expect(posts()[0].body).toEqual(posts()[1].body);
+  expect(Object.keys(posts()[0].body).sort()).toEqual([
+    "idempotencyKey",
+    "principalCents",
+  ]);
+  expect(posts()[0].body.principalCents).toBe(1000);
+  await attempt("10.01");
+  expect(posts()[2].body.idempotencyKey).not.toBe(
+    posts()[0].body.idempotencyKey,
+  );
+  await openCustom();
+  await attempt("0010.00");
+  expect(posts()[3].body).toEqual(posts()[0].body);
+  await openCustom(PAGE.replace("org-1", "org-2"));
+  await attempt("10.00");
+  expect(posts()[4].body.idempotencyKey).not.toBe(
+    posts()[0].body.idempotencyKey,
+  );
+  const anotherUserPage = await page.context().newPage();
+  const anotherUser = await setup(anotherUserPage, {
+    userId: "billing-admin-2",
+    checkoutFailures: 1,
+  });
+  await anotherUserPage.addInitScript(
+    ({ key, value }) => sessionStorage.setItem(key, value),
+    {
+      key: "polis.textingCheckout.billing-admin:org-1.custom:1000",
+      value: posts()[0].body.idempotencyKey,
+    },
+  );
+  await anotherUserPage.goto(PAGE);
+  await anotherUserPage
+    .getByRole("button", { name: "Add texting funds", exact: true })
+    .click();
+  await anotherUserPage
+    .getByRole("button", { name: "Other", exact: true })
+    .click();
+  await anotherUserPage
+    .getByRole("textbox", { name: "Amount in dollars" })
+    .fill("10");
+  await anotherUserPage.getByRole("checkbox").check();
+  await anotherUserPage
+    .getByRole("button", { name: "Continue to secure checkout" })
+    .click();
+  await expect(anotherUserPage.getByRole("alert")).toContainText(
+    "Retry to recover the same purchase",
+  );
+  expect(
+    anotherUser.calls.find((call) => call.method === "POST").body
+      .idempotencyKey,
+  ).not.toBe(posts()[0].body.idempotencyKey);
+  await anotherUserPage.close();
+  state.status = "funded";
+  state.funds = 10000000;
+  await page.goto(`${PAGE}?purchase=purchase_1&checkout=returned`);
+  await expect(page.getByTestId("texting-purchase-status")).toContainText(
+    "$10.00 was added",
+  );
+  await expect(page.getByTestId("texting-available")).toHaveText("$10.00");
+  const keys = await page.evaluate(() => Object.keys(sessionStorage));
+  expect(keys).not.toContain(
+    "polis.textingCheckout.billing-admin:org-1.custom:1000",
+  );
+  expect(keys).toContain(
+    "polis.textingCheckout.billing-admin:org-1.custom:1001",
+  );
+  expect(keys).toContain(
+    "polis.textingCheckout.billing-admin:org-2.custom:1000",
+  );
+  state.status = "pending";
+  await openCustom();
+  await attempt("10");
+  expect(posts()[5].body.idempotencyKey).not.toBe(
+    posts()[0].body.idempotencyKey,
+  );
+  state.denied = true;
+  await page.getByRole("button", { name: "Refresh balance" }).click();
+  await expect(page.getByRole("alert")).toContainText("do not have access");
+  await expect(
+    page.getByRole("textbox", { name: "Amount in dollars" }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Continue to secure checkout" }),
+  ).toHaveCount(0);
+  expect(posts()).toHaveLength(6);
 });

@@ -1,4 +1,9 @@
 import { rateMoney } from "./textingWorkspaceUi";
+import {
+  customFundingConfig,
+  customFundingQuote,
+  fundingRetryAmount,
+} from "./textingFundingAmount";
 import "../css/texting-balance.css";
 
 const TERMINAL = new Set([
@@ -79,6 +84,27 @@ export function createTextingBalancePage({ request, context, changed }) {
   };
   const current = (key, version) =>
     identity() === key && view.key === key && sequence === version;
+  const renderChanged = changed;
+  changed = () => {
+    const input = document.activeElement;
+    const focused = input?.matches("[data-texting-custom-amount]");
+    const selection = focused
+      ? [input.selectionStart, input.selectionEnd]
+      : null;
+    const key = view.key;
+    renderChanged();
+    if (focused)
+      requestAnimationFrame(() => {
+        if (identity() !== key || view.key !== key) return;
+        const replacement = document.querySelector(
+          "[data-texting-custom-amount]",
+        );
+        if (replacement && document.activeElement === document.body) {
+          replacement.focus();
+          replacement.setSelectionRange(...selection);
+        }
+      });
+  };
   const transport = request;
   request = async (...args) => {
     const key = identity(),
@@ -179,12 +205,11 @@ export function createTextingBalancePage({ request, context, changed }) {
       }
       if (TERMINAL.has(view.purchase?.status)) {
         view.section = "balance";
-        retryKeys.delete(
-          `polis.textingCheckout.${view.key}.${view.purchase.packId}`,
-        );
+        const amountKey = fundingRetryAmount(view.purchase);
+        retryKeys.delete(`polis.textingCheckout.${view.key}.${amountKey}`);
         try {
           sessionStorage.removeItem(
-            `polis.textingCheckout.${view.key}.${view.purchase.packId}`,
+            `polis.textingCheckout.${view.key}.${amountKey}`,
           );
         } catch {
           /* Storage can be unavailable in privacy mode. */
@@ -291,19 +316,17 @@ export function createTextingBalancePage({ request, context, changed }) {
       });
       if (!current(key, version)) return;
       requireBillingAdmin(result.billing);
-      const oldPack = view.billing?.packs?.find(
-        (item) => item.id === view.selectedPack,
-      );
-      const newPack = result.billing.packs?.find(
-        (item) => item.id === view.selectedPack,
-      );
-      if (
-        JSON.stringify(oldPack) !== JSON.stringify(newPack) ||
-        view.billing?.terms?.version !== result.billing.terms?.version
-      ) {
+      if (approvalDetails(view.billing) !== approvalDetails(result.billing)) {
         view.acceptedTerms = false;
       }
       view.billing = result.billing;
+      if (
+        view.selectedPack === "custom" &&
+        !customFundingConfig(view.billing.customAmount)
+      ) {
+        view.selectedPack = "";
+        view.customTouched = false;
+      }
       view.error = "";
       if (!view.billing.canManageBilling) {
         view.purchase = null;
@@ -335,6 +358,21 @@ export function createTextingBalancePage({ request, context, changed }) {
     }
   }
 
+  function selectedQuote(billing = view.billing) {
+    return view.selectedPack === "custom"
+      ? customFundingQuote(view.customAmount, billing?.customAmount).quote
+      : billing?.packs?.find((item) => item.id === view.selectedPack);
+  }
+
+  function approvalDetails(billing) {
+    return JSON.stringify({
+      quote: selectedQuote(billing),
+      customAmount:
+        view.selectedPack === "custom" ? billing?.customAmount : null,
+      terms: billing?.terms,
+    });
+  }
+
   /** Retain a retry key across uncertain HTTP results and page refreshes. */
   function checkoutKey(packId) {
     const storageKey = `polis.textingCheckout.${view.key}.${packId}`;
@@ -356,15 +394,15 @@ export function createTextingBalancePage({ request, context, changed }) {
   }
 
   async function checkout() {
-    const pack = view.billing?.packs?.find(
-      (item) => item.id === view.selectedPack,
-    );
+    const pack = selectedQuote();
     if (
+      identity() !== view.key ||
       view.saving ||
       !view.billing?.canManageBilling ||
       !view.billing.canPurchase ||
       !pack ||
-      !view.acceptedTerms
+      !view.acceptedTerms ||
+      !safeUrl(view.billing.terms?.url)
     )
       return;
     const key = view.key;
@@ -378,7 +416,17 @@ export function createTextingBalancePage({ request, context, changed }) {
         {
           auth: true,
           method: "POST",
-          body: { packId: pack.id, idempotencyKey: checkoutKey(pack.id) },
+          body: {
+            ...(pack.id === "custom"
+              ? { principalCents: pack.principalCents }
+              : { packId: pack.id }),
+            idempotencyKey: checkoutKey(
+              fundingRetryAmount({
+                packId: pack.id,
+                principalCents: pack.principalCents,
+              }),
+            ),
+          },
         },
       );
       if (!current(key, version)) return;
@@ -421,16 +469,51 @@ export function createTextingBalancePage({ request, context, changed }) {
     else if (action === "balance") show("balance");
     else if (action === "history") show("history");
     else if (action === "pack" && !view.saving) {
+      if (!view.billing?.canManageBilling || !view.billing.canPurchase) return;
+      if (
+        button.dataset.pack === "custom" &&
+        !customFundingConfig(view.billing.customAmount)
+      )
+        return;
       view.selectedPack = button.dataset.pack;
       view.acceptedTerms = false;
       view.checkoutError = "";
       changed();
+      if (view.selectedPack === "custom")
+        requestAnimationFrame(() =>
+          document.querySelector("[data-texting-custom-amount]")?.focus(),
+        );
     }
+  });
+  document.addEventListener("input", (event) => {
+    if (
+      !event.target.matches("[data-texting-custom-amount]") ||
+      identity() !== view.key ||
+      view.saving ||
+      view.selectedPack !== "custom"
+    )
+      return;
+    view.customAmount = event.target.value;
+    view.customTouched = true;
+    view.acceptedTerms = false;
+    view.checkoutError = "";
+    // Keep the input node and caret intact while updating its quote and feedback.
+    const error = customAmountError(view.billing);
+    event.target.setAttribute("aria-invalid", String(Boolean(error)));
+    const feedback = document.querySelector("[data-texting-amount-error]");
+    if (feedback) {
+      feedback.textContent = error;
+      feedback.hidden = !error;
+    }
+    const review = document.querySelector("[data-texting-review]");
+    if (review) review.innerHTML = renderPurchaseReview(view.billing);
   });
   document.addEventListener("change", (event) => {
     if (
       event.target.matches("[data-texting-terms]") &&
-      identity() === view.key
+      identity() === view.key &&
+      !view.saving &&
+      selectedQuote()
     ) {
       view.acceptedTerms = event.target.checked;
       changed();
@@ -449,6 +532,8 @@ export function createTextingBalancePage({ request, context, changed }) {
     view.section = section;
     if (section === "add-funds") {
       view.selectedPack = "";
+      view.customAmount = "";
+      view.customTouched = false;
       view.acceptedTerms = false;
       view.checkoutError = "";
     }
@@ -482,10 +567,28 @@ export function createTextingBalancePage({ request, context, changed }) {
     </section>`;
   }
 
+  function customAmountError(billing) {
+    if (!view.customTouched) return "";
+    const { error } = customFundingQuote(
+      view.customAmount,
+      billing?.customAmount,
+    );
+    return (
+      {
+        empty: "Enter an amount.",
+        format: "Use dollars and up to two decimal places, such as 12.50.",
+        minimum: `Enter at least ${money(billing?.customAmount?.minimumCents)}.`,
+        maximum: `Enter ${money(billing?.customAmount?.maximumCents)} or less.`,
+        unavailable: "Custom amounts are unavailable. Choose a listed amount.",
+      }[error] || ""
+    );
+  }
+
   function renderPacks(billing) {
     if (!billing.canManageBilling || !billing.canPurchase) return "";
-    const pack = billing.packs?.find((item) => item.id === view.selectedPack);
-    const termsUrl = safeUrl(billing.terms?.url);
+    const custom = customFundingConfig(billing.customAmount);
+    const isCustom = view.selectedPack === "custom";
+    const error = customAmountError(billing);
     return `<div class="texting-balance__purchase-grid">
       <section class="texting-balance__card">
         <span class="texting-balance__eyebrow">ONE-TIME PURCHASE</span>
@@ -498,15 +601,33 @@ export function createTextingBalancePage({ request, context, changed }) {
             (item) =>
               `<button class="texting-balance__pack" data-texting-action="pack" data-pack="${escape(item.id)}" aria-pressed="${item.id === view.selectedPack}" ${view.saving ? "disabled" : ""}>${money(item.principalCents)}</button>`,
           )
-          .join("")}</div>
+          .join(
+            "",
+          )}${custom ? `<button class="texting-balance__pack" data-texting-action="pack" data-pack="custom" aria-pressed="${isCustom}" ${view.saving ? "disabled" : ""}>Other</button>` : ""}</div>
+        ${
+          custom && isCustom
+            ? `<div class="texting-balance__custom">
+          <label for="texting-custom-amount">Amount in dollars</label>
+          <div class="texting-balance__amount-input"><span aria-hidden="true">$</span><input id="texting-custom-amount" data-texting-custom-amount type="text" inputmode="decimal" autocomplete="off" spellcheck="false" maxlength="20" placeholder="10.00" value="${escape(view.customAmount || "")}" aria-describedby="texting-amount-hint texting-amount-error" aria-invalid="${Boolean(error)}" ${view.saving ? "disabled" : ""}></div>
+          <p class="texting-balance__fine" id="texting-amount-hint">${money(custom.minimumCents)} minimum · ${money(custom.maximumCents)} maximum</p>
+          <p class="texting-balance__amount-error" id="texting-amount-error" data-texting-amount-error role="alert" ${error ? "" : "hidden"}>${escape(error)}</p>
+        </div>`
+            : ""
+        }
         <p class="texting-balance__fine">Plus a 5% service fee, including payment processing.</p>
         <details class="texting-balance__details"><summary>How texting funds work</summary>
           <p>No automatic refills, expiration, or transfers. Adding funds does not approve registration, remove holds, or restart messaging.</p>
         </details>
       </section>
-      ${
-        pack
-          ? `<section class="texting-balance__card texting-balance__review" aria-label="Review purchase">
+      <div data-texting-review>${renderPurchaseReview(billing)}</div>
+    </div>`;
+  }
+
+  function renderPurchaseReview(billing) {
+    const pack = selectedQuote(billing);
+    const termsUrl = safeUrl(billing.terms?.url);
+    return pack
+      ? `<section class="texting-balance__card texting-balance__review" aria-label="Review purchase">
           <span class="texting-balance__eyebrow">REVIEW PURCHASE</span>
           <h2>${escape(billing.organizationName || context().organizationId)}</h2>
           ${pack.notice ? `<p class="texting-balance__notice">${escape(pack.notice)}</p>` : ""}
@@ -521,9 +642,7 @@ export function createTextingBalancePage({ request, context, changed }) {
           <p class="texting-balance__fine texting-balance__secure">Payment is completed through secure checkout.</p>
           ${view.checkoutError ? `<p class="texting-balance__notice" role="alert">${escape(view.checkoutError)}</p>` : ""}
         </section>`
-          : `<section class="texting-balance__card texting-balance__placeholder"><span aria-hidden="true">＋</span><h2>Ready when you are</h2><p>Select an amount to review the total.</p></section>`
-      }
-    </div>`;
+      : `<section class="texting-balance__card texting-balance__placeholder"><span aria-hidden="true">＋</span><h2>Ready when you are</h2><p>${view.selectedPack === "custom" ? "Enter your amount to review the total." : "Select an amount to review the total."}</p></section>`;
   }
 
   function renderHistory(billing, preview = false) {
