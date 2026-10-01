@@ -326,6 +326,10 @@
   font-size: 0.6875rem;
   font-weight: 550;
 }
+.pt-tag--attention {
+  color: var(--polis-text);
+  background: var(--polis-surface-raised);
+}
 .pt-notice {
   padding: 18px;
   border-radius: 12px;

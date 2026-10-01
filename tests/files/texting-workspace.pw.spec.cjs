@@ -124,6 +124,7 @@ for (const legacy of [false, true])
           createdAtMs: Date.now(),
         },
       ];
+      let queueChecks = 0;
       const queued = ["one", "two"].map((name, index) => ({
         itemId: `item-${name}`,
         state: "awaiting_confirmation",
@@ -215,7 +216,17 @@ for (const legacy of [false, true])
             ok: true,
             campaignId: campaign.campaignId,
             state: "held",
-            items: queued,
+            items:
+              ++queueChecks === 1
+                ? [
+                    {
+                      ...queued[0],
+                      state: "blocked",
+                      humanConfirmation: undefined,
+                      blockedReasons: ["prompt_source_guard_required"],
+                    },
+                  ]
+                : queued,
             blockedReasons: [],
           });
         if (suffix === "/campaigns/campaign-one/queue/item-one/confirm")
@@ -281,6 +292,36 @@ for (const legacy of [false, true])
       ).toBeVisible();
       expect(writes).toHaveLength(0);
       await page.getByRole("button", { name: "Get my next messages" }).click();
+      await expect(
+        page.getByRole("button", { name: "Send to Recipient one" }),
+      ).toBeDisabled();
+      await expect(
+        page.getByText(
+          "Polis could not verify this recipient against the campaign’s saved contact selection.",
+          { exact: false },
+        ),
+      ).toBeVisible();
+      await expect(page.getByText("Opted out", { exact: true })).toHaveCount(0);
+      expect(writes.filter((x) => x.path.endsWith("/confirm"))).toHaveLength(0);
+      await page.screenshot({
+        path: testInfo.outputPath("queue-validation-unavailable.png"),
+        fullPage: true,
+      });
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.screenshot({
+        path: testInfo.outputPath("queue-validation-unavailable-mobile.png"),
+        fullPage: true,
+      });
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+      ).toBe(true);
+      await page.setViewportSize({ width: 1440, height: 1100 });
+      await page
+        .getByRole("button", { name: "Check recipient again", exact: true })
+        .click();
+      expect(writes.filter((x) => x.path.endsWith("/confirm"))).toHaveLength(0);
       await expect(
         page.getByRole("button", { name: "Send to Recipient one" }),
       ).toBeEnabled();

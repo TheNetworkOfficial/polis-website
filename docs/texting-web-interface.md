@@ -22,6 +22,7 @@ All deep links require normal Polis authentication. Organization entry is availa
 - Active, Paused and Archived campaign views use server-side filtering and retain cursor pagination, including an empty filtered page with older history available. Archiving preserves campaign records, messages and results.
 - Contact uploads use checksummed, signed multipart storage requests without account credentials. Mapping review, consent and source provenance remain explicit.
 - Provider work occurs only after an explicit action. Every initial send requires its own current authoritative recipient/message preview and confirmation. Unknown send outcomes remain held without automatic retries.
+- Queue validation failures show a visible explanation and a neutral **Sending unavailable** status. Only an explicit recipient suppression is labeled **Opted out**. **Check recipient again** revalidates a held, unattempted recipient through the normal queue endpoint; it does not confirm a send. Pending and uncertain sends remain fenced for administrator review.
 - Replies retain permission, opt-out, spending and approval restrictions. Funding cannot activate messaging.
 - After an accepted reply, the conversation refreshes its saved messages and sending allowance. A short, bounded series of read-only checks catches delayed delivery callbacks; it never repeats a send. Returning to the conversation refreshes saved messages while preserving an unsent draft.
 - Customer state and late responses are fenced to the signed-in user, organization and current view.

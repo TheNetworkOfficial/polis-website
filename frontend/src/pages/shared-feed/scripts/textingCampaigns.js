@@ -20,6 +20,7 @@ import {
   messagePrice,
   streamLabel,
   queueCanConfirm,
+  queueBlockExplanation,
   checkedUrl,
   protectedMediaData,
 } from "./textingWorkspaceUi";
@@ -211,6 +212,7 @@ export function createCampaigns(r) {
       q = s.queue,
       item = list(q?.items)[0],
       p = item?.preview,
+      block = queueBlockExplanation(item),
       held = item && r.sendHeld(`queue:${c.campaignId}:${item.itemId}`),
       pending = item && s.pendingItemId === item.itemId,
       price =
@@ -232,7 +234,7 @@ export function createCampaigns(r) {
       (!q
         ? `<section class="pt-card"><h2>Your next conversation</h2><p class="pt-muted">Get your assigned recipients when you’re ready.</p>${button("queue-load", s.preparingAccess ? "Preparing your texting access…" : "Get my next messages", { disabled: !c.canFetchQueue || !r.can("manualQueue") || r.busy() })}${reasons(c.blockedReasons)}</section>`
         : item
-          ? `<div class="pt-grid pt-grid--two"><section class="pt-card"><div class="pt-row"><div><h2>${e(p?.contactDisplayName || "Recipient")}</h2><p class="pt-muted">${e(p?.contactPhone || "Recipient unavailable")}</p></div><span class="pt-tag">${e(label(pending ? s.pendingAction : held ? "needs_review" : item.state))}</span></div><div class="pt-eyebrow">FINAL MESSAGE${item.stream ? ` · ${e(streamLabel(item.stream))}` : ""}</div><div class="pt-workspace-bubble">${p?.attachmentUrl || p?.mediaId ? ((item.stream === "opt_in" && p.mediaId ? protectedMediaData(s.queueMedia?.[p.mediaId]) : checkedUrl(p.attachmentUrl)) ? `<img data-workspace-queue-image="${e(item.itemId)}" src="${e(item.stream === "opt_in" && p.mediaId ? protectedMediaData(s.queueMedia?.[p.mediaId]) : checkedUrl(p.attachmentUrl))}" alt="Final message attachment" referrerpolicy="no-referrer">` : notice("Attachment unavailable")) : ""}<p>${e(p?.message || "Final text unavailable")}</p></div>${held && !pending ? notice("Delivery needs review", "Do not send again. Its charge stays reserved until the outcome is confirmed.") : ""}${reasons(item.blockedReasons)}${item.state === "lease_expired" ? notice("Recipient assignment expired", "This unsent recipient needs provider release before reassignment. It has not been returned automatically.") : item.expiresAtMs <= Date.now() ? notice("Preview expired", "Check the campaign status before continuing.") : ""}<div class="pt-row"><span>${p?.attachmentUrl || p?.mediaId ? "MMS" : "SMS"}${r.can("manageBilling") ? ` · ${price === null ? "Rate unavailable" : rateMoney(price)}` : ""}</span><div class="pt-actions">${item.state === "lease_expired" ? "" : button("queue-skip", "Skip recipient", { secondary: true, disabled: r.busy() || held || item.state !== "awaiting_confirmation" })}${item.state === "lease_expired" ? "" : button("queue-confirm", pending && s.pendingAction === "sending" ? "Sending…" : `Send to ${p?.contactDisplayName || p?.contactPhone || "recipient"}`, { disabled: r.busy() || held || !queueCanConfirm(item, r.workspace(), r.billing(), s.imageLoaded === item.itemId) })}</div></div><p class="pt-muted">Sends this message to this person only.</p></section><aside class="pt-card"><div class="pt-eyebrow">YOUR SESSION</div>${stat("Messages confirmed this session", count(s.sent || 0))}${r.can("manageBilling") ? `<div class="pt-row"><span>Available funds</span><strong>${money(r.billing()?.availableMicros)}</strong></div>` : ""}${go("inbox", "Open inbox", "", true)}</aside></div>`
+          ? `<div class="pt-grid pt-grid--two"><section class="pt-card"><div class="pt-row"><div><h2>${e(p?.contactDisplayName || "Recipient")}</h2><p class="pt-muted">${e(p?.contactPhone || "Recipient unavailable")}</p></div><span class="pt-tag${block ? " pt-tag--attention" : ""}">${e(pending ? label(s.pendingAction) : held ? "Needs review" : block?.title || label(item.state))}</span></div><div class="pt-eyebrow">FINAL MESSAGE${item.stream ? ` · ${e(streamLabel(item.stream))}` : ""}</div><div class="pt-workspace-bubble">${p?.attachmentUrl || p?.mediaId ? ((item.stream === "opt_in" && p.mediaId ? protectedMediaData(s.queueMedia?.[p.mediaId]) : checkedUrl(p.attachmentUrl)) ? `<img data-workspace-queue-image="${e(item.itemId)}" src="${e(item.stream === "opt_in" && p.mediaId ? protectedMediaData(s.queueMedia?.[p.mediaId]) : checkedUrl(p.attachmentUrl))}" alt="Final message attachment" referrerpolicy="no-referrer">` : notice("Attachment unavailable")) : ""}<p>${e(p?.message || "Final text unavailable")}</p></div>${held && !pending ? notice("Delivery needs review", "Do not send again. Its charge stays reserved until the outcome is confirmed.") : ""}${block && !held && !pending ? notice(block.title, block.text) + (block.canRecheck ? button("queue-recheck", "Check recipient again", { secondary: true, disabled: r.busy() || !r.can("manualQueue") || !c.canFetchQueue }) : "") : ""}${reasons(item.blockedReasons)}${item.state === "lease_expired" ? notice("Recipient assignment expired", "This unsent recipient needs provider release before reassignment. It has not been returned automatically.") : item.expiresAtMs <= Date.now() ? notice("Preview expired", "Check the campaign status before continuing.") : ""}<div class="pt-row"><span>${p?.attachmentUrl || p?.mediaId ? "MMS" : "SMS"}${r.can("manageBilling") ? ` · ${price === null ? "Rate unavailable" : rateMoney(price)}` : ""}</span><div class="pt-actions">${item.state === "lease_expired" ? "" : button("queue-skip", "Skip recipient", { secondary: true, disabled: r.busy() || held || item.state !== "awaiting_confirmation" })}${item.state === "lease_expired" ? "" : button("queue-confirm", pending && s.pendingAction === "sending" ? "Sending…" : `Send to ${p?.contactDisplayName || p?.contactPhone || "recipient"}`, { disabled: r.busy() || held || !queueCanConfirm(item, r.workspace(), r.billing(), s.imageLoaded === item.itemId) })}</div></div><p class="pt-muted">Sends this message to this person only.</p></section><aside class="pt-card"><div class="pt-eyebrow">YOUR SESSION</div>${stat("Messages confirmed this session", count(s.sent || 0))}${r.can("manageBilling") ? `<div class="pt-row"><span>Available funds</span><strong>${money(r.billing()?.availableMicros)}</strong></div>` : ""}${go("inbox", "Open inbox", "", true)}</aside></div>`
           : `<section class="pt-card"><h2>${q.state === "allocation_unknown" ? "Session needs review" : q.state === "lease_expired" ? "Recipient assignment expired" : "You’re caught up"}</h2><p class="pt-muted">${q.state === "allocation_unknown" ? "Your assigned messages could not be confirmed. An administrator must check the saved status." : q.state === "lease_expired" ? (q.automaticReclaim === true ? "Unsent contacts are available for assignment again. Get another group when you’re ready." : "This assignment needs provider release before those contacts can be reassigned.") : "Get another group when you’re ready."}</p>${q.state !== "allocation_unknown" ? button("queue-load", "Get more messages", { disabled: !c.canFetchQueue || r.busy() }) : ""}${reasons(q.blockedReasons)}</section>`)
     );
   }
@@ -548,10 +550,19 @@ export function createCampaigns(r) {
       }
       return true;
     }
-    if (name === "queue-load") {
+    if (name === "queue-load" || name === "queue-recheck") {
+      if (name === "queue-recheck") {
+        const current = list(s.queue?.items)[0];
+        if (
+          !queueBlockExplanation(current)?.canRecheck ||
+          s.pendingItemId ||
+          r.sendHeld(`queue:${c?.campaignId}:${current?.itemId}`)
+        )
+          throw new Error("This recipient needs review before checking again.");
+      }
       if (!r.can("manualQueue") || !c?.canFetchQueue)
         throw new Error("This campaign is not ready for texting.");
-      await prepareTextingAccess(r, s, c.campaignId);
+      if (name === "queue-load") await prepareTextingAccess(r, s, c.campaignId);
       s.queue = await r.api(`/campaigns/${id(c.campaignId)}/queue`, {});
       s.imageLoaded = null;
       s.queueMedia = {};

@@ -93,6 +93,71 @@ export const reasons = (values) =>
       )
     : "";
 
+/** A technical send check must never imply that the recipient opted out. */
+export function queueBlockExplanation(item) {
+  if (item?.state !== "blocked") return null;
+  const codes = new Set(list(item.blockedReasons));
+  if (
+    ["prompt_recipient_suppressed", "texting_recipient_suppressed"].some(
+      (code) => codes.has(code),
+    )
+  )
+    return {
+      title: "Opted out",
+      text: "An opt-out is recorded for this recipient. Sending is unavailable.",
+      canRecheck: false,
+    };
+  if (codes.has("prompt_contact_suppressed"))
+    return {
+      title: "Texting restricted",
+      text: "This contact has an opt-out or contact restriction. An administrator can review the contact book record.",
+      canRecheck: false,
+    };
+  if (
+    [
+      "prompt_provider_item_already_attempted",
+      "prompt_logical_recipient_already_attempted",
+      "prompt_confirmation_already_claimed",
+      "provider_outcome_reconciliation_required",
+      "queue_reconciliation_required",
+    ].some((code) => codes.has(code))
+  )
+    return {
+      title: "Delivery needs review",
+      text: "A send may already have been attempted for this recipient. An administrator must check the saved outcome before any further action.",
+      canRecheck: false,
+    };
+  if (codes.has("prompt_source_guard_required"))
+    return {
+      title: "Sending unavailable",
+      text: "Polis could not verify this recipient against the campaign’s saved contact selection. Check the recipient again. If this continues, ask an administrator to review the campaign.",
+      canRecheck: true,
+    };
+  if (codes.has("prompt_source_membership_changed"))
+    return {
+      title: "Sending unavailable",
+      text: "This recipient’s saved contact selection has changed. An administrator needs to review the campaign before sending.",
+      canRecheck: false,
+    };
+  if (codes.has("prompt_confirmation_guard_rejected"))
+    return {
+      title: "Sending unavailable",
+      text: "Polis could not verify this recipient’s sending approval. Check the recipient again. If this continues, ask an administrator to review the campaign.",
+      canRecheck: true,
+    };
+  if (codes.has("prompt_confirmation_expired"))
+    return {
+      title: "Preview expired",
+      text: "Check this recipient again to load a current message preview before sending.",
+      canRecheck: true,
+    };
+  return {
+    title: "Sending unavailable",
+    text: "This recipient did not pass the checks required to send. Check the recipient again. If this continues, ask an administrator to review the campaign.",
+    canRecheck: true,
+  };
+}
+
 /** Mirrors the server's GSM-7/UCS-2 estimator. It displays a quote only; the server reserves the actual price. */
 export function smsSegments(value) {
   const basic = new Set(
