@@ -293,7 +293,6 @@ export function createTextingIntakePage({
   navigate,
 }) {
   let view = {};
-  const optIn = createTextingOptIn({ request, context, changed });
   let sequence = 0;
   const identity = () => {
     const current = context();
@@ -303,6 +302,19 @@ export function createTextingIntakePage({
   };
   const active = (key, version) =>
     key === identity() && view.key === key && version === sequence;
+  const transport = request;
+  request = async (...args) => {
+    const key = identity(),
+      version = sequence;
+    try {
+      return await transport(...args);
+    } catch (error) {
+      if (active(key, version) && [401, 403].includes(error?.status))
+        view.accessDenied = true;
+      throw error;
+    }
+  };
+  const optIn = createTextingOptIn({ request, context, changed });
   const endpoint = (organizationId) =>
     `/api/text-banking/prompt-intake/${encodeURIComponent(`coalition:${organizationId}`)}`;
   const serviceEndpoint = () =>
@@ -416,6 +428,9 @@ export function createTextingIntakePage({
       workspace?.workspace?.scopeKey ===
         `coalition:${context().organizationId}` &&
       workspace?.workspace?.capabilities?.readContactBook === true;
+    view.authorizationReady =
+      workspace?.workspace?.scopeKey ===
+      `coalition:${context().organizationId}`;
     view.manageBilling =
       workspace?.workspace?.capabilities?.manageBilling === true;
     if (
@@ -960,6 +975,11 @@ export function createTextingIntakePage({
     getMeta: () =>
       identity() === view.key
         ? {
+            authorizationStatus: view.accessDenied
+              ? "denied"
+              : view.authorizationReady
+                ? "ready"
+                : "pending",
             organizationName:
               view.intake?.packet?.legalEntityName ||
               context()?.organizationName ||

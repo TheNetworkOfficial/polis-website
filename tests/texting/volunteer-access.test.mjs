@@ -142,9 +142,20 @@ test("failed assignment write keeps removed rows and selections, then reconciles
     can: () => true,
     busy: () => false,
     toast: () => {},
+    changed: () => {},
     api: async (path, body) => {
       calls.push({ path, body });
       if (body) throw new Error("Response lost");
+      if (path.endsWith("/team?limit=50"))
+        return {
+          campaignId: "campaign",
+          campaignRevision: 11,
+          members: ["a", "b", "d"].map((userId) => ({
+            userId,
+            displayName: userId,
+          })),
+          nextCursor: null,
+        };
       return {
         campaign: {
           ...campaign,

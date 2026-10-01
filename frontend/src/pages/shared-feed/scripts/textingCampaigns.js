@@ -31,6 +31,8 @@ import {
 import { prepareTextingAccess, saveAssignmentChanges } from "./textingAccess";
 import { createOrganizationContactBook } from "./organizationContactBook";
 import { estimateContactCampaign } from "./textingCampaignEstimate";
+import { createCampaignPreparation } from "./textingCampaignPreparation";
+import { createVolunteerPicker } from "./textingVolunteerPicker";
 
 const localInput = (ms) => {
   if (!Number.isSafeInteger(ms)) return "";
@@ -60,12 +62,18 @@ const mediaData = (media) =>
     : "";
 
 export function createCampaigns(r) {
-  const recipients = createOrganizationContactBook(r, { mode: "selector" });
+  const recipients = createOrganizationContactBook(r, {
+    mode: "selector",
+    continueAction: "campaign-next",
+  });
   const state = () => (r.view().campaigns ||= {});
+  const preparation = createCampaignPreparation(r, state);
+  const volunteerPicker = createVolunteerPicker(r, state);
   async function load(resource, section) {
     const s = state();
     if (resource && resource !== "new") {
       s.campaign = (await r.api(`/campaigns/${id(resource)}`)).campaign;
+      if (section === "campaigns") preparation.observe(s.campaign);
       s.draft = { ...s.campaign };
       s.selected = new Set(list(s.campaign.assignedUserIds));
       if (s.campaign.mediaId)
@@ -101,6 +109,13 @@ export function createCampaigns(r) {
       await recipients.load({ selection: pendingSelection });
       s.composeStep ||= "recipients";
     }
+    if (
+      resource &&
+      resource !== "new" &&
+      section === "team" &&
+      r.can("createCampaigns")
+    )
+      await volunteerPicker.loadAssigned();
   }
   function campaignViews(s) {
     return `<div class="pt-actions" aria-label="Campaign views">${["active", "paused", "archived"].map((value) => button("campaigns-view", value[0].toUpperCase() + value.slice(1), { value, secondary: value !== (s.listView || "active"), disabled: r.busy() })).join("")}</div><p class="pt-muted">${s.listView === "archived" ? "Archived campaigns keep their messages, results and history." : s.listView === "paused" ? "Paused campaigns keep their history and can be resumed when ready." : "Active campaigns and drafts ready for your next step."}</p>`;
@@ -147,13 +162,32 @@ export function createCampaigns(r) {
         !!d.mediaId,
       ),
       newCampaign = r.context().resourceId === "new";
-    return `${newCampaign ? `<div class="pt-campaign-step-nav"><div><span class="pt-eyebrow">STEP 2 OF 2</span><p>Write your message</p></div>${button("campaign-back", "Back to recipients", { secondary: true })}</div>` : recipients.render()}<div class="pt-grid pt-grid--two"><form class="pt-card" data-workspace-form="campaign"><div class="pt-fields">${field("name", "Campaign name", d.name, { required: true })}${d.audienceId ? `<p class="pt-muted">This campaign keeps its saved recipient selection until you review a replacement below.</p>` : ""}${textarea("templateText", "Message", d.templateText || "", true)}${r.can("manageBilling") ? field("budget", "Spending limit ($)", d.budgetMicros ? (d.budgetMicros / 1000000).toFixed(2) : "", { type: "number", required: true, extra: 'min="0.01" step="0.01"' }) : ""}</div><p class="pt-muted">Include your organization name and “Reply STOP to opt out.” Use the complete message without merge fields.</p>${r.can("manageBilling") ? `<section class="pt-campaign-estimate" aria-label="Campaign estimate"><div class="pt-row"><span>Reviewed eligible contacts</span><strong>${estimate.count === null ? "Review recipients first" : count(estimate.count)}</strong></div><div class="pt-row"><span>Per message</span><strong>${estimate.rate === null ? "Rate awaiting verification" : rateMoney(estimate.rate)}</strong></div><div class="pt-row"><span>Estimated campaign total</span><strong>${estimate.total === null ? "Awaiting review or verified rates" : money(estimate.total)}</strong></div><p class="pt-muted">Based on ${d.mediaId ? "one MMS" : `${estimate.segments} SMS segment(s)`} per eligible contact at the standard rate. Sender consent, opt-outs and routing are checked again before preparation; final totals can change.</p></section>` : ""}${details("When can volunteers send?", `<div class="pt-fields">${field("deliveryStart", "From", localInput(d.deliveryNotBeforeMs), { type: "datetime-local", required: true })}${field("deliveryEnd", "Until", localInput(d.deliveryBeforeMs), { type: "datetime-local", required: true })}</div><p class="pt-muted">Your local time. This sets the allowed window; it does not schedule automatic sends.</p>`)}${s.scheduleUnsupported ? "" : scheduleFields(s.schedule, d.deliverySchedule, true)}<div class="pt-field"><label for="workspace-media">GIF or image (optional)</label><input id="workspace-media" type="file" accept="image/png,image/gif,.png,.gif" data-workspace-change="campaign-media"><p class="pt-muted">PNG or GIF · up to 512 KB</p></div>${d.mediaId ? `<div class="pt-row"><span>${e(label(s.media?.state || "Saved attachment"))}</span>${button("media-remove", "Remove", { secondary: true })}</div>${r.can("canPrepareProviderMedia") && s.media?.providerReady !== true ? button("media-prepare", "Prepare attachment", { secondary: true, disabled: s.mediaNeedsRead || r.busy() || !["local_ready", "provider_uploaded_pending_verification"].includes(s.media?.state) }) : ""}${s.mediaNeedsRead ? button("media-refresh", "Refresh attachment", { secondary: true }) : ""}` : ""}<div class="pt-actions"><button class="pt-btn" type="submit"${r.busy() ? " disabled" : ""}>Save campaign</button></div>${s.audienceCursor ? button("audiences-more", "Load more lists", { secondary: true }) : ""}</form><aside class="pt-card pt-workspace-preview"><div class="pt-eyebrow">MESSAGE PREVIEW</div><div class="pt-workspace-phone"><div class="pt-workspace-bubble">${image ? `<img src="${e(image)}" alt="Campaign attachment">` : ""}<p>${e(d.templateText || "Your message will appear here.")}</p></div></div><div class="pt-row"><span>${d.mediaId ? "MMS" : `SMS · ${smsSegments(d.templateText || "")} segment(s)`}</span>${r.can("manageBilling") ? `<strong>${price === null ? "Rate awaiting verification" : `${rateMoney(price)}${optInPrice === null ? " per message" : " standard"}`}</strong>` : ""}</div>${r.can("manageBilling") && optInPrice !== null ? `<div class="pt-row"><span>Opt-in message</span><strong>${rateMoney(optInPrice)}</strong></div>` : ""}<p class="pt-muted">Each person gets an individual send confirmation.</p></aside></div>`;
+    return `${newCampaign ? `<div class="pt-campaign-step-nav"><div><span class="pt-eyebrow">STEP 2 OF 2</span><p>Write your message</p></div>${button("campaign-back", "Back to recipients", { secondary: true })}</div>` : recipients.render()}<div class="pt-grid pt-grid--two"><form class="pt-card" data-workspace-form="campaign"><div class="pt-fields">${field("name", "Campaign name", d.name, { required: true })}${d.audienceId ? `<p class="pt-muted">This campaign keeps its saved recipient selection until you review a replacement below.</p>` : ""}${textarea("templateText", "Message", d.templateText || "", true)}${r.can("manageBilling") ? field("budget", "Spending limit ($)", d.budgetMicros ? (d.budgetMicros / 1000000).toFixed(2) : "", { type: "number", required: true, extra: 'min="0.01" step="0.01"' }) : ""}</div><p class="pt-muted">Include your organization name and “Reply STOP to opt out.” Use the complete message without merge fields.</p>${r.can("manageBilling") ? `<section class="pt-campaign-estimate" aria-label="Campaign estimate"><div class="pt-row"><span>Reviewed eligible contacts</span><strong>${estimate.count === null ? "Review recipients first" : count(estimate.count)}</strong></div><div class="pt-row"><span>Per message</span><strong>${estimate.rate === null ? "Rate awaiting verification" : rateMoney(estimate.rate)}</strong></div><div class="pt-row"><span>Estimated campaign total</span><strong>${estimate.total === null ? "Awaiting review or verified rates" : money(estimate.total)}</strong></div><p class="pt-muted">Based on ${d.mediaId ? "one MMS" : `${estimate.segments} SMS segment(s)`} per eligible contact at the standard rate. Sender consent, opt-outs and routing are checked again before preparation; final totals can change.</p></section>` : ""}${details("When can volunteers send?", `<div class="pt-fields">${field("deliveryStart", "From", localInput(d.deliveryNotBeforeMs), { type: "datetime-local", required: true })}${field("deliveryEnd", "Until", localInput(d.deliveryBeforeMs), { type: "datetime-local", required: true })}</div><p class="pt-muted">Your local time. This sets the allowed window; it does not schedule automatic sends.</p>`)}${s.scheduleUnsupported ? "" : scheduleFields(s.schedule, d.deliverySchedule, true)}<div class="pt-field"><label for="workspace-media">GIF or image (optional)</label><input id="workspace-media" type="file" accept="image/png,image/gif,.png,.gif" data-workspace-change="campaign-media"><p class="pt-muted">PNG or GIF · up to 512 KB</p></div>${d.mediaId ? `<div class="pt-row"><span>${e(s.media?.providerReady === true ? "Image verified" : label(s.media?.state || "Saved attachment"))}</span>${button("media-remove", "Remove", { secondary: true })}</div>${r.can("canPrepareProviderMedia") && s.media?.providerReady !== true ? button("media-prepare", "Prepare attachment", { secondary: true, disabled: s.mediaNeedsRead || r.busy() || !["local_ready", "provider_uploaded_pending_verification"].includes(s.media?.state) }) : ""}${s.mediaNeedsRead ? button("media-refresh", "Refresh attachment", { secondary: true }) : ""}` : ""}<div class="pt-actions"><button class="pt-btn" type="submit"${r.busy() ? " disabled" : ""}>Save campaign</button></div>${s.audienceCursor ? button("audiences-more", "Load more lists", { secondary: true }) : ""}</form><aside class="pt-card pt-workspace-preview"><div class="pt-eyebrow">MESSAGE PREVIEW</div><div class="pt-workspace-phone"><div class="pt-workspace-bubble">${image ? `<img src="${e(image)}" alt="Campaign attachment">` : ""}<p>${e(d.templateText || "Your message will appear here.")}</p></div></div><div class="pt-row"><span>${d.mediaId ? "MMS" : `SMS · ${smsSegments(d.templateText || "")} segment(s)`}</span>${r.can("manageBilling") ? `<strong>${price === null ? "Rate awaiting verification" : `${rateMoney(price)}${optInPrice === null ? " per message" : " standard"}`}</strong>` : ""}</div>${r.can("manageBilling") && optInPrice !== null ? `<div class="pt-row"><span>Opt-in message</span><strong>${rateMoney(optInPrice)}</strong></div>` : ""}<p class="pt-muted">Each person gets an individual send confirmation.</p></aside></div>`;
+  }
+  function preparationNotice(s) {
+    const p = s.campaign?.preparation;
+    if (!p || p.status === "complete") return "";
+    const needsAttention = p.status === "needs_attention";
+    const title = needsAttention
+      ? "Recipient preparation needs attention"
+      : p.status === "ready_to_finalize"
+        ? "Checking the campaign message…"
+        : "Preparing selected recipients…";
+    const text =
+      s.preparationPollError ||
+      s.preparationRetryMessage ||
+      (s.preparationPollingPaused
+        ? "Automatic checks are paused. Your saved preparation is retained; check its status to continue."
+        : needsAttention
+          ? "Preparation stopped before it finished. Review the saved status below, then resume this approved selection when available."
+          : "Your approved recipient selection is saved. This page checks progress automatically; you can return later without losing it.");
+    return `${notice(title, text)}${p.errorCode ? reasons([p.errorCode]) : ""}<div class="pt-actions">${p.canResume === true && (needsAttention || s.preparationPollError || s.preparationPollingPaused || s.preparationCompletionAttempted || p.automaticResume !== true) ? button("campaign-preparation-resume", "Resume saved preparation", { disabled: r.busy() || !r.can("createCampaigns") }) : ""}${button("campaign-refresh", "Check preparation now", { secondary: true, disabled: r.busy() })}</div>`;
   }
   function campaignDetail(s) {
     const c = s.campaign,
       manage = r.can("createCampaigns"),
       image = mediaData(s.media);
-    return `${s.preparingRecipients ? notice("Preparing selected recipients…", "Your reviewed selection is being prepared. Refresh to check progress, then finish preparation when it is ready.") + button("campaign-refresh", "Refresh preparation", { secondary: true }) : ""}${r.can("manageBilling") ? `<div class="pt-grid pt-grid--three">${stat("Campaign limit", money(c.budgetMicros))}${stat("Pending charges", money(c.reservedMicros))}${stat("Completed usage", money(c.settledMicros))}</div>` : ""}<div class="pt-grid pt-grid--two"><section class="pt-card"><div class="pt-row"><h2>Your message</h2>${manage && ["draft", "prepared"].includes(c.status) ? button("campaign-edit", "Edit", { secondary: true }) : ""}</div><div class="pt-workspace-bubble">${image ? `<img src="${e(image)}" alt="Saved campaign attachment">` : ""}<p>${e(c.templateText)}</p></div><p class="pt-muted">${dateText(c.deliveryNotBeforeMs)} – ${dateText(c.deliveryBeforeMs)}</p></section><section class="pt-card"><h2>Ready to begin?</h2><div class="pt-row"><span>Campaign</span><strong>${e(label(c.status))}</strong></div>${c.routingSummary ? `<div class="pt-row"><span>Opt-in contacts</span><strong>${count(c.routingSummary.optInCount)}</strong></div><div class="pt-row"><span>Standard contacts</span><strong>${count(c.routingSummary.standardCount)}</strong></div><div class="pt-row"><span>Excluded contacts</span><strong>${count(c.routingSummary.excludedCount)}</strong></div>${r.can("manageBilling") && Number.isSafeInteger(c.estimatedCostMicros) ? `<div class="pt-row"><span>Estimated campaign cost</span><strong>${money(c.estimatedCostMicros)}</strong></div>` : ""}` : ""}<div class="pt-row"><span>Assigned volunteers</span><strong>${count(list(c.assignedUserIds).length)}</strong></div>${reasons(c.blockedReasons)}<div class="pt-actions">${manage ? `${go("team", "Manage team", c.campaignId, true)}${["draft", "prepared"].includes(c.status) ? button("transition-prepare", "Prepare selected recipients", { secondary: true }) : ""}${c.canActivate ? button("transition-activate", c.status === "paused" ? "Resume campaign" : "Open campaign") : ""}${c.status === "active" ? button("transition-pause", "Pause campaign", { secondary: true }) : ""}${c.status !== "archived" ? button("transition-archive", "Archive", { secondary: true }) : ""}` : ""}${c.canFetchQueue && r.can("manualQueue") ? go("send", "Start texting", c.campaignId) : ""}${go("results", "View results", c.campaignId, true)}</div>${c.status === "paused" ? notice("Sending paused", "This stops new sends from Polis. Any vendor-side work already accepted keeps its recorded status.") : ""}</section></div>`;
+    return `${preparationNotice(s)}${r.can("manageBilling") ? `<div class="pt-grid pt-grid--three">${stat("Campaign limit", money(c.budgetMicros))}${stat("Pending charges", money(c.reservedMicros))}${stat("Completed usage", money(c.settledMicros))}</div>` : ""}<div class="pt-grid pt-grid--two"><section class="pt-card"><div class="pt-row"><h2>Your message</h2>${manage && ["draft", "prepared"].includes(c.status) ? button("campaign-edit", "Edit", { secondary: true }) : ""}</div><div class="pt-workspace-bubble">${image ? `<img src="${e(image)}" alt="Saved campaign attachment">${s.media?.providerReady === true ? "<p>Image verified</p>" : ""}` : ""}<p>${e(c.templateText)}</p></div><p class="pt-muted">${dateText(c.deliveryNotBeforeMs)} – ${dateText(c.deliveryBeforeMs)}</p></section><section class="pt-card"><h2>Ready to begin?</h2><div class="pt-row"><span>Campaign</span><strong>${e(label(c.status))}</strong></div>${c.routingSummary ? `<div class="pt-row"><span>Opt-in contacts</span><strong>${count(c.routingSummary.optInCount)}</strong></div><div class="pt-row"><span>Standard contacts</span><strong>${count(c.routingSummary.standardCount)}</strong></div><div class="pt-row"><span>Excluded contacts</span><strong>${count(c.routingSummary.excludedCount)}</strong></div>${r.can("manageBilling") && Number.isSafeInteger(c.estimatedCostMicros) ? `<div class="pt-row"><span>Estimated campaign cost</span><strong>${money(c.estimatedCostMicros)}</strong></div>` : ""}` : ""}<div class="pt-row"><span>Assigned volunteers</span><strong>${count(list(c.assignedUserIds).length)}</strong></div>${reasons(list(c.blockedReasons).map((reason) => (reason === "content_not_prepared" || reason === "prompt_content_not_prepared" ? (s.preparingRecipients ? "Message will be checked when recipient preparation finishes" : "Message needs campaign preparation") : reason)))}<div class="pt-actions">${manage ? `${go("team", "Manage team", c.campaignId, true)}${["draft", "prepared"].includes(c.status) && !s.preparingRecipients ? button("transition-prepare", "Prepare selected recipients", { secondary: true }) : ""}${c.canActivate ? button("transition-activate", c.status === "paused" ? "Resume campaign" : "Open campaign") : ""}${c.status === "active" ? button("transition-pause", "Pause campaign", { secondary: true }) : ""}${c.status !== "archived" ? button("transition-archive", "Archive", { secondary: true }) : ""}` : ""}${c.canFetchQueue && r.can("manualQueue") ? go("send", "Start texting", c.campaignId) : ""}${go("results", "View results", c.campaignId, true)}</div>${c.status === "paused" ? notice("Sending paused", "This stops new sends from Polis. Any vendor-side work already accepted keeps its recorded status.") : ""}</section></div>`;
   }
   function team(s) {
     const c = s.campaign;
@@ -162,9 +196,6 @@ export function createCampaigns(r) {
         head("TEAM", "Choose a campaign", "Assignments belong to a campaign.") +
         listCards(s)
       );
-    const selected = s.selected || new Set(),
-      found = list(s.members),
-      known = new Map(found.map((m) => [m.userId, m.displayName]));
     return (
       head(
         c.name,
@@ -172,7 +203,7 @@ export function createCampaigns(r) {
         "Choose people who already have texting access.",
         go("campaigns", "Back", c.campaignId, true),
       ) +
-      `<section class="pt-card"><form data-workspace-form="members" class="pt-fields">${field("query", "Find a teammate", s.query || "", { required: true, extra: 'minlength="2"' })}<div class="pt-actions"><button class="pt-btn pt-btn--secondary" type="submit">Search</button></div></form><p class="pt-muted">${selected.size} selected</p>${[...new Set([...list(c.assignedUserIds), ...selected, ...found.map((m) => m.userId)])].map((userId) => `<label class="pt-row pt-workspace-check"><span><strong>${e(known.get(userId) || "Assigned member")}</strong>${known.has(userId) ? "" : `<small class="pt-muted">${e(userId)}</small>`}</span><input type="checkbox" data-workspace-member="${e(userId)}"${selected.has(userId) ? " checked" : ""}${r.busy() || s.assignmentsNeedRead || !r.can("createCampaigns") || c.status === "archived" ? " disabled" : ""}></label>`).join("")}<div class="pt-actions">${button("assignments-save", "Save team", { disabled: r.busy() || s.assignmentsNeedRead || !r.can("createCampaigns") || c.status === "archived" })}${s.assignmentsNeedRead ? button("assignments-refresh", "Check saved assignments", { secondary: true, disabled: r.busy() }) + notice("Your selections are kept", "Check saved assignments before trying again.") : ""}</div><p class="pt-muted">Assignment does not grant organization permissions.</p></section>`
+      `<section class="pt-card">${volunteerPicker.render()}<div class="pt-actions">${button("assignments-save", "Save team", { disabled: r.busy() || s.assignmentsNeedRead || !r.can("createCampaigns") || c.status === "archived" })}${s.assignmentsNeedRead ? button("assignments-refresh", "Check saved assignments", { secondary: true, disabled: r.busy() }) + notice("Your selections are kept", "Check saved assignments before trying again.") : ""}</div><p class="pt-muted">Assignment does not grant organization permissions.</p></section>`
     );
   }
   function queue(s) {
@@ -350,22 +381,21 @@ export function createCampaigns(r) {
       return true;
     }
     if (kind === "members") {
-      s.query = String(new FormData(form).get("query") || "").trim();
-      if (s.query.length < 2) throw new Error("Enter at least two characters.");
-      s.members = list(
-        (await r.api(`/members?query=${id(s.query)}&limit=20`)).members,
-      );
+      await volunteerPicker.submit(form);
       return true;
     }
     return false;
   }
   async function action(name, value) {
+    if (await volunteerPicker.action(name)) return true;
     if (await recipients.action(name, value)) return true;
     const s = state(),
       c = s.campaign;
-    if (name === "campaign-refresh") {
-      s.campaign = (await r.api(`/campaigns/${id(c.campaignId)}`)).campaign;
-      if (s.campaign.status === "prepared") s.preparingRecipients = false;
+    if (name === "campaign-refresh" || name === "campaign-preparation-resume") {
+      await preparation.refresh({
+        manual: true,
+        resume: name === "campaign-preparation-resume",
+      });
       return true;
     }
     if (name === "campaigns-view") {
@@ -450,6 +480,7 @@ export function createCampaigns(r) {
       try {
         await saveAssignmentChanges(r.api, c, s.selected, (saved) => {
           s.campaign = saved;
+          volunteerPicker.invalidateAssigned();
         });
       } catch (error) {
         s.assignmentsNeedRead = true;
@@ -469,12 +500,14 @@ export function createCampaigns(r) {
       )
         throw new Error("Campaign assignments could not be verified.");
       s.campaign = saved;
+      volunteerPicker.invalidateAssigned();
       s.selected = new Set(
         [...saved.assignedUserIds, ...add].filter(
           (userId) => !remove.includes(userId),
         ),
       );
       s.assignmentsNeedRead = false;
+      await volunteerPicker.loadAssigned();
       return true;
     }
     if (name.startsWith("transition-")) {
@@ -500,15 +533,18 @@ export function createCampaigns(r) {
             action,
           })
         ).campaign;
-        s.preparingRecipients = false;
+        preparation.observe(s.campaign);
       } catch (error) {
         const code = error?.payload?.error || error?.code || error?.message;
+        const uncertain = !error?.status || error.status >= 500;
         if (
           action !== "prepare" ||
-          code !== "prompt_contact_audience_preparing"
+          (code !== "prompt_contact_audience_preparing" && !uncertain)
         )
           throw error;
-        s.preparingRecipients = true;
+        await preparation.refresh({ manual: true });
+        if (!s.campaign?.preparation && s.campaign?.status !== "prepared")
+          throw error;
       }
       return true;
     }
@@ -603,6 +639,7 @@ export function createCampaigns(r) {
     return false;
   }
   function change(target) {
+    if (volunteerPicker.change(target)) return true;
     if (recipients.change(target)) return true;
     const s = state();
     const hoursForm = target.closest('[data-workspace-form="campaign-hours"]');
@@ -685,7 +722,12 @@ export function createCampaigns(r) {
     action,
     change,
     mediaFile,
+    avatarError: volunteerPicker.avatarError,
     localAction: recipients.localAction,
-    dispose: recipients.dispose,
+    dispose() {
+      preparation.dispose();
+      volunteerPicker.dispose();
+      recipients.dispose();
+    },
   };
 }

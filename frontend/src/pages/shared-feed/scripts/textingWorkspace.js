@@ -102,6 +102,7 @@ export function createTextingWorkspacePage({
     (name !== "manageBilling" || view.billing?.canManageBilling === true);
   function fail(error) {
     if (error?.status === 401 || error?.status === 403) {
+      view.accessDenied = true;
       pendingContactCampaign = null;
       for (const module of Object.values(modules)) module.dispose?.();
       view.workspace = null;
@@ -127,12 +128,13 @@ export function createTextingWorkspacePage({
       if (!current(key, version))
         throw new Error("Workspace changed; previous operation stopped.");
     };
-    const api = async (suffix, body, method) => {
+    const api = async (suffix, body, method, { signal } = {}) => {
       guard();
       const result = await request(
         `/api/text-banking/${view.neutralApi ? "workspaces" : "prompt/scopes"}/${id(`coalition:${organizationId}`)}${suffix}`,
         {
           auth: true,
+          ...(signal ? { signal } : {}),
           beforeRequest: guard,
           ...(body === undefined ? {} : { method: method || "POST", body }),
         },
@@ -625,6 +627,14 @@ export function createTextingWorkspacePage({
     (event) => {
       if (
         owned(event.target) &&
+        event.target.dataset.workspaceVolunteerAvatar
+      ) {
+        modules.campaigns?.avatarError?.(event.target);
+        event.target.hidden = true;
+        return;
+      }
+      if (
+        owned(event.target) &&
         event.target.dataset.workspaceQueueImage &&
         view.campaigns.imageFailed !== event.target.dataset.workspaceQueueImage
       ) {
@@ -642,16 +652,24 @@ export function createTextingWorkspacePage({
     render,
     reset,
     refresh,
-    getMeta: () => ({
-      organizationName:
-        view.billing?.organizationName || context()?.organizationName,
-      capabilities: {
-        ...view.workspace?.capabilities,
-        manageBilling: can("manageBilling"),
-        readContactBook:
-          view.contactBook?.schema?.capabilities?.read === true ||
-          view.workspace?.capabilities?.readContactBook === true,
-      },
-    }),
+    getMeta: () =>
+      identity() === view.key
+        ? {
+            authorizationStatus: view.accessDenied
+              ? "denied"
+              : view.workspace || view.contactBook?.schema
+                ? "ready"
+                : "pending",
+            organizationName:
+              view.billing?.organizationName || context()?.organizationName,
+            capabilities: {
+              ...view.workspace?.capabilities,
+              manageBilling: can("manageBilling"),
+              readContactBook:
+                view.contactBook?.schema?.capabilities?.read === true ||
+                view.workspace?.capabilities?.readContactBook === true,
+            },
+          }
+        : { authorizationStatus: "pending" },
   };
 }

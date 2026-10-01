@@ -50,9 +50,11 @@ import {
   parseTextingRoute,
   textingRoute,
   renderTextingShell,
+  createTextingShellAccess,
   snapshotTextingFocus,
   restoreTextingFocus,
 } from "./scripts/textingShell.js";
+const textingShellAccess = createTextingShellAccess();
 import {
   buildComposerMediaItems,
   mediaPresentation,
@@ -6502,14 +6504,15 @@ function renderCurrentTextingPage() {
         ? textingIntakePage
         : textingWorkspacePage;
   const meta = controller.getMeta?.() || {};
+  const shellAccess = textingShellAccess.read({ ...current, ...meta });
   const user = state.auth.session
     ? getAuthenticatedUser(state.auth.session)
     : null;
   return renderTextingShell({
     ...current,
     organizationName: meta.organizationName || "",
-    manageBilling: meta.capabilities?.manageBilling === true,
-    readContactBook: meta.capabilities?.readContactBook === true,
+    manageBilling: shellAccess.manageBilling === true,
+    readContactBook: shellAccess.readContactBook === true,
     userName:
       user?.displayName || user?.username || user?.name || "Your account",
     logoUrl: resolveSharedAssetUrl(polisLogoUrl),
@@ -62590,6 +62593,7 @@ async function loadCurrentRoute({ refresh = false } = {}) {
   state.renderError = "";
   const texting = currentTextingContext();
   if (!texting || !state.auth.session) {
+    textingShellAccess.reset();
     textingBalancePage.reset();
     textingIntakePage.reset();
     textingWorkspacePage.reset();
@@ -128694,6 +128698,21 @@ async function handleRootClick(event) {
   }
 
   if (action === "navigate") {
+    if (
+      target.matches("a[href]") &&
+      target.closest(".texting-workspace") &&
+      parseTextingRoute(target.getAttribute("data-route") || "")
+    ) {
+      if (
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey
+      )
+        return;
+      event.preventDefault();
+    }
     syncCandidateAccessActiveDraftFromDom();
     if (state.pages.create.camera?.active) {
       stopPostComposerCamera({ schedule: false });
@@ -131755,6 +131774,7 @@ async function handleRootClick(event) {
   }
 
   if (action === "logout") {
+    textingShellAccess.reset();
     textingBalancePage.reset();
     textingIntakePage.reset();
     textingWorkspacePage.reset();

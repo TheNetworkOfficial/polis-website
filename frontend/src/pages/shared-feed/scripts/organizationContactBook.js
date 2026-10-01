@@ -80,7 +80,10 @@ const checkbox = (name, text, checked, extra = "") =>
   `<label class="pt-workspace-check"><input type="checkbox" data-contact-change="${e(name)}"${checked ? " checked" : ""} ${extra}>${e(text)}</label>`;
 
 /** One controller powers the organization book and campaign selector; selections are always local. */
-export function createOrganizationContactBook(r, { mode = "book" } = {}) {
+export function createOrganizationContactBook(
+  r,
+  { mode = "book", continueAction = null } = {},
+) {
   let queryGeneration = 0,
     queryAbort = null,
     cityAbort = null,
@@ -1041,7 +1044,7 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
             )
             .join("")
         : ""
-    }<p><strong>${count(selection.count)}</strong> selected contacts · ${count(selection.eligibleCount || 0)} eligible for texting · ${count(selection.excludedCount || 0)} held for texting.</p>${list(s.selectedRows).length ? rowTable(s.selectedRows, { review: true }) : ""}${s.selectedPage > 1 ? b("selected-first", "First selected page", { secondary: true }) : ""}${s.selectedCursor ? b("selected-more", "Next selected page", { secondary: true }) : ""}${mode === "selector" ? `<p class="pt-muted">Only this reviewed selection can be prepared with your texting provider. Opt-outs are checked again before sending.</p>${checkbox(`${prefix}-reviewed`, "I reviewed these campaign recipients", s.reviewed, selection.duplicateEndpointCount ? "disabled" : "")}` : ""}</section>`;
+    }<p><strong>${count(selection.count)}</strong> selected contacts · ${count(selection.eligibleCount || 0)} eligible for texting · ${count(selection.excludedCount || 0)} held for texting.</p>${list(s.selectedRows).length ? rowTable(s.selectedRows, { review: true }) : ""}${s.selectedPage > 1 ? b("selected-first", "First selected page", { secondary: true }) : ""}${s.selectedCursor ? b("selected-more", "Next selected page", { secondary: true }) : ""}${mode === "selector" ? `<p class="pt-muted">Only this reviewed selection can be prepared with your texting provider. Opt-outs are checked again before sending.</p>${checkbox(`${prefix}-reviewed`, "I reviewed these campaign recipients", s.reviewed, selection.duplicateEndpointCount ? "disabled" : "")}${continueAction && r.context().resourceId === "new" ? `<footer class="pt-cb-panel-footer">${button(continueAction, "Continue to write message", { disabled: r.busy() || !can("campaign") || !s.reviewed || !selection.count || !!selection.duplicateEndpointCount })}</footer>` : ""}` : ""}</section>`;
   }
   function selectionActions() {
     const s = state();

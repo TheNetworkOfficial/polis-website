@@ -80,6 +80,32 @@ export function textingIcon(name) {
 const link = (route, text, extra = "") =>
   `<a href="${escapeTextingHtml(route)}" data-action="navigate" data-route="${escapeTextingHtml(route)}" ${extra}>${text}</a>`;
 
+/** Navigation visibility only. Page requests and actions still require fresh authorization. */
+export function createTextingShellAccess() {
+  let actor = "",
+    permissions = {};
+  return {
+    reset() {
+      actor = "";
+      permissions = {};
+    },
+    read({ userId, organizationId, authorizationStatus, capabilities }) {
+      const key = userId && organizationId ? `${userId}:${organizationId}` : "";
+      if (!key || key !== actor) {
+        actor = key;
+        permissions = {};
+      }
+      if (authorizationStatus === "denied") permissions = {};
+      else if (key && authorizationStatus === "ready")
+        permissions = {
+          readContactBook: capabilities?.readContactBook === true,
+          manageBilling: capabilities?.manageBilling === true,
+        };
+      return { ...permissions };
+    },
+  };
+}
+
 export function renderTextingShell({
   organizationId,
   organizationName,

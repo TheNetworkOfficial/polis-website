@@ -79,6 +79,18 @@ export function createTextingBalancePage({ request, context, changed }) {
   };
   const current = (key, version) =>
     identity() === key && view.key === key && sequence === version;
+  const transport = request;
+  request = async (...args) => {
+    const key = identity(),
+      version = sequence;
+    try {
+      return await transport(...args);
+    } catch (error) {
+      if (current(key, version) && [401, 403].includes(error?.status))
+        view.accessDenied = true;
+      throw error;
+    }
+  };
   const path = (organizationId, suffix) =>
     `/api/text-banking/${view.neutralApi ? "workspaces" : "prompt/scopes"}/${encodeURIComponent(`coalition:${organizationId}`)}/billing/${suffix}`;
 
@@ -233,6 +245,7 @@ export function createTextingBalancePage({ request, context, changed }) {
       view.readContactBook =
         workspace?.workspace?.scopeKey === scope &&
         workspace?.workspace?.capabilities?.readContactBook === true;
+      view.authorizationReady = workspace?.workspace?.scopeKey === scope;
       view.neutralApi =
         workspace?.workspace?.scopeKey === scope &&
         workspace?.workspace?.capabilities?.neutralWorkspaceApi === true;
@@ -607,6 +620,14 @@ export function createTextingBalancePage({ request, context, changed }) {
   }
 
   const getMeta = () => ({
+    authorizationStatus:
+      identity() !== view.key
+        ? "pending"
+        : view.accessDenied
+          ? "denied"
+          : view.authorizationReady
+            ? "ready"
+            : "pending",
     organizationName:
       identity() === view.key ? view.billing?.organizationName || "" : "",
     capabilities: {
