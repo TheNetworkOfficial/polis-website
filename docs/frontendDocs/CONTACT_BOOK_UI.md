@@ -24,6 +24,15 @@ Filter checkboxes are square. The table shows a compact tag summary; its expansi
 - A local ten-run controller fixture with 60 ms per asynchronous read measured book entry at about 187 ms before and 124 ms after (4 reads to 2). Home/Campaigns/Inbox each retain 3 reads; their fixture times decreased from about 186–187 ms to 124–125 ms. These measurements exclude HTTP, browser paint, and production backend latency and do not prove that all live navigation delay is resolved.
 - Expired provider assignments hide Send/Skip and require provider review. Prompt owns assignment lifetime; its policy has no local lease duration or automatic return. Local opt-in expiry displays reclaim guidance only when the server confirms automatic reclaim. No UI claims that provider-held contacts automatically returned.
 
+## Campaign preparation and navigation recovery
+
+- The recipient review drawer includes **Continue to write message** after review. The existing top and bottom Next controls remain available, and returning to recipients preserves the selection. Continuing does not prepare or transfer contacts.
+- Campaign preparation comes from the saved campaign DTO. Returning to an accepted preparation restores its status. The visible page polls for up to one hour or 180 reads, with intervals of 5, 15, then 30 seconds and up to three transient read retries. Hidden pages suspend polling. Route, account, organization, and permission changes stop the old controller.
+- Only a server-authorized `ready_to_finalize` preparation may automatically call the revision-checked resume endpoint, at most once per preparation ID in the current controller. A lost resume response is reconciled through reads. Held or failed work requires explicit review/resume; opening a campaign never creates a provider approval or recipient transfer.
+- **Image verified** describes attachment readiness only. While recipients are preparing, message readiness says that the message will be checked when recipient preparation finishes. Other blocked reasons remain visible.
+- Texting navigation retains only two display permissions for the same signed-in actor and organization while fresh authorization loads. Fresh denials, logout, and identity changes clear them. These values never authorize requests or actions. Primary texting-link clicks use the existing client router; modified clicks keep browser link behavior.
+- Volunteer search is debounced, cancelable, and limited to the authorized organization member endpoint. Selected people remain selected across searches. Existing assignments load through the campaign-scoped paginated team endpoint, fenced by campaign revision. Names, usernames, and available profile images replace user IDs; failed images show initials.
+
 ## Checks
 
 ```powershell
