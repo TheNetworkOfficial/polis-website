@@ -26,8 +26,18 @@ import {
   assertContactImportHeaders,
   boundedContactImportPreview,
 } from "./organizationContactImport";
+import {
+  contactPageSizes,
+  contactStateOptions,
+  contactFilterCategories,
+  contactCategoryFields,
+  contactFilterCount,
+  splitContactFilter,
+  combineContactFilters,
+  contactIcon as icon,
+} from "./organizationContactPresentation";
 
-const defaults = ["displayName", "city", "state", "phone", "consentStatus"];
+const defaults = ["displayName", "phone", "eligibility", "tags"];
 const virtualFields = [
   { fieldId: "tags", label: "Tags", type: "multiple_choice" },
   { fieldId: "sources", label: "Import sources", type: "multiple_choice" },
@@ -90,6 +100,12 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
       excludeIds: new Set(),
       panel: "contacts",
       endpointChoices: {},
+      pageSize: 50,
+      density: "comfortable",
+      overlay: null,
+      filterCategory: "location",
+      filterSearch: "",
+      columnSearch: "",
     });
   const details = (title, content) =>
     `<details class="pt-workspace-details" data-contact-change="${prefix}-disclosure" data-disclosure="${e(title)}"${state().expanded?.has(title) ? " open" : ""}><summary>${e(title)}</summary>${content}</details>`;
@@ -127,7 +143,7 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
             label:
               tags().find((tag) => `tag:${tag.tagId}` === key)?.label || "Tag",
           }
-        : fields().find((item) => item.fieldId === key);
+        : [...fields(), ...virtualFields].find((item) => item.fieldId === key);
   const filterFields = () => [
     ...fields().filter((item) => item.filterable !== false),
     ...virtualFields,
@@ -165,7 +181,7 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
         "/query",
         {
           ...s.query,
-          limit: 50,
+          limit: contactPageSizes.includes(s.pageSize) ? s.pageSize : 50,
           ...(requestedCursor ? { cursor: requestedCursor } : {}),
         },
         "POST",
@@ -327,7 +343,7 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
     }
     s.columns = s.columns.filter(
       (key) =>
-        fields().some((item) => item.fieldId === key) ||
+        [...fields(), ...virtualFields].some((item) => item.fieldId === key) ||
         tags().some((tag) => `tag:${tag.tagId}` === key) ||
         tagGroups().some((group) => group.fieldId === key),
     );
@@ -336,6 +352,7 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
   }
   function applyView(item) {
     const s = state();
+    s.activeView = item.name || "Custom view";
     s.query.filter = item.filter || null;
     s.query.search = item.search || "";
     if (item.sort) s.query.sort = item.sort;
@@ -430,9 +447,170 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
     s.bound = { ...result, campaignId };
     return result.audienceId;
   }
+  const tool = (
+    action,
+    text,
+    glyph,
+    { value = "", primary = false, disabled = false, extra = "" } = {},
+  ) =>
+    `<button type="button" class="pt-btn ${primary ? "" : "pt-btn--secondary"} pt-cb-tool" data-workspace-action="${prefix}-${e(action)}" data-value="${e(value)}"${extra.includes("aria-label") ? "" : ` aria-label="${e(text)}"`}${disabled || r.busy() ? " disabled" : ""} ${extra}>${icon(glyph)}<span>${e(text)}</span></button>`;
   function filterForm() {
+    const s = state(),
+      filters = contactFilterCount(s.query.filter);
+    return `<form data-workspace-form="${formName("search")}" class="pt-cb-toolbar"><label class="pt-cb-search">${icon("search")}<input name="search" type="search" aria-label="Search contacts" placeholder="Search name, phone, address…" maxlength="200" value="${e(s.query.search || "")}"${s.allMatching ? " disabled" : ""}><button type="submit" aria-label="Run contact search"${r.busy() || s.allMatching ? " disabled" : ""}>${icon("right")}</button></label><div class="pt-cb-toolbar-actions">${tool("overlay", `Filters${filters ? ` · ${filters}` : ""}`, "filter", { value: "filters", disabled: !!s.allMatching, extra: 'aria-label="Filters"' })}${tool("overlay", "Sort", "sort", { value: "sort", disabled: !!s.allMatching })}${tool("overlay", "View", "columns", { value: "columns" })}</div></form>${filterChips()}${s.allMatching ? '<p class="pt-cb-hint">Clear the selection to change its filters. Individual contacts can still be added or unchecked.</p>' : ""}`;
+  }
+  function filterChips() {
+    const s = state(),
+      root = s.query.filter;
+    if (!root && !s.query.search)
+      return `<div class="pt-cb-quick"><span>Quick filters</span>${tool("quick", "Opted in", "message", { value: "consent", disabled: !!s.allMatching })}${tool("overlay", "Choose a district", "location", { value: "filters", disabled: !!s.allMatching })}</div>`;
+    const conditions =
+      root?.op === "and" ? root.conditions : root ? [root] : [];
+    const text = (condition) => {
+      if (condition.conditions)
+        return `${contactFilterCount(condition)} advanced rules`;
+      const definition = filterFields().find(
+        (item) => item.fieldId === condition.field,
+      );
+      let value = condition.value;
+      if (["tags", "sources"].includes(condition.field)) {
+        const options =
+          condition.field === "tags" ? tags() : list(s.schema.sources);
+        value = list(value).map(
+          (key) =>
+            options.find((item) => (item.tagId || item.sourceId) === key)
+              ?.label || "Saved choice",
+        );
+      }
+      return `${definition?.label || label(condition.field)} · ${condition.op === "exists" ? (value ? "Recorded" : "Not recorded") : label(displayContactValue(value))}`;
+    };
+    return `<div class="pt-cb-chips">${s.query.search ? `<span class="pt-cb-chip">Search · ${e(s.query.search)}</span>` : ""}${conditions.map((condition, index) => `<button type="button" class="pt-cb-chip" data-workspace-action="${prefix}-chip-remove" data-value="${index}" aria-label="Remove ${e(text(condition))} filter"${r.busy() || s.allMatching ? " disabled" : ""}>${e(text(condition))}${icon("close")}</button>`).join("")}${b("filter-clear", "Clear filters", { secondary: true, disabled: !!s.allMatching || r.busy() })}</div>`;
+  }
+  function beginFilterDraft() {
+    const s = state(),
+      split = splitContactFilter(s.query.filter, filterFields());
+    s.simpleFilters = split.simple;
+    const advanced = split.advanced;
+    s.advancedOriginal = structuredClone(advanced);
+    s.advancedDirty = false;
+    s.filterMode = advanced?.conditions ? advanced.op : "and";
+    s.filters = advanced
+      ? advanced.conditions
+        ? draftCondition(advanced).conditions
+        : [draftCondition(advanced)]
+      : [];
+    s.filterSearch = "";
+    s.filterCategory = "location";
+  }
+  function simpleFilterControl(definition) {
+    const s = state(),
+      key = definition.fieldId,
+      condition = s.simpleFilters?.[key];
+    const values = Array.isArray(condition?.value)
+      ? condition.value
+      : condition
+        ? [condition.value]
+        : [];
+    const choices =
+      key === "tags"
+        ? tags().map((tag) => [tag.tagId, tag.label])
+        : key === "sources"
+          ? list(s.schema.sources).map((source) => [
+              source.sourceId,
+              source.label || "Imported contacts",
+            ])
+          : key.startsWith("tag_group:")
+            ? (definition.memberTags || []).map((tag) => [tag.tagId, tag.label])
+            : key === "eligibility"
+              ? [
+                  ["eligible", "Eligible"],
+                  ["held", "Needs review"],
+                  ["suppressed", "Suppressed"],
+                ]
+              : key === "consentStatus"
+                ? [
+                    ["opted_in", "Opted in"],
+                    ["unknown", "Not recorded"],
+                    ["opted_out", "Opted out"],
+                  ]
+                : key === "status"
+                  ? [
+                      ["active", "Active"],
+                      ["archived", "Archived"],
+                    ]
+                  : ["single_choice", "multiple_choice"].includes(
+                        definition.type,
+                      )
+                    ? list(definition.options).map((item) => [
+                        typeof item === "string" ? item : item.value,
+                        typeof item === "string" ? item : item.label,
+                      ])
+                    : null;
+    if (choices)
+      return `<fieldset class="pt-cb-choice-group"><legend>${e(definition.label)}</legend>${choices.length ? choices.map(([value, text]) => checkbox(`${prefix}-simple-choice`, text, values.includes(value), `data-field-id="${e(key)}" value="${e(value)}"`)).join("") : '<p class="pt-cb-hint">No choices are available for your access.</p>'}</fieldset>`;
+    const attrs = `data-contact-change="${prefix}-simple-value" data-field-id="${e(key)}"`;
+    if (key === "state") {
+      const value = condition?.value ?? "";
+      const options = [...contactStateOptions];
+      if (value && !options.some(([code]) => code === value))
+        options.push([value, `Saved value: ${displayContactValue(value)}`]);
+      return `<label class="pt-field"><span>${e(definition.label)}</span><select ${attrs} aria-label="${e(definition.label)}"><option value="">Any state</option>${options.map(([code, name]) => `<option value="${e(code)}"${code === value ? " selected" : ""}>${e(name)}</option>`).join("")}</select></label>`;
+    }
+    if (definition.type === "boolean" || ["phone", "email"].includes(key)) {
+      const presence = ["phone", "email"].includes(key);
+      return `<label class="pt-field"><span>${e(definition.label)}</span><select ${attrs}><option value="">Any</option><option value="true"${condition?.value === true ? " selected" : ""}>${presence ? "Recorded" : "Yes"}</option><option value="false"${condition?.value === false ? " selected" : ""}>${presence ? "Not recorded" : "No"}</option></select></label>`;
+    }
+    const value = condition?.value ?? "";
+    const range = ["number", "date", "datetime"].includes(definition.type);
+    return `<div class="pt-cb-simple-field">${
+      range
+        ? `<label class="pt-field"><span>${e(definition.label)} condition</span><select data-contact-change="${prefix}-simple-operator" data-field-id="${e(key)}">${[
+            ["eq", "Is"],
+            ["gte", "At least / on or after"],
+            ["lte", "At most / on or before"],
+          ]
+            .map(
+              ([op, text]) =>
+                `<option value="${op}"${(condition?.op || "eq") === op ? " selected" : ""}>${text}</option>`,
+            )
+            .join("")}</select></label>`
+        : ""
+    }<label class="pt-field"><span>${e(definition.label)}</span><input ${attrs} type="${definition.type === "number" ? "number" : definition.type === "date" ? "date" : definition.type === "datetime" ? "datetime-local" : "text"}"${definition.type === "number" ? ' step="any"' : ""} maxlength="1000" value="${e(typeof value === "object" ? JSON.stringify(value) : value)}" placeholder="${key === "state" ? "State code, e.g. MT" : key.includes("District") ? "District number" : "Any"}"></label></div>`;
+  }
+  function categoryFilterPanel() {
+    const s = state(),
+      search = (s.filterSearch || "").trim().toLowerCase();
+    const available = filterFields(),
+      categories = contactFilterCategories.filter(
+        (category) => contactCategoryFields(available, category.id).length,
+      );
+    const category =
+      categories.find((item) => item.id === s.filterCategory) || categories[0];
+    let visible = search
+      ? available.filter((item) =>
+          `${item.label} ${item.fieldId} ${item.group || ""}`
+            .toLowerCase()
+            .includes(search),
+        )
+      : contactCategoryFields(available, category?.id);
+    const primaryLocation = new Set([
+      "state",
+      "stateHouseDistrict",
+      "stateSenateDistrict",
+      "congressionalDistrict",
+      "precinct",
+    ]);
+    const moreLocation =
+      !search && category?.id === "location"
+        ? visible.filter((item) => !primaryLocation.has(item.fieldId))
+        : [];
+    if (moreLocation.length)
+      visible = visible.filter((item) => primaryLocation.has(item.fieldId));
+    return `<form data-workspace-form="${formName("simple-filter")}" class="pt-cb-filter-form"><label class="pt-cb-search pt-cb-filter-search">${icon("search")}<input type="search" aria-label="Find a filter" placeholder="Find a filter, like precinct or opt-in…" data-contact-change="${prefix}-filter-search" value="${e(s.filterSearch || "")}"></label><div class="pt-cb-filter-layout"><nav class="pt-cb-categories" aria-label="Filter categories">${categories.map((item) => `<button type="button" data-workspace-action="${prefix}-filter-category" data-value="${item.id}" class="${!search && category?.id === item.id ? "is-active" : ""}"${!search && category?.id === item.id ? ' aria-current="true"' : ""}>${icon(item.icon)}<span>${e(item.label)}</span></button>`).join("")}</nav><div class="pt-cb-filter-fields"><h3>${search ? "Matching filters" : e(category?.label || "Filters")}</h3>${category?.id === "location" && !search ? '<p class="pt-cb-hint">Choose a state as well as a district.</p>' : ""}<div class="pt-cb-simple-grid">${visible.map(simpleFilterControl).join("") || '<p class="pt-cb-hint">No filters match this search.</p>'}</div>${moreLocation.length ? `<details class="pt-workspace-details"><summary>City, address & local districts</summary><div class="pt-cb-simple-grid">${moreLocation.map(simpleFilterControl).join("")}</div></details>` : ""}</div></div><div class="pt-cb-advanced-link">${tool("overlay", `Advanced rules${s.filters.length ? ` · ${s.filters.length}` : ""}`, "filter", { value: "advanced" })}<p class="pt-cb-hint">Choose any listed value within a field. Match all chosen fields.</p></div><footer class="pt-cb-panel-footer"><span>Results update when you apply.</span><button type="submit" class="pt-btn"${r.busy() || s.allMatching ? " disabled" : ""}>Show contacts</button>${b("simple-reset", "Reset filters", { secondary: true })}</footer></form>`;
+  }
+  function sortPanel() {
     const s = state();
-    return `<form data-workspace-form="${formName("filter")}" class="pt-contact-filter"><div class="pt-contact-tools">${field("search", "Search contacts", s.query.search || "", { max: 200, extra: 'placeholder="Name, contact details…"' })}${select(
+    return `<form data-workspace-form="${formName("sort")}"><div class="pt-cb-panel-body">${select(
       "sort",
       "Sort by",
       fields()
@@ -447,19 +625,20 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
         ["desc", "Descending"],
       ],
       s.query.sort?.direction || "asc",
-    )}<button type="submit" class="pt-btn pt-btn--secondary"${r.busy() || s.allMatching ? " disabled" : ""}>Apply</button></div>${details(
-      "Filter contacts",
-      `${select(
-        "filterMode",
-        "Match",
-        [
-          ["and", "All conditions"],
-          ["or", "Any condition"],
-          ["not", "None of these conditions"],
-        ],
-        s.filterMode || "and",
-      )}${renderFilterConditions(s.filters)}<div class="pt-actions">${b("filter-add", "Add condition", { secondary: true, disabled: !!s.allMatching || r.busy() })}${b("filter-group-add", "Add group", { secondary: true, disabled: !!s.allMatching || r.busy() })}${b("filter-clear", "Clear filters", { secondary: true, disabled: !!s.allMatching || r.busy() })}</div><p class="pt-muted">For district filters, choose a state as well as a district.</p>`,
-    )}${s.allMatching ? notice("Selection filters are held", "Clear the selection to change these filters. You can add individual contacts using the separate search below.") : ""}</form>`;
+    )}</div><footer class="pt-cb-panel-footer"><button type="submit" class="pt-btn">Apply sort</button></footer></form>`;
+  }
+  function advancedFilterPanel() {
+    const s = state();
+    return `<form data-workspace-form="${formName("filter")}" class="pt-cb-advanced-form"><p class="pt-cb-hint">Build nested rules for more specific audiences. Category filters remain in place.</p>${select(
+      "filterMode",
+      "Match",
+      [
+        ["and", "All conditions"],
+        ["or", "Any condition"],
+        ["not", "None of these conditions"],
+      ],
+      s.filterMode || "and",
+    )}${renderFilterConditions(s.filters)}<div class="pt-actions">${b("filter-add", "Add condition", { secondary: true })}${b("filter-group-add", "Add group", { secondary: true })}</div><footer class="pt-cb-panel-footer">${b("overlay", "Back to categories", { secondary: true, value: "filters" })}<button type="submit" class="pt-btn">Apply</button></footer></form>`;
   }
   function filterNode(path) {
     let nodes = state().filters,
@@ -602,6 +781,64 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
       extra: 'placeholder="Separate multiple values with commas"',
     });
   }
+  function contactTags(contact) {
+    return list(contact.tags || contact.tagIds).map((value) => {
+      const key = typeof value === "string" ? value : value.tagId || value.id;
+      return {
+        id: key,
+        label:
+          tags().find((tag) => tag.tagId === key)?.label ||
+          value.label ||
+          "Archived tag",
+      };
+    });
+  }
+  function rowValue(contact, definition) {
+    const key = definition.fieldId,
+      value = contactValue(contact, definition);
+    if (key === "displayName") {
+      const name = value || contact.fields?.fullName || "Contact";
+      const locality = [contact.fields?.city, contact.fields?.state]
+        .filter(Boolean)
+        .join(", ");
+      const initials = String(name)
+        .trim()
+        .split(/\s+/)
+        .slice(0, 2)
+        .map((part) => part[0])
+        .join("");
+      return `<button type="button" class="pt-cb-person" data-workspace-action="${prefix}-detail" data-value="${e(contact.contactId)}"><span class="pt-cb-avatar" aria-hidden="true">${e(initials)}</span><span><strong>${e(name)}</strong>${locality ? `<small>${e(locality)}</small>` : ""}</span></button>`;
+    }
+    if (key === "tags") {
+      const assigned = contactTags(contact);
+      return `<div class="pt-cb-tags">${assigned
+        .slice(0, 2)
+        .map((tag) => `<span class="pt-cb-tag">${e(tag.label)}</span>`)
+        .join(
+          "",
+        )}${assigned.length > 2 ? `<button type="button" class="pt-cb-more-tags" data-workspace-action="${prefix}-detail-tags" data-value="${e(contact.contactId)}" aria-label="Show all ${assigned.length} tags for ${e(contact.fields?.displayName || "contact")}">+${assigned.length - 2}</button>` : ""}${!assigned.length ? '<span class="pt-cb-hint">—</span>' : ""}</div>`;
+    }
+    if (key === "eligibility" || key === "consentStatus") {
+      const status =
+        key === "eligibility" ? contact.eligibility?.status : value;
+      const captions = {
+        eligible: "Eligible",
+        held: "Needs review",
+        suppressed: "Suppressed",
+        opted_in: "Opted in",
+        opted_out: "Opted out",
+        unknown: "Not recorded",
+      };
+      return `<span class="pt-cb-status ${["eligible", "opted_in"].includes(status) ? "is-ready" : ["suppressed", "opted_out"].includes(status) ? "is-blocked" : "is-unknown"}"><span aria-hidden="true"></span>${e(captions[status] || "Not recorded")}</span>`;
+    }
+    if (key === "sources")
+      return e(
+        list(contact.sources)
+          .map((source) => source.label || "Imported contacts")
+          .join(" · ") || "Not recorded",
+      );
+    return `${e(displayContactValue(value))}${contact.fieldIssues?.[key] ? '<small class="pt-cb-review">Original value · needs review</small>' : ""}`;
+  }
   function rowTable(rows, { review = false, addition = false } = {}) {
     const s = state(),
       columns = [
@@ -616,9 +853,9 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
         .indexOf(key);
       return index < 0
         ? ""
-        : ` class="pt-contact-pinned" style="left:${index * 180}px"`;
+        : ` pt-contact-pinned pt-contact-pin-${Math.min(index, 9)}`;
     };
-    return `<div class="pt-workspace-table-wrap"><table class="pt-workspace-table pt-contact-table"><thead><tr>${can("select") ? '<th scope="col">Select</th>' : ""}${columns.map((item) => `<th scope="col"${pin(item.fieldId)}>${e(item.label)}</th>`).join("")}<th scope="col">Details</th></tr></thead><tbody>${rows.map((contact) => `<tr>${can("select") ? `<td class="pt-contact-select"><input type="checkbox" aria-label="Select ${e(contact.fields?.displayName || contact.fields?.fullName || "contact")}" data-contact-change="${prefix}-row" data-contact-id="${e(contact.contactId)}"${addition ? ' data-addition="true"' : ""}${(addition ? s.includeIds.has(contact.contactId) : review || selected(contact)) ? " checked" : ""}${r.busy() ? " disabled" : ""}></td>` : ""}${columns.map((item) => `<td data-label="${e(item.label)}"${pin(item.fieldId)}>${item.fieldId.startsWith("tag:") && can("edit") && mode === "book" ? `<input type="checkbox" aria-label="${e(item.label)} for ${e(contact.fields?.displayName || "contact")}" data-contact-change="${prefix}-tag-cell" data-contact-id="${e(contact.contactId)}" data-tag-id="${e(item.fieldId.slice(4))}"${contactValue(contact, item) ? " checked" : ""}${r.busy() ? " disabled" : ""}>` : e(displayContactValue(contactValue(contact, item)))}</td>`).join("")}<td class="pt-contact-open">${b("detail", "Open", { secondary: true, value: contact.contactId })}</td></tr>`).join("")}</tbody></table></div>`;
+    return `<div class="pt-workspace-table-wrap pt-cb-table-wrap"><table class="pt-workspace-table pt-contact-table"><thead><tr>${can("select") ? '<th scope="col" class="pt-cb-select-heading"><span class="pt-cb-visually-hidden">Select</span></th>' : ""}${columns.map((item) => `<th scope="col" class="${pin(item.fieldId)}">${e(item.fieldId === "eligibility" ? "Texting status" : item.label)}</th>`).join("")}<th scope="col" class="pt-cb-open-heading"><span class="pt-cb-visually-hidden">Details</span></th></tr></thead><tbody>${rows.map((contact) => `<tr class="${selected(contact) ? "is-selected" : ""}">${can("select") ? `<td class="pt-contact-select"><label class="pt-cb-check-hit"><input type="checkbox" aria-label="Select ${e(contact.fields?.displayName || contact.fields?.fullName || "contact")}" data-contact-change="${prefix}-row" data-contact-id="${e(contact.contactId)}"${addition ? ' data-addition="true"' : ""}${(addition ? s.includeIds.has(contact.contactId) : review || selected(contact)) ? " checked" : ""}${r.busy() ? " disabled" : ""}></label></td>` : ""}${columns.map((item) => `<td data-label="${e(item.label)}" class="pt-cb-cell pt-cb-cell-${e(item.fieldId.replace(/[^a-zA-Z]/g, ""))}${pin(item.fieldId)}">${item.fieldId.startsWith("tag:") && can("edit") && mode === "book" ? `<label class="pt-cb-check-hit"><input type="checkbox" aria-label="${e(item.label)} for ${e(contact.fields?.displayName || "contact")}" data-contact-change="${prefix}-tag-cell" data-contact-id="${e(contact.contactId)}" data-tag-id="${e(item.fieldId.slice(4))}"${contactValue(contact, item) ? " checked" : ""}${r.busy() ? " disabled" : ""}></label>` : rowValue(contact, item)}</td>`).join("")}<td class="pt-contact-open">${tool("detail", "Open", "right", { value: contact.contactId })}</td></tr>`).join("")}</tbody></table></div>`;
   }
   function columnOrderControls() {
     const s = state();
@@ -626,45 +863,42 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
   }
   function viewTools() {
     const s = state();
-    return details(
-      "View and saved audiences",
-      `<form data-workspace-form="${formName("view")}"><div class="pt-contact-columns">${[...fields(), ...tags().map((tag) => ({ fieldId: `tag:${tag.tagId}`, label: `Tag: ${tag.label}` })), ...tagGroups().map((group) => ({ ...group, label: `Tag group: ${group.label}` }))].map((item) => checkbox(`${prefix}-column`, item.label, s.columns.includes(item.fieldId), `value="${e(item.fieldId)}"`)).join("")}</div>${columnOrderControls()}${field("name", s.editingView ? "View name" : "Save this view as", s.viewDraft?.name || "", { required: true })}${select(
-        "visibility",
-        "Who can use this view",
-        [
-          ["private", "Only me"],
-          ["organization", "Organization"],
-        ],
-        s.viewDraft?.visibility || "private",
-      )}<button type="submit" class="pt-btn pt-btn--secondary">${s.editingView ? "Save view changes" : "Save view"}</button>${s.editingView ? b("view-cancel-edit", "Cancel editing", { secondary: true }) : ""}</form><div class="pt-actions">${list(
-        s.views,
+    return `<form data-workspace-form="${formName("view")}">${field("name", s.editingView ? "View name" : "Save this view as", s.viewDraft?.name || "", { required: true })}${select(
+      "visibility",
+      "Who can use this view",
+      [
+        ["private", "Only me"],
+        ["organization", "Organization"],
+      ],
+      s.viewDraft?.visibility || "private",
+    )}<button type="submit" class="pt-btn pt-btn--secondary">${s.editingView ? "Save view changes" : "Save view"}</button>${s.editingView ? b("view-cancel-edit", "Cancel editing", { secondary: true }) : ""}</form><div class="pt-actions">${list(
+      s.views,
+    )
+      .map(
+        (view) =>
+          `<div class="pt-row"><span>${b("view-load", view.name, { secondary: true, value: view.viewId || view.id, disabled: !!s.allMatching || r.busy() })}${s.schema.viewDefaults?.viewId === view.viewId ? " · Organization default" : ""}</span><div class="pt-actions">${b("view-edit", "Edit layout", { secondary: true, value: view.viewId || view.id, disabled: !!s.allMatching || r.busy() })}${can("manage") && view.visibility === "organization" ? b("view-default", "Set organization default", { secondary: true, value: view.viewId || view.id }) : ""}${b("view-archive", "Archive layout", { secondary: true, value: view.viewId || view.id })}</div></div>`,
       )
-        .map(
-          (view) =>
-            `<div class="pt-row"><span>${b("view-load", view.name, { secondary: true, value: view.viewId || view.id, disabled: !!s.allMatching || r.busy() })}${s.schema.viewDefaults?.viewId === view.viewId ? " · Organization default" : ""}</span><div class="pt-actions">${b("view-edit", "Edit layout", { secondary: true, value: view.viewId || view.id, disabled: !!s.allMatching || r.busy() })}${can("manage") && view.visibility === "organization" ? b("view-default", "Set organization default", { secondary: true, value: view.viewId || view.id }) : ""}${b("view-archive", "Archive layout", { secondary: true, value: view.viewId || view.id })}</div></div>`,
-        )
-        .join(
-          "",
-        )}</div><form data-workspace-form="${formName("audience")}" class="pt-contact-save">${field("name", "Save these filters as an audience", s.audienceDraft?.name || "", { required: true })}${select(
-        "visibility",
-        "Who can use this audience",
-        [
-          ["private", "Only me"],
-          ["organization", "Organization"],
-        ],
-        s.audienceDraft?.visibility || "private",
-      )}<button type="submit" class="pt-btn pt-btn--secondary">Save audience</button></form><div class="pt-actions">${list(
-        s.audiences,
+      .join(
+        "",
+      )}</div><form data-workspace-form="${formName("audience")}" class="pt-contact-save">${field("name", "Save these filters as an audience", s.audienceDraft?.name || "", { required: true })}${select(
+      "visibility",
+      "Who can use this audience",
+      [
+        ["private", "Only me"],
+        ["organization", "Organization"],
+      ],
+      s.audienceDraft?.visibility || "private",
+    )}<button type="submit" class="pt-btn pt-btn--secondary">Save audience</button></form><div class="pt-actions">${list(
+      s.audiences,
+    )
+      .map((audience) =>
+        b("audience-load", audience.name, {
+          secondary: true,
+          value: audience.audienceId || audience.id,
+          disabled: !!s.allMatching || r.busy(),
+        }),
       )
-        .map((audience) =>
-          b("audience-load", audience.name, {
-            secondary: true,
-            value: audience.audienceId || audience.id,
-            disabled: !!s.allMatching || r.busy(),
-          }),
-        )
-        .join("")}</div>`,
-    );
+      .join("")}</div>`;
   }
   function selectionReview() {
     const s = state();
@@ -705,11 +939,11 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
         : ""
     }<p><strong>${count(selection.count)}</strong> selected contacts · ${count(selection.eligibleCount || 0)} eligible for texting · ${count(selection.excludedCount || 0)} held for texting.</p>${list(s.selectedRows).length ? rowTable(s.selectedRows, { review: true }) : ""}${s.selectedPage > 1 ? b("selected-first", "First selected page", { secondary: true }) : ""}${s.selectedCursor ? b("selected-more", "Next selected page", { secondary: true }) : ""}${mode === "selector" ? `<p class="pt-muted">Only this reviewed selection can be prepared with your texting provider. Opt-outs are checked again before sending.</p>${checkbox(`${prefix}-reviewed`, "I reviewed these campaign recipients", s.reviewed, selection.duplicateEndpointCount ? "disabled" : "")}` : ""}</section>`;
   }
-  function selectionTools() {
+  function selectionActions() {
     const s = state();
     if (!can("select")) return "";
     const hasSelection = s.allMatching || s.includeIds.size;
-    return `${mode === "selector" && hasSelection ? endpointControls() : ""}<div class="pt-contact-selection-bar"><span>${s.allMatching ? `All ${s.publication?.status === "updating" ? "published matches" : "matching contacts"}${s.excludeIds.size ? `, excluding ${count(s.excludeIds.size)}` : ""}${s.includeIds.size ? `, plus ${count(s.includeIds.size)} individual choices` : ""}` : `${count(s.includeIds.size)} selected`}</span><div class="pt-actions">${b("select-page", "Select this page", { secondary: true })}${b("select-all", s.publication?.status === "updating" ? "Select all published matches" : "Select all matching", { secondary: true, disabled: !s.rows.length || r.busy() })}${hasSelection ? b("select-clear", "Clear selection", { secondary: true }) + b("selection-review", "Review selection") : ""}</div></div>${hasSelection ? details("Add specific contacts", `<form data-workspace-form="${formName("add-search")}" class="pt-contact-save">${field("search", "Search the rest of your contact book", s.addSearch || "", { required: true })}<button class="pt-btn pt-btn--secondary" type="submit">Search</button></form>${list(s.addRows).length ? rowTable(s.addRows, { addition: true }) : ""}${s.addCursor ? b("add-more", "Next search page", { secondary: true }) : ""}`) : ""}${
+    return `${mode === "selector" && hasSelection ? endpointControls() : ""}${hasSelection ? details("Add specific contacts", `<form data-workspace-form="${formName("add-search")}" class="pt-contact-save">${field("search", "Search the rest of your contact book", s.addSearch || "", { required: true })}<button class="pt-btn pt-btn--secondary" type="submit">Search</button></form>${list(s.addRows).length ? rowTable(s.addRows, { addition: true }) : ""}${s.addCursor ? b("add-more", "Next search page", { secondary: true }) : ""}`) : ""}${
       mode === "book" && can("edit") && hasSelection
         ? `<form data-workspace-form="${formName("bulk-tags")}" class="pt-contact-save">${select(
             "action",
@@ -746,7 +980,7 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
             }`,
           )
         : ""
-    }${bulkPanel()}${geographyPanel()}`;
+    }${can("export") && hasSelection ? b("export", "Export selected contacts", { secondary: true }) : ""}${bulkPanel()}${geographyPanel()}`;
   }
   function geographyPanel() {
     const s = state(),
@@ -851,9 +1085,90 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
       : `<div class="pt-field"><span>${e(definition.label)}</span>${value !== null && typeof value === "object" ? `<pre class="pt-contact-json">${e(JSON.stringify(value, null, 2))}</pre>` : `<p>${e(displayContactValue(value))}</p>`}</div>`;
   }
 
-  function renderRows() {
+  function selectionTools() {
     const s = state();
-    return `${indexPreparation()}<section class="pt-card">${filterForm()}${viewTools()}${s.publication?.status === "updating" ? notice("Contacts updating", `${s.publication.pending > 0 ? `${count(s.publication.pending)} updates pending. ` : ""}Showing published matches. Imported or edited contacts may still be updating. Refresh to check progress.`) : ""}<p class="pt-muted" role="status">${s.publication?.status === "updating" ? `${count(s.rows.length)} published matches loaded${s.cursor ? " · more pages available" : ""}` : s.total != null ? `${count(s.total)} matching contacts` : `${count(s.rows.length)} contacts loaded${s.cursor ? " · more pages available" : ""}`}</p>${s.recentResults ? '<p class="pt-muted" role="status">Recent results. Refresh to check for updates.</p>' : ""}${b("refresh", "Refresh contacts", { secondary: true })}${selectionTools()}${s.rows.length ? rowTable(s.rows) : notice(s.publication?.status === "updating" ? "No published matches on this page" : s.cursor ? "No matches on this page" : "No matching contacts", s.publication?.status === "updating" ? "Contact updates are still publishing. Refresh to check progress." : s.cursor ? "Continue to check the remaining results." : "Try changing the filters or add contacts.")}${s.rows.length || s.pageNumber > 1 ? `<p class="pt-muted">Page ${count(s.pageNumber || 1)} · ${count(s.rows.length)} contacts on this page</p>` : ""}<div class="pt-actions">${s.previousCursors?.length ? b("previous", "Previous page", { secondary: true }) : ""}${s.pageNumber > 1 ? b("first", "First page", { secondary: true }) : ""}${s.cursor ? b("more", "Next page", { secondary: true }) : ""}</div></section>${selectionReview()}`;
+    if (!can("select")) return "";
+    const hasSelection = s.allMatching || s.includeIds.size;
+    const description = s.allMatching
+      ? `All ${s.publication?.status === "updating" ? "published matches" : "matching contacts"}${s.excludeIds.size ? `, excluding ${count(s.excludeIds.size)}` : ""}${s.includeIds.size ? `, plus ${count(s.includeIds.size)} individual choices` : ""}`
+      : `${count(s.includeIds.size)} selected`;
+    return `<div class="pt-cb-select-page">${b("select-page", "Select this page", { secondary: true, disabled: !s.rows.length || r.busy() })}${b("select-all", s.publication?.status === "updating" ? "Select all published matches" : "Select all matching", { secondary: true, disabled: (!s.rows.length && !s.cursor) || r.busy() })}</div>${hasSelection ? `<aside class="pt-cb-selection-bar" aria-label="Selection actions"><div><strong>${e(description)}</strong><small>Across your contact book</small></div><div class="pt-actions">${tool("overlay", "Actions", "more", { value: "selection" })}${b("selection-review", "Review selection")}${mode === "book" ? b("campaign-start", "Create campaign", { secondary: true }) : ""}${tool("select-clear", "Clear selection", "close")}</div></aside>` : ""}`;
+  }
+  function pageSizeControl() {
+    const s = state();
+    return `<label class="pt-field"><span>Rows per page</span><select data-contact-change="${prefix}-page-size" aria-label="Rows per page"${r.busy() ? " disabled" : ""}>${contactPageSizes.map((size) => `<option value="${size}"${(s.pageSize || 50) === size ? " selected" : ""}>${size}</option>`).join("")}</select></label>`;
+  }
+  function columnsPanel() {
+    const s = state(),
+      search = (s.columnSearch || "").toLowerCase();
+    const definitions = [
+      ...fields(),
+      ...virtualFields,
+      ...tags().map((tag) => ({
+        fieldId: `tag:${tag.tagId}`,
+        label: `Tag: ${tag.label}`,
+      })),
+      ...tagGroups().map((group) => ({
+        ...group,
+        label: `Tag group: ${group.label}`,
+      })),
+    ];
+    return `${pageSizeControl()}<p class="pt-cb-hint">Choose the information shown in your contact list. Every available field stays accessible in contact details.</p><label class="pt-cb-search">${icon("search")}<input type="search" aria-label="Find a column" placeholder="Find a column…" data-contact-change="${prefix}-column-search" value="${e(s.columnSearch || "")}"></label><div class="pt-contact-columns">${definitions
+      .filter((item) => item.label.toLowerCase().includes(search))
+      .map((item) =>
+        checkbox(
+          `${prefix}-column`,
+          item.label,
+          s.columns.includes(item.fieldId),
+          `value="${e(item.fieldId)}"${s.columns.length === 1 && s.columns.includes(item.fieldId) ? " disabled" : ""}`,
+        ),
+      )
+      .join(
+        "",
+      )}</div><details class="pt-workspace-details"><summary>Column order & pinning</summary>${columnOrderControls()}</details><label class="pt-field"><span>Row density</span><select data-contact-change="${prefix}-density"><option value="comfortable"${s.density !== "compact" ? " selected" : ""}>Comfortable</option><option value="compact"${s.density === "compact" ? " selected" : ""}>Compact</option></select></label><footer class="pt-cb-panel-footer">${b("columns-reset", "Reset columns", { secondary: true })}${b("overlay", "Saved views & audiences", { secondary: true, value: "views" })}${b("overlay-close", "Done")}</footer>`;
+  }
+  function overlayPanel() {
+    const s = state();
+    if (!s.overlay) return "";
+    const panels = {
+      filters: ["Filter contacts", categoryFilterPanel],
+      advanced: ["Advanced rules", advancedFilterPanel],
+      sort: ["Sort contacts", sortPanel],
+      columns: ["View columns", columnsPanel],
+      views: ["Saved views & audiences", viewTools],
+      selection: ["Selection actions", selectionActions],
+      review: ["Review selection", selectionReview],
+      add: [
+        "Add contacts",
+        () =>
+          `<div class="pt-cb-menu">${can("import") ? tool("panel", "Upload a file", "plus", { value: "imports" }) : ""}${can("edit") ? tool("new", "Add one contact", "person") : ""}<p class="pt-cb-hint">Every upload joins this organization’s contact book. Nothing is automatically shared with a texting provider.</p></div>`,
+      ],
+      more: [
+        "Contact tools",
+        () =>
+          `<div class="pt-cb-menu">${can("import") ? tool("panel", "Imports", "plus", { value: "imports" }) : ""}${tool("panel", "Fields and tags", "columns", { value: "fields" })}${can("manage") ? tool("panel", "Sync status", "refresh", { value: "status" }) : ""}${tool("refresh", "Refresh contacts", "refresh")}</div>`,
+      ],
+    };
+    const panel = panels[s.overlay];
+    if (!panel) return "";
+    return dialog(
+      panel[0],
+      panel[1](),
+      ["sort", "more", "add"].includes(s.overlay),
+    );
+  }
+  function dialog(title, content, small = false) {
+    return `<div class="pt-cb-overlay"><button type="button" class="pt-cb-backdrop" tabindex="-1" aria-hidden="true" data-workspace-action="${prefix}-overlay-close"></button><section role="dialog" aria-modal="true" aria-label="${e(title)}" class="pt-cb-dialog${small ? " pt-cb-dialog-small" : ""}" tabindex="-1" data-contact-dialog="${prefix}"><header class="pt-cb-panel-header"><div><span class="pt-cb-eyebrow">Contact book</span><h2>${e(title)}</h2></div><button type="button" class="pt-cb-close" aria-label="Close panel" data-workspace-action="${prefix}-overlay-close">${icon("close")}</button></header><div class="pt-cb-panel-content">${r.view().error ? `<div class="pt-notice" role="alert">${e(r.view().error)}</div>` : ""}${content}</div></section></div>`;
+  }
+  function renderRows() {
+    const s = state(),
+      updating = s.publication?.status === "updating";
+    const summary = updating
+      ? `${count(s.rows.length)} published matches loaded${s.cursor ? " · more pages available" : ""}`
+      : s.total != null
+        ? `${count(s.total)} matching contacts`
+        : `${count(s.rows.length)} contacts on this page${s.cursor ? " · more pages available" : ""}`;
+    return `${indexPreparation()}<section class="pt-cb-book-list ${s.density === "compact" ? "is-compact" : ""}"><div class="pt-cb-view-row">${tool("overlay", s.activeView || "All contacts", "bookmark", { value: "views" })}<span>Organization contact book</span>${b("overlay", "Save view", { secondary: true, value: "views" })}</div>${filterForm()}${updating ? notice("Contacts updating", `${s.publication.pending > 0 ? `${count(s.publication.pending)} updates pending. ` : ""}Showing published matches. Imported or edited contacts may still be updating. Refresh to check progress.`) : ""}${s.recentResults ? '<p class="pt-cb-hint" role="status">Recent results. Refresh to check for updates.</p>' : ""}<div class="pt-cb-results"><span role="status">${e(summary)}</span><span>Sorted by ${e(columnDefinition(s.query.sort?.field)?.label || "name")}, ${s.query.sort?.direction === "desc" ? "descending" : "ascending"}</span>${tool("refresh", "Refresh", "refresh", { extra: 'aria-label="Refresh contacts"' })}</div>${selectionTools()}${s.rows.length ? rowTable(s.rows) : notice(updating ? "No published matches on this page" : s.cursor ? "More contacts may match" : "No matching contacts", updating ? "Contact updates are still publishing. Refresh to check progress." : s.cursor ? "Continue to check the remaining results. This page does not cover the entire contact book." : "Try changing the filters or add contacts.")}<footer class="pt-cb-pagination">${pageSizeControl()}<span>Page ${count(s.pageNumber || 1)} · ${count(s.rows.length)} contacts</span><div class="pt-actions">${b("previous", "Previous page", { secondary: true, disabled: !s.previousCursors?.length || r.busy() })}${s.pageNumber > 1 ? b("first", "First page", { secondary: true }) : ""}${b("more", "Next page", { secondary: true, disabled: !s.cursor || r.busy() })}</div></footer></section>${mode === "selector" && s.selection?.status === "ready" && s.reviewed ? notice("Recipients reviewed", `${count(s.selection.count)} contacts selected for this campaign. Only explicit provider preparation can transfer selected phone numbers.`) : ""}`;
   }
   function endpointControls() {
     const s = state();
@@ -951,6 +1266,15 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
       },
     );
   }
+  function detailTagSummary(contact) {
+    const assigned = contactTags(contact);
+    if (!assigned.length) return '<p class="pt-cb-hint">No tags assigned.</p>';
+    const chips = (items) =>
+      `<div class="pt-cb-tags pt-cb-detail-tags">${items.map((tag) => `<span class="pt-cb-tag">${e(tag.label)}</span>`).join("")}</div>`;
+    return assigned.length <= 2
+      ? chips(assigned)
+      : `${chips(assigned.slice(0, 2))}<details class="pt-workspace-details pt-cb-all-tags"${state().showAllDetailTags ? " open" : ""}><summary>Show all tags (${assigned.length})</summary>${chips(assigned)}</details>`;
+  }
   function detail() {
     const s = state(),
       contact = s.detail?.contact || { fields: {}, tags: [] };
@@ -970,16 +1294,16 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
         "Contact details, voter information, and field history in one place.",
         b("close-detail", "Back", { secondary: true }),
       ) +
-      `<section class="pt-card">${contact.sync ? notice(contact.sync.status === "needs_attention" ? "Saved · related views need attention" : contact.sync.status === "updating_related_views" ? "Saved · updating related views" : "Saved", contact.sync.status === "needs_attention" ? "An administrator can retry pending updates from Sync status." : "") : ""}${contact.eligibility ? notice(`Texting: ${label(contact.eligibility.status)}`, list(contact.eligibility.reasons).map(label).join(", ")) : ""}${contact.contactId && editable ? `<div class="pt-actions">${b("enrich", "Update districts", { secondary: true })}${b("contact-archive", contact.status === "archived" ? "Restore contact" : "Archive contact", { secondary: true })}</div>` : ""}${s.enrichmentStatus ? notice(s.enrichmentStatus) : ""}<form data-workspace-form="${formName("contact")}">${[...groups].map(([group, definitions]) => `<details class="pt-workspace-details"${["identity", "contact", "Identity", "Contact details"].includes(group) ? " open" : ""}><summary>${e(label(group))}</summary><div class="pt-fields">${definitions.map((definition) => renderContactField(definition, contact, editable)).join("")}</div></details>`).join("")}${
+      `<section class="pt-card">${detailTagSummary(contact)}${contact.sync ? notice(contact.sync.status === "needs_attention" ? "Saved · related views need attention" : contact.sync.status === "updating_related_views" ? "Saved · updating related views" : "Saved", contact.sync.status === "needs_attention" ? "An administrator can retry pending updates from Sync status." : "") : ""}${contact.eligibility ? notice(`Texting: ${label(contact.eligibility.status)}`, list(contact.eligibility.reasons).map(label).join(", ")) : ""}${contact.contactId && editable ? `<div class="pt-actions">${b("enrich", "Update districts", { secondary: true })}${b("contact-archive", contact.status === "archived" ? "Restore contact" : "Archive contact", { secondary: true })}</div>` : ""}${s.enrichmentStatus ? notice(s.enrichmentStatus) : ""}<form data-workspace-form="${formName("contact")}">${[...groups].map(([group, definitions]) => `<details class="pt-workspace-details"${["identity", "contact", "Identity", "Contact details"].includes(group) ? " open" : ""}><summary>${e(label(group))}</summary><div class="pt-fields">${definitions.map((definition) => renderContactField(definition, contact, editable)).join("")}</div></details>`).join("")}${
         editable
-          ? `<div class="pt-contact-columns">${tags()
+          ? `<details class="pt-workspace-details"><summary>Edit contact tags</summary><div class="pt-contact-columns">${tags()
               .map(
                 (tag) =>
                   `<label class="pt-workspace-check"><input name="tagId" value="${e(tag.tagId)}" type="checkbox"${contact.tags?.includes(tag.tagId) ? " checked" : ""}>${e(tag.label)}</label>`,
               )
               .join(
                 "",
-              )}</div><button class="pt-btn" type="submit">Save contact</button>`
+              )}</div></details><button class="pt-btn" type="submit">Save contact</button>`
           : ""
       }</form></section>${details(
         "Sources",
@@ -1384,25 +1708,154 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
         "Contact access is restricted",
         "Your organization administrator can review your access.",
       );
-    if (s.detail || s.detailNew) return detail();
     if (mode === "book" && s.panel === "status" && can("manage"))
-      return statusPanel();
-    if (mode === "book" && s.panel === "fields") return schemaPanel();
-    if (mode === "book" && s.panel === "imports") return importPanel();
-    return (
-      (mode === "book"
-        ? head(
-            "YOUR ORGANIZATION",
-            "Contacts",
-            "One contact book for texting, the voter map, and door knocking.",
-            can("import")
-              ? b("panel", "Add contacts", { value: "imports" })
-              : "",
-          ) +
-          `<div class="pt-actions pt-contact-navigation">${can("import") ? b("panel", "Imports", { secondary: true, value: "imports" }) : ""}${b("panel", "Fields and tags", { secondary: true, value: "fields" })}${can("manage") ? b("panel", "Sync status", { secondary: true, value: "status" }) : ""}${can("edit") ? b("new", "Add one contact", { secondary: true }) : ""}</div>`
-        : '<h2>Choose campaign recipients</h2><p class="pt-muted">Filter across your contact book, then select matching contacts or individual people.</p>') +
-      renderRows()
+      return `<div class="pt-contact-book">${statusPanel()}</div>`;
+    if (mode === "book" && s.panel === "fields")
+      return `<div class="pt-contact-book">${schemaPanel()}</div>`;
+    if (mode === "book" && s.panel === "imports")
+      return `<div class="pt-contact-book">${importPanel()}</div>`;
+    const showingDetail = s.detail || s.detailNew;
+    const main = `${mode === "book" ? `<div class="pt-cb-breadcrumb">Text banking ${icon("right")} <span>Contact book</span></div><header class="pt-cb-heading"><div><h1>Contact book</h1><p>Your people, together in one place.</p></div><div class="pt-actions">${can("import") || can("edit") ? tool("overlay", "Add contacts", "plus", { value: "add", primary: true }) : ""}${tool("overlay", "More contact tools", "more", { value: "more", extra: 'aria-label="More contact tools"' })}</div></header>` : '<header class="pt-cb-heading"><div><h2>Choose campaign recipients</h2><p>Filter across your contact book, then select matching contacts or individual people.</p></div></header>'}${renderRows()}`;
+    return `<div class="pt-contact-book"><div${s.overlay || showingDetail ? ' inert aria-hidden="true"' : ""}>${main}</div>${showingDetail ? dialog(s.detailNew ? "Add a contact" : "Contact details", detail()) : overlayPanel()}</div>`;
+  }
+  function normalizedSimpleFilters() {
+    return Object.fromEntries(
+      Object.entries(state().simpleFilters || {}).map(([key, condition]) => {
+        const definition = filterFields().find((item) => item.fieldId === key);
+        const value = condition.value;
+        return [
+          key,
+          {
+            ...condition,
+            field: key.startsWith("tag_group:") ? "tags" : key,
+            value:
+              condition.op === "exists" || Array.isArray(value) || value === ""
+                ? value
+                : typedContactInput(String(value), definition),
+          },
+        ];
+      }),
     );
+  }
+  function draftAdvancedFilter() {
+    const s = state();
+    if (!s.advancedDirty) return structuredClone(s.advancedOriginal || null);
+    const read = (conditions) =>
+      conditions.map((condition) => {
+        if (condition.conditions) {
+          const children = read(condition.conditions);
+          return {
+            op: condition.op,
+            conditions:
+              condition.op === "not"
+                ? [{ op: "or", conditions: children }]
+                : children,
+          };
+        }
+        return {
+          field: condition.field.startsWith("tag_group:")
+            ? "tags"
+            : condition.field,
+          op: condition.op,
+          value:
+            condition.op === "exists"
+              ? condition.value !== false
+              : ["any", "all", "none"].includes(condition.op)
+                ? String(condition.value || "")
+                    .split(",")
+                    .map((item) => item.trim())
+                    .filter(Boolean)
+                : contactFilterValue(
+                    condition.value ?? "",
+                    filterFields().find(
+                      (field) => field.fieldId === condition.field,
+                    ),
+                    condition.op,
+                  ),
+        };
+      });
+    const conditions = read(s.filters);
+    return conditions.length
+      ? {
+          op: s.filterMode || "and",
+          conditions:
+            s.filterMode === "not" ? [{ op: "or", conditions }] : conditions,
+        }
+      : null;
+  }
+  /** Local presentation actions never call the API or enter the network busy state. */
+  function localAction(name, value, trigger) {
+    if (!name.startsWith(`${prefix}-`)) return false;
+    const s = state(),
+      op = name.slice(prefix.length + 1);
+    if (op === "overlay") {
+      if (["filters", "sort", "advanced"].includes(value) && s.allMatching)
+        return true;
+      if (value === "filters" && !["filters", "advanced"].includes(s.overlay))
+        beginFilterDraft();
+      if (trigger)
+        s.returnFocus = {
+          action: trigger.dataset.workspaceAction,
+          value: trigger.dataset.value,
+        };
+      s.overlay = value;
+    } else if (op === "overlay-close") {
+      s.overlay = null;
+      s.detail = null;
+      s.detailNew = false;
+    } else if (op === "filter-category") {
+      s.filterCategory = value;
+      s.filterSearch = "";
+    } else if (op === "simple-reset") {
+      s.simpleFilters = {};
+      s.filters = [];
+      s.advancedOriginal = null;
+      s.advancedDirty = true;
+      s.filterMode = "and";
+    } else if (op === "columns-reset") {
+      s.columns = defaults.filter((key) => columnDefinition(key));
+      s.pinnedColumns = [];
+      s.density = "comfortable";
+    } else return false;
+    if (
+      typeof requestAnimationFrame === "function" &&
+      ["overlay", "overlay-close"].includes(op)
+    )
+      requestAnimationFrame(() => {
+        if (
+          disposed ||
+          (document.activeElement !== document.body &&
+            document.activeElement?.isConnected &&
+            !document.activeElement.closest("[inert]"))
+        )
+          return;
+        const dialog = document.querySelector(
+          `[data-contact-dialog="${prefix}"]`,
+        );
+        if (dialog) dialog.querySelector(".pt-cb-close")?.focus();
+        else if (s.returnFocus)
+          [...document.querySelectorAll("[data-workspace-action]")]
+            .find(
+              (element) =>
+                element.dataset.workspaceAction === s.returnFocus.action &&
+                element.dataset.value === s.returnFocus.value,
+            )
+            ?.focus();
+      });
+    return true;
+  }
+  async function seedSelection(spec) {
+    const s = state();
+    s.query = structuredClone(spec.query || s.query);
+    s.allMatching = spec.mode === "all_matching";
+    s.selectionQuery = structuredClone(s.query);
+    s.selectionRevision = spec.expectedBookRevision;
+    s.includeIds = new Set(spec.includeIds || []);
+    s.excludeIds = new Set(spec.excludeIds || []);
+    s.endpointChoices = { ...spec.endpointChoices };
+    s.overlay = "review";
+    await query();
+    await prepareSelection();
   }
   function readFilters(form) {
     const s = state(),
@@ -1490,21 +1943,41 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
       data = new FormData(form),
       operationId = uuid();
     const action = kind.slice(prefix.length + 1);
-    if (action === "filter") {
+    if (["search", "sort", "simple-filter"].includes(action)) {
+      if (s.allMatching)
+        throw new Error("Clear the selection before changing its filters.");
+      if (action === "search")
+        s.query.search = String(data.get("search") || "").trim();
+      if (action === "sort")
+        s.query.sort = {
+          field: data.get("sort"),
+          direction: data.get("direction"),
+        };
+      if (action === "simple-filter") {
+        s.query.filter = combineContactFilters(
+          normalizedSimpleFilters(),
+          draftAdvancedFilter(),
+        );
+      }
+      s.activeView = "Custom view";
+      s.overlay = null;
+      await query();
+    } else if (action === "filter") {
       if (s.allMatching)
         throw new Error("Clear the selection before changing its filters.");
       s.filterMode = data.get("filterMode") || "and";
       const conditions = readFilters(form);
       s.filters = conditions.map(draftCondition);
-      s.query = {
-        search: String(data.get("search") || "").trim(),
-        sort: { field: data.get("sort"), direction: data.get("direction") },
-        filter: conditions.length
+      s.query.filter = combineContactFilters(
+        normalizedSimpleFilters(),
+        conditions.length
           ? s.filterMode === "not"
             ? { op: "not", conditions: [{ op: "or", conditions }] }
             : { op: s.filterMode, conditions }
           : null,
-      };
+      );
+      s.activeView = "Custom view";
+      s.overlay = null;
       await query();
     } else if (action === "view" || action === "audience") {
       const name = String(data.get("name") || "").trim();
@@ -1533,6 +2006,7 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
         action === "view" ? "views" : "audiences",
       );
       s[`${action}Draft`] = null;
+      s.activeView = name;
       r.toast("Saved.");
     } else if (action === "conversion") {
       if (!can("manage") || !s.convertField)
@@ -1580,7 +2054,14 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
         contact ? `/contacts/${id(contact.contactId)}` : "/contacts",
         {
           fields: patch,
-          tags: data.getAll("tagId"),
+          tags: [
+            ...new Set([
+              ...data.getAll("tagId"),
+              ...list(contact?.tags).filter(
+                (key) => !tags().some((tag) => tag.tagId === key),
+              ),
+            ]),
+          ],
           operationId,
           ...(contact ? { expectedRevision: contact.revision } : {}),
         },
@@ -1857,8 +2338,35 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
     if (!name.startsWith(`${prefix}-`)) return false;
     const s = state(),
       op = name.slice(prefix.length + 1);
+    if (localAction(name, value)) return true;
     if (op === "refresh") await query({ refresh: true });
-    else if (op === "index-prepare")
+    else if (op === "page-size") {
+      if (!contactPageSizes.includes(s.pageSize)) s.pageSize = 50;
+      await query();
+    } else if (op === "quick") {
+      if (s.allMatching)
+        throw new Error("Clear the selection before changing its filters.");
+      s.query.filter = {
+        op: "and",
+        conditions: [{ field: "consentStatus", op: "eq", value: "opted_in" }],
+      };
+      s.activeView = "Opted in";
+      await query();
+    } else if (op === "chip-remove") {
+      if (s.allMatching)
+        throw new Error("Clear the selection before changing its filters.");
+      const root = s.query.filter;
+      const conditions =
+        root?.op === "and" ? [...root.conditions] : root ? [root] : [];
+      conditions.splice(Number(value), 1);
+      s.query.filter = conditions.length ? { op: "and", conditions } : null;
+      s.activeView = "Custom view";
+      await query();
+    } else if (op === "campaign-start") {
+      if (!can("select") || (!s.allMatching && !s.includeIds.size))
+        throw new Error("Choose contacts first.");
+      r.beginContactCampaign?.(selectionSpec());
+    } else if (op === "index-prepare")
       await prepareIndex({ resume: s.indexJob?.status === "paused" });
     else if (op === "index-status") await prepareIndex({ refresh: true });
     else if (op === "column-earlier" || op === "column-later") {
@@ -1876,6 +2384,7 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
         name: item.name,
         visibility: item.visibility || "private",
       };
+      s.overlay = "views";
       await query();
     } else if (op === "view-cancel-edit") {
       s.editingView = null;
@@ -2128,6 +2637,7 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
       await loadImportReport();
     } else if (op === "import-report-more") await loadImportReport(true);
     else if (op === "panel") {
+      s.overlay = null;
       s.panel = value;
       if (value === "imports") await loadImports();
       if (value === "status" && can("manage"))
@@ -2146,7 +2656,9 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
         ],
       };
       (s.expanded ||= new Set()).add("Linked activity");
-    } else if (op === "detail") {
+    } else if (op === "detail" || op === "detail-tags") {
+      s.overlay = null;
+      s.showAllDetailTags = op === "detail-tags";
       s.activity = null;
       s.detail = await api(`/contacts/${id(value)}`);
       s.enrichmentStatus = null;
@@ -2246,28 +2758,36 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
       );
       await schema();
     } else if (op === "new") {
+      s.overlay = null;
       s.detailNew = true;
       s.detail = null;
     } else if (op === "close-detail") {
       s.detail = null;
       s.detailNew = false;
     } else if (op === "filter-add") {
+      s.advancedDirty = true;
       (s.expanded ||= new Set()).add("Filter contacts");
       filterChildren(value).push({ field: "state", op: "eq", value: "" });
     } else if (op === "filter-group-add") {
+      s.advancedDirty = true;
       (s.expanded ||= new Set()).add("Filter contacts");
       filterChildren(value).push({
         op: "or",
         conditions: [{ field: "state", op: "eq", value: "" }],
       });
     } else if (op === "filter-remove") {
+      s.advancedDirty = true;
       const parts = String(value).split(".");
       const index = Number(parts.pop());
       filterChildren(parts.join(".")).splice(index, 1);
     } else if (op === "filter-clear") {
+      if (s.allMatching)
+        throw new Error("Clear the selection before changing its filters.");
       s.filters = [];
       s.query.filter = null;
       s.query.search = "";
+      s.activeView = null;
+      s.simpleFilters = {};
       await query();
     } else if (op === "select-page") {
       for (const row of s.rows) {
@@ -2289,8 +2809,10 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
       s.excludeIds.clear();
       s.addRows = [];
       invalidateSelection();
-    } else if (op === "selection-review") await prepareSelection();
-    else if (op === "selection-advance") {
+    } else if (op === "selection-review") {
+      s.overlay = "review";
+      await prepareSelection();
+    } else if (op === "selection-advance") {
       await advanceSelection();
       if (s.selection?.status === "ready") await loadSelected();
     } else if (op === "selected-more") await loadSelected(true);
@@ -2312,6 +2834,7 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
       );
       if (!item) throw new Error("The saved view is no longer available.");
       applyView(item);
+      s.overlay = null;
       await query();
     } else if (op === "tag-cell") {
       const change = s.pendingTag;
@@ -2338,6 +2861,72 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
   function change(target) {
     const name = target.dataset.contactChange,
       s = state();
+    if (
+      name === `${prefix}-filter-search` ||
+      name === `${prefix}-column-search`
+    ) {
+      s[name.endsWith("-filter-search") ? "filterSearch" : "columnSearch"] =
+        target.value;
+      return true;
+    }
+    if (name === `${prefix}-density`) {
+      s.density = target.value;
+      return true;
+    }
+    if (name === `${prefix}-page-size`) {
+      const size = Number(target.value);
+      if (contactPageSizes.includes(size)) s.pageSize = size;
+      return false;
+    }
+    if (name?.startsWith(`${prefix}-simple-`)) {
+      const key = target.dataset.fieldId,
+        definition = filterFields().find((item) => item.fieldId === key);
+      if (!definition) return false;
+      s.simpleFilters ||= {};
+      const prior = s.simpleFilters[key];
+      if (name.endsWith("-choice")) {
+        const values = new Set(
+          Array.isArray(prior?.value)
+            ? prior.value
+            : prior
+              ? [prior.value]
+              : [],
+        );
+        if (target.checked) values.add(target.value);
+        else values.delete(target.value);
+        s.simpleFilters[key] = {
+          field: key,
+          op:
+            ["tags", "sources"].includes(key) ||
+            key.startsWith("tag_group:") ||
+            definition.type === "multiple_choice"
+              ? "any"
+              : "in",
+          value: [...values],
+        };
+      } else if (name.endsWith("-operator")) {
+        s.simpleFilters[key] = {
+          field: key,
+          op: target.value,
+          value: prior?.value ?? "",
+        };
+      } else {
+        const presence = ["phone", "email"].includes(key);
+        s.simpleFilters[key] = {
+          field: key,
+          op: presence
+            ? "exists"
+            : prior?.op || (key.startsWith("addressLine") ? "contains" : "eq"),
+          value:
+            target.value === ""
+              ? ""
+              : definition.type === "boolean" || presence
+                ? target.value === "true"
+                : target.value,
+        };
+      }
+      return false;
+    }
     for (const kind of ["view", "audience"]) {
       const form = target.closest?.(
         `[data-workspace-form="${formName(kind)}"]`,
@@ -2401,8 +2990,11 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
       return true;
     }
     if (name === `${prefix}-column`) {
-      if (target.checked) s.columns.push(target.value);
+      if (target.checked && !s.columns.includes(target.value))
+        s.columns.push(target.value);
       else {
+        if (s.columns.length === 1 && s.columns.includes(target.value))
+          return true;
         s.columns = s.columns.filter((key) => key !== target.value);
         s.pinnedColumns = (s.pinnedColumns || []).filter(
           (key) => key !== target.value,
@@ -2450,6 +3042,7 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
     const form = target.closest?.(
       `[data-workspace-form="${formName("filter")}"]`,
     );
+    if (form) s.advancedDirty = true;
     if (form && target.name?.startsWith("field_")) {
       const condition = filterNode(target.name.slice(6));
       condition.field = target.value;
@@ -2488,6 +3081,8 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
     action,
     change,
     bindCampaign,
+    localAction,
+    seedSelection,
     selection: () => state().selection,
     hasSelection: () =>
       !!state().selection || state().allMatching || state().includeIds.size > 0,

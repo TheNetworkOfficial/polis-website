@@ -33,7 +33,8 @@ export function createTextingWorkspacePage({
     timer,
     upload,
     entryActor = "",
-    fundsDismissed = false;
+    fundsDismissed = false,
+    pendingContactCampaign = null;
   const sendHolds = new Set();
   const holdStorage = (key) => `polis.texting.uncertain.${key}`;
   function hasHold(key) {
@@ -88,6 +89,7 @@ export function createTextingWorkspacePage({
     clearView();
     entryActor = "";
     fundsDismissed = false;
+    pendingContactCampaign = null;
   }
   const can = (name) =>
     view.workspace?.status === "configured" &&
@@ -99,6 +101,7 @@ export function createTextingWorkspacePage({
     (name !== "manageBilling" || view.billing?.canManageBilling === true);
   function fail(error) {
     if (error?.status === 401 || error?.status === 403) {
+      pendingContactCampaign = null;
       for (const module of Object.values(modules)) module.dispose?.();
       view.workspace = null;
       view.billing = null;
@@ -182,6 +185,20 @@ export function createTextingWorkspacePage({
         guard();
         navigate(section, resource);
       },
+      beginContactCampaign: (selection) => {
+        guard();
+        pendingContactCampaign = {
+          actor,
+          selection: structuredClone(selection),
+        };
+        navigate("campaigns", "new");
+      },
+      takeContactCampaign: () => {
+        guard();
+        const pending = pendingContactCampaign;
+        pendingContactCampaign = null;
+        return pending?.actor === actor ? pending.selection : null;
+      },
       toast: (message) => {
         guard();
         view.message = message;
@@ -215,6 +232,7 @@ export function createTextingWorkspacePage({
     if (view.key === key && (view.loading || (!force && view.workspace)))
       return;
     if (entryActor !== actorIdentity()) {
+      pendingContactCampaign = null;
       entryActor = actorIdentity();
       fundsDismissed = false;
     }
@@ -250,6 +268,8 @@ export function createTextingWorkspacePage({
       )
         throw new Error("The customer workspace could not be verified.");
       view.workspace = w;
+      if (w.capabilities?.createCampaigns !== true)
+        pendingContactCampaign = null;
       view.neutralApi =
         w.capabilities?.neutralWorkspaceApi === true || w.contractVersion === 2;
       if (w.status !== "configured") return;
@@ -399,7 +419,10 @@ export function createTextingWorkspacePage({
               ? "Sending…"
               : "Updating session…"
             : "Saving…";
-    return `<div data-workspace-key="${e(view.key)}" aria-busy="${view.busy ? "true" : "false"}">${view.error ? `<div class="pt-notice" role="alert">${e(view.error)}</div>` : ""}${view.message ? notice(view.message) : ""}${view.busy && !view.contacts?.starting ? `<div class="pt-workspace-working" role="status">${busyLabel}</div>` : ""}${html}</div>`;
+    const contactDialogOpen = [view.contactBook, view.recipientBook].some(
+      (book) => book?.overlay || book?.detail || book?.detailNew,
+    );
+    return `<div data-workspace-key="${e(view.key)}" aria-busy="${view.busy ? "true" : "false"}">${view.error && !contactDialogOpen ? `<div class="pt-notice" role="alert">${e(view.error)}</div>` : ""}${view.message ? notice(view.message) : ""}${view.busy && !view.contacts?.starting ? `<div class="pt-workspace-working" role="status">${busyLabel}</div>` : ""}${html}</div>`;
   }
   function owned(target) {
     return (
@@ -411,6 +434,12 @@ export function createTextingWorkspacePage({
     const target = event.target.closest?.("[data-workspace-action]");
     if (!target || !owned(target) || target.disabled) return;
     const action = target.dataset.workspaceAction;
+    for (const module of Object.values(modules)) {
+      if (module.localAction?.(action, target.dataset.value, target)) {
+        changed();
+        return;
+      }
+    }
     if (action === "upload-stop") {
       upload?.abort();
       return;
@@ -461,11 +490,15 @@ export function createTextingWorkspacePage({
     let rerender = false;
     for (const module of Object.values(modules))
       rerender = module.change(target) || rerender;
-    if (target.dataset.contactChange?.endsWith("-tag-cell")) {
-      const prefix = target.dataset.contactChange.slice(0, -9);
+    if (
+      ["-tag-cell", "-page-size"].some((suffix) =>
+        target.dataset.contactChange?.endsWith(suffix),
+      )
+    ) {
+      const action = target.dataset.contactChange;
       void run(async () => {
         for (const module of Object.values(modules))
-          if (await module.action(`${prefix}-tag-cell`)) return;
+          if (await module.action(action)) return;
       });
       return;
     }
@@ -482,6 +515,48 @@ export function createTextingWorkspacePage({
     }
   };
   document.addEventListener("change", onChange);
+  document.addEventListener("keydown", (event) => {
+    const dialog = document.querySelector("[data-contact-dialog]");
+    if (!dialog || !owned(dialog)) return;
+    if (event.key === "Escape" && !view.busy) {
+      event.preventDefault();
+      for (const module of Object.values(modules))
+        if (
+          module.localAction?.(`${dialog.dataset.contactDialog}-overlay-close`)
+        ) {
+          changed();
+          return;
+        }
+    }
+    if (event.key !== "Tab") return;
+    const focusable = [
+      ...dialog.querySelectorAll(
+        'button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),a[href],summary,[tabindex="0"]',
+      ),
+    ].filter(
+      (element) => element.getClientRects().length && element.tabIndex >= 0,
+    );
+    const first = focusable[0],
+      last = focusable.at(-1);
+    if (!first) {
+      event.preventDefault();
+      dialog.focus();
+    } else if (
+      event.shiftKey &&
+      (document.activeElement === first ||
+        !dialog.contains(document.activeElement))
+    ) {
+      event.preventDefault();
+      last.focus();
+    } else if (
+      !event.shiftKey &&
+      (document.activeElement === last ||
+        !dialog.contains(document.activeElement))
+    ) {
+      event.preventDefault();
+      first.focus();
+    }
+  });
   document.addEventListener(
     "toggle",
     (event) => {

@@ -67,6 +67,7 @@ test("queue allocation waits for automatic setup and setup failure does not allo
   };
   const page = createCampaigns(runtime);
   const pending = page.action("queue-load");
+  await new Promise(setImmediate);
   assert.equal(view.campaigns.preparingAccess, true);
   assert.deepEqual(paths, ["/texter/ensure"]);
   release({ texter: { state: "ready" } });

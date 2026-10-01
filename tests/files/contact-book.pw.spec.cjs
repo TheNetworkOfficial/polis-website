@@ -1,527 +1,31 @@
 const { test, expect } = require("@playwright/test");
-const BASE = process.env.POLIS_TEST_BASE_URL || "http://127.0.0.1:9000";
-const BOOK = "/api/contact-book/scopes/coalition%3Aorg-1";
-const PROMPT = "/api/text-banking/prompt/scopes/coalition%3Aorg-1";
+const { mockBook, BASE, BOOK, PROMPT } = require("./contact-book-fixture.cjs");
 
-async function mockBook(
-  page,
-  {
-    resume = false,
-    duplicate = false,
-    issues = false,
-    recovery = false,
-    publication,
-  } = {},
-) {
-  const token = `e30.${Buffer.from(JSON.stringify({ sub: "contact-admin", email: "admin@example.test" })).toString("base64url")}.test`;
-  await page.addInitScript(
-    ({ baseUrl, token }) => {
-      sessionStorage.setItem(
-        "sharedFeedSession.v1",
-        JSON.stringify({
-          accessToken: token,
-          idToken: token,
-          expiresAt: Date.now() + 3600000,
-        }),
-      );
-      let config;
-      Object.defineProperty(window, "__POLIS_WEB_APP__", {
-        configurable: true,
-        get: () => config,
-        set: (value) => {
-          config = {
-            ...value,
-            apiBaseUrl: baseUrl,
-            auth: {
-              ...value.auth,
-              region: "us-west-2",
-              clientId: "test",
-              enablePasswordFlow: "true",
-            },
-          };
-        },
-      });
-    },
-    { baseUrl: BASE, token },
-  );
-  const calls = [],
-    errors = [];
-  page.on("pageerror", (error) => errors.push(error.message));
-  const fields = [
-    ["displayName", "Name"],
-    ["firstName", "First name"],
-    ["phone", "Phone"],
-    ["city", "City"],
-    ["state", "State"],
-    ["consentStatus", "Opt-in status"],
-    ["stateHouseDistrict", "State House district"],
-    ["taxDistrict", "Special tax district"],
-    ["doorKnock", "Door knock"],
-    ["addresses", "Additional addresses"],
-  ].map(([fieldId, label]) => ({
-    fieldId,
-    label,
-    type:
-      fieldId === "doorKnock"
-        ? "boolean"
-        : fieldId === "addresses"
-          ? "json"
-          : "text",
-    group: "Identity",
-    custom: fieldId === "taxDistrict",
-    filterable: true,
-    sortable: true,
-  }));
-  const rows = ["Alex Example", "Blair Example", "Casey Example"].map(
-    (name, index) => ({
-      contactId: `contact-${index + 1}`,
-      scopeKey: "coalition:org-1",
-      revision: 1,
-      fields: {
-        displayName: name,
-        phone: `+1202555012${index + 1}`,
-        city: "Example City",
-        state: "MT",
-        stateHouseDistrict: "22",
-        consentStatus: "opted_in",
-        taxDistrict: "0007",
-        addresses: [
-          {
-            line1: "12 Fictional Lane",
-            unit: "0002",
-            custom: { tax: "0007", visited: false },
-          },
-        ],
-        ...(issues ? { doorKnock: "sometimes" } : {}),
-      },
-      fieldIssues: issues
-        ? { doorKnock: { code: "invalid_type", expectedType: "boolean" } }
-        : {},
-      tags: [],
-      sources: [
-        {
-          sourceId: `source-${index + 1}`,
-          sourceRecordId: `record-${index + 1}`,
-          label: `List ${index + 1}`,
-        },
-      ],
-      eligibility: { status: "eligible", reasons: [] },
-      sync: {
-        status: "updating_related_views",
-        acceptedRevision: 1,
-        indexRevision: 1,
-        mapRevision: 0,
-      },
-    }),
-  );
-  let selection,
-    campaign,
-    imported = false,
-    conversion,
-    geographyJob,
-    bulkJob;
-  const tags = [{ tagId: "tag-volunteer", label: "Volunteer", revision: 1 }];
-  const views = [];
-  const viewDefaults = { viewId: null, revision: 0 };
-  let schemaJob = recovery ? "convert-1" : null;
-  await page.route("**/*", async (route) => {
-    const request = route.request(),
-      url = new URL(request.url());
-    if (url.origin !== BASE) return route.abort();
-    if (!url.pathname.startsWith("/api/")) return route.continue();
-    const path = url.pathname,
-      body = request.postData() ? request.postDataJSON() : undefined;
-    calls.push({ path, method: request.method(), body });
-    const respond = (data) =>
-      route.fulfill({
-        contentType: "application/json",
-        body: JSON.stringify({ ok: true, ...data }),
-      });
-    if (path.startsWith(BOOK)) {
-      const suffix = path.slice(BOOK.length);
-      if (suffix === "/schema")
-        return respond({
-          fields,
-          viewDefaults,
-          tags,
-          sources: rows.map((row, index) => ({
-            sourceId: `source-${index + 1}`,
-            label: `List ${index + 1}`,
-          })),
-          capabilities: {
-            read: true,
-            edit: true,
-            manage: true,
-            import: true,
-            export: true,
-            select: true,
-            personal: true,
-          },
-          privacy: {
-            externalGeocoding: false,
-            automaticExternalSharing: false,
-          },
-        });
-      if (suffix === "/tags/tag-volunteer" && request.method() === "PATCH") {
-        Object.assign(tags[0], body, { revision: tags[0].revision + 1 });
-        return respond({ tag: tags[0] });
-      }
-      if (suffix === "/views") {
-        if (request.method() === "POST") {
-          const view = { ...body, viewId: "view-1", revision: 1 };
-          views.push(view);
-          return respond({ view });
-        }
-        return respond({ items: views.filter((view) => !view.archived) });
-      }
-      if (suffix === "/views/view-1" && request.method() === "PATCH") {
-        Object.assign(views[0], body, { revision: views[0].revision + 1 });
-        return respond({ view: views[0] });
-      }
-      if (suffix === "/view-default") {
-        Object.assign(viewDefaults, {
-          viewId: body.viewId,
-          revision: viewDefaults.revision + 1,
-        });
-        return respond({ viewDefaults });
-      }
-      if (suffix === "/import-preview")
-        return respond({
-          preview: {
-            sampleOnly: true,
-            sampledRows: body.rows.length,
-            newContacts: 1,
-            matchedContacts: 0,
-            conflicts: 0,
-            missingLocations: 1,
-            invalidPhones: 0,
-            customFields: [{ label: "Unfamiliar column" }],
-            rows: [{ row: 0, status: "new", missingLocation: true }],
-            bookRevision: 7,
-          },
-        });
-      if (suffix === "/imports/import-1/rows/0/original")
-        return respond({
-          row: 0,
-          columns: ["Name", "Special tax district"],
-          values: ["Source Example", "0008"],
-        });
-      if (suffix.startsWith("/contacts/contact-1/activity"))
-        return respond({
-          kind: "requests",
-          items: [
-            {
-              type: "yard_sign",
-              status: "fulfilled",
-              propertyId: "property-1",
-            },
-          ],
-          nextCursor: null,
-          complete: true,
-          basis: "authorized_contact_activity",
-        });
-      if (suffix === "/audiences") return respond({ items: [] });
-      if (suffix === "/query")
-        return respond({
-          items: body?.cursor ? rows.slice(2) : rows.slice(0, 2),
-          nextCursor: body?.cursor ? null : "page-2",
-          complete: !!body?.cursor,
-          total: 3,
-          bookRevision: 7,
-          ...(publication ? { publication } : {}),
-        });
-      if (suffix === "/imports" && request.method() === "GET")
-        return respond({
-          items: resume
-            ? [
-                {
-                  importId: "import-1",
-                  name: "interrupted.csv",
-                  status: "open",
-                  accepted: 1,
-                  conflicts: 0,
-                },
-              ]
-            : imported
-              ? [
-                  {
-                    importId: "import-1",
-                    name: "example.csv",
-                    status: "complete",
-                  },
-                ]
-              : [],
-        });
-      if (suffix === "/imports/import-1" && request.method() === "GET")
-        return respond({
-          import: {
-            importId: "import-1",
-            name: "interrupted.csv",
-            status: "open",
-            columns: ["Name", "Special tax district"],
-            fieldByIndex: { 0: "displayName", 1: "taxDistrict" },
-            sourceNamespace: "example-voter-2026",
-            sourcePolicy: { permittedPurpose: "not_for_sms" },
-            accepted: 1,
-            conflicts: 0,
-          },
-        });
-      if (suffix === "/imports" && request.method() === "POST")
-        return respond({
-          import: { importId: "import-1", status: "importing" },
-        });
-      if (suffix === "/imports/import-1/rows" && request.method() === "GET")
-        return respond({
-          items: [
-            { row: 0, status: "accepted", contactId: "contact-1" },
-            {
-              row: 1,
-              status: "conflict",
-              error: "contact_identity_review_required",
-            },
-          ],
-          nextCursor: null,
-        });
-      if (suffix === "/imports/import-1/rows")
-        return respond({
-          import: { importId: "import-1" },
-          accepted: body.rows.length,
-          processedRows: body.rows.length,
-          nextRow: body.startRow + body.rows.length,
-          remainingRows: 0,
-          complete: true,
-        });
-      if (suffix === "/imports/import-1/complete") {
-        imported = true;
-        return respond({
-          import: { importId: "import-1", status: "complete" },
-        });
-      }
-      if (suffix === "/selections") {
-        selection = {
-          selectionId: "selection-1",
-          status: "ready",
-          count: 2,
-          eligibleCount: 2,
-          excludedCount: 0,
-          duplicateEndpointCount: duplicate ? 1 : 0,
-          duplicateEndpoints: duplicate
-            ? [{ contactIds: ["contact-1", "contact-3"] }]
-            : [],
-          bookRevision: 7,
-        };
-        return respond({ selection });
-      }
-      if (suffix === "/selections/selection-1/contacts")
-        return respond({ items: [rows[0], rows[2]], nextCursor: null });
-      if (suffix === "/selections/selection-1/campaign")
-        return respond({
-          audienceId: "contactbook:selection-1",
-          selectionId: "selection-1",
-          exportAuthorized: false,
-        });
-      if (suffix === "/fields/taxDistrict/conversions") {
-        conversion = {
-          jobId: "convert-1",
-          status: "preview_ready",
-          processed: 3,
-          invalid: 0,
-          samples: [{ before: "0007", after: 7 }],
-        };
-        return respond({ job: conversion });
-      }
-      if (suffix === "/conversions/convert-1/apply")
-        return respond({ job: { ...conversion, status: "applying" } });
-      if (suffix === "/conversions/convert-1/advance") {
-        schemaJob = null;
-        return respond({ job: { ...conversion, status: "complete" } });
-      }
-      if (suffix === "/schema-job/recover") {
-        conversion = {
-          jobId: "convert-1",
-          fieldId: "taxDistrict",
-          status: "applying",
-          processed: 1,
-        };
-        return respond({ job: conversion });
-      }
-      if (suffix === "/contacts/contact-1/enrich")
-        return respond({
-          contact: rows[0],
-          status: "local_address_coverage_unavailable",
-          externalRequests: 0,
-        });
-      if (suffix === "/geography-refresh") {
-        geographyJob = {
-          jobId: "geography-1",
-          status: "previewing",
-          processed: 0,
-          changedCount: 0,
-        };
-        return respond({ job: geographyJob });
-      }
-      if (suffix === "/geography-refresh/geography-1/advance") {
-        geographyJob = {
-          ...geographyJob,
-          status:
-            geographyJob.status === "applying" ? "complete" : "preview_ready",
-          processed: 2,
-          changedCount: 1,
-        };
-        return respond({ job: geographyJob });
-      }
-      if (suffix === "/geography-refresh/geography-1/apply") {
-        geographyJob.status = "applying";
-        return respond({ job: geographyJob });
-      }
-      if (suffix.startsWith("/geography-refresh/geography-1/outcomes"))
-        return respond({
-          items: [
-            {
-              contactId: "contact-1",
-              status: "matched",
-              geographyStatus: "local_address_coverage_unavailable",
-              before: [],
-              after: [],
-            },
-          ],
-          nextCursor: null,
-        });
-      if (suffix.startsWith("/geography-refresh/geography-1/affected-views"))
-        return respond({
-          items: [{ name: "House district audience" }],
-          nextCursor: null,
-        });
-      if (suffix === "/bulk") {
-        bulkJob = {
-          jobId: "bulk-1",
-          action: body.action,
-          status: "running",
-          processed: 0,
-        };
-        return respond({ job: bulkJob });
-      }
-      if (suffix === "/jobs/bulk-1/advance") {
-        bulkJob = {
-          ...bulkJob,
-          status: bulkJob.phase === "undo" ? "undone" : "complete",
-          processed: 2,
-        };
-        return respond({ job: bulkJob });
-      }
-      if (suffix === "/jobs/bulk-1/outcomes")
-        return respond({
-          items: [
-            {
-              contactId: "contact-1",
-              status: bulkJob.phase === "undo" ? "undone" : "applied",
-              ...(bulkJob.action === "enrich"
-                ? { geographyStatus: "local_address_coverage_unavailable" }
-                : {}),
-            },
-          ],
-          nextCursor: null,
-        });
-      if (suffix === "/jobs/bulk-1/undo") {
-        bulkJob = { ...bulkJob, phase: "undo", status: "running" };
-        return respond({ job: bulkJob });
-      }
-      if (suffix === "/status")
-        return respond({
-          bookRevision: 7,
-          schemaJob,
-          pendingIndexes: 0,
-          pendingRestrictions: 1,
-          externalSharing: false,
-        });
-      if (suffix === "/reconcile")
-        return respond({
-          processed: 2,
-          repaired: 0,
-          mapRepaired: 2,
-          failures: [],
-          complete: true,
-          nextCursor: null,
-        });
-      if (suffix === "/contacts/contact-1/sources/remove") {
-        rows[0].sources = [];
-        rows[0].revision++;
-        return respond({ contact: rows[0] });
-      }
-      if (suffix === "/identities/merge") {
-        Object.assign(rows[0].fields, body.fieldChoices || {});
-        rows[0].revision++;
-        return respond({ contact: rows[0], mergeId: "merge-1" });
-      }
-      if (suffix.startsWith("/contacts/")) {
-        const row = rows.find((row) => `/contacts/${row.contactId}` === suffix);
-        if (request.method() === "PATCH") {
-          Object.assign(row.fields, body.fields || {});
-          row.tags = body.tags || row.tags;
-          row.revision++;
-        }
-        return respond({ contact: row, history: [], sources: row.sources });
-      }
-      return route.fulfill({
-        status: 404,
-        contentType: "application/json",
-        body: JSON.stringify({ ok: false, error: "unexpected_book_endpoint" }),
-      });
-    }
-    if (path.startsWith(PROMPT)) {
-      const suffix = path.slice(PROMPT.length);
-      if (suffix === "/workspace")
-        return respond({
-          workspace: {
-            provider: "prompt",
-            scopeKey: "coalition:org-1",
-            manualOnly: true,
-            status: "configured",
-            canSend: true,
-            capabilities: {
-              manageBilling: true,
-              createCampaigns: true,
-              uploadImports: true,
-            },
-          },
-        });
-      if (suffix === "/billing/summary")
-        return respond({
-          billing: {
-            canManageBilling: true,
-            rateStatus: "verified",
-            smsUpToTwoSegmentsMicros: 35000,
-            availableMicros: 1000000,
-            sendingBlocked: false,
-          },
-        });
-      if (suffix === "/delivery-schedule")
-        return respond({
-          schedule: {
-            revision: 1,
-            status: "verified",
-            timeZone: "America/Denver",
-            startTime: "08:00",
-            endTime: "20:00",
-          },
-        });
-      if (suffix === "/campaigns" && request.method() === "POST") {
-        campaign = {
-          ...body,
-          revision: 1,
-          status: "draft",
-          assignedUserIds: [],
-          blockedReasons: [],
-        };
-        return respond({ campaign });
-      }
-      if (suffix.startsWith("/campaigns/") && request.method() === "GET")
-        return respond({ campaign });
-      return respond({ items: [] });
-    }
-    return respond({});
+async function closePanel(page) {
+  const dialog = page.getByRole("dialog");
+  if (await dialog.count())
+    await dialog
+      .getByRole("button", { name: "Close panel", exact: true })
+      .click();
+}
+async function openAdvanced(page) {
+  await page.getByRole("button", { name: "Filters", exact: true }).click();
+  await page.getByRole("button", { name: /^Advanced rules/ }).click();
+}
+async function openTool(page, name) {
+  await page
+    .getByRole("button", { name: "More contact tools", exact: true })
+    .click();
+  await page.getByRole("button", { name, exact: true }).click();
+}
+async function openSaved(page) {
+  const control = page.getByRole("button", {
+    name: "Saved views & audiences",
+    exact: true,
   });
-  return { calls, errors };
+  if (await control.count()) await control.click();
+  else
+    await page.getByRole("button", { name: "Save view", exact: true }).click();
 }
 
 test("shared contact book works without provider setup, retains custom columns, and edits a shared contact", async ({
@@ -530,16 +34,17 @@ test("shared contact book works without provider setup, retains custom columns, 
   const { calls, errors } = await mockBook(page);
   await page.goto(`${BASE}/organizations/org-1/texting/contacts`);
   await expect(
-    page.getByRole("heading", { name: "Contacts", exact: true }),
+    page.getByRole("heading", { name: "Contact book", exact: true }),
   ).toBeVisible();
   await expect(page.getByText("Alex Example", { exact: true })).toBeVisible();
   expect(calls.some((call) => call.path.startsWith(PROMPT))).toBe(false);
-  await page.getByText("View and saved audiences", { exact: true }).click();
+  await page.getByRole("button", { name: "View", exact: true }).click();
   await page.getByLabel("Special tax district", { exact: true }).check();
+  await page.getByLabel("Tag: Volunteer", { exact: true }).check();
+  await closePanel(page);
   await expect(
     page.getByRole("columnheader", { name: "Special tax district" }),
   ).toBeVisible();
-  await page.getByLabel("Tag: Volunteer", { exact: true }).check();
   await page.getByLabel("Volunteer for Alex Example", { exact: true }).check();
   await expect
     .poll(() => calls.filter((call) => call.method === "PATCH").length)
@@ -547,6 +52,7 @@ test("shared contact book works without provider setup, retains custom columns, 
   expect(calls.find((call) => call.method === "PATCH").body.tags).toEqual([
     "tag-volunteer",
   ]);
+  await closePanel(page);
   await page.getByRole("button", { name: "Open", exact: true }).first().click();
   await page
     .getByRole("textbox", { name: "Name", exact: true })
@@ -568,7 +74,7 @@ test("shared contact book works without provider setup, retains custom columns, 
     path: testInfo.outputPath("shared-contacts-mobile.png"),
     fullPage: true,
   });
-  await page.getByText("View and saved audiences", { exact: true }).click();
+  await page.getByRole("button", { name: "View", exact: true }).click();
   await page.screenshot({
     path: testInfo.outputPath("shared-contacts-default-mobile.png"),
     fullPage: true,
@@ -630,7 +136,7 @@ test("campaign selection covers all pages, preserves exclusions, and binds local
   await expect(
     page.getByRole("heading", { name: "Choose campaign recipients" }),
   ).toBeVisible();
-  await page.getByText("Filter contacts", { exact: true }).click();
+  await openAdvanced(page);
   await page
     .getByRole("button", { name: "Add condition", exact: true })
     .click();
@@ -701,6 +207,7 @@ test("campaign selection covers all pages, preserves exclusions, and binds local
   await page
     .getByLabel("I reviewed these campaign recipients", { exact: true })
     .check();
+  await closePanel(page);
   await page
     .getByLabel("Campaign name", { exact: true })
     .fill("House 22 outreach");
@@ -753,6 +260,9 @@ test("contact import streams raw custom values into Polis without external trans
   const { calls, errors } = await mockBook(page);
   await page.goto(`${BASE}/organizations/org-1/texting/contacts`);
   await page.getByRole("button", { name: "Add contacts", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Upload a file", exact: true })
+    .click();
   await expect(page.locator("[data-workspace-key]")).toHaveAttribute(
     "aria-busy",
     "false",
@@ -835,7 +345,7 @@ test("nested audience groups preserve AND, OR and exclusions when applying", asy
 }) => {
   const { calls, errors } = await mockBook(page);
   await page.goto(`${BASE}/organizations/org-1/texting/contacts`);
-  await page.getByText("Filter contacts", { exact: true }).click();
+  await openAdvanced(page);
   await page
     .getByRole("button", { name: "Add condition", exact: true })
     .click();
@@ -879,6 +389,7 @@ test("nested audience groups preserve AND, OR and exclusions when applying", asy
       },
     ],
   });
+  await openAdvanced(page);
   await page
     .getByRole("combobox", { name: "Group match", exact: true })
     .selectOption("not");
@@ -903,9 +414,7 @@ test("field conversions show changed values and require explicit apply", async (
 }) => {
   const { calls, errors } = await mockBook(page);
   await page.goto(`${BASE}/organizations/org-1/texting/contacts`);
-  await page
-    .getByRole("button", { name: "Fields and tags", exact: true })
-    .click();
+  await openTool(page, "Fields and tags");
   await page.getByRole("button", { name: "Change type", exact: true }).click();
   await page
     .getByRole("combobox", { name: "New type", exact: true })
@@ -939,7 +448,7 @@ test("reload resume verifies original headers and replays saved rows into the sa
   const { calls, errors } = await mockBook(page, { resume: true });
   await page.goto(`${BASE}/organizations/org-1/texting/contacts`);
   await page.reload();
-  await page.getByRole("button", { name: "Imports", exact: true }).click();
+  await openTool(page, "Imports");
   await page.getByRole("button", { name: "Resume", exact: true }).click();
   await expect(
     page.getByText("Resume interrupted.csv", { exact: true }),
@@ -1029,6 +538,7 @@ test("retained invalid values require an explicit correction and survive unrelat
 }) => {
   const { calls, errors } = await mockBook(page, { issues: true });
   await page.goto(`${BASE}/organizations/org-1/texting/contacts`);
+  await closePanel(page);
   await page.getByRole("button", { name: "Open", exact: true }).first().click();
   await expect(page.getByText("sometimes", { exact: true })).toBeVisible();
   await expect(
@@ -1058,6 +568,7 @@ test("bulk outcomes, guarded undo, source removal and related-view repair use lo
   await page
     .getByRole("button", { name: "Select this page", exact: true })
     .click();
+  await page.getByRole("button", { name: "Actions", exact: true }).click();
   await page
     .getByRole("combobox", { name: "Tag", exact: true })
     .selectOption("tag-volunteer");
@@ -1077,6 +588,7 @@ test("bulk outcomes, guarded undo, source removal and related-view repair use lo
   await expect(
     page.getByRole("cell", { name: "undone", exact: true }),
   ).toBeVisible();
+  await closePanel(page);
   await page.getByRole("button", { name: "Open", exact: true }).first().click();
   await page.getByText("Sources", { exact: true }).click();
   page.once("dialog", (dialog) => dialog.accept());
@@ -1092,7 +604,7 @@ test("bulk outcomes, guarded undo, source removal and related-view repair use lo
   const removal = calls.find((call) => call.path.endsWith("/sources/remove"));
   expect(removal.body.sourceRecordId).toBe("record-1");
   await page.getByRole("button", { name: "Back", exact: true }).click();
-  await page.getByRole("button", { name: "Sync status", exact: true }).click();
+  await openTool(page, "Sync status");
   await expect(
     page.getByText("Contact index is up to date", { exact: true }),
   ).toBeVisible();
@@ -1123,6 +635,7 @@ test("structured values retain nested properties and merge choices use reviewed 
 }) => {
   const { calls, errors } = await mockBook(page);
   await page.goto(`${BASE}/organizations/org-1/texting/contacts`);
+  await closePanel(page);
   await page.getByRole("button", { name: "Open", exact: true }).first().click();
   const editor = page.getByRole("textbox", {
     name: "Additional addresses (JSON)",
@@ -1185,12 +698,14 @@ test("column order and private visibility are saved with the view", async ({
 }) => {
   const { calls } = await mockBook(page);
   await page.goto(`${BASE}/organizations/org-1/texting/contacts`);
-  await page.getByText("View and saved audiences", { exact: true }).click();
+  await page.getByRole("button", { name: "View", exact: true }).click();
+  await page.getByText("Column order & pinning", { exact: true }).click();
   await page
     .locator(
-      '[data-workspace-action="book-column-earlier"][data-value="state"]',
+      '[data-workspace-action="book-column-earlier"][data-value="phone"]',
     )
     .click();
+  await openSaved(page);
   await page
     .getByRole("textbox", { name: "Save this view as", exact: true })
     .fill("My contact layout");
@@ -1210,11 +725,10 @@ test("column order and private visibility are saved with the view", async ({
     (call) => call.path.endsWith("/views") && call.method === "POST",
   ).body;
   expect(saved.columns).toEqual([
-    "displayName",
-    "state",
-    "city",
     "phone",
-    "consentStatus",
+    "displayName",
+    "eligibility",
+    "tags",
   ]);
   expect(saved.visibility).toBe("private");
 });
@@ -1224,10 +738,12 @@ test("saved layouts can be edited, pinned, and published as the organization def
 }) => {
   const { calls, errors } = await mockBook(page);
   await page.goto(`${BASE}/organizations/org-1/texting/contacts`);
-  await page.getByText("View and saved audiences", { exact: true }).click();
+  await page.getByRole("button", { name: "View", exact: true }).click();
+  await page.getByText("Column order & pinning", { exact: true }).click();
   await page
     .locator('[data-contact-change="book-column-pin"][value="displayName"]')
     .check();
+  await openSaved(page);
   await page
     .getByRole("textbox", { name: "Save this view as", exact: true })
     .fill("Shared contact view");
@@ -1268,6 +784,7 @@ test("batch local district review, selected source removal, and current linked a
   await page
     .getByRole("button", { name: "Select this page", exact: true })
     .click();
+  await page.getByRole("button", { name: "Actions", exact: true }).click();
   await page.getByText("More selection actions", { exact: true }).click();
   await page
     .getByRole("button", {
@@ -1324,6 +841,7 @@ test("batch local district review, selected source removal, and current linked a
   expect(
     calls.filter((call) => call.path.endsWith("/bulk"))[0].body.sourceId,
   ).toBe("source-1");
+  await closePanel(page);
   await page.getByRole("button", { name: "Open", exact: true }).first().click();
   await page.getByText("Linked activity", { exact: true }).click();
   await page
@@ -1341,9 +859,7 @@ test("tag groups create readable columns and filter through stable member tags",
 }) => {
   const { calls, errors } = await mockBook(page);
   await page.goto(`${BASE}/organizations/org-1/texting/contacts`);
-  await page
-    .getByRole("button", { name: "Fields and tags", exact: true })
-    .click();
+  await openTool(page, "Fields and tags");
   const editor = page.locator('[data-workspace-form="book-tag-rename"]');
   await editor
     .getByRole("textbox", { name: "New group name", exact: true })
@@ -1364,14 +880,15 @@ test("tag groups create readable columns and filter through stable member tags",
   await page
     .getByRole("button", { name: "Back to contacts", exact: true })
     .click();
-  await page.getByText("View and saved audiences", { exact: true }).click();
+  await page.getByRole("button", { name: "View", exact: true }).click();
   await page
     .getByRole("checkbox", { name: "Tag group: Interests", exact: true })
     .check();
+  await closePanel(page);
   await expect(
     page.getByRole("columnheader", { name: "Interests", exact: true }),
   ).toBeVisible();
-  await page.getByText("Filter contacts", { exact: true }).click();
+  await openAdvanced(page);
   await page
     .getByRole("button", { name: "Add condition", exact: true })
     .click();
@@ -1394,7 +911,7 @@ test("an administrator can recover and finish an abandoned schema update without
 }) => {
   const { calls, errors } = await mockBook(page, { recovery: true });
   await page.goto(`${BASE}/organizations/org-1/texting/contacts`);
-  await page.getByRole("button", { name: "Sync status", exact: true }).click();
+  await openTool(page, "Sync status");
   page.once("dialog", (dialog) => dialog.accept());
   await page
     .getByRole("button", { name: "Take over and finish update", exact: true })

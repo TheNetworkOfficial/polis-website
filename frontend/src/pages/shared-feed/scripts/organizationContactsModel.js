@@ -157,18 +157,27 @@ export function typedContactInput(value, definition) {
 }
 
 export function contactFilterValue(value, definition, operator) {
+  const multipleChoice = [
+    "multi_choice",
+    "multiple_choice",
+    "multiselect",
+    "tags",
+  ].includes(definition?.type);
   if (["in", "not_in"].includes(operator))
     return String(value)
       .split(",")
       .map((item) =>
         typedContactInput(
           item.trim(),
-          definition?.type === "multiple_choice"
-            ? { ...definition, type: "text" }
-            : definition,
+          multipleChoice ? { ...definition, type: "text" } : definition,
         ),
       );
-  return typedContactInput(String(value), definition);
+  return typedContactInput(
+    String(value),
+    multipleChoice && ["eq", "neq", "contains"].includes(operator)
+      ? { ...definition, type: "text" }
+      : definition,
+  );
 }
 
 /** Neutralize spreadsheet formulas in a download without changing retained source values. */

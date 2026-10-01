@@ -97,6 +97,8 @@ export function createCampaigns(r) {
       r.can("createCampaigns")
     ) {
       await recipients.load();
+      const pendingSelection = r.takeContactCampaign?.();
+      if (pendingSelection) await recipients.seedSelection(pendingSelection);
     }
   }
   function campaignViews(s) {
@@ -647,5 +649,14 @@ export function createCampaigns(r) {
     s.media = { ...media, dataBase64: attempt.dataBase64 };
     s.draft.mediaId = media.mediaId;
   }
-  return { load, render, submit, action, change, mediaFile };
+  return {
+    load,
+    render,
+    submit,
+    action,
+    change,
+    mediaFile,
+    localAction: recipients.localAction,
+    dispose: recipients.dispose,
+  };
 }

@@ -233,6 +233,7 @@ const loadBook = async () => {
     "textingWorkspaceUi",
     "organizationContactsModel",
     "organizationContactImport",
+    "organizationContactPresentation",
   ]) {
     const dependency = await readFile(
       new URL(
