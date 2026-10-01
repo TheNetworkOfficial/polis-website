@@ -14,15 +14,27 @@ The shared Contact Book uses a compact contact table on desktop and contact card
 
 Filter checkboxes are square. The table shows a compact tag summary; its expansion opens contact details with every tag visible. Detail tag expansion also works independently of edit permission. No sample contacts are included in application source.
 
+## October 1 refinements
+
+- New filter, sort, and column choices omit country and map coordinates. Existing saved conditions, selected sorts, columns, and stored values remain intact. State-based city choices use the authenticated public Census catalog, cache only reference names for 24 hours, cancel obsolete loads, and retain saved cities absent from the catalog. Voter choices come from the authorized schema and preserve unfamiliar imported values.
+- Texting and tag choices use two columns. Selection actions have a compact tag form, an authorized create-tag empty state, and actual usage-count ordering when counts are known. Unknown counts remain unknown. Congressional display uses state-prefixed codes without changing raw stored districts or precinct identifiers.
+- New campaigns use two screens: select/review recipients, then write the message. Next appears above and below the recipient list. Returning to recipients retains the message and selection. The estimate uses the frozen eligible count and verified segment/MMS rate; provider preparation rechecks routing and consent before any sending.
+- Whole-book navigation requires `readContactBook` or an authorized book schema. Organization and candidate role catalogs preserve `contact_book_view`, `contact_book_edit`, `contact_book_import`, `contact_book_tag`, and `contact_book_export`. Tag editing and campaign binding use their separate schema grants. The book remains available before texting-provider provisioning.
+- Navigation remains client-side. First book entry reads the fresh schema and query; it loads only a configured default view before querying, and loads other saved views/audiences when their manager opens. Home, Campaigns, and Inbox retain fresh workspace authorization, then run independent billing and page reads together. Failures drain before private state is cleared. No authorization response is cached across navigation.
+- A local ten-run controller fixture with 60 ms per asynchronous read measured book entry at about 187 ms before and 124 ms after (4 reads to 2). Home/Campaigns/Inbox each retain 3 reads; their fixture times decreased from about 186–187 ms to 124–125 ms. These measurements exclude HTTP, browser paint, and production backend latency and do not prove that all live navigation delay is resolved.
+- Expired provider assignments hide Send/Skip and require provider review. Prompt owns assignment lifetime; its policy has no local lease duration or automatic return. Local opt-in expiry displays reclaim guidance only when the server confirms automatic reclaim. No UI claims that provider-held contacts automatically returned.
+
 ## Checks
 
 ```powershell
-node --test tests/files/organization-contacts.spec.mjs tests/files/organization-contacts-performance.spec.mjs tests/files/contact-book-presentation.spec.mjs tests/texting/*.test.mjs
-npx playwright test --config=tests/contact-book.playwright.config.cjs tests/files/contact-book.pw.spec.cjs tests/files/contact-book-redesign.pw.spec.cjs --workers=1 --reporter=line
+node --test tests/files/organization-contacts.spec.mjs tests/files/organization-contacts-performance.spec.mjs tests/files/contact-book-presentation.spec.mjs tests/files/contact-book-refinement.spec.mjs tests/texting/*.test.mjs
+npx playwright test --config=tests/contact-book.playwright.config.cjs tests/files/contact-book.pw.spec.cjs tests/files/contact-book-redesign.pw.spec.cjs tests/files/contact-book-refinement.pw.spec.cjs --workers=1 --reporter=line
 npm run lint
 npm run build:frontend
 ```
 
 Format only the changed files with Prettier to avoid rewriting unrelated source. Browser fixtures block external requests and use fictional contacts. They cover imports, retained values, resumed uploads, saved views, nested filters, page-size/cursor handling, full tag disclosure, campaign review, source and geography operations, and recovery.
 
-Local verification evidence and fictional desktop/mobile screenshots are kept outside the repository at `D:/CodexHome/artifacts/polis-contact-book-ui-20260930/website`. The full backend startup check was attempted with isolated in-memory SQLite and no production configuration; the reused dependency installation lacks the native `sqlite3` binding for Node 24. Frontend validation does not imply that local backend startup passed. This release changes backend source only to advance the shared CSS/JavaScript asset version.
+Earlier redesign evidence and fictional desktop/mobile screenshots are kept outside the repository at `D:/CodexHome/artifacts/polis-contact-book-ui-20260930/website`. That release advanced the shared CSS/JavaScript asset version in backend source. Its backend startup check used isolated in-memory SQLite and no production configuration; the reused dependency installation lacks the native `sqlite3` binding for Node 24. Frontend validation does not imply that local backend startup passed.
+
+Refinement evidence is kept at `D:/CodexHome/artifacts/polis-contact-book-refinement-20261001/website`; the navigation fixture includes source identity and explicit measurement limits. Local backend startup was rechecked with a synthetic session secret and in-memory database and has the same missing native SQLite binding. This refinement changes frontend assets only. No website deployment or provider actions are part of local validation.

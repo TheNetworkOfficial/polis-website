@@ -44,6 +44,7 @@ import {
 import { createTextingBalancePage } from "./scripts/textingBalance.js";
 import { createTextingIntakePage } from "./scripts/textingIntake.js";
 import { createTextingWorkspacePage } from "./scripts/textingWorkspace.js";
+import { contactBookPermissionDefinitions } from "./scripts/organizationContactPermissions.js";
 import { createTextingSessionRequest } from "./scripts/textingSession.js";
 import {
   parseTextingRoute,
@@ -1863,6 +1864,7 @@ const MISSION_PRESETS = [
   },
 ];
 const CANDIDATE_STAFF_PERMISSION_DEFINITIONS = [
+  ...contactBookPermissionDefinitions,
   { key: "analytics", label: "Analytics", category: "Reporting" },
   { key: "events", label: "Events", category: "Campaign operations" },
   {
@@ -2609,6 +2611,7 @@ const COALITION_AMPLIFY_PLATFORM_OPTIONS = [
   ["other", "Other"],
 ];
 const COALITION_ASSIGNABLE_PERMISSION_DEFINITIONS = [
+  ...contactBookPermissionDefinitions,
   {
     key: "voter_map_access",
     label: "Voter map access",
@@ -6506,6 +6509,7 @@ function renderCurrentTextingPage() {
     ...current,
     organizationName: meta.organizationName || "",
     manageBilling: meta.capabilities?.manageBilling === true,
+    readContactBook: meta.capabilities?.readContactBook === true,
     userName:
       user?.displayName || user?.username || user?.name || "Your account",
     logoUrl: resolveSharedAssetUrl(polisLogoUrl),
@@ -91097,12 +91101,18 @@ function renderCoalitionVoterImportPanel(resource) {
 }
 
 function renderCoalitionVoterRecordsListPanel(resource, coalitionId = "") {
+  const detail = state.pages.coalitions.detail;
+  const membership =
+    detail.coalition?.coalitionId === coalitionId ? detail.membership : null;
+  const canReadBook =
+    membership?.isActive &&
+    coalitionHasAnyPermission(membership, ["contact_book_view"]);
   return `<article id="coalition-connected-voters" class="shared-coalition-panel shared-campaign-registry-list-panel">
     <div class="shared-coalition-panel__header">
       <div>
         <h2>Connected voters</h2>
         <p>Search, filter, and review coalition voter records from Polis opt-ins, manual adds, and imports.</p>
-        ${coalitionId ? `<a class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(textingRoute(coalitionId, "contacts"))}" href="${escapeHtml(textingRoute(coalitionId, "contacts"))}">Open shared contact book</a>` : ""}
+        ${coalitionId && canReadBook ? `<a class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(textingRoute(coalitionId, "contacts"))}" href="${escapeHtml(textingRoute(coalitionId, "contacts"))}">Open shared contact book</a>` : ""}
       </div>
       <button class="shared-feed-chip shared-campaign-registry-icon-chip" type="button" data-action="coalition-voter-records-refresh"${disabledAttr(resource.loading)}>${renderIcon("registry")} <span>Refresh</span></button>
     </div>

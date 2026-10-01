@@ -209,6 +209,10 @@ test("campaign selection covers all pages, preserves exclusions, and binds local
     .check();
   await closePanel(page);
   await page
+    .getByRole("button", { name: "Next: Write message", exact: true })
+    .first()
+    .click();
+  await page
     .getByLabel("Campaign name", { exact: true })
     .fill("House 22 outreach");
   await page.evaluate(() => new Promise(requestAnimationFrame));
@@ -572,9 +576,7 @@ test("bulk outcomes, guarded undo, source removal and related-view repair use lo
   await page
     .getByRole("combobox", { name: "Tag", exact: true })
     .selectOption("tag-volunteer");
-  await page
-    .getByRole("button", { name: "Apply to selection", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Apply tag", exact: true }).click();
   await page
     .getByRole("button", { name: "Review tag results", exact: true })
     .click();

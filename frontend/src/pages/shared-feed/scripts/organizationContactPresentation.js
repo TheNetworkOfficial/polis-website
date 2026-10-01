@@ -1,5 +1,38 @@
 /** Presentation metadata only. All matching remains in the authorized contact API. */
 export const contactPageSizes = [10, 25, 50, 100];
+export const simpleContactFields = (fields, retainedIds = []) =>
+  fields.filter(
+    (field) =>
+      retainedIds.includes(field.fieldId) ||
+      !["country", "latitude", "longitude", "lat", "lon", "lng"].includes(
+        field.fieldId,
+      ),
+  );
+
+/** Display congressional districts consistently without changing imported values. */
+export function contactDistrictLabel(value, state) {
+  const number = typeof value === "object" && value ? value.number : value;
+  if (/^\d{1,2}$/.test(String(number)) && /^[A-Z]{2}$/.test(String(state)))
+    return `${state}-${String(number).padStart(2, "0")}`;
+  return value;
+}
+
+export function orderedContactTags(tags) {
+  return [...tags].sort((a, b) => {
+    const left =
+      Number.isSafeInteger(a.usageCount) && a.usageCount >= 0
+        ? a.usageCount
+        : null;
+    const right =
+      Number.isSafeInteger(b.usageCount) && b.usageCount >= 0
+        ? b.usageCount
+        : null;
+    return (
+      (right ?? -1) - (left ?? -1) ||
+      String(a.label).localeCompare(String(b.label))
+    );
+  });
+}
 export const contactStateOptions = [
   ["AL", "Alabama"],
   ["AK", "Alaska"],

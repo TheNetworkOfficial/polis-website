@@ -10,6 +10,7 @@ async function mockBook(
     issues = false,
     recovery = false,
     publication,
+    capabilities = {},
     configureFixture,
     queryResponse,
   } = {},
@@ -140,6 +141,15 @@ async function mockBook(
         contentType: "application/json",
         body: JSON.stringify({ ok: true, ...data }),
       });
+    if (path === "/api/geo/cities")
+      return respond({
+        state: url.searchParams.get("state"),
+        cities:
+          url.searchParams.get("state") === "MT"
+            ? ["Billings", "Bozeman", "Helena"]
+            : ["Phoenix", "Tucson"],
+        version: "fixture",
+      });
     if (path.startsWith(BOOK)) {
       const suffix = path.slice(BOOK.length);
       if (suffix === "/schema")
@@ -159,6 +169,9 @@ async function mockBook(
             export: true,
             select: true,
             personal: true,
+            tag: true,
+            campaign: true,
+            ...capabilities,
           },
           privacy: {
             externalGeocoding: false,
@@ -176,6 +189,19 @@ async function mockBook(
           return respond({ view });
         }
         return respond({ items: views.filter((view) => !view.archived) });
+      }
+      if (suffix.startsWith("/views/") && request.method() === "GET")
+        return respond({
+          view: views.find((view) => view.viewId === suffix.slice(7)),
+        });
+      if (suffix === "/tags" && request.method() === "POST") {
+        const tag = {
+          tagId: `tag-${tags.length + 1}`,
+          label: body.label,
+          revision: 1,
+        };
+        tags.push(tag);
+        return respond({ tag });
       }
       if (suffix === "/views/view-1" && request.method() === "PATCH") {
         Object.assign(views[0], body, { revision: views[0].revision + 1 });
@@ -489,6 +515,7 @@ async function mockBook(
               manageBilling: true,
               createCampaigns: true,
               uploadImports: true,
+              readContactBook: capabilities.read !== false,
             },
           },
         });

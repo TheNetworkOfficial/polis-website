@@ -74,7 +74,7 @@ export const field = (
 ) =>
   `<label class="pt-field${wide ? " pt-wide" : ""}"><span>${escapeText(title)}</span><input name="${escapeText(name)}" type="${type}" value="${escapeText(value)}" maxlength="${max}"${required ? " required" : ""} ${extra}></label>`;
 export const select = (name, title, options, value = "", required = false) =>
-  `<label class="pt-field"><span>${escapeText(title)}</span><select name="${escapeText(name)}"${required ? " required" : ""}>${options.map(([key, text]) => `<option value="${escapeText(key)}"${key === value ? " selected" : ""}>${escapeText(text)}</option>`).join("")}</select></label>`;
+  `<label class="pt-field"><span>${escapeText(title)}</span><select name="${escapeText(name)}" aria-label="${escapeText(title)}"${required ? " required" : ""}>${options.map(([key, text]) => `<option value="${escapeText(key)}"${key === value ? " selected" : ""}>${escapeText(text)}</option>`).join("")}</select></label>`;
 export const textarea = (
   name,
   title,

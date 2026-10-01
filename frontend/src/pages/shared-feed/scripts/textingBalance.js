@@ -230,6 +230,9 @@ export function createTextingBalancePage({ request, context, changed }) {
         return null;
       });
       if (!current(key, version)) return;
+      view.readContactBook =
+        workspace?.workspace?.scopeKey === scope &&
+        workspace?.workspace?.capabilities?.readContactBook === true;
       view.neutralApi =
         workspace?.workspace?.scopeKey === scope &&
         workspace?.workspace?.capabilities?.neutralWorkspaceApi === true;
@@ -607,6 +610,7 @@ export function createTextingBalancePage({ request, context, changed }) {
     organizationName:
       identity() === view.key ? view.billing?.organizationName || "" : "",
     capabilities: {
+      readContactBook: identity() === view.key && view.readContactBook === true,
       manageBilling:
         identity() === view.key && view.billing?.canManageBilling === true,
     },

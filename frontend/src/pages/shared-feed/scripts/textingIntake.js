@@ -412,6 +412,10 @@ export function createTextingIntakePage({
       ),
     ]);
     if (!active(key, version)) return;
+    view.readContactBook =
+      workspace?.workspace?.scopeKey ===
+        `coalition:${context().organizationId}` &&
+      workspace?.workspace?.capabilities?.readContactBook === true;
     view.manageBilling =
       workspace?.workspace?.capabilities?.manageBilling === true;
     if (
@@ -961,7 +965,10 @@ export function createTextingIntakePage({
               context()?.organizationName ||
               "",
             registrationStatus: view.intake?.status || null,
-            capabilities: { manageBilling: view.manageBilling === true },
+            capabilities: {
+              manageBilling: view.manageBilling === true,
+              readContactBook: view.readContactBook === true,
+            },
           }
         : {},
   };

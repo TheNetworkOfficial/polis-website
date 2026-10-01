@@ -1125,3 +1125,59 @@ body:has(.pt-cb-dialog) {
     padding-block: 0;
   }
 }
+.pt-cb-simple-grid,
+.pt-cb-simple-field {
+  align-items: start;
+  align-content: start;
+}
+.pt-cb-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 16px;
+}
+.pt-cb-choice-grid .pt-workspace-check {
+  align-items: center;
+  overflow-wrap: anywhere;
+}
+.pt-cb-selection-actions {
+  display: grid;
+  gap: 16px;
+}
+.pt-contact-book .pt-cb-selection-actions > details {
+  margin: 0;
+  padding: 12px 0;
+}
+.pt-cb-selection-actions > details > summary {
+  min-height: 32px;
+  display: list-item;
+}
+.pt-cb-selection-actions > details[open] > summary {
+  margin-bottom: 12px;
+}
+.pt-cb-action-section {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+.pt-cb-action-section h3,
+.pt-cb-action-section p {
+  margin: 0;
+}
+.pt-cb-tag-action {
+  display: grid;
+  grid-template-columns: minmax(100px, 0.8fr) minmax(140px, 1.5fr);
+  gap: 12px;
+  align-items: end;
+}
+.pt-cb-tag-action > button {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+.pt-cb-tag-create {
+  display: grid;
+  gap: 12px;
+  align-items: end;
+}
+.pt-cb-tag-create > button {
+  justify-self: start;
+}

@@ -76,7 +76,7 @@ async function harness(t) {
           ok: true,
           fields: [{ fieldId: "displayName", label: "Name", type: "text" }],
           tags: [],
-          capabilities: { read: true, select: true },
+          capabilities: { read: true, select: true, campaign: true },
         };
       if (url.endsWith("/query"))
         return { ok: true, items: [row], bookRevision: 1, complete: true };

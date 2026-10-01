@@ -17,6 +17,7 @@ import {
 } from "./textingWorkspaceUi";
 import { createOrganizationContactBook } from "./organizationContactBook";
 import { createOrganizationContactsApi } from "./organizationContactsApi";
+import { loadContactCities } from "./organizationContactCities";
 import { createCampaigns } from "./textingCampaigns";
 import { createConversations } from "./textingConversations";
 
@@ -162,6 +163,12 @@ export function createTextingWorkspacePage({
     };
     return {
       api,
+      cities: async (state, options) => {
+        guard();
+        const result = await loadContactCities(state, request, options);
+        guard();
+        return result;
+      },
       contactApi: createOrganizationContactsApi({
         request,
         scopeKey: `coalition:${organizationId}`,
@@ -273,18 +280,22 @@ export function createTextingWorkspacePage({
       view.neutralApi =
         w.capabilities?.neutralWorkspaceApi === true || w.contractVersion === 2;
       if (w.status !== "configured") return;
-      await r.refreshBilling();
       const { section = "home", resourceId } = context();
-      if (section === "contacts") {
-        if (can("uploadImports")) await modules.contacts.load(resourceId);
-      } else if (["campaigns", "team", "send", "results"].includes(section))
-        await modules.campaigns.load(resourceId, section);
-      else if (["inbox", "conversation"].includes(section))
-        await modules.conversations.load(resourceId);
-      else {
-        const campaigns = await r.api("/campaigns?limit=5");
-        view.homeCampaigns = list(campaigns.items);
-      }
+      const loadSection = async () => {
+        if (["campaigns", "team", "send", "results"].includes(section))
+          await modules.campaigns.load(resourceId, section);
+        else if (["inbox", "conversation"].includes(section))
+          await modules.conversations.load(resourceId);
+        else
+          view.homeCampaigns = list((await r.api("/campaigns?limit=5")).items);
+      };
+      // Both reads follow the fresh scoped workspace gate. Drain failures before clearing private state.
+      const reads = await Promise.allSettled([
+        r.refreshBilling(),
+        loadSection(),
+      ]);
+      const failed = reads.find((result) => result.status === "rejected");
+      if (failed) throw failed.reason;
     } catch (error) {
       if (current(key, version)) fail(error);
     } finally {
@@ -367,7 +378,7 @@ export function createTextingWorkspacePage({
           ? go("campaigns", "New campaign", "new")
           : go("campaigns", "View campaigns"),
       ) +
-      `<div class="pt-grid pt-grid--two"><section class="pt-card pt-workspace-hero"><div class="pt-eyebrow">BETTER, TOGETHER</div><h2>${ready ? "Make the next connection." : "Get ready for your first conversation."}</h2><p>${ready ? "Pick a campaign and give each message a personal moment." : "Your drafts and contact lists stay ready while texting setup is completed."}</p>${go("campaigns", ready ? "Open campaigns" : "Prepare a campaign")}</section>${can("manageBilling") ? `<section class="pt-card"><div class="pt-eyebrow">TEXTING BALANCE</div><div class="pt-workspace-large">${money(b?.availableMicros)}</div><p class="pt-muted">Available to message</p>${go("balance", "View balance", "", true)}</section>` : ""}</div><div class="pt-grid pt-grid--three">${stat("Sending", ready ? (w.sendingMode === "pilot" ? "Controlled test" : "Available") : "Paused")}${can("manageBilling") ? `${stat("Pending charges", money(b?.reservedMicros))}${stat("Completed usage", money(b?.settledMicros))}` : ""}</div><section class="pt-card"><div class="pt-row"><h2>Your campaigns</h2>${go("campaigns", "View all", "", true)}</div>${campaigns.length ? campaigns.map((c) => `<div class="pt-row"><div><strong>${e(c.name)}</strong><p class="pt-muted">${e(label(c.status))}</p></div>${go("campaigns", "Open", c.campaignId, true)}</div>`).join("") : `<p class="pt-muted">Create a campaign when your contact list is ready.</p>`}</section><div class="pt-grid pt-grid--two">${can("uploadImports") ? `<section class="pt-card"><h2>Bring your people</h2><p class="pt-muted">Upload and review a contact list.</p>${go("contacts", "Open contacts", "", true)}</section>` : ""}<section class="pt-card"><h2>Keep listening</h2><p class="pt-muted">Replies and opt-outs stay available when sends are paused.</p>${go("inbox", "Open inbox", "", true)}</section></div>`
+      `<div class="pt-grid pt-grid--two"><section class="pt-card pt-workspace-hero"><div class="pt-eyebrow">BETTER, TOGETHER</div><h2>${ready ? "Make the next connection." : "Get ready for your first conversation."}</h2><p>${ready ? "Pick a campaign and give each message a personal moment." : "Your drafts and contact lists stay ready while texting setup is completed."}</p>${go("campaigns", ready ? "Open campaigns" : "Prepare a campaign")}</section>${can("manageBilling") ? `<section class="pt-card"><div class="pt-eyebrow">TEXTING BALANCE</div><div class="pt-workspace-large">${money(b?.availableMicros)}</div><p class="pt-muted">Available to message</p>${go("balance", "View balance", "", true)}</section>` : ""}</div><div class="pt-grid pt-grid--three">${stat("Sending", ready ? (w.sendingMode === "pilot" ? "Controlled test" : "Available") : "Paused")}${can("manageBilling") ? `${stat("Pending charges", money(b?.reservedMicros))}${stat("Completed usage", money(b?.settledMicros))}` : ""}</div><section class="pt-card"><div class="pt-row"><h2>Your campaigns</h2>${go("campaigns", "View all", "", true)}</div>${campaigns.length ? campaigns.map((c) => `<div class="pt-row"><div><strong>${e(c.name)}</strong><p class="pt-muted">${e(label(c.status))}</p></div>${go("campaigns", "Open", c.campaignId, true)}</div>`).join("") : `<p class="pt-muted">Create a campaign when your contact list is ready.</p>`}</section><div class="pt-grid pt-grid--two">${can("readContactBook") ? `<section class="pt-card"><h2>Bring your people</h2><p class="pt-muted">Upload and review a contact list.</p>${go("contacts", "Open contacts", "", true)}</section>` : ""}<section class="pt-card"><h2>Keep listening</h2><p class="pt-muted">Replies and opt-outs stay available when sends are paused.</p>${go("inbox", "Open inbox", "", true)}</section></div>`
     );
   }
   function render() {
@@ -561,6 +572,7 @@ export function createTextingWorkspacePage({
     "toggle",
     (event) => {
       if (
+        !event.target.isConnected ||
         !owned(event.target) ||
         !event.target.dataset.contactChange?.endsWith("-disclosure")
       )
@@ -636,6 +648,9 @@ export function createTextingWorkspacePage({
       capabilities: {
         ...view.workspace?.capabilities,
         manageBilling: can("manageBilling"),
+        readContactBook:
+          view.contactBook?.schema?.capabilities?.read === true ||
+          view.workspace?.capabilities?.readContactBook === true,
       },
     }),
   };

@@ -365,7 +365,7 @@ test("saved search, sort and columns restore without losing advanced OR rules", 
 
 test("book campaign handoff rechecks permissions, rebuilds selection and requires review without provider preparation", async ({
   page,
-}) => {
+}, testInfo) => {
   const fixture = await mockBook(page);
   await openContacts(page);
   await page
@@ -409,22 +409,14 @@ test("book campaign handoff rechecks permissions, rebuilds selection and require
   await review
     .getByRole("button", { name: "Close panel", exact: true })
     .click();
+  await expect(page.getByLabel("Campaign name", { exact: true })).toHaveCount(
+    0,
+  );
   await page
-    .getByLabel("Campaign name", { exact: true })
-    .fill("Fictional selected contact outreach");
-  await page
-    .getByLabel("Message", { exact: true })
-    .fill("Example Civic Team: join our meeting. Reply STOP to opt out.");
-  await page.getByLabel("Spending limit ($)", { exact: true }).fill("1");
-  await page
-    .getByRole("button", { name: "Save campaign", exact: true })
+    .getByRole("button", { name: "Next: Write message", exact: true })
+    .first()
     .click();
-  await expect(
-    page.getByText(
-      "Review and confirm the recipient selection before saving this campaign.",
-      { exact: true },
-    ),
-  ).toBeVisible();
+  await expect(review).toBeVisible();
   expect(
     fixture.calls.some(
       (call) => call.path === `${PROMPT}/campaigns` && call.method === "POST",
@@ -434,14 +426,51 @@ test("book campaign handoff rechecks permissions, rebuilds selection and require
     fixture.calls.some((call) => call.path.endsWith("/selection-1/campaign")),
   ).toBe(false);
   await page
-    .getByRole("button", { name: "Review selection", exact: true })
-    .click();
-  await page
     .getByLabel("I reviewed these campaign recipients", { exact: true })
     .check();
   await review
     .getByRole("button", { name: "Close panel", exact: true })
     .click();
+  await page
+    .getByRole("button", { name: "Next: Write message", exact: true })
+    .first()
+    .click();
+  await page
+    .getByLabel("Campaign name", { exact: true })
+    .fill("Fictional selected contact outreach");
+  await page
+    .getByLabel("Message", { exact: true })
+    .fill("Example Civic Team: join our meeting. Reply STOP to opt out.");
+  await page.getByLabel("Spending limit ($)", { exact: true }).fill("1");
+  await expect(page.getByLabel("Campaign estimate")).toContainText("$0.07");
+  await page.screenshot({
+    path: testInfo.outputPath("campaign-message-desktop.png"),
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await page.screenshot({
+    path: testInfo.outputPath("campaign-message-mobile.png"),
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page
+    .getByRole("button", { name: "Back to recipients", exact: true })
+    .click();
+  await expect(
+    page.getByRole("checkbox", { name: "Select Alex Example", exact: true }),
+  ).toBeChecked();
+  await page
+    .getByRole("button", { name: "Next: Write message", exact: true })
+    .first()
+    .click();
+  await expect(page.getByLabel("Campaign name", { exact: true })).toHaveValue(
+    "Fictional selected contact outreach",
+  );
   await page
     .getByRole("button", { name: "Save campaign", exact: true })
     .click();

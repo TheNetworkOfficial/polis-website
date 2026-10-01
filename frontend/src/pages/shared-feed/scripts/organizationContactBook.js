@@ -28,6 +28,9 @@ import {
 } from "./organizationContactImport";
 import {
   contactPageSizes,
+  simpleContactFields,
+  contactDistrictLabel,
+  orderedContactTags,
   contactStateOptions,
   contactFilterCategories,
   contactCategoryFields,
@@ -80,11 +83,15 @@ const checkbox = (name, text, checked, extra = "") =>
 export function createOrganizationContactBook(r, { mode = "book" } = {}) {
   let queryGeneration = 0,
     queryAbort = null,
+    cityAbort = null,
+    cityGeneration = 0,
     disposed = false;
   const dispose = () => {
     disposed = true;
     queryGeneration++;
     queryAbort?.abort();
+    cityAbort?.abort();
+    cityGeneration++;
     r.contactApi.invalidate?.();
   };
   const prefix = mode === "selector" ? "recipients" : "book";
@@ -116,7 +123,10 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
   const formName = (suffix) => `${prefix}-${suffix}`;
   const fields = () =>
     list(state().schema?.fields).filter((item) => !item.archived);
-  const tags = () => list(state().schema?.tags).filter((tag) => !tag.archived);
+  const tags = () =>
+    orderedContactTags(
+      list(state().schema?.tags).filter((tag) => !tag.archived),
+    );
   const tagGroups = () =>
     [
       ...new Set(
@@ -324,31 +334,96 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
     } while (cursor);
     return items;
   }
-  async function load() {
+  async function load({ selection } = {}) {
     await schema();
     const s = state();
     if (!can("read")) return;
-    const [views, audiences] = await Promise.all([
-      savedItems("views"),
-      savedItems("audiences"),
-    ]);
-    s.views = views;
-    s.audiences = audiences;
-    if (!s.defaultViewLoaded) {
-      const initialView = s.views.find(
-        (view) => view.viewId === s.schema.viewDefaults?.viewId,
-      );
-      if (initialView) applyView(initialView);
+    s.views ||= [];
+    s.audiences ||= [];
+    if (!s.defaultViewLoaded && !selection) {
+      const defaultId = s.schema.viewDefaults?.viewId;
+      if (defaultId) {
+        const result = await api(`/views/${id(defaultId)}`);
+        if (result.view) applyView(result.view);
+      }
       s.defaultViewLoaded = true;
     }
-    s.columns = s.columns.filter(
-      (key) =>
-        [...fields(), ...virtualFields].some((item) => item.fieldId === key) ||
-        tags().some((tag) => `tag:${tag.tagId}` === key) ||
-        tagGroups().some((group) => group.fieldId === key),
-    );
+    s.columns = s.columns.filter((key) => columnDefinition(key));
     if (!s.columns.length) s.columns = fields().slice(0, 5).map(fieldId);
-    await query();
+    if (selection) await seedSelection(selection);
+    else await query();
+  }
+  async function loadSavedChoices() {
+    const s = state();
+    if (s.savedChoicesLoaded || s.savedChoicesLoading) return;
+    s.savedChoicesLoading = true;
+    try {
+      const results = await Promise.allSettled([
+        savedItems("views"),
+        savedItems("audiences"),
+      ]);
+      const failed = results.find((result) => result.status === "rejected");
+      if (failed) throw failed.reason;
+      s.views = results[0].value;
+      s.audiences = results[1].value;
+      s.savedChoicesLoaded = true;
+    } catch (error) {
+      if (!disposed) r.fail(error);
+    } finally {
+      if (!disposed) {
+        s.savedChoicesLoading = false;
+        r.changed();
+      }
+    }
+  }
+  function captureDisclosures() {
+    if (typeof document === "undefined") return;
+    const s = state();
+    for (const element of document.querySelectorAll?.(
+      `[data-contact-dialog="${prefix}"] details[data-disclosure]`,
+    ) || []) {
+      s.expanded ||= new Set();
+      if (element.open) s.expanded.add(element.dataset.disclosure);
+      else s.expanded.delete(element.dataset.disclosure);
+    }
+  }
+  async function loadCities() {
+    captureDisclosures();
+    const s = state(),
+      selectedState = s.simpleFilters?.state?.value;
+    cityAbort?.abort();
+    const generation = ++cityGeneration;
+    s.cityState = selectedState;
+    s.cities = [];
+    s.cityError = "";
+    s.citySearch = "";
+    if (!selectedState || !r.cities) {
+      s.cityLoading = false;
+      return;
+    }
+    const controller = new AbortController();
+    cityAbort = controller;
+    s.cityLoading = true;
+    try {
+      const cities = await r.cities(selectedState, {
+        signal: controller.signal,
+      });
+      if (!disposed && generation === cityGeneration) s.cities = cities;
+    } catch (error) {
+      if (
+        !disposed &&
+        generation === cityGeneration &&
+        error?.name !== "AbortError"
+      )
+        s.cityError =
+          "City choices could not be loaded. Reopen Filters to try again.";
+    } finally {
+      if (!disposed && generation === cityGeneration) {
+        s.cityLoading = false;
+        captureDisclosures();
+        r.changed();
+      }
+    }
   }
   function applyView(item) {
     const s = state();
@@ -424,6 +499,8 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
   }
   async function bindCampaign(campaignId) {
     const s = state();
+    if (!can("campaign"))
+      throw new Error("Campaign contact access is restricted.");
     if (s.selection?.duplicateEndpointCount)
       throw new Error(
         "Several selected contacts share a phone number. Uncheck extra contacts or choose a separate eligible number, then review the selection again.",
@@ -546,8 +623,19 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
                         typeof item === "string" ? item : item.label,
                       ])
                     : null;
+    if (
+      choices &&
+      definition.type === "single_choice" &&
+      !["eligibility", "consentStatus", "status"].includes(key)
+    ) {
+      const selectedValue = condition?.value ?? "";
+      for (const value of values)
+        if (!choices.some(([option]) => option === value))
+          choices.push([value, `Saved value: ${displayContactValue(value)}`]);
+      return `<label class="pt-field"><span>${e(definition.label)}</span><select data-contact-change="${prefix}-simple-value" data-field-id="${e(key)}" aria-label="${e(definition.label)}"><option value="">Any</option>${choices.map(([value, text]) => `<option value="${e(value)}"${value === selectedValue ? " selected" : ""}>${e(text)}</option>`).join("")}</select></label>`;
+    }
     if (choices)
-      return `<fieldset class="pt-cb-choice-group"><legend>${e(definition.label)}</legend>${choices.length ? choices.map(([value, text]) => checkbox(`${prefix}-simple-choice`, text, values.includes(value), `data-field-id="${e(key)}" value="${e(value)}"`)).join("") : '<p class="pt-cb-hint">No choices are available for your access.</p>'}</fieldset>`;
+      return `<fieldset class="pt-cb-choice-group"><legend>${e(definition.label)}</legend><div class="pt-cb-choice-grid">${choices.length ? choices.map(([value, text]) => checkbox(`${prefix}-simple-choice`, text, values.includes(value), `data-field-id="${e(key)}" value="${e(value)}"`)).join("") : '<p class="pt-cb-hint">No choices are available for your access.</p>'}</div></fieldset>`;
     const attrs = `data-contact-change="${prefix}-simple-value" data-field-id="${e(key)}"`;
     if (key === "state") {
       const value = condition?.value ?? "";
@@ -555,6 +643,17 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
       if (value && !options.some(([code]) => code === value))
         options.push([value, `Saved value: ${displayContactValue(value)}`]);
       return `<label class="pt-field"><span>${e(definition.label)}</span><select ${attrs} aria-label="${e(definition.label)}"><option value="">Any state</option>${options.map(([code, name]) => `<option value="${e(code)}"${code === value ? " selected" : ""}>${e(name)}</option>`).join("")}</select></label>`;
+    }
+    if (key === "city") {
+      const selectedState = s.simpleFilters?.state?.value;
+      const current = condition?.value ?? "";
+      const choices = [...(s.cities || [])];
+      if (current && !choices.includes(current)) choices.unshift(current);
+      const search = (s.citySearch || "").trim().toLowerCase();
+      const matches = choices.filter(
+        (city) => city === current || city.toLowerCase().includes(search),
+      );
+      return `<div class="pt-cb-simple-field"><label class="pt-field"><span>Find a city</span><input type="search" aria-label="Find a city" data-contact-change="${prefix}-city-search" value="${e(s.citySearch || "")}" placeholder="${selectedState ? "Search city names" : "Choose a state first"}"${!selectedState || s.cityLoading ? " disabled" : ""}></label><label class="pt-field"><span>${e(definition.label)}</span><select ${attrs} aria-label="City"${!selectedState || s.cityLoading ? " disabled" : ""}><option value="">${!selectedState ? "Choose a state first" : s.cityLoading ? "Loading cities…" : "Any city"}</option>${matches.map((city) => `<option value="${e(city)}"${city === current ? " selected" : ""}>${e(city)}${!s.cities?.includes(city) ? " (saved value)" : ""}</option>`).join("")}</select></label>${s.cityError ? `<p class="pt-cb-hint">${e(s.cityError)}</p>` : ""}</div>`;
     }
     if (definition.type === "boolean" || ["phone", "email"].includes(key)) {
       const presence = ["phone", "email"].includes(key);
@@ -580,7 +679,7 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
   function categoryFilterPanel() {
     const s = state(),
       search = (s.filterSearch || "").trim().toLowerCase();
-    const available = filterFields(),
+    const available = simpleContactFields(filterFields()),
       categories = contactFilterCategories.filter(
         (category) => contactCategoryFields(available, category.id).length,
       );
@@ -606,14 +705,14 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
         : [];
     if (moreLocation.length)
       visible = visible.filter((item) => primaryLocation.has(item.fieldId));
-    return `<form data-workspace-form="${formName("simple-filter")}" class="pt-cb-filter-form"><label class="pt-cb-search pt-cb-filter-search">${icon("search")}<input type="search" aria-label="Find a filter" placeholder="Find a filter, like precinct or opt-in…" data-contact-change="${prefix}-filter-search" value="${e(s.filterSearch || "")}"></label><div class="pt-cb-filter-layout"><nav class="pt-cb-categories" aria-label="Filter categories">${categories.map((item) => `<button type="button" data-workspace-action="${prefix}-filter-category" data-value="${item.id}" class="${!search && category?.id === item.id ? "is-active" : ""}"${!search && category?.id === item.id ? ' aria-current="true"' : ""}>${icon(item.icon)}<span>${e(item.label)}</span></button>`).join("")}</nav><div class="pt-cb-filter-fields"><h3>${search ? "Matching filters" : e(category?.label || "Filters")}</h3>${category?.id === "location" && !search ? '<p class="pt-cb-hint">Choose a state as well as a district.</p>' : ""}<div class="pt-cb-simple-grid">${visible.map(simpleFilterControl).join("") || '<p class="pt-cb-hint">No filters match this search.</p>'}</div>${moreLocation.length ? `<details class="pt-workspace-details"><summary>City, address & local districts</summary><div class="pt-cb-simple-grid">${moreLocation.map(simpleFilterControl).join("")}</div></details>` : ""}</div></div><div class="pt-cb-advanced-link">${tool("overlay", `Advanced rules${s.filters.length ? ` · ${s.filters.length}` : ""}`, "filter", { value: "advanced" })}<p class="pt-cb-hint">Choose any listed value within a field. Match all chosen fields.</p></div><footer class="pt-cb-panel-footer"><span>Results update when you apply.</span><button type="submit" class="pt-btn"${r.busy() || s.allMatching ? " disabled" : ""}>Show contacts</button>${b("simple-reset", "Reset filters", { secondary: true })}</footer></form>`;
+    return `<form data-workspace-form="${formName("simple-filter")}" class="pt-cb-filter-form"><label class="pt-cb-search pt-cb-filter-search">${icon("search")}<input type="search" aria-label="Find a filter" placeholder="Find a filter, like precinct or opt-in…" data-contact-change="${prefix}-filter-search" value="${e(s.filterSearch || "")}"></label><div class="pt-cb-filter-layout"><nav class="pt-cb-categories" aria-label="Filter categories">${categories.map((item) => `<button type="button" data-workspace-action="${prefix}-filter-category" data-value="${item.id}" class="${!search && category?.id === item.id ? "is-active" : ""}"${!search && category?.id === item.id ? ' aria-current="true"' : ""}>${icon(item.icon)}<span>${e(item.label)}</span></button>`).join("")}</nav><div class="pt-cb-filter-fields">${search ? "<h3>Matching filters</h3>" : ""}${category?.id === "location" && !search ? '<p class="pt-cb-hint">Choose a state as well as a district.</p>' : ""}<div class="pt-cb-simple-grid">${visible.map(simpleFilterControl).join("") || '<p class="pt-cb-hint">No filters match this search.</p>'}</div>${moreLocation.length ? details("City, address & local districts", `<div class="pt-cb-simple-grid">${moreLocation.map(simpleFilterControl).join("")}</div>`) : ""}</div></div><div class="pt-cb-advanced-link">${tool("overlay", `Advanced rules${s.filters.length ? ` · ${s.filters.length}` : ""}`, "filter", { value: "advanced" })}<p class="pt-cb-hint">Choose any listed value within a field. Match all chosen fields.</p></div><footer class="pt-cb-panel-footer"><span>Results update when you apply.</span><button type="submit" class="pt-btn"${r.busy() || s.allMatching ? " disabled" : ""}>Show contacts</button>${b("simple-reset", "Reset filters", { secondary: true })}</footer></form>`;
   }
   function sortPanel() {
     const s = state();
     return `<form data-workspace-form="${formName("sort")}"><div class="pt-cb-panel-body">${select(
       "sort",
       "Sort by",
-      fields()
+      simpleContactFields(fields(), [s.query.sort?.field])
         .filter((item) => item.sortable !== false)
         .map((item) => [item.fieldId, item.label]),
       s.query.sort?.field,
@@ -690,7 +789,10 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
         return `<div class="pt-contact-filter-row">${select(
           `field_${path}`,
           "Field",
-          filterFields().map((item) => [item.fieldId, item.label]),
+          simpleContactFields(filterFields(), [condition.field]).map((item) => [
+            item.fieldId,
+            item.label,
+          ]),
           condition.field,
         )}${select(`op_${path}`, "Condition", ["tags", "sources"].includes(condition.field) || condition.field.startsWith("tag_group:") ? operators.filter(([op]) => ["any", "all", "none"].includes(op)) : operators, condition.op || "eq")}${filterInput(condition, path)}${b("filter-remove", "Remove", { secondary: true, value: path, disabled })}</div>`;
       })
@@ -837,7 +939,7 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
           .map((source) => source.label || "Imported contacts")
           .join(" · ") || "Not recorded",
       );
-    return `${e(displayContactValue(value))}${contact.fieldIssues?.[key] ? '<small class="pt-cb-review">Original value · needs review</small>' : ""}`;
+    return `${e(displayContactValue(key === "congressionalDistrict" ? contactDistrictLabel(value, contact.fields?.state) : value))}${contact.fieldIssues?.[key] ? '<small class="pt-cb-review">Original value · needs review</small>' : ""}`;
   }
   function rowTable(rows, { review = false, addition = false } = {}) {
     const s = state(),
@@ -855,7 +957,7 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
         ? ""
         : ` pt-contact-pinned pt-contact-pin-${Math.min(index, 9)}`;
     };
-    return `<div class="pt-workspace-table-wrap pt-cb-table-wrap"><table class="pt-workspace-table pt-contact-table"><thead><tr>${can("select") ? '<th scope="col" class="pt-cb-select-heading"><span class="pt-cb-visually-hidden">Select</span></th>' : ""}${columns.map((item) => `<th scope="col" class="${pin(item.fieldId)}">${e(item.fieldId === "eligibility" ? "Texting status" : item.label)}</th>`).join("")}<th scope="col" class="pt-cb-open-heading"><span class="pt-cb-visually-hidden">Details</span></th></tr></thead><tbody>${rows.map((contact) => `<tr class="${selected(contact) ? "is-selected" : ""}">${can("select") ? `<td class="pt-contact-select"><label class="pt-cb-check-hit"><input type="checkbox" aria-label="Select ${e(contact.fields?.displayName || contact.fields?.fullName || "contact")}" data-contact-change="${prefix}-row" data-contact-id="${e(contact.contactId)}"${addition ? ' data-addition="true"' : ""}${(addition ? s.includeIds.has(contact.contactId) : review || selected(contact)) ? " checked" : ""}${r.busy() ? " disabled" : ""}></label></td>` : ""}${columns.map((item) => `<td data-label="${e(item.label)}" class="pt-cb-cell pt-cb-cell-${e(item.fieldId.replace(/[^a-zA-Z]/g, ""))}${pin(item.fieldId)}">${item.fieldId.startsWith("tag:") && can("edit") && mode === "book" ? `<label class="pt-cb-check-hit"><input type="checkbox" aria-label="${e(item.label)} for ${e(contact.fields?.displayName || "contact")}" data-contact-change="${prefix}-tag-cell" data-contact-id="${e(contact.contactId)}" data-tag-id="${e(item.fieldId.slice(4))}"${contactValue(contact, item) ? " checked" : ""}${r.busy() ? " disabled" : ""}></label>` : rowValue(contact, item)}</td>`).join("")}<td class="pt-contact-open">${tool("detail", "Open", "right", { value: contact.contactId })}</td></tr>`).join("")}</tbody></table></div>`;
+    return `<div class="pt-workspace-table-wrap pt-cb-table-wrap"><table class="pt-workspace-table pt-contact-table"><thead><tr>${can("select") ? '<th scope="col" class="pt-cb-select-heading"><span class="pt-cb-visually-hidden">Select</span></th>' : ""}${columns.map((item) => `<th scope="col" class="${pin(item.fieldId)}">${e(item.fieldId === "eligibility" ? "Texting status" : item.label)}</th>`).join("")}<th scope="col" class="pt-cb-open-heading"><span class="pt-cb-visually-hidden">Details</span></th></tr></thead><tbody>${rows.map((contact) => `<tr class="${selected(contact) ? "is-selected" : ""}">${can("select") ? `<td class="pt-contact-select"><label class="pt-cb-check-hit"><input type="checkbox" aria-label="Select ${e(contact.fields?.displayName || contact.fields?.fullName || "contact")}" data-contact-change="${prefix}-row" data-contact-id="${e(contact.contactId)}"${addition ? ' data-addition="true"' : ""}${(addition ? s.includeIds.has(contact.contactId) : review || selected(contact)) ? " checked" : ""}${r.busy() ? " disabled" : ""}></label></td>` : ""}${columns.map((item) => `<td data-label="${e(item.label)}" class="pt-cb-cell pt-cb-cell-${e(item.fieldId.replace(/[^a-zA-Z]/g, ""))}${pin(item.fieldId)}">${item.fieldId.startsWith("tag:") && can("tag") && mode === "book" ? `<label class="pt-cb-check-hit"><input type="checkbox" aria-label="${e(item.label)} for ${e(contact.fields?.displayName || "contact")}" data-contact-change="${prefix}-tag-cell" data-contact-id="${e(contact.contactId)}" data-tag-id="${e(item.fieldId.slice(4))}"${contactValue(contact, item) ? " checked" : ""}${r.busy() ? " disabled" : ""}></label>` : rowValue(contact, item)}</td>`).join("")}<td class="pt-contact-open">${tool("detail", "Open", "right", { value: contact.contactId })}</td></tr>`).join("")}</tbody></table></div>`;
   }
   function columnOrderControls() {
     const s = state();
@@ -863,6 +965,8 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
   }
   function viewTools() {
     const s = state();
+    if (s.savedChoicesLoading)
+      return '<p class="pt-cb-hint" role="status">Loading saved views and audiences…</p>';
     return `<form data-workspace-form="${formName("view")}">${field("name", s.editingView ? "View name" : "Save this view as", s.viewDraft?.name || "", { required: true })}${select(
       "visibility",
       "Who can use this view",
@@ -943,30 +1047,39 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
     const s = state();
     if (!can("select")) return "";
     const hasSelection = s.allMatching || s.includeIds.size;
-    return `${mode === "selector" && hasSelection ? endpointControls() : ""}${hasSelection ? details("Add specific contacts", `<form data-workspace-form="${formName("add-search")}" class="pt-contact-save">${field("search", "Search the rest of your contact book", s.addSearch || "", { required: true })}<button class="pt-btn pt-btn--secondary" type="submit">Search</button></form>${list(s.addRows).length ? rowTable(s.addRows, { addition: true }) : ""}${s.addCursor ? b("add-more", "Next search page", { secondary: true }) : ""}`) : ""}${
-      mode === "book" && can("edit") && hasSelection
-        ? `<form data-workspace-form="${formName("bulk-tags")}" class="pt-contact-save">${select(
-            "action",
-            "Tag action",
-            [
-              ["add", "Add tag"],
-              ["remove", "Remove tag"],
-            ],
-          )}${select(
-            "tagId",
-            "Tag",
-            tags().map((tag) => [tag.tagId, tag.label]),
-            "",
-            true,
-          )}<button class="pt-btn pt-btn--secondary" type="submit">Apply to selection</button></form>`
-        : ""
-    }${
-      mode === "book" && can("edit") && hasSelection
+    if (!hasSelection)
+      return '<p class="pt-cb-hint">Choose contacts to see available actions.</p>';
+    const tagList = tags();
+    const tagControls =
+      mode === "book" && can("tag")
+        ? `<section class="pt-cb-action-section"><h3>${tagList.some((tag) => tag.usageCount > 0) ? "Popular tags" : "Available tags"}</h3>${
+            tagList.length
+              ? `<form data-workspace-form="${formName("bulk-tags")}" class="pt-cb-tag-action">${select(
+                  "action",
+                  "Action",
+                  [
+                    ["add", "Add tag"],
+                    ["remove", "Remove tag"],
+                  ],
+                )}${select(
+                  "tagId",
+                  "Tag",
+                  tagList.map((tag) => [tag.tagId, tag.label]),
+                  "",
+                  true,
+                )}<button class="pt-btn" type="submit">Apply tag</button></form>`
+              : `<p class="pt-cb-hint">No tags yet. Create a tag, then apply it to your selection.</p><form data-workspace-form="${formName("tag-create")}" class="pt-cb-tag-create">${field("label", "New tag", "", { required: true })}<button class="pt-btn" type="submit">Create tag</button></form>`
+          }</section>`
+        : mode === "book" && !tagList.length
+          ? '<section class="pt-cb-action-section"><h3>Tags</h3><p class="pt-cb-hint">No tags are available. A contact tag manager can create them.</p></section>'
+          : "";
+    return `<div class="pt-cb-selection-actions">${mode === "selector" ? endpointControls() : ""}${tagControls}${details("Add specific contacts", `<form data-workspace-form="${formName("add-search")}" class="pt-cb-tag-create">${field("search", "Search the rest of your contact book", s.addSearch || "", { required: true })}<button class="pt-btn pt-btn--secondary" type="submit">Search</button></form>${list(s.addRows).length ? rowTable(s.addRows, { addition: true }) : ""}${s.addCursor ? b("add-more", "Next search page", { secondary: true }) : ""}`)}${
+      mode === "book" && can("manage")
         ? details(
             "More selection actions",
-            `${can("manage") ? b("geography-start", "Update districts for selection", { secondary: true }) : ""}<p class="pt-muted">Uses installed local boundary coverage. Addresses are never sent to an outside geocoder.</p>${
-              can("manage")
-                ? `<form data-workspace-form="${formName("bulk-source-remove")}" class="pt-contact-save">${select(
+            `<section class="pt-cb-action-section">${b("geography-start", "Update districts for selection", { secondary: true })}<p class="pt-cb-hint">Uses installed local boundaries. Addresses stay in Polis.</p></section>${
+              list(s.schema.sources).length
+                ? `<form data-workspace-form="${formName("bulk-source-remove")}" class="pt-cb-action-section">${select(
                     "sourceId",
                     "Source membership to remove",
                     list(s.schema.sources).map((source) => [
@@ -975,12 +1088,12 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
                     ]),
                     "",
                     true,
-                  )}<button type="submit" class="pt-btn pt-btn--secondary">Remove source from selection</button></form><p class="pt-muted">Only matching source memberships on the reviewed selection are removed. Other sources and recorded history remain available.</p>`
+                  )}<button type="submit" class="pt-btn pt-btn--secondary">Remove source from selection</button><p class="pt-cb-hint">Other sources and recorded history remain available.</p></form>`
                 : ""
             }`,
           )
         : ""
-    }${can("export") && hasSelection ? b("export", "Export selected contacts", { secondary: true }) : ""}${bulkPanel()}${geographyPanel()}`;
+    }${can("export") ? `<section class="pt-cb-action-section">${b("export", "Export selected contacts", { secondary: true })}</section>` : ""}${bulkPanel()}${geographyPanel()}</div>`;
   }
   function geographyPanel() {
     const s = state(),
@@ -1082,7 +1195,7 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
       return `<div class="pt-field"><span>${e(definition.label)}</span><p>${e(displayContactValue(value))}</p><p class="pt-muted">Retained original value · needs ${e(label(issue.expectedType || definition.type))} review.</p>${editable && !definition.readOnly && simpleTypes.has(definition.type) ? `<details class="pt-workspace-details"><summary>Correct this value</summary>${editorInput(definition, null)}<label class="pt-workspace-check"><input type="checkbox" name="correct_${e(definition.fieldId)}">Replace this retained value when saving</label></details>` : ""}</div>`;
     return editable && !definition.readOnly && simpleTypes.has(definition.type)
       ? editorInput(definition, value)
-      : `<div class="pt-field"><span>${e(definition.label)}</span>${value !== null && typeof value === "object" ? `<pre class="pt-contact-json">${e(JSON.stringify(value, null, 2))}</pre>` : `<p>${e(displayContactValue(value))}</p>`}</div>`;
+      : `<div class="pt-field"><span>${e(definition.label)}</span>${value !== null && typeof value === "object" ? `<pre class="pt-contact-json">${e(JSON.stringify(value, null, 2))}</pre>` : `<p>${e(displayContactValue(definition.fieldId === "congressionalDistrict" ? contactDistrictLabel(value, contact.fields?.state) : value))}</p>`}</div>`;
   }
 
   function selectionTools() {
@@ -1092,7 +1205,7 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
     const description = s.allMatching
       ? `All ${s.publication?.status === "updating" ? "published matches" : "matching contacts"}${s.excludeIds.size ? `, excluding ${count(s.excludeIds.size)}` : ""}${s.includeIds.size ? `, plus ${count(s.includeIds.size)} individual choices` : ""}`
       : `${count(s.includeIds.size)} selected`;
-    return `<div class="pt-cb-select-page">${b("select-page", "Select this page", { secondary: true, disabled: !s.rows.length || r.busy() })}${b("select-all", s.publication?.status === "updating" ? "Select all published matches" : "Select all matching", { secondary: true, disabled: (!s.rows.length && !s.cursor) || r.busy() })}</div>${hasSelection ? `<aside class="pt-cb-selection-bar" aria-label="Selection actions"><div><strong>${e(description)}</strong><small>Across your contact book</small></div><div class="pt-actions">${tool("overlay", "Actions", "more", { value: "selection" })}${b("selection-review", "Review selection")}${mode === "book" ? b("campaign-start", "Create campaign", { secondary: true }) : ""}${tool("select-clear", "Clear selection", "close")}</div></aside>` : ""}`;
+    return `<div class="pt-cb-select-page">${b("select-page", "Select this page", { secondary: true, disabled: !s.rows.length || r.busy() })}${b("select-all", s.publication?.status === "updating" ? "Select all published matches" : "Select all matching", { secondary: true, disabled: (!s.rows.length && !s.cursor) || r.busy() })}</div>${hasSelection ? `<aside class="pt-cb-selection-bar" aria-label="Selection actions"><div><strong>${e(description)}</strong><small>Across your contact book</small></div><div class="pt-actions">${tool("overlay", "Actions", "more", { value: "selection" })}${b("selection-review", "Review selection")}${mode === "book" && can("campaign") ? b("campaign-start", "Create campaign", { secondary: true }) : ""}${tool("select-clear", "Clear selection", "close")}</div></aside>` : ""}`;
   }
   function pageSizeControl() {
     const s = state();
@@ -1102,7 +1215,7 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
     const s = state(),
       search = (s.columnSearch || "").toLowerCase();
     const definitions = [
-      ...fields(),
+      ...simpleContactFields(fields(), s.columns),
       ...virtualFields,
       ...tags().map((tag) => ({
         fieldId: `tag:${tag.tagId}`,
@@ -1236,8 +1349,16 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
               ? [option.value, option.label]
               : [option, option],
           ),
+          ...(value != null &&
+          value !== "" &&
+          !list(definition.options).some(
+            (option) =>
+              (typeof option === "object" ? option.value : option) === value,
+          )
+            ? [[value, `${displayContactValue(value)} (saved value)`]]
+            : []),
         ],
-        value || "",
+        value ?? "",
       );
     if (definition.type === "long_text")
       return textarea(
@@ -1295,7 +1416,7 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
         b("close-detail", "Back", { secondary: true }),
       ) +
       `<section class="pt-card">${detailTagSummary(contact)}${contact.sync ? notice(contact.sync.status === "needs_attention" ? "Saved · related views need attention" : contact.sync.status === "updating_related_views" ? "Saved · updating related views" : "Saved", contact.sync.status === "needs_attention" ? "An administrator can retry pending updates from Sync status." : "") : ""}${contact.eligibility ? notice(`Texting: ${label(contact.eligibility.status)}`, list(contact.eligibility.reasons).map(label).join(", ")) : ""}${contact.contactId && editable ? `<div class="pt-actions">${b("enrich", "Update districts", { secondary: true })}${b("contact-archive", contact.status === "archived" ? "Restore contact" : "Archive contact", { secondary: true })}</div>` : ""}${s.enrichmentStatus ? notice(s.enrichmentStatus) : ""}<form data-workspace-form="${formName("contact")}">${[...groups].map(([group, definitions]) => `<details class="pt-workspace-details"${["identity", "contact", "Identity", "Contact details"].includes(group) ? " open" : ""}><summary>${e(label(group))}</summary><div class="pt-fields">${definitions.map((definition) => renderContactField(definition, contact, editable)).join("")}</div></details>`).join("")}${
-        editable
+        can("tag")
           ? `<details class="pt-workspace-details"><summary>Edit contact tags</summary><div class="pt-contact-columns">${tags()
               .map(
                 (tag) =>
@@ -1304,7 +1425,9 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
               .join(
                 "",
               )}</div></details><button class="pt-btn" type="submit">Save contact</button>`
-          : ""
+          : editable
+            ? '<button class="pt-btn" type="submit">Save contact</button>'
+            : ""
       }</form></section>${details(
         "Sources",
         list(s.detail?.sources || contact.sources)
@@ -1464,10 +1587,10 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
         )
         .join(
           "",
-        )}</section><section class="pt-card"><h2>Tags</h2>${can("manage") ? `<form data-workspace-form="${formName("tag-create")}" class="pt-contact-save">${field("label", "New tag", "", { required: true })}${tagGroupInputs()}<button class="pt-btn" type="submit">Create tag</button></form>` : ""}${tags()
+        )}</section><section class="pt-card"><h2>Tags</h2>${can("tag") ? `<form data-workspace-form="${formName("tag-create")}" class="pt-contact-save">${field("label", "New tag", "", { required: true })}${tagGroupInputs()}<button class="pt-btn" type="submit">Create tag</button></form>` : ""}${tags()
         .map(
           (tag) =>
-            `<form data-workspace-form="${formName("tag-rename")}" data-tag-id="${e(tag.tagId)}" class="pt-contact-save">${field("label", "Tag label", tag.label, { required: true })}${can("manage") ? tagGroupInputs(tag) : ""}<small class="pt-muted">${e(tag.tagId)}</small>${can("manage") ? '<button class="pt-btn pt-btn--secondary" type="submit">Rename</button>' + b("tag-archive", "Archive", { secondary: true, value: tag.tagId }) : ""}</form>`,
+            `<form data-workspace-form="${formName("tag-rename")}" data-tag-id="${e(tag.tagId)}" class="pt-contact-save">${field("label", "Tag label", tag.label, { required: true })}${can("tag") ? tagGroupInputs(tag) : ""}<small class="pt-muted">${e(tag.tagId)}</small>${can("tag") ? '<button class="pt-btn pt-btn--secondary" type="submit">Rename</button>' + b("tag-archive", "Archive", { secondary: true, value: tag.tagId }) : ""}</form>`,
         )
         .join("")}</section></div>`
     );
@@ -1799,6 +1922,8 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
           value: trigger.dataset.value,
         };
       s.overlay = value;
+      if (value === "filters") void loadCities();
+      if (value === "views") void loadSavedChoices();
     } else if (op === "overlay-close") {
       s.overlay = null;
       s.detail = null;
@@ -2030,11 +2155,12 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
       s.addRows = list(result.items);
       s.addCursor = result.nextCursor;
     } else if (action === "contact") {
-      if (!can("edit")) throw new Error("Contact editing is restricted.");
+      if (!can("edit") && !can("tag"))
+        throw new Error("Contact editing is restricted.");
       const contact = s.detail?.contact,
         patch = {};
       for (const definition of fields().filter(
-        (item) => !item.readOnly && simpleTypes.has(item.type),
+        (item) => can("edit") && !item.readOnly && simpleTypes.has(item.type),
       )) {
         if (
           contact?.fieldIssues?.[definition.fieldId] &&
@@ -2053,15 +2179,19 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
       const result = await api(
         contact ? `/contacts/${id(contact.contactId)}` : "/contacts",
         {
-          fields: patch,
-          tags: [
-            ...new Set([
-              ...data.getAll("tagId"),
-              ...list(contact?.tags).filter(
-                (key) => !tags().some((tag) => tag.tagId === key),
-              ),
-            ]),
-          ],
+          ...(can("edit") ? { fields: patch } : {}),
+          ...(can("tag")
+            ? {
+                tags: [
+                  ...new Set([
+                    ...data.getAll("tagId"),
+                    ...list(contact?.tags).filter(
+                      (key) => !tags().some((tag) => tag.tagId === key),
+                    ),
+                  ]),
+                ],
+              }
+            : {}),
           operationId,
           ...(contact ? { expectedRevision: contact.revision } : {}),
         },
@@ -2072,7 +2202,7 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
       await query();
       r.toast("Contact saved.");
     } else if (action === "field-create" || action === "tag-create") {
-      if (!can("manage"))
+      if (!can(action === "tag-create" ? "tag" : "manage"))
         throw new Error("Field and tag management is restricted.");
       await api(action === "field-create" ? "/fields" : "/tags", {
         label: data.get("label"),
@@ -2091,6 +2221,8 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
       });
       await schema();
     } else if (action === "field-rename" || action === "tag-rename") {
+      if (!can(action === "tag-rename" ? "tag" : "manage"))
+        throw new Error("Field and tag management is restricted.");
       const tag = tags().find((item) => item.tagId === form.dataset.tagId);
       await api(
         action === "field-rename"
@@ -2116,7 +2248,7 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
         return true;
       await startBulk("source_remove", { sourceId: data.get("sourceId") });
     } else if (action === "bulk-tags") {
-      if (!can("edit")) throw new Error("Tag editing is restricted.");
+      if (!can("tag")) throw new Error("Tag editing is restricted.");
       if (s.selection?.status !== "ready") await prepareSelection();
       if (s.selection?.status !== "ready")
         throw new Error("Finish building and reviewing the selection first.");
@@ -2363,8 +2495,8 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
       s.activeView = "Custom view";
       await query();
     } else if (op === "campaign-start") {
-      if (!can("select") || (!s.allMatching && !s.includeIds.size))
-        throw new Error("Choose contacts first.");
+      if (!can("campaign") || (!s.allMatching && !s.includeIds.size))
+        throw new Error("Campaign selection is restricted or empty.");
       r.beginContactCampaign?.(selectionSpec());
     } else if (op === "index-prepare")
       await prepareIndex({ resume: s.indexJob?.status === "paused" });
@@ -2750,6 +2882,7 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
       );
       await schema();
     } else if (op === "tag-archive") {
+      if (!can("tag")) throw new Error("Tag editing is restricted.");
       const tag = tags().find((tag) => tag.tagId === value);
       await api(
         `/tags/${id(value)}`,
@@ -2838,7 +2971,7 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
       await query();
     } else if (op === "tag-cell") {
       const change = s.pendingTag;
-      if (!change || !can("edit")) return true;
+      if (!change || !can("tag")) return true;
       const contact = s.rows.find((row) => row.contactId === change.contactId);
       if (!contact) return true;
       const tags = new Set(contact.tags || []);
@@ -2867,6 +3000,10 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
     ) {
       s[name.endsWith("-filter-search") ? "filterSearch" : "columnSearch"] =
         target.value;
+      return true;
+    }
+    if (name === `${prefix}-city-search`) {
+      s.citySearch = target.value;
       return true;
     }
     if (name === `${prefix}-density`) {
@@ -2924,6 +3061,11 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
                 ? target.value === "true"
                 : target.value,
         };
+      }
+      if (key === "state") {
+        delete s.simpleFilters.city;
+        void loadCities();
+        return true;
       }
       return false;
     }
@@ -3084,6 +3226,21 @@ export function createOrganizationContactBook(r, { mode = "book" } = {}) {
     localAction,
     seedSelection,
     selection: () => state().selection,
+    reviewed: () =>
+      state().reviewed === true && state().selection?.status === "ready",
+    reviewForCampaign: async () => {
+      const s = state();
+      if (!can("campaign") || (!s.allMatching && !s.includeIds.size))
+        throw new Error("Campaign contact access is restricted or empty.");
+      if (s.selection?.status !== "ready") await prepareSelection();
+      if (!s.reviewed || s.selection.duplicateEndpointCount) {
+        s.overlay = "review";
+        return false;
+      }
+      if (!s.selection.count) throw new Error("Choose at least one contact.");
+      s.overlay = null;
+      return true;
+    },
     hasSelection: () =>
       !!state().selection || state().allMatching || state().includeIds.size > 0,
   };
