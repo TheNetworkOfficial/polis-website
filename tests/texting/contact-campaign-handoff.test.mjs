@@ -76,10 +76,21 @@ async function harness(t) {
           ok: true,
           fields: [{ fieldId: "displayName", label: "Name", type: "text" }],
           tags: [],
-          capabilities: { read: true, select: true, campaign: true },
+          capabilities: {
+            read: true,
+            select: true,
+            campaign: true,
+            backgroundSelections: true,
+          },
         };
       if (url.endsWith("/query"))
-        return { ok: true, items: [row], bookRevision: 1, complete: true };
+        return {
+          ok: true,
+          items: [row],
+          bookRevision: 1,
+          complete: true,
+          total: 1,
+        };
       if (url.endsWith("/selections"))
         return {
           ok: true,
@@ -144,13 +155,14 @@ async function harness(t) {
   };
 }
 
-test("book handoff builds a local selection once and requires review without provider or campaign writes", async (t) => {
+test("book handoff opens message while local selection builds; review gates save without provider writes", async (t) => {
   const h = await harness(t);
   h.route({ section: "campaigns", resourceId: "new" });
   await h.page.load();
   const selection = h.calls.find((call) => call.url.endsWith("/selections"));
   assert.deepEqual(selection.body.includeIds, ["contact-one"]);
-  assert.match(h.page.render(), /Review selection/);
+  assert.match(h.page.render(), /Campaign name/);
+  assert.match(h.page.render(), /Review recipients/);
   assert.doesNotMatch(
     h.page.render(),
     /data-contact-change="recipients-reviewed" checked/,

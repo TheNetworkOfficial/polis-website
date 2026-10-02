@@ -103,6 +103,7 @@ export function createTextingWorkspacePage({
   function fail(error) {
     if (error?.status === 401 || error?.status === 403) {
       view.accessDenied = true;
+      modules.campaigns?.clearStoredDraft?.();
       pendingContactCampaign = null;
       for (const module of Object.values(modules)) module.dispose?.();
       view.workspace = null;

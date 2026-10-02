@@ -1,4 +1,5 @@
 import "../css/organization-contacts.css";
+import { createContactProgress } from "./organizationContactProgress";
 import {
   escapeText as e,
   button,
@@ -99,6 +100,8 @@ export function createOrganizationContactBook(
     queryAbort?.abort();
     cityAbort?.abort();
     cityGeneration++;
+    selectionProgress.dispose();
+    countProgress.dispose();
     r.contactApi.invalidate?.();
   };
   const prefix = mode === "selector" ? "recipients" : "book";
@@ -168,12 +171,131 @@ export function createOrganizationContactBook(
   ];
   const invalidateSelection = () => {
     const s = state();
+    selectionProgress.reset();
     s.selection = null;
     s.selectionOperationId = null;
+    s.selectionSubmission = null;
     s.reviewed = false;
     s.bound = null;
     s.bindOperationId = null;
+    s.selectionError = "";
+    s.selectionStarted = false;
+    s.restoredReview = null;
+    s.selectedRowsLoaded = false;
+    s.selectedRows = [];
   };
+  const selectionProgress = createContactProgress(r, {
+    recoverAfterMs: 150000,
+    read: async ({ manual, recover }) => {
+      const s = state();
+      const result = s.selection?.selectionId
+        ? s.schema?.capabilities?.backgroundSelections === true
+          ? recover || (manual && s.selectionError)
+            ? await api(`/selections/${id(s.selection.selectionId)}/advance`, {
+                background: true,
+              })
+            : await api(`/selections/${id(s.selection.selectionId)}`)
+          : await api(`/selections/${id(s.selection.selectionId)}/advance`, {
+              operationId: uuid(),
+            })
+        : await api("/selections", {
+            ...(s.selectionSubmission || selectionSpec()),
+            operationId: s.selectionOperationId,
+            ...(s.schema?.capabilities?.backgroundSelections === true
+              ? { background: true }
+              : {}),
+          });
+      return result.selection;
+    },
+    accept: async (selection, current) => {
+      if (
+        !selection?.selectionId ||
+        !["building", "ready", "needs_review"].includes(selection.status)
+      )
+        throw new Error("Recipient preparation could not be verified.");
+      const s = state();
+      if (
+        s.selection?.selectionId &&
+        s.selection.selectionId !== selection.selectionId
+      )
+        throw new Error(
+          "Recipient preparation changed. Review your selection again.",
+        );
+      s.selection = selection;
+      if (s.restoredReview) {
+        s.reviewed =
+          selection.status === "ready" &&
+          selection.selectionId === s.restoredReview.selectionId &&
+          !!selection.manifestSha256 &&
+          selection.manifestSha256 === s.restoredReview.manifestSha256 &&
+          !selection.duplicateEndpointCount;
+        if (selection.status !== "building") s.restoredReview = null;
+      }
+      s.selectionError = "";
+      s.selectionStarted = true;
+      if (selection.status === "ready" && !s.selectedRowsLoaded) {
+        const result = await api(
+          `/selections/${id(selection.selectionId)}/contacts`,
+        );
+        if (!current()) return;
+        s.selectedRows = list(result.items);
+        s.selectedCursor = result.nextCursor;
+        s.selectedPage = 1;
+        s.selectedRowsLoaded = true;
+      }
+    },
+    pending: () =>
+      state().selectionStarted &&
+      (!state().selection || state().selection.status === "building"),
+    failed: (error) => {
+      state().selectionError =
+        error.message || "Preparation could not be checked. Try again.";
+    },
+  });
+  const countProgress = createContactProgress(r, {
+    read: async () => {
+      const s = state();
+      const result = s.countJob?.countId
+        ? await api(`/query-counts/${id(s.countJob.countId)}`)
+        : await api("/query-counts", { query: s.query });
+      return result.job;
+    },
+    accept: (job) => {
+      const s = state();
+      if (
+        !job?.countId ||
+        !["counting", "ready", "needs_review"].includes(job.status)
+      )
+        throw new Error("Contact count could not be verified.");
+      s.countJob = job;
+      if (job.bookRevision !== s.bookRevision) {
+        s.countError = "Contacts changed. Refresh to update the count.";
+        return;
+      }
+      if (
+        job.status === "ready" &&
+        Number.isSafeInteger(job.total) &&
+        job.total >= 0
+      )
+        s.total = job.total;
+      if (
+        job.status === "ready" &&
+        s.allMatching &&
+        s.selectionTotal == null &&
+        s.selectionRevision === job.bookRevision &&
+        JSON.stringify(s.selectionQuery) === JSON.stringify(s.query)
+      )
+        s.selectionTotal = job.total;
+    },
+    pending: () =>
+      state().countStarted &&
+      state().total == null &&
+      !state().countError &&
+      (!state().countJob || state().countJob.status === "counting"),
+    failed: () => {
+      state().countError = "Count unavailable";
+    },
+  });
   async function schema() {
     state().schema = await api("/schema");
   }
@@ -183,6 +305,16 @@ export function createOrganizationContactBook(
     refresh = false,
   } = {}) {
     const s = state();
+    if (!more && !previous) {
+      countProgress.reset();
+      s.countJob = null;
+      s.countStarted = false;
+      s.countError = "";
+      s.total = null;
+    }
+    s.pageFilling = false;
+    s.pagePaused = false;
+    s.pageError = "";
     const requestedCursor = previous
       ? s.previousCursors?.at(-1)
       : more
@@ -266,13 +398,74 @@ export function createOrganizationContactBook(
     s.rows = list(result.items);
     s.cursor = result.nextCursor;
     s.complete = result.complete;
-    s.total = result.total;
+    if (result.total != null) s.total = result.total;
     s.bookRevision = result.bookRevision;
     s.recentResults = result.fromCache === true;
     s.publication = result.publication;
     s.effectiveSort = result.effectiveSort || null;
     s.indexRequirement = null;
     s.indexJob = null;
+    if (
+      s.total == null &&
+      !s.countStarted &&
+      s.schema?.capabilities?.queryCounts === true
+    ) {
+      s.countStarted = true;
+      void countProgress.refresh();
+    }
+    if (s.cursor && s.rows.length < (s.pageSize || 50))
+      void fillLogicalPage(s, generation, controller);
+  }
+  async function fillLogicalPage(s, generation, controller) {
+    const current = () =>
+      !disposed && generation === queryGeneration && !controller.signal.aborted;
+    s.pageFilling = true;
+    s.pagePaused = false;
+    const revision = s.bookRevision;
+    const started = Date.now();
+    let requests = 0;
+    try {
+      while (current() && s.cursor && s.rows.length < (s.pageSize || 50)) {
+        if (requests >= 10 || Date.now() - started >= 10000) {
+          s.pagePaused = true;
+          break;
+        }
+        requests++;
+        const before = s.cursor;
+        const result = await api(
+          "/query",
+          {
+            ...s.query,
+            cursor: before,
+            limit: (s.pageSize || 50) - s.rows.length,
+          },
+          "POST",
+          { signal: controller.signal, isCurrent: current },
+        );
+        if (!current()) return;
+        if (result.bookRevision !== revision || result.nextCursor === before)
+          throw new Error(
+            "Contacts changed while loading this page. Refresh to continue.",
+          );
+        s.rows.push(...list(result.items));
+        s.cursor = result.nextCursor;
+        s.complete = result.complete;
+        if (result.total != null) s.total = result.total;
+        r.changed();
+      }
+    } catch (error) {
+      if (current()) {
+        s.pageError =
+          error.message || "The rest of this page could not be loaded.";
+        if ([401, 403].includes(error?.status || error?.statusCode))
+          r.fail(error);
+      }
+    } finally {
+      if (current()) {
+        s.pageFilling = false;
+        r.changed();
+      }
+    }
   }
   async function prepareIndex({ resume = false, refresh = false } = {}) {
     const s = state(),
@@ -361,6 +554,7 @@ export function createOrganizationContactBook(
     if (!s.columns.length) s.columns = fields().slice(0, 5).map(fieldId);
     if (selection) await seedSelection(selection);
     else await query();
+    if (s.selectionStarted) startPreparation();
   }
   async function loadSavedChoices() {
     const s = state();
@@ -471,15 +665,7 @@ export function createOrganizationContactBook(
     };
   }
   async function advanceSelection() {
-    const s = state();
-    for (let step = 0; s.selection?.status === "building" && step < 8; step++) {
-      s.selection = (
-        await api(`/selections/${id(s.selection.selectionId)}/advance`, {
-          operationId: uuid(),
-        })
-      ).selection;
-      r.changed();
-    }
+    return selectionProgress.refresh({ manual: true });
   }
   async function prepareSelection() {
     const s = state();
@@ -488,14 +674,19 @@ export function createOrganizationContactBook(
     if (!s.allMatching && !s.includeIds.size)
       throw new Error("Choose contacts first.");
     s.selectionOperationId ||= uuid();
-    s.selection = (
-      await api("/selections", {
-        ...selectionSpec(),
-        operationId: s.selectionOperationId,
-      })
-    ).selection;
-    await advanceSelection();
-    if (s.selection?.status === "ready") await loadSelected();
+    s.selectionSubmission ||= structuredClone(selectionSpec());
+    s.selectionStarted = true;
+    s.selectionError = "";
+    r.changed();
+    return selectionProgress.refresh({ manual: true });
+  }
+  function startPreparation() {
+    void prepareSelection().catch((error) => {
+      if (!disposed) {
+        state().selectionError = error.message;
+        r.changed();
+      }
+    });
   }
   async function loadSelected(more = false) {
     const s = state();
@@ -1015,19 +1206,16 @@ export function createOrganizationContactBook(
   }
   function selectionReview() {
     const s = state();
-    if (!s.selection) return "";
+    if (!s.selection && !s.selectionStarted) return "";
     const selection = s.selection;
-    if (selection.status === "building")
-      return (
-        notice(
-          "Building the complete selection",
-          "The selection spans all result pages. Continue until its exact count is ready.",
-        ) + b("selection-advance", "Continue selection")
-      );
+    if (!selection || selection.status === "building")
+      return preparationSummary();
     if (selection.status !== "ready")
       return notice(
         "Selection needs review",
-        list(selection.reasons).map(label).join(", ") ||
+        list(selection.reasons || (selection.reason ? [selection.reason] : []))
+          .map(label)
+          .join(", ") ||
           "Resolve conflicting endpoints or refresh changed contacts before continuing.",
       );
     return `<section class="pt-card pt-contact-selection"><h3>Review selected contacts</h3>${
@@ -1207,14 +1395,47 @@ export function createOrganizationContactBook(
       : `<div class="pt-field"><span>${e(definition.label)}</span>${value !== null && typeof value === "object" ? `<pre class="pt-contact-json">${e(JSON.stringify(value, null, 2))}</pre>` : `<p>${e(displayContactValue(definition.fieldId === "congressionalDistrict" ? contactDistrictLabel(value, contact.fields?.state) : value))}</p>`}</div>`;
   }
 
+  function selectionDescription() {
+    const s = state();
+    if (s.selection?.status === "ready")
+      return `${count(s.selection.count)} selected`;
+    if (!s.allMatching) return `${count(s.includeIds.size)} selected`;
+    const known = s.selectionTotal != null;
+    return `All ${known ? `${count(s.selectionTotal)} ` : ""}${s.selectionPublication === "updating" ? "published matching contacts" : "matching contacts"}${s.excludeIds.size ? `, excluding ${count(s.excludeIds.size)}` : ""}${s.includeIds.size ? `, plus individual choices` : ""}`;
+  }
+  function preparationSummary() {
+    const s = state(),
+      selection = s.selection;
+    if (s.selectionError)
+      return (
+        notice("Recipient preparation paused", e(s.selectionError)) +
+        b("selection-advance", "Check preparation", { secondary: true })
+      );
+    if (selection?.status === "needs_review")
+      return (
+        notice(
+          "Review recipients again",
+          "The contact book changed. Your message is kept.",
+        ) +
+        b("selection-restart", "Update recipient selection", {
+          secondary: true,
+        })
+      );
+    if (!selection || selection.status === "building")
+      return `<section class="pt-notice" role="status"><strong>Preparing recipients</strong><p>${e(selectionDescription())}${selection?.count ? ` · ${count(selection.count)} checked` : ""}. You can write your message now.</p></section>`;
+    return `<section class="pt-card pt-campaign-recipient-summary"><div class="pt-row"><div><strong>${count(selection.count)} contacts selected</strong><p class="pt-muted">${count(selection.eligibleCount || 0)} eligible · ${count(selection.excludedCount || 0)} held${s.reviewed ? " · Reviewed" : ""}</p></div>${b("selection-review", s.reviewed ? "View recipients" : "Review recipients", { secondary: true })}</div></section>`;
+  }
   function selectionTools() {
     const s = state();
     if (!can("select")) return "";
     const hasSelection = s.allMatching || s.includeIds.size;
-    const description = s.allMatching
-      ? `All ${s.publication?.status === "updating" ? "published matches" : "matching contacts"}${s.excludeIds.size ? `, excluding ${count(s.excludeIds.size)}` : ""}${s.includeIds.size ? `, plus ${count(s.includeIds.size)} individual choices` : ""}`
-      : `${count(s.includeIds.size)} selected`;
-    return `<div class="pt-cb-select-page">${b("select-page", "Select this page", { secondary: true, disabled: !s.rows.length || r.busy() })}${b("select-all", s.publication?.status === "updating" ? "Select all published matches" : "Select all matching", { secondary: true, disabled: (!s.rows.length && !s.cursor) || r.busy() })}</div>${hasSelection ? `<aside class="pt-cb-selection-bar" aria-label="Selection actions"><div><strong>${e(description)}</strong><small>Across your contact book</small></div><div class="pt-actions">${tool("overlay", "Actions", "more", { value: "selection" })}${b("selection-review", "Review selection")}${mode === "book" && can("campaign") ? b("campaign-start", "Create campaign", { secondary: true }) : ""}${tool("select-clear", "Clear selection", "close")}</div></aside>` : ""}`;
+    const allLabel =
+      s.publication?.status === "updating"
+        ? "Select all published matches"
+        : s.total != null
+          ? `Select all ${count(s.total)} matching contacts`
+          : "Select all matching";
+    return `<div class="pt-cb-select-page">${b("select-page", "Select this page", { secondary: true, disabled: !s.rows.length || r.busy() })}${b("select-all", allLabel, { secondary: true, disabled: (!s.rows.length && !s.cursor) || r.busy() })}</div>${hasSelection ? `<aside class="pt-cb-selection-bar" aria-label="Selection actions"><div><strong>${e(selectionDescription())}</strong><small>Across your contact book</small></div><div class="pt-actions">${tool("overlay", "Actions", "more", { value: "selection" })}${b("selection-review", "Review selection")}${mode === "book" && can("campaign") ? b("campaign-start", "Create campaign", { secondary: true }) : ""}${tool("select-clear", "Clear selection", "close")}</div></aside>` : ""}`;
   }
   function pageSizeControl() {
     const s = state();
@@ -1294,8 +1515,12 @@ export function createOrganizationContactBook(
       ? `${count(s.rows.length)} published matches loaded${s.cursor ? " · more pages available" : ""}`
       : s.total != null
         ? `${count(s.total)} matching contacts`
-        : `${count(s.rows.length)} contacts on this page${s.cursor ? " · more pages available" : ""}`;
-    return `${indexPreparation()}<section class="pt-cb-book-list ${s.density === "compact" ? "is-compact" : ""}"><div class="pt-cb-view-row">${tool("overlay", s.activeView || "All contacts", "bookmark", { value: "views" })}<span>Organization contact book</span>${b("overlay", "Save view", { secondary: true, value: "views" })}</div>${filterForm()}${updating ? notice("Contacts updating", `${s.publication.pending > 0 ? `${count(s.publication.pending)} updates pending. ` : ""}Showing published matches. Imported or edited contacts may still be updating. Refresh to check progress.`) : ""}${s.recentResults ? '<p class="pt-cb-hint" role="status">Recent results. Refresh to check for updates.</p>' : ""}<div class="pt-cb-results"><span role="status">${e(summary)}</span><span>${e(sortSummary)}</span>${tool("refresh", "Refresh", "refresh", { extra: 'aria-label="Refresh contacts"' })}</div>${selectionTools()}${s.rows.length ? rowTable(s.rows) : notice(updating ? "No published matches on this page" : s.cursor ? "More contacts may match" : "No matching contacts", updating ? "Contact updates are still publishing. Refresh to check progress." : s.cursor ? "Continue to check the remaining results. This page does not cover the entire contact book." : "Try changing the filters or add contacts.")}<footer class="pt-cb-pagination">${pageSizeControl()}<span>Page ${count(s.pageNumber || 1)} · ${count(s.rows.length)} contacts</span><div class="pt-actions">${b("previous", "Previous page", { secondary: true, disabled: !s.previousCursors?.length || r.busy() })}${s.pageNumber > 1 ? b("first", "First page", { secondary: true }) : ""}${b("more", "Next page", { secondary: true, disabled: !s.cursor || r.busy() })}</div></footer></section>${mode === "selector" && s.selection?.status === "ready" && s.reviewed ? notice("Recipients reviewed", `${count(s.selection.count)} contacts selected for this campaign. Only explicit provider preparation can transfer selected phone numbers.`) : ""}`;
+        : s.countStarted &&
+            !s.countError &&
+            s.countJob?.status !== "needs_review"
+          ? "Counting matching contacts…"
+          : `${count(s.rows.length)} contacts on this page${s.cursor ? " · more available" : ""}`;
+    return `${indexPreparation()}<section class="pt-cb-book-list ${s.density === "compact" ? "is-compact" : ""}"><div class="pt-cb-view-row">${tool("overlay", s.activeView || "All contacts", "bookmark", { value: "views" })}<span>Organization contact book</span>${b("overlay", "Save view", { secondary: true, value: "views" })}</div>${filterForm()}${updating ? notice("Contacts updating", `${s.publication.pending > 0 ? `${count(s.publication.pending)} updates pending. ` : ""}Showing published matches. Imported or edited contacts may still be updating. Refresh to check progress.`) : ""}${s.recentResults ? '<p class="pt-cb-hint" role="status">Recent results. Refresh to check for updates.</p>' : ""}<div class="pt-cb-results"><span role="status">${e(summary)}</span><span>${e(sortSummary)}</span>${tool("refresh", "Refresh", "refresh", { extra: 'aria-label="Refresh contacts"' })}</div>${s.pageError ? notice("Page loading paused", e(s.pageError)) : ""}${s.pagePaused ? notice("More matches are available", "This page has not finished loading.") + b("page-resume", "Resume loading page", { secondary: true }) : ""}${selectionTools()}${s.rows.length ? rowTable(s.rows) : notice(updating ? "No published matches on this page" : s.cursor ? "More contacts may match" : "No matching contacts", updating ? "Contact updates are still publishing. Refresh to check progress." : s.cursor ? "Continue to check the remaining results. This page does not cover the entire contact book." : "Try changing the filters or add contacts.")}<footer class="pt-cb-pagination">${pageSizeControl()}<span>Page ${count(s.pageNumber || 1)}${s.total != null ? ` of ${count(Math.max(1, Math.ceil(s.total / (s.pageSize || 50))))}` : ""} · ${count(s.rows.length)} contacts${s.pageFilling ? " · Loading page…" : ""}</span><div class="pt-actions">${b("previous", "Previous page", { secondary: true, disabled: !s.previousCursors?.length || r.busy() })}${s.pageNumber > 1 ? b("first", "First page", { secondary: true }) : ""}${b("more", "Next page", { secondary: true, disabled: !s.cursor || s.pageFilling || s.pagePaused || !!s.pageError || r.busy() })}</div></footer></section>${mode === "selector" && s.selection?.status === "ready" && s.reviewed ? notice("Recipients reviewed", `${count(s.selection.count)} contacts selected for this campaign. Only explicit provider preparation can transfer selected phone numbers.`) : ""}`;
   }
   function endpointControls() {
     const s = state();
@@ -1988,7 +2213,10 @@ export function createOrganizationContactBook(
     return true;
   }
   async function seedSelection(spec) {
+    invalidateSelection();
     const s = state();
+    s.selectionTotal = null;
+    s.selectionPublication = null;
     s.query = structuredClone(spec.query || s.query);
     s.allMatching = spec.mode === "all_matching";
     s.selectionQuery = structuredClone(s.query);
@@ -1996,9 +2224,13 @@ export function createOrganizationContactBook(
     s.includeIds = new Set(spec.includeIds || []);
     s.excludeIds = new Set(spec.excludeIds || []);
     s.endpointChoices = { ...spec.endpointChoices };
-    s.overlay = "review";
+    s.overlay = null;
     await query();
-    await prepareSelection();
+    if (s.selectionRevision === s.bookRevision) {
+      s.selectionTotal = s.total;
+      s.selectionPublication = s.publication?.status;
+    }
+    startPreparation();
   }
   function readFilters(form) {
     const s = state(),
@@ -2966,22 +3198,38 @@ export function createOrganizationContactBook(
       s.allMatching = true;
       s.selectionQuery = structuredClone(s.query);
       s.selectionRevision = s.bookRevision;
+      s.selectionTotal = s.total;
+      s.selectionPublication = s.publication?.status;
       s.excludeIds.clear();
       invalidateSelection();
     } else if (op === "select-clear") {
       s.allMatching = false;
       s.selectionQuery = null;
       s.selectionRevision = null;
+      s.selectionTotal = null;
       s.includeIds.clear();
       s.excludeIds.clear();
       s.addRows = [];
       invalidateSelection();
     } else if (op === "selection-review") {
       s.overlay = "review";
-      await prepareSelection();
+      startPreparation();
+    } else if (op === "selection-restart") {
+      invalidateSelection();
+      await query({ refresh: true });
+      s.selectionRevision = s.bookRevision;
+      s.selectionTotal =
+        JSON.stringify(s.selectionQuery) === JSON.stringify(s.query)
+          ? s.total
+          : null;
+      s.selectionPublication = s.publication?.status;
+      startPreparation();
     } else if (op === "selection-advance") {
       await advanceSelection();
       if (s.selection?.status === "ready") await loadSelected();
+    } else if (op === "page-resume") {
+      if (queryAbort && !s.pageFilling)
+        void fillLogicalPage(s, queryGeneration, queryAbort);
     } else if (op === "selected-more") await loadSelected(true);
     else if (op === "selected-first") await loadSelected();
     else if (op === "bulk-advance") await advanceBulk();
@@ -3186,7 +3434,10 @@ export function createOrganizationContactBook(
       return true;
     }
     if (name === `${prefix}-reviewed`) {
-      s.reviewed = target.checked;
+      s.reviewed =
+        target.checked &&
+        s.selection?.status === "ready" &&
+        !s.selection.duplicateEndpointCount;
       return true;
     }
     if (name === `${prefix}-file`) {
@@ -3260,6 +3511,58 @@ export function createOrganizationContactBook(
     localAction,
     seedSelection,
     selection: () => state().selection,
+    prepareInBackground() {
+      state().overlay = null;
+      startPreparation();
+    },
+    renderPreparation: preparationSummary,
+    renderReview: () => overlayPanel(),
+    snapshot: () => {
+      const s = state();
+      return {
+        spec: structuredClone(s.selectionSubmission || selectionSpec()),
+        operationId: s.selectionOperationId,
+        selectionId: s.selection?.selectionId || null,
+        started: !!s.selectionStarted,
+        total: s.selectionTotal,
+        publication: s.selectionPublication,
+        reviewed:
+          s.reviewed && s.selection?.status === "ready"
+            ? {
+                selectionId: s.selection.selectionId,
+                manifestSha256: s.selection.manifestSha256,
+              }
+            : null,
+      };
+    },
+    restore(snapshot) {
+      if (
+        !snapshot?.spec ||
+        !["explicit", "all_matching"].includes(snapshot.spec.mode)
+      )
+        return;
+      const s = state(),
+        spec = snapshot.spec;
+      s.defaultViewLoaded = true;
+      s.query = structuredClone(spec.query || s.query);
+      s.allMatching = spec.mode === "all_matching";
+      s.selectionQuery = structuredClone(s.query);
+      s.selectionRevision = spec.expectedBookRevision;
+      s.selectionTotal = snapshot.total ?? null;
+      s.selectionPublication = snapshot.publication;
+      s.includeIds = new Set(list(spec.includeIds));
+      s.excludeIds = new Set(list(spec.excludeIds));
+      s.endpointChoices = { ...spec.endpointChoices };
+      s.selectionOperationId = snapshot.operationId || null;
+      s.selectionSubmission = snapshot.operationId
+        ? structuredClone(spec)
+        : null;
+      s.selection = snapshot.selectionId
+        ? { selectionId: snapshot.selectionId, status: "building" }
+        : null;
+      s.selectionStarted = snapshot.started === true;
+      s.restoredReview = snapshot.reviewed;
+    },
     reviewed: () =>
       state().reviewed === true && state().selection?.status === "ready",
     reviewForCampaign: async () => {

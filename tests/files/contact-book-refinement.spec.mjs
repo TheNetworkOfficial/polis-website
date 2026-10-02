@@ -239,7 +239,7 @@ test("a late city lookup cannot replace choices after changing the state", async
               { fieldId: "city", label: "City", type: "text" },
             ],
           }
-        : { items: [], complete: true, bookRevision: 1 },
+        : { items: [], complete: true, bookRevision: 1, total: 0 },
   };
   const book = createOrganizationContactBook(r);
   await book.load();
@@ -284,7 +284,7 @@ test("first contact view reads schema then query; saved metadata stays lazy and 
             },
           };
         if (path === "/query")
-          return { items: [], complete: true, bookRevision: 1 };
+          return { items: [], complete: true, bookRevision: 1, total: 0 };
         throw new Error(path);
       },
     };

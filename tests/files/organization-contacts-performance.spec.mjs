@@ -221,37 +221,8 @@ test("zero or malformed acknowledgements pause without completion; maxRow detect
   );
 });
 const loadBook = async () => {
-  let source = await readFile(
-    new URL(
-      "../../frontend/src/pages/shared-feed/scripts/organizationContactBook.js",
-      import.meta.url,
-    ),
-    "utf8",
-  );
-  source = source.replace('import "../css/organization-contacts.css";', "");
-  for (const module of [
-    "textingWorkspaceUi",
-    "organizationContactsModel",
-    "organizationContactImport",
-    "organizationContactPresentation",
-  ]) {
-    const dependency = await readFile(
-      new URL(
-        `../../frontend/src/pages/shared-feed/scripts/${module}.js`,
-        import.meta.url,
-      ),
-      "utf8",
-    );
-    source = source.replace(
-      `"./${module}"`,
-      JSON.stringify(
-        `data:text/javascript;base64,${Buffer.from(dependency).toString("base64")}`,
-      ),
-    );
-  }
-  return import(
-    `data:text/javascript;base64,${Buffer.from(source).toString("base64")}`
-  );
+  const { moduleUrl } = await import("../texting/module-fixture.mjs");
+  return import(await moduleUrl("organizationContactBook"));
 };
 const { createOrganizationContactBook } = await loadBook();
 
