@@ -183,6 +183,11 @@ export function snapshotTextingFocus(root, identity) {
     ),
   ];
   const form = active.closest("[data-workspace-form]");
+  const message =
+    active.matches("[data-workspace-personalize]") &&
+    form?.dataset.workspaceForm === "campaign"
+      ? form.querySelector('textarea[name="templateText"]')
+      : null;
   const matchingForms = form
     ? [...root.querySelectorAll("[data-workspace-form]")].filter(
         (item) => item.dataset.workspaceForm === form.dataset.workspaceForm,
@@ -204,6 +209,13 @@ export function snapshotTextingFocus(root, identity) {
     tag: active.tagName,
     start: active.selectionStart,
     end: active.selectionEnd,
+    messageCaret: message
+      ? {
+          value: message.value,
+          start: message.selectionStart,
+          end: message.selectionEnd,
+        }
+      : null,
   };
 }
 
@@ -247,6 +259,16 @@ export function restoreTextingFocus(root, snapshot, identity) {
       : fields[snapshot.index];
   if (!field || field.disabled || field.tagName !== snapshot.tag) return;
   field.focus({ preventScroll: true });
+  // The picker may have focus while a queued render replaces the message.
+  // Restore that textarea's latest caret without moving focus from the picker.
+  if (snapshot.messageCaret && field.matches("[data-workspace-personalize]")) {
+    const message = form?.querySelector('textarea[name="templateText"]');
+    if (message && message.value === snapshot.messageCaret.value)
+      message.setSelectionRange(
+        snapshot.messageCaret.start,
+        snapshot.messageCaret.end,
+      );
+  }
   if (
     Number.isInteger(snapshot.start) &&
     typeof field.setSelectionRange === "function"

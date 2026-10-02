@@ -1,4 +1,5 @@
 import { messagePrice, smsSegments } from "./textingWorkspaceUi";
+import { hasPersonalization } from "./textingPersonalization";
 
 /** Estimate the reviewed audience at the standard rate; final routing is verified at preparation. */
 export function estimateContactCampaign(
@@ -16,12 +17,15 @@ export function estimateContactCampaign(
     eligible >= 0
       ? eligible
       : null;
-  const rate = messagePrice(billing, text, media);
+  const personalized = hasPersonalization(text);
+  const rate =
+    personalized && !media ? null : messagePrice(billing, text, media);
   const total = count === null || rate === null ? null : count * rate;
   return {
     count,
     rate,
     total: Number.isSafeInteger(total) ? total : null,
-    segments: media ? null : smsSegments(text),
+    segments: media || personalized ? null : smsSegments(text),
+    personalized,
   };
 }

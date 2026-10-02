@@ -1,3 +1,5 @@
+import { personalizationError } from "./textingPersonalization";
+
 export const escapeText = (value) =>
   String(value ?? "").replace(
     /[&<>"']/g,
@@ -7,7 +9,7 @@ export const escapeText = (value) =>
       ],
   );
 export const customerText = (value) =>
-  String(value ?? "")
+  String(personalizationError(value) || (value ?? ""))
     .replace(/\b(?:prompt|telnyx)_/gi, "texting_")
     .replace(/\b(?:Prompt(?:\.io)?|Telnyx)(?:'s)?\b/gi, "texting service");
 export const label = (value) =>
@@ -94,6 +96,30 @@ export const reasons = (values) =>
     : "";
 
 /** A technical send check must never imply that the recipient opted out. */
+const personalizationBlocks = new Set([
+  "texting_personalization_value_invalid",
+  "texting_message_too_long",
+  "texting_personalization_reprepare_required",
+]);
+
+/** Skipping invalid content must not reopen attempted or uncertain sends. */
+export function queueCanSkip(item, now = Date.now()) {
+  if (!item) return false;
+  if (
+    item.leaseExpiresAtMs != null &&
+    (!Number.isSafeInteger(item.leaseExpiresAtMs) ||
+      item.leaseExpiresAtMs <= now)
+  )
+    return false;
+  if (item.state === "awaiting_confirmation") return true;
+  const codes = list(item.blockedReasons);
+  return (
+    item.state === "blocked" &&
+    codes.length > 0 &&
+    codes.every((code) => personalizationBlocks.has(code))
+  );
+}
+
 export function queueBlockExplanation(item) {
   if (item?.state !== "blocked") return null;
   const codes = new Set(list(item.blockedReasons));
@@ -125,6 +151,15 @@ export function queueBlockExplanation(item) {
     return {
       title: "Delivery needs review",
       text: "A send may already have been attempted for this recipient. An administrator must check the saved outcome before any further action.",
+      canRecheck: false,
+    };
+  if ([...codes].some((code) => personalizationBlocks.has(code)))
+    return {
+      title: "Message needs attention",
+      text: [...codes]
+        .filter((code) => personalizationBlocks.has(code))
+        .map((code) => personalizationError(code))
+        .join(" "),
       canRecheck: false,
     };
   if (codes.has("prompt_source_guard_required"))

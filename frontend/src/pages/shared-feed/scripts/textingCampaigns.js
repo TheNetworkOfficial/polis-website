@@ -11,7 +11,6 @@ import {
   head,
   stat,
   field,
-  textarea,
   notice,
   details,
   reasons,
@@ -20,6 +19,7 @@ import {
   messagePrice,
   streamLabel,
   queueCanConfirm,
+  queueCanSkip,
   queueBlockExplanation,
   checkedUrl,
   protectedMediaData,
@@ -34,6 +34,11 @@ import { createOrganizationContactBook } from "./organizationContactBook";
 import { estimateContactCampaign } from "./textingCampaignEstimate";
 import { createCampaignPreparation } from "./textingCampaignPreparation";
 import { createVolunteerPicker } from "./textingVolunteerPicker";
+import {
+  availablePersonalization,
+  insertPersonalization,
+  personalizationPreview,
+} from "./textingPersonalization";
 
 const localInput = (ms) => {
   if (!Number.isSafeInteger(ms)) return "";
@@ -145,15 +150,23 @@ export function createCampaigns(r) {
       });
     return `<div class="pt-campaign-step"><header class="pt-campaign-step-nav"><div><span class="pt-eyebrow">STEP 1 OF 2</span><p>Choose and review your recipients.</p></div>${next()}</header>${recipients.render()}<footer class="pt-campaign-step-nav"><p class="pt-muted">Your selection is kept when you continue.</p>${next()}</footer></div>`;
   }
+  function messageField(s, preview) {
+    const fields = availablePersonalization(r.workspace?.()?.personalization);
+    const error = s.personalizationInsertError || preview.error;
+    return `<div class="pt-field pt-wide pt-message-field"><div class="pt-message-field-heading"><label for="campaign-message">Message</label>${fields.length ? `<select aria-label="Personalize message" data-workspace-personalize${r.busy() ? " disabled" : ""}><option value="">Personalize…</option>${fields.map((item) => `<option value="${e(item.name)}">${e(item.label)}</option>`).join("")}</select>` : ""}</div><textarea id="campaign-message" name="templateText" rows="6" maxlength="1600" required aria-invalid="${Boolean(error)}" aria-describedby="campaign-message-help${error ? " campaign-message-error" : ""}">${e(s.draft.templateText || "")}</textarea><p class="pt-muted" id="campaign-message-help">Include your organization name and “Reply STOP to opt out.”</p>${error ? `<p class="pt-message-error" id="campaign-message-error" role="alert">${e(error)}</p>` : ""}</div>`;
+  }
   function draftForm(s) {
     const d = s.draft,
-      price = messagePrice(r.billing(), d.templateText || "", !!d.mediaId),
-      optInPrice = messagePrice(
-        r.billing(),
+      preview = personalizationPreview(
         d.templateText || "",
-        !!d.mediaId,
-        "opt_in",
+        r.workspace?.()?.personalization,
       ),
+      price = preview.error
+        ? null
+        : messagePrice(r.billing(), preview.example, !!d.mediaId),
+      optInPrice = preview.error
+        ? null
+        : messagePrice(r.billing(), preview.example, !!d.mediaId, "opt_in"),
       image = mediaData(s.media),
       estimate = estimateContactCampaign(
         r.billing(),
@@ -163,7 +176,7 @@ export function createCampaigns(r) {
         !!d.mediaId,
       ),
       newCampaign = r.context().resourceId === "new";
-    return `${newCampaign ? `<div class="pt-campaign-step-nav"><div><span class="pt-eyebrow">STEP 2 OF 2</span><p>Write your message</p></div>${button("campaign-back", "Back to recipients", { secondary: true })}</div>` : recipients.render()}<div class="pt-grid pt-grid--two"><form class="pt-card" data-workspace-form="campaign"><div class="pt-fields">${field("name", "Campaign name", d.name, { required: true })}${d.audienceId ? `<p class="pt-muted">This campaign keeps its saved recipient selection until you review a replacement below.</p>` : ""}${textarea("templateText", "Message", d.templateText || "", true)}${r.can("manageBilling") ? field("budget", "Spending limit ($)", d.budgetMicros ? (d.budgetMicros / 1000000).toFixed(2) : "", { type: "number", required: true, extra: 'min="0.01" step="0.01"' }) : ""}</div><p class="pt-muted">Include your organization name and “Reply STOP to opt out.” Use the complete message without merge fields.</p>${r.can("manageBilling") ? `<section class="pt-campaign-estimate" aria-label="Campaign estimate"><div class="pt-row"><span>Reviewed eligible contacts</span><strong>${estimate.count === null ? "Review recipients first" : count(estimate.count)}</strong></div><div class="pt-row"><span>Per message</span><strong>${estimate.rate === null ? "Rate awaiting verification" : rateMoney(estimate.rate)}</strong></div><div class="pt-row"><span>Estimated campaign total</span><strong>${estimate.total === null ? "Awaiting review or verified rates" : money(estimate.total)}</strong></div><p class="pt-muted">Based on ${d.mediaId ? "one MMS" : `${estimate.segments} SMS segment(s)`} per eligible contact at the standard rate. Sender consent, opt-outs and routing are checked again before preparation; final totals can change.</p></section>` : ""}${details("When can volunteers send?", `<div class="pt-fields">${field("deliveryStart", "From", localInput(d.deliveryNotBeforeMs), { type: "datetime-local", required: true })}${field("deliveryEnd", "Until", localInput(d.deliveryBeforeMs), { type: "datetime-local", required: true })}</div><p class="pt-muted">Your local time. This sets the allowed window; it does not schedule automatic sends.</p>`)}${s.scheduleUnsupported ? "" : scheduleFields(s.schedule, d.deliverySchedule, true)}<div class="pt-field"><label for="workspace-media">GIF or image (optional)</label><input id="workspace-media" type="file" accept="image/png,image/gif,.png,.gif" data-workspace-change="campaign-media"><p class="pt-muted">PNG or GIF · up to 512 KB</p></div>${d.mediaId ? `<div class="pt-row"><span>${e(s.media?.providerReady === true ? "Image verified" : label(s.media?.state || "Saved attachment"))}</span>${button("media-remove", "Remove", { secondary: true })}</div>${r.can("canPrepareProviderMedia") && s.media?.providerReady !== true ? button("media-prepare", "Prepare attachment", { secondary: true, disabled: s.mediaNeedsRead || r.busy() || !["local_ready", "provider_uploaded_pending_verification"].includes(s.media?.state) }) : ""}${s.mediaNeedsRead ? button("media-refresh", "Refresh attachment", { secondary: true }) : ""}` : ""}<div class="pt-actions"><button class="pt-btn" type="submit"${r.busy() ? " disabled" : ""}>Save campaign</button></div>${s.audienceCursor ? button("audiences-more", "Load more lists", { secondary: true }) : ""}</form><aside class="pt-card pt-workspace-preview"><div class="pt-eyebrow">MESSAGE PREVIEW</div><div class="pt-workspace-phone"><div class="pt-workspace-bubble">${image ? `<img src="${e(image)}" alt="Campaign attachment">` : ""}<p>${e(d.templateText || "Your message will appear here.")}</p></div></div><div class="pt-row"><span>${d.mediaId ? "MMS" : `SMS · ${smsSegments(d.templateText || "")} segment(s)`}</span>${r.can("manageBilling") ? `<strong>${price === null ? "Rate awaiting verification" : `${rateMoney(price)}${optInPrice === null ? " per message" : " standard"}`}</strong>` : ""}</div>${r.can("manageBilling") && optInPrice !== null ? `<div class="pt-row"><span>Opt-in message</span><strong>${rateMoney(optInPrice)}</strong></div>` : ""}<p class="pt-muted">Each person gets an individual send confirmation.</p></aside></div>`;
+    return `${newCampaign ? `<div class="pt-campaign-step-nav"><div><span class="pt-eyebrow">STEP 2 OF 2</span><p>Write your message</p></div>${button("campaign-back", "Back to recipients", { secondary: true })}</div>` : recipients.render()}<div class="pt-grid pt-grid--two"><form class="pt-card" data-workspace-form="campaign"><div class="pt-fields">${field("name", "Campaign name", d.name, { required: true })}${d.audienceId ? `<p class="pt-muted">This campaign keeps its saved recipient selection until you review a replacement below.</p>` : ""}${messageField(s, preview)}${r.can("manageBilling") ? field("budget", "Spending limit ($)", d.budgetMicros ? (d.budgetMicros / 1000000).toFixed(2) : "", { type: "number", required: true, extra: 'min="0.01" step="0.01"' }) : ""}</div>${r.can("manageBilling") ? `<section class="pt-campaign-estimate" aria-label="Campaign estimate"><div class="pt-row"><span>Reviewed eligible contacts</span><strong>${estimate.count === null ? "Review recipients first" : count(estimate.count)}</strong></div><div class="pt-row"><span>${preview.personalized && !d.mediaId ? "Example rate" : "Per message"}</span><strong>${price === null ? "Rate awaiting verification" : rateMoney(price)}</strong></div><div class="pt-row"><span>Estimated campaign total</span><strong>${estimate.personalized && !d.mediaId ? "Varies by recipient" : estimate.total === null ? "Awaiting review or verified rates" : money(estimate.total)}</strong></div><p class="pt-muted">${preview.personalized && !d.mediaId ? "Personalized messages vary in length. Final cost is checked for each recipient." : `Based on ${d.mediaId ? "one MMS" : `${estimate.segments} SMS segment(s)`} per eligible contact. Final totals may change after recipient checks.`}</p></section>` : ""}${details("When can volunteers send?", `<div class="pt-fields">${field("deliveryStart", "From", localInput(d.deliveryNotBeforeMs), { type: "datetime-local", required: true })}${field("deliveryEnd", "Until", localInput(d.deliveryBeforeMs), { type: "datetime-local", required: true })}</div><p class="pt-muted">Your local time. This sets the allowed window; it does not schedule automatic sends.</p>`)}${s.scheduleUnsupported ? "" : scheduleFields(s.schedule, d.deliverySchedule, true)}<div class="pt-field"><label for="workspace-media">GIF or image (optional)</label><input id="workspace-media" type="file" accept="image/png,image/gif,.png,.gif" data-workspace-change="campaign-media"><p class="pt-muted">PNG or GIF · up to 512 KB</p></div>${d.mediaId ? `<div class="pt-row"><span>${e(s.media?.providerReady === true ? "Image verified" : label(s.media?.state || "Saved attachment"))}</span>${button("media-remove", "Remove", { secondary: true })}</div>${r.can("canPrepareProviderMedia") && s.media?.providerReady !== true ? button("media-prepare", "Prepare attachment", { secondary: true, disabled: s.mediaNeedsRead || r.busy() || !["local_ready", "provider_uploaded_pending_verification"].includes(s.media?.state) }) : ""}${s.mediaNeedsRead ? button("media-refresh", "Refresh attachment", { secondary: true }) : ""}` : ""}<div class="pt-actions"><button class="pt-btn" type="submit"${r.busy() || preview.error || s.personalizationInsertError ? " disabled" : ""}>Save campaign</button></div>${s.audienceCursor ? button("audiences-more", "Load more lists", { secondary: true }) : ""}</form><aside class="pt-card pt-workspace-preview"><div class="pt-eyebrow">${preview.personalized ? "EXAMPLE PREVIEW" : "MESSAGE PREVIEW"}</div><div class="pt-workspace-phone"><div class="pt-workspace-bubble">${image ? `<img src="${e(image)}" alt="Campaign attachment">` : ""}<p>${e(preview.error ? "Finish your message to see the example." : preview.example || "Your message will appear here.")}</p></div></div><div class="pt-row"><span>${d.mediaId ? "MMS" : preview.error ? "SMS" : `${preview.personalized ? "Example · " : ""}SMS · ${smsSegments(preview.example)} segment(s)`}</span>${r.can("manageBilling") ? `<strong>${price === null ? "Rate awaiting verification" : `${rateMoney(price)}${preview.personalized && !d.mediaId ? " example rate" : optInPrice === null ? " per message" : " standard"}`}</strong>` : ""}</div>${r.can("manageBilling") && optInPrice !== null ? `<div class="pt-row"><span>${preview.personalized && !d.mediaId ? "Opt-in example rate" : "Opt-in message"}</span><strong>${rateMoney(optInPrice)}</strong></div>` : ""}<p class="pt-muted">${preview.personalized ? "Example details only. Each recipient’s final message is reviewed before sending." : "Each person gets an individual send confirmation."}</p>${preview.fields.length ? details("If a detail is missing", `<p class="pt-muted">${preview.fields.map((item) => `${e(item.label)}: “${e(item.fallback)}”`).join(" · ")}</p>`) : ""}</aside></div>`;
   }
   function preparationNotice(s) {
     const p = s.campaign?.preparation;
@@ -234,7 +247,7 @@ export function createCampaigns(r) {
       (!q
         ? `<section class="pt-card"><h2>Your next conversation</h2><p class="pt-muted">Get your assigned recipients when you’re ready.</p>${button("queue-load", s.preparingAccess ? "Preparing your texting access…" : "Get my next messages", { disabled: !c.canFetchQueue || !r.can("manualQueue") || r.busy() })}${reasons(c.blockedReasons)}</section>`
         : item
-          ? `<div class="pt-grid pt-grid--two"><section class="pt-card"><div class="pt-row"><div><h2>${e(p?.contactDisplayName || "Recipient")}</h2><p class="pt-muted">${e(p?.contactPhone || "Recipient unavailable")}</p></div><span class="pt-tag${block ? " pt-tag--attention" : ""}">${e(pending ? label(s.pendingAction) : held ? "Needs review" : block?.title || label(item.state))}</span></div><div class="pt-eyebrow">FINAL MESSAGE${item.stream ? ` · ${e(streamLabel(item.stream))}` : ""}</div><div class="pt-workspace-bubble">${p?.attachmentUrl || p?.mediaId ? ((item.stream === "opt_in" && p.mediaId ? protectedMediaData(s.queueMedia?.[p.mediaId]) : checkedUrl(p.attachmentUrl)) ? `<img data-workspace-queue-image="${e(item.itemId)}" src="${e(item.stream === "opt_in" && p.mediaId ? protectedMediaData(s.queueMedia?.[p.mediaId]) : checkedUrl(p.attachmentUrl))}" alt="Final message attachment" referrerpolicy="no-referrer">` : notice("Attachment unavailable")) : ""}<p>${e(p?.message || "Final text unavailable")}</p></div>${held && !pending ? notice("Delivery needs review", "Do not send again. Its charge stays reserved until the outcome is confirmed.") : ""}${block && !held && !pending ? notice(block.title, block.text) + (block.canRecheck ? button("queue-recheck", "Check recipient again", { secondary: true, disabled: r.busy() || !r.can("manualQueue") || !c.canFetchQueue }) : "") : ""}${reasons(item.blockedReasons)}${item.state === "lease_expired" ? notice("Recipient assignment expired", "This unsent recipient needs provider release before reassignment. It has not been returned automatically.") : item.expiresAtMs <= Date.now() ? notice("Preview expired", "Check the campaign status before continuing.") : ""}<div class="pt-row"><span>${p?.attachmentUrl || p?.mediaId ? "MMS" : "SMS"}${r.can("manageBilling") ? ` · ${price === null ? "Rate unavailable" : rateMoney(price)}` : ""}</span><div class="pt-actions">${item.state === "lease_expired" ? "" : button("queue-skip", "Skip recipient", { secondary: true, disabled: r.busy() || held || item.state !== "awaiting_confirmation" })}${item.state === "lease_expired" ? "" : button("queue-confirm", pending && s.pendingAction === "sending" ? "Sending…" : `Send to ${p?.contactDisplayName || p?.contactPhone || "recipient"}`, { disabled: r.busy() || held || !queueCanConfirm(item, r.workspace(), r.billing(), s.imageLoaded === item.itemId) })}</div></div><p class="pt-muted">Sends this message to this person only.</p></section><aside class="pt-card"><div class="pt-eyebrow">YOUR SESSION</div>${stat("Messages confirmed this session", count(s.sent || 0))}${r.can("manageBilling") ? `<div class="pt-row"><span>Available funds</span><strong>${money(r.billing()?.availableMicros)}</strong></div>` : ""}${go("inbox", "Open inbox", "", true)}</aside></div>`
+          ? `<div class="pt-grid pt-grid--two"><section class="pt-card"><div class="pt-row"><div><h2>${e(p?.contactDisplayName || "Recipient")}</h2><p class="pt-muted">${e(p?.contactPhone || "Recipient unavailable")}</p></div><span class="pt-tag${block ? " pt-tag--attention" : ""}">${e(pending ? label(s.pendingAction) : held ? "Needs review" : block?.title || label(item.state))}</span></div><div class="pt-eyebrow">FINAL MESSAGE${item.stream ? ` · ${e(streamLabel(item.stream))}` : ""}</div><div class="pt-workspace-bubble">${p?.attachmentUrl || p?.mediaId ? ((item.stream === "opt_in" && p.mediaId ? protectedMediaData(s.queueMedia?.[p.mediaId]) : checkedUrl(p.attachmentUrl)) ? `<img data-workspace-queue-image="${e(item.itemId)}" src="${e(item.stream === "opt_in" && p.mediaId ? protectedMediaData(s.queueMedia?.[p.mediaId]) : checkedUrl(p.attachmentUrl))}" alt="Final message attachment" referrerpolicy="no-referrer">` : notice("Attachment unavailable")) : ""}<p>${e(p?.message || "Final text unavailable")}</p></div>${held && !pending ? notice("Delivery needs review", "Do not send again. Its charge stays reserved until the outcome is confirmed.") : ""}${block && !held && !pending ? notice(block.title, block.text) + (block.canRecheck ? button("queue-recheck", "Check recipient again", { secondary: true, disabled: r.busy() || !r.can("manualQueue") || !c.canFetchQueue }) : "") : ""}${reasons(item.blockedReasons)}${item.state === "lease_expired" ? notice("Recipient assignment expired", "This unsent recipient needs provider release before reassignment. It has not been returned automatically.") : item.expiresAtMs <= Date.now() ? notice("Preview expired", "Check the campaign status before continuing.") : ""}<div class="pt-row"><span>${p?.attachmentUrl || p?.mediaId ? "MMS" : "SMS"}${r.can("manageBilling") ? ` · ${price === null ? "Rate unavailable" : rateMoney(price)}` : ""}</span><div class="pt-actions">${item.state === "lease_expired" ? "" : button("queue-skip", "Skip recipient", { secondary: true, disabled: r.busy() || held || pending || !r.can("manualQueue") || !c.canFetchQueue || !queueCanSkip(item) })}${item.state === "lease_expired" ? "" : button("queue-confirm", pending && s.pendingAction === "sending" ? "Sending…" : `Send to ${p?.contactDisplayName || p?.contactPhone || "recipient"}`, { disabled: r.busy() || held || !queueCanConfirm(item, r.workspace(), r.billing(), s.imageLoaded === item.itemId) })}</div></div><p class="pt-muted">Sends this message to this person only.</p></section><aside class="pt-card"><div class="pt-eyebrow">YOUR SESSION</div>${stat("Messages confirmed this session", count(s.sent || 0))}${r.can("manageBilling") ? `<div class="pt-row"><span>Available funds</span><strong>${money(r.billing()?.availableMicros)}</strong></div>` : ""}${go("inbox", "Open inbox", "", true)}</aside></div>`
           : `<section class="pt-card"><h2>${q.state === "allocation_unknown" ? "Session needs review" : q.state === "lease_expired" ? "Recipient assignment expired" : "You’re caught up"}</h2><p class="pt-muted">${q.state === "allocation_unknown" ? "Your assigned messages could not be confirmed. An administrator must check the saved status." : q.state === "lease_expired" ? (q.automaticReclaim === true ? "Unsent contacts are available for assignment again. Get another group when you’re ready." : "This assignment needs provider release before those contacts can be reassigned.") : "Get another group when you’re ready."}</p>${q.state !== "allocation_unknown" ? button("queue-load", "Get more messages", { disabled: !c.canFetchQueue || r.busy() }) : ""}${reasons(q.blockedReasons)}</section>`)
     );
   }
@@ -353,13 +366,13 @@ export function createCampaigns(r) {
       if (!r.can("createCampaigns") || (!s.campaign && !r.can("manageBilling")))
         throw new Error("Campaign editing is restricted.");
       const draft = readDraft(form);
-      if (
-        !/\bSTOP\b/i.test(draft.templateText) ||
-        /\{\{.*?\}\}|\[\[.*?\]\]/s.test(draft.templateText)
-      )
-        throw new Error(
-          "Use the complete message with STOP instructions and no merge fields.",
-        );
+      if (!/\bSTOP\b/i.test(draft.templateText))
+        throw new Error("Include “Reply STOP to opt out” in your message.");
+      const preview = personalizationPreview(
+        draft.templateText,
+        r.workspace?.()?.personalization,
+      );
+      if (preview.error) throw new Error(preview.error);
       if (recipients.hasSelection())
         draft.audienceId = await recipients.bindCampaign(s.draft.campaignId);
       if (!draft.audienceId)
@@ -589,6 +602,7 @@ export function createCampaigns(r) {
       if (
         !item ||
         r.sendHeld(key) ||
+        s.pendingItemId === item.itemId ||
         (name === "queue-confirm"
           ? !queueCanConfirm(
               item,
@@ -596,9 +610,7 @@ export function createCampaigns(r) {
               r.billing(),
               s.imageLoaded === item.itemId,
             )
-          : !r.can("manualQueue") ||
-            !c.canFetchQueue ||
-            item.state !== "awaiting_confirmation")
+          : !r.can("manualQueue") || !c.canFetchQueue || !queueCanSkip(item))
       )
         throw new Error(
           "This preview is not ready. Check its status before continuing.",
@@ -621,7 +633,10 @@ export function createCampaigns(r) {
         ).result;
         if (!result || result.itemId !== item.itemId)
           throw new Error("The message outcome could not be verified.");
-        if (["accepted", "confirmed"].includes(result.state)) {
+        if (
+          ["accepted", "confirmed"].includes(result.state) ||
+          (!confirming && result.state === "skipped")
+        ) {
           r.releaseSend(key);
           s.queue.items.shift();
           if (confirming) s.sent = (s.sent || 0) + 1;
@@ -653,6 +668,32 @@ export function createCampaigns(r) {
     if (volunteerPicker.change(target)) return true;
     if (recipients.change(target)) return true;
     const s = state();
+    if (target.dataset.workspacePersonalize !== undefined) {
+      if (!target.value || !r.can("createCampaigns") || r.busy()) return false;
+      const input = target
+        .closest('[data-workspace-form="campaign"]')
+        ?.querySelector('textarea[name="templateText"]');
+      if (!input) return false;
+      const inserted = insertPersonalization(
+        input.value,
+        target.value,
+        input.selectionStart,
+        input.selectionEnd,
+        r.workspace?.()?.personalization,
+        input.maxLength,
+      );
+      target.value = "";
+      s.personalizationInsertError = inserted
+        ? ""
+        : "Make room in your message before adding a detail.";
+      if (inserted) {
+        s.draft.templateText = inserted.value;
+        input.value = inserted.value;
+        input.focus({ preventScroll: true });
+        input.setSelectionRange(inserted.caret, inserted.caret);
+      }
+      return true;
+    }
     const hoursForm = target.closest('[data-workspace-form="campaign-hours"]');
     if (hoursForm && target.name) {
       const values = new FormData(hoursForm);
@@ -680,6 +721,14 @@ export function createCampaigns(r) {
     }
     const form = target.closest('[data-workspace-form="campaign"]');
     if (form && target.name) {
+      if (target.name === "templateText") {
+        if (
+          s.draft.templateText === target.value &&
+          !s.personalizationInsertError
+        )
+          return false;
+        s.personalizationInsertError = "";
+      }
       const values = new FormData(form);
       if (["name", "templateText"].includes(target.name))
         s.draft[target.name] = target.value;

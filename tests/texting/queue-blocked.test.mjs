@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { moduleUrl } from "./module-fixture.mjs";
 
 const { createCampaigns } = await import(await moduleUrl("textingCampaigns"));
-const { queueBlockExplanation } = await import(
+const { queueBlockExplanation, queueCanSkip } = await import(
   await moduleUrl("textingWorkspaceUi")
 );
 
@@ -156,4 +156,120 @@ test("selection verification failures explain the source issue; attempted recipi
     await assert.rejects(page.action("queue-recheck"), /needs review/);
   }
   assert.equal(calls.length, 0);
+});
+
+test("invalid personalized content can be skipped explicitly in either stream, never sent or rechecked", async () => {
+  for (const resultState of ["accepted", "skipped"]) {
+    const { page, state, item, r, held, calls } = fixture();
+    item.blockedReasons = ["texting_personalization_value_invalid"];
+    item.humanConfirmation = null;
+    Object.assign(r, {
+      holdSend: (key) => held.add(key),
+      releaseSend: (key) => held.delete(key),
+      changed: () => {},
+      toast: () => {},
+      refreshSendStatus: async () => {},
+      api: async (path, body) => {
+        calls.push({ path, body });
+        return { result: { itemId: item.itemId, state: resultState } };
+      },
+    });
+    assert.match(page.render("send"), /Message needs attention/);
+    assert.match(
+      page.render("send"),
+      /data-workspace-action="queue-skip"[^>]*>Skip recipient/,
+    );
+    assert.match(
+      page.render("send"),
+      /data-workspace-action="queue-confirm"[^>]*disabled/,
+    );
+    assert.doesNotMatch(page.render("send"), /Check recipient again/);
+    await assert.rejects(page.action("queue-confirm"), /not ready/);
+    await assert.rejects(page.action("queue-recheck"), /needs review/);
+    await page.action("queue-skip");
+    assert.equal(calls.length, 1);
+    assert.equal(
+      calls[0].path,
+      "/campaigns/campaign-one/queue/held-recipient/skip",
+    );
+    assert.ok(calls[0].body.actionId);
+    assert.equal(state.campaigns.queue.items.length, 0);
+    assert.equal(state.campaigns.sent, undefined);
+    assert.equal(held.size, 0);
+  }
+});
+
+test("personalized Skip retains lease, attempt, pending, unknown-outcome, and permission fences", async () => {
+  const { page, state, item, r, held, calls } = fixture();
+  item.blockedReasons = ["texting_personalization_value_invalid"];
+  assert.equal(queueCanSkip(item), true);
+  for (const code of [
+    "prompt_confirmation_already_claimed",
+    "provider_outcome_reconciliation_required",
+    "prompt_recipient_suppressed",
+    "unknown_reason",
+  ]) {
+    item.blockedReasons.push(code);
+    assert.equal(queueCanSkip(item), false);
+    await assert.rejects(page.action("queue-skip"), /not ready/);
+    item.blockedReasons.pop();
+  }
+  assert.equal(queueCanSkip({ ...item, blockedReasons: [] }), false);
+  assert.equal(
+    queueCanSkip({
+      ...item,
+      expiresAtMs: Date.now() - 1,
+      leaseExpiresAtMs: null,
+    }),
+    true,
+  );
+  assert.equal(
+    queueCanSkip({
+      ...item,
+      expiresAtMs: undefined,
+      leaseExpiresAtMs: Date.now() + 60_000,
+    }),
+    true,
+  );
+  assert.equal(
+    queueCanSkip({ ...item, leaseExpiresAtMs: Date.now() - 1 }),
+    false,
+  );
+  assert.equal(queueCanSkip({ ...item, leaseExpiresAtMs: "invalid" }), false);
+  assert.equal(
+    queueCanSkip({ ...item, state: "provider_outcome_unknown" }),
+    false,
+  );
+  assert.equal(queueCanSkip({ ...item, state: "lease_expired" }), false);
+  held.add("queue:campaign-one:held-recipient");
+  await assert.rejects(page.action("queue-skip"), /not ready/);
+  held.clear();
+  state.campaigns.pendingItemId = item.itemId;
+  await assert.rejects(page.action("queue-skip"), /not ready/);
+  state.campaigns.pendingItemId = null;
+  r.can = () => false;
+  await assert.rejects(page.action("queue-skip"), /not ready/);
+  r.can = () => true;
+  state.campaigns.campaign.canFetchQueue = false;
+  await assert.rejects(page.action("queue-skip"), /not ready/);
+  assert.equal(calls.length, 0);
+});
+
+test("a skipped response to Confirm cannot be treated as a successful send", async () => {
+  const { page, state, item, r, held } = fixture();
+  item.state = "awaiting_confirmation";
+  item.blockedReasons = [];
+  item.humanConfirmation = { recordId: "proof" };
+  Object.assign(r, {
+    holdSend: (key) => held.add(key),
+    releaseSend: (key) => held.delete(key),
+    changed: () => {},
+    toast: () => {},
+    refreshSendStatus: async () => {},
+    api: async () => ({ result: { itemId: item.itemId, state: "skipped" } }),
+  });
+  await page.action("queue-confirm");
+  assert.equal(state.campaigns.queue.items.length, 1);
+  assert.equal(state.campaigns.sent, undefined);
+  assert.equal(held.size, 1);
 });

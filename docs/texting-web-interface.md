@@ -52,6 +52,40 @@ Focused coverage includes `tests/texting/dual-stream.test.mjs` and
 
 ## Focused verification
 
+### Campaign personalization
+
+New and edited campaign messages show a compact **Personalize** picker when the
+workspace advertises personalization version 1. The supported details are first
+name, last name, full name, city, and state. The picker inserts the canonical
+`{{first_name}}`, `{{last_name}}`, `{{full_name}}`, `{{city}}`, or `{{state}}` token
+at the current caret, replacing selected text. The saved draft still uses only
+`templateText`; opening the picker or typing never prepares contacts or sends a
+message.
+
+The phone preview uses fictional details and is labeled **Example preview**.
+Missing-value guidance is collapsed until requested: first/full name use
+“there,” last name uses “friend,” city uses “your community,” and state uses
+“your state.” Actual contact resolution, frozen recipient values, final message
+validation, and send prices belong to the backend. Older recipient snapshots
+that cannot support personalization require a new campaign.
+
+Unknown fields, case/whitespace variations, unfinished braces, literal braces,
+and legacy double-square-bracket syntax show an inline error and disable Save.
+The existing recipient review, STOP instructions, authorization, and explicit
+send confirmation remain required. Workspaces without the capability retain
+ordinary messages and reject pasted personalization fields.
+
+Personalized SMS displays example segments and an example rate. Campaign totals
+show **Varies by recipient** until the backend supplies an actual resolved
+amount; template-token length and fictional values are never multiplied into a
+campaign total. MMS retains its fixed message-rate estimate, subject to recipient
+checks and routing. Volunteers continue to see the backend's exact per-recipient
+message preview without administrator-only financial data.
+
+Focused coverage: `tests/texting/personalization.test.mjs` and
+`tests/files/texting-personalization.pw.spec.cjs`, alongside the existing campaign,
+recipient-review, pricing, and permission suites.
+
 Run `node --test tests/texting/*.test.mjs` and `npx playwright test --config=playwright.texting.config.cjs`, then the repository lint and production frontend build. Browser fixtures mock backend requests and do not pay or send messages. Avoid running the dev server and production build in the same worktree concurrently because webpack cleans their shared output directory.
 
 The approved live purchase and controlled carrier acceptance remain separate from mocked website verification. Native app releases are outside this website change.

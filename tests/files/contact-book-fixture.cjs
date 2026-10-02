@@ -13,6 +13,7 @@ async function mockBook(
     capabilities = {},
     configureFixture,
     queryResponse,
+    personalization = null,
   } = {},
 ) {
   const token = `e30.${Buffer.from(JSON.stringify({ sub: "contact-admin", email: "admin@example.test" })).toString("base64url")}.test`;
@@ -511,6 +512,7 @@ async function mockBook(
             manualOnly: true,
             status: "configured",
             canSend: true,
+            personalization,
             capabilities: {
               manageBilling: true,
               createCampaigns: true,

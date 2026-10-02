@@ -278,3 +278,24 @@
   height: 22px;
   border-radius: 4px;
 }
+.pt-message-field-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+#shared-feed-app
+  .texting-workspace
+  .pt-message-field.pt-field
+  .pt-message-field-heading
+  select {
+  width: auto;
+  max-width: 100%;
+  min-height: 44px;
+}
+.pt-message-field .pt-message-error {
+  color: var(--polis-danger);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
