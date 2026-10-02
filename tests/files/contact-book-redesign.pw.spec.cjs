@@ -70,7 +70,10 @@ test("rows default to 50 and changing 10/25/50/100 resets cursor history without
   await page
     .getByRole("checkbox", { name: "Select Fictional 000", exact: true })
     .check();
-  await page.getByRole("button", { name: "Next page", exact: true }).click();
+  await page
+    .getByRole("navigation", { name: "Contact pages top", exact: true })
+    .getByRole("button", { name: "Next page", exact: true })
+    .click();
   await expect(page.getByText("Fictional 050", { exact: true })).toBeVisible();
   expect(lastQuery(fixture).cursor).toBe("50");
   for (const size of [10, 25, 100, 50]) {
@@ -93,7 +96,9 @@ test("rows default to 50 and changing 10/25/50/100 resets cursor history without
       ).toBe(true);
     }
     await expect(
-      page.getByRole("button", { name: "Previous page", exact: true }),
+      page
+        .getByRole("navigation", { name: "Contact pages top", exact: true })
+        .getByRole("button", { name: "Previous page", exact: true }),
     ).toBeDisabled();
   }
   await page.getByRole("button", { name: "View", exact: true }).click();
@@ -114,7 +119,7 @@ test("rows default to 50 and changing 10/25/50/100 resets cursor history without
   expect(fixture.errors).toEqual([]);
 });
 
-test("an empty incomplete page retains an explicit continuation and never claims the book is empty", async ({
+test("an empty incomplete page finishes automatically without claiming the book is empty", async ({
   page,
 }) => {
   const fixture = await mockBook(page, {
@@ -129,22 +134,16 @@ test("an empty incomplete page retains an explicit continuation and never claims
     },
   });
   await openContacts(page);
-  await expect(
-    page.getByText("More contacts may match", { exact: true }),
-  ).toBeVisible();
+  await expect(page.getByText("Alex Example", { exact: true })).toBeVisible();
   await expect(
     page.getByText("No matching contacts", { exact: true }),
   ).toHaveCount(0);
-  await expect(
-    page.getByRole("button", { name: "Next page", exact: true }),
-  ).toBeEnabled();
-  expect(queryCalls(fixture)).toHaveLength(1);
-  await page.getByRole("button", { name: "Next page", exact: true }).click();
-  await expect(page.getByText("Alex Example", { exact: true })).toBeVisible();
   expect(queryCalls(fixture)).toHaveLength(2);
   expect(lastQuery(fixture).cursor).toBe("remaining-candidates");
   await expect(
-    page.getByRole("button", { name: "Next page", exact: true }),
+    page
+      .getByRole("navigation", { name: "Contact pages top", exact: true })
+      .getByRole("button", { name: "Next page", exact: true }),
   ).toBeDisabled();
   expect(fixture.errors).toEqual([]);
 });
@@ -183,12 +182,14 @@ test("simple district and upload filters compose AND with membership choices and
   expect(box.width).toBe(box.height);
   expect(box.width).toBeGreaterThanOrEqual(16);
   expect(box.radius).toBeLessThanOrEqual(4);
-  expect(queryCalls(fixture)).toHaveLength(1);
+  expect(queryCalls(fixture)).toHaveLength(2);
   await dialog
     .getByRole("button", { name: "Show contacts", exact: true })
     .click();
   await expect(dialog).toHaveCount(0);
-  await expect.poll(() => queryCalls(fixture).length).toBe(2);
+  await expect
+    .poll(() => queryCalls(fixture).filter((call) => !call.body.cursor).length)
+    .toBe(2);
   const filter = lastQuery(fixture).filter;
   expect(filter.op).toBe("and");
   expect(flatten(filter)).toEqual(
@@ -363,7 +364,7 @@ test("saved search, sort and columns restore without losing advanced OR rules", 
   expect(fixture.errors).toEqual([]);
 });
 
-test("book campaign handoff rechecks permissions, rebuilds selection and requires review without provider preparation", async ({
+test("book campaign handoff opens the composer immediately while retaining recipient review before saving", async ({
   page,
 }, testInfo) => {
   const fixture = await mockBook(page);
@@ -378,11 +379,12 @@ test("book campaign handoff rechecks permissions, rebuilds selection and require
     .getByRole("button", { name: "Create campaign", exact: true })
     .click();
   await expect(page).toHaveURL(/\/texting\/campaigns\/new$/);
+  await expect(page.getByLabel("Campaign name", { exact: true })).toBeVisible();
   const review = page.getByRole("dialog", {
     name: "Review selection",
     exact: true,
   });
-  await expect(review).toBeVisible();
+  await expect(review).toHaveCount(0);
   await expect
     .poll(
       () =>
@@ -403,20 +405,6 @@ test("book campaign handoff rechecks permissions, rebuilds selection and require
     includeIds: ["contact-1"],
     excludeIds: [],
   });
-  await expect(
-    page.getByLabel("I reviewed these campaign recipients", { exact: true }),
-  ).not.toBeChecked();
-  await review
-    .getByRole("button", { name: "Close panel", exact: true })
-    .click();
-  await expect(page.getByLabel("Campaign name", { exact: true })).toHaveCount(
-    0,
-  );
-  await page
-    .getByRole("button", { name: "Next: Write message", exact: true })
-    .first()
-    .click();
-  await expect(review).toBeVisible();
   expect(
     fixture.calls.some(
       (call) => call.path === `${PROMPT}/campaigns` && call.method === "POST",
@@ -425,15 +413,21 @@ test("book campaign handoff rechecks permissions, rebuilds selection and require
   expect(
     fixture.calls.some((call) => call.path.endsWith("/selection-1/campaign")),
   ).toBe(false);
+  await expect(
+    page.getByRole("button", { name: "Save campaign", exact: true }),
+  ).toBeDisabled();
+  await page
+    .getByRole("button", { name: "Review recipients", exact: true })
+    .click();
+  await expect(review).toBeVisible();
+  await expect(
+    page.getByLabel("I reviewed these campaign recipients", { exact: true }),
+  ).not.toBeChecked();
   await page
     .getByLabel("I reviewed these campaign recipients", { exact: true })
     .check();
   await review
     .getByRole("button", { name: "Close panel", exact: true })
-    .click();
-  await page
-    .getByRole("button", { name: "Next: Write message", exact: true })
-    .first()
     .click();
   await page
     .getByLabel("Campaign name", { exact: true })
