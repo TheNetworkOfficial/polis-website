@@ -150,6 +150,20 @@ export function createOrganizationContactsApi({
           "Selected contacts share a phone number. Keep one person per shared number or choose separate eligible numbers, then review again.",
         contact_book_changed:
           "Contacts changed while this view was open. Refresh the results and review your selection again.",
+        contact_count_expired:
+          "This page list has expired. Refresh contacts to load the latest pages.",
+        contact_count_not_found:
+          "This page list is no longer available. Refresh contacts to load it again.",
+        contact_page_not_ready:
+          "This page is still preparing. Refresh contacts to check its progress.",
+        contact_page_directory_required:
+          "Page navigation needs to be prepared. Refresh contacts to continue.",
+        contact_page_directory_invalid:
+          "Page navigation is temporarily unavailable. Refresh contacts to try again.",
+        contact_page_out_of_range:
+          "This page is no longer available. Refresh contacts to see the latest pages.",
+        contact_page_invalid:
+          "This page could not be opened. Refresh contacts to continue.",
         contact_index_updating:
           "Contact updates are still being indexed. Refresh in a moment to see the complete result.",
         contact_index_preparation_required:

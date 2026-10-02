@@ -1,6 +1,10 @@
 import "../css/organization-contacts.css";
 import { createContactProgress } from "./organizationContactProgress";
 import {
+  contactPageWindow,
+  contactDirectoryHasPage,
+} from "./organizationContactPagination";
+import {
   escapeText as e,
   button,
   field,
@@ -252,12 +256,18 @@ export function createOrganizationContactBook(
         error.message || "Preparation could not be checked. Try again.";
     },
   });
+  const numberedPages = () =>
+    state().schema?.capabilities?.numberedPages === true &&
+    state().schema?.capabilities?.queryCounts === true;
   const countProgress = createContactProgress(r, {
     read: async () => {
       const s = state();
       const result = s.countJob?.countId
         ? await api(`/query-counts/${id(s.countJob.countId)}`)
-        : await api("/query-counts", { query: s.query });
+        : await api("/query-counts", {
+            query: s.query,
+            ...(numberedPages() ? { pages: true } : {}),
+          });
       return result.job;
     },
     accept: (job) => {
@@ -270,30 +280,52 @@ export function createOrganizationContactBook(
       s.countJob = job;
       if (job.bookRevision !== s.bookRevision) {
         s.countError = "Contacts changed. Refresh to update the count.";
+        if (s.pendingPage) {
+          s.pendingPage = null;
+          s.pageError = "Contacts changed. Refresh contacts to continue.";
+        }
         return;
       }
-      if (
-        job.status === "ready" &&
-        Number.isSafeInteger(job.total) &&
-        job.total >= 0
-      )
+      if (Number.isSafeInteger(job.total) && job.total >= 0)
         s.total = job.total;
       if (
-        job.status === "ready" &&
+        Number.isSafeInteger(job.total) &&
         s.allMatching &&
         s.selectionTotal == null &&
         s.selectionRevision === job.bookRevision &&
         JSON.stringify(s.selectionQuery) === JSON.stringify(s.query)
       )
         s.selectionTotal = job.total;
+      if (
+        s.pendingPage &&
+        s.total != null &&
+        s.pendingPage > Math.max(1, Math.ceil(s.total / s.pageSize))
+      )
+        s.pendingPage = null;
+      if (job.status === "needs_review" && s.pendingPage) {
+        s.pendingPage = null;
+        s.pageError = "Contacts changed. Refresh contacts to continue.";
+      }
+      if (
+        s.pendingPage &&
+        contactDirectoryHasPage(job, s.pendingPage, s.pageSize) &&
+        !s.pageLoading
+      )
+        void loadNumberedPage(s.pendingPage);
     },
     pending: () =>
       state().countStarted &&
-      state().total == null &&
       !state().countError &&
-      (!state().countJob || state().countJob.status === "counting"),
+      (!state().countJob ||
+        state().countJob.status === "counting" ||
+        state().countJob.pageDirectory?.status === "building"),
     failed: () => {
       state().countError = "Count unavailable";
+      if (state().pendingPage) {
+        state().pendingPage = null;
+        state().pageError =
+          "Page navigation is unavailable. Refresh contacts to try again.";
+      }
     },
   });
   async function schema() {
@@ -311,6 +343,10 @@ export function createOrganizationContactBook(
       s.countStarted = false;
       s.countError = "";
       s.total = null;
+      s.pendingPage = null;
+      s.pageLoading = false;
+      s.directoryPage = false;
+      s.directoryHasNext = false;
     }
     s.pageFilling = false;
     s.pagePaused = false;
@@ -406,7 +442,7 @@ export function createOrganizationContactBook(
     s.indexRequirement = null;
     s.indexJob = null;
     if (
-      s.total == null &&
+      (s.total == null || numberedPages()) &&
       !s.countStarted &&
       s.schema?.capabilities?.queryCounts === true
     ) {
@@ -415,6 +451,115 @@ export function createOrganizationContactBook(
     }
     if (s.cursor && s.rows.length < (s.pageSize || 50))
       void fillLogicalPage(s, generation, controller);
+  }
+  /** Numbered pages use the server's bounded directory, never a client walk through prior pages. */
+  async function loadNumberedPage(page) {
+    const s = state();
+    if (
+      !Number.isSafeInteger(page) ||
+      page < 1 ||
+      (s.total != null && page > Math.max(1, Math.ceil(s.total / s.pageSize)))
+    )
+      return;
+    const generation = ++queryGeneration;
+    queryAbort?.abort();
+    const controller = new AbortController();
+    queryAbort = controller;
+    s.pendingPage = page;
+    s.pageError = "";
+    s.pageLoading = false;
+    s.pageFilling = false;
+    s.pagePaused = false;
+    if (!contactDirectoryHasPage(s.countJob, page, s.pageSize)) {
+      if (s.countError || s.countJob?.status === "needs_review") {
+        s.pendingPage = null;
+        s.pageError =
+          "Contacts changed or pages are unavailable. Refresh contacts to continue.";
+      }
+      r.changed();
+      return;
+    }
+    const size = s.pageSize,
+      countId = s.countJob.countId,
+      revision = s.bookRevision;
+    const current = () =>
+      !disposed && generation === queryGeneration && !controller.signal.aborted;
+    s.pageLoading = true;
+    s.pageFilling = false;
+    s.pagePaused = false;
+    r.changed();
+    try {
+      const result = await api(
+        `/query-counts/${id(countId)}/page?page=${page}&limit=${size}`,
+        undefined,
+        "GET",
+        { signal: controller.signal, isCurrent: current },
+      );
+      if (!current()) return;
+      if (
+        result.bookRevision !== revision ||
+        result.pageNumber !== page ||
+        list(result.items).length > size
+      )
+        throw new Error("Contacts changed. Refresh contacts to continue.");
+      s.rows = list(result.items);
+      s.pageNumber = page;
+      s.currentCursor = null;
+      s.previousCursors = [];
+      s.cursor = null;
+      s.complete = result.complete;
+      s.directoryPage = true;
+      s.directoryHasNext = result.hasNext === true;
+      s.pendingPage = null;
+      if (Number.isSafeInteger(result.total) && result.total >= 0)
+        s.total = result.total;
+      s.publication = result.publication;
+      s.effectiveSort = result.effectiveSort || null;
+      s.recentResults = false;
+    } catch (error) {
+      if (!current() || error?.name === "AbortError") return;
+      s.pendingPage = null;
+      s.pageError =
+        error.message ||
+        "This page could not be loaded. Refresh contacts to try again.";
+      if ([401, 403].includes(error?.status || error?.statusCode)) {
+        s.rows = [];
+        s.schema = { capabilities: {} };
+        invalidateSelection();
+        r.fail(error);
+      }
+    } finally {
+      if (current()) {
+        s.pageLoading = false;
+        r.changed();
+      }
+    }
+  }
+  async function goToPage(page) {
+    const s = state();
+    if (page === s.pageNumber) {
+      if (s.pendingPage) {
+        queryGeneration++;
+        queryAbort?.abort();
+        s.pendingPage = null;
+        s.pageLoading = false;
+        s.pageError = "";
+        r.changed();
+      }
+      return;
+    }
+    if (numberedPages()) return loadNumberedPage(page);
+    if (page === 1) return query();
+    if (page === s.pageNumber - 1 && s.previousCursors?.length)
+      return query({ previous: true });
+    if (
+      page === s.pageNumber + 1 &&
+      s.cursor &&
+      !s.pageFilling &&
+      !s.pagePaused &&
+      !s.pageError
+    )
+      return query({ more: true });
   }
   async function fillLogicalPage(s, generation, controller) {
     const current = () =>
@@ -1437,6 +1582,52 @@ export function createOrganizationContactBook(
           : "Select all matching";
     return `<div class="pt-cb-select-page">${b("select-page", "Select this page", { secondary: true, disabled: !s.rows.length || r.busy() })}${b("select-all", allLabel, { secondary: true, disabled: (!s.rows.length && !s.cursor) || r.busy() })}</div>${hasSelection ? `<aside class="pt-cb-selection-bar" aria-label="Selection actions"><div><strong>${e(selectionDescription())}</strong><small>Across your contact book</small></div><div class="pt-actions">${tool("overlay", "Actions", "more", { value: "selection" })}${b("selection-review", "Review selection")}${mode === "book" && can("campaign") ? b("campaign-start", "Create campaign", { secondary: true }) : ""}${tool("select-clear", "Clear selection", "close")}</div></aside>` : ""}`;
   }
+  function pagination(position) {
+    const s = state(),
+      page = s.pageNumber || 1;
+    const totalPages =
+      s.total == null ? null : Math.max(1, Math.ceil(s.total / s.pageSize));
+    const nextAvailable = s.directoryPage ? s.directoryHasNext : !!s.cursor;
+    const maxShown =
+      totalPages ??
+      Math.max(
+        page + (nextAvailable ? 1 : 0),
+        Math.floor((s.countJob?.pageDirectory?.readyThrough || 0) / s.pageSize),
+      );
+    const locked = r.busy() || s.pageLoading;
+    const canVisit = (target) =>
+      target >= 1 &&
+      (totalPages == null || target <= totalPages) &&
+      (numberedPages() ||
+        target === 1 ||
+        target === page ||
+        (target === page - 1 && s.previousCursors?.length) ||
+        (target === page + 1 &&
+          nextAvailable &&
+          !s.pageFilling &&
+          !s.pagePaused &&
+          !s.pageError));
+    const pageButton = (
+      text,
+      target,
+      label,
+      { current = false, disabled = false } = {},
+    ) =>
+      `<button type="button" class="pt-btn pt-btn--secondary pt-cb-page-button${current ? " is-current" : ""}" data-workspace-action="${prefix}-page" data-value="${target}" aria-label="${e(label)}"${current ? ' aria-current="page"' : ""}${disabled || locked || (target === page && !s.pendingPage) || !canVisit(target) ? " disabled" : ""}>${e(text)}</button>`;
+    const pages = contactPageWindow(page, maxShown)
+      .map((target) =>
+        pageButton(count(target), target, `Page ${count(target)}`, {
+          current: target === page,
+        }),
+      )
+      .join("");
+    const preparing = s.pendingPage
+      ? `Preparing page ${count(s.pendingPage)}…`
+      : s.pageFilling
+        ? "Loading page…"
+        : "";
+    return `<nav class="pt-cb-pagination" aria-label="Contact pages ${position}" data-contact-pagination="${position}"><div class="pt-cb-page-summary"><span>Page ${count(page)}${totalPages == null ? "" : ` of ${count(totalPages)}`} · ${count(s.rows.length)} contacts</span>${preparing ? `<span role="status">${e(preparing)}</span>` : ""}</div><div class="pt-cb-page-controls"><div class="pt-cb-page-ends">${pageButton("First", 1, "First page")}${pageButton("Previous", page - 1, "Previous page")}</div><div class="pt-cb-page-numbers">${pages}</div><div class="pt-cb-page-ends">${pageButton("Next", page + 1, "Next page", { disabled: !nextAvailable && totalPages == null })}${pageButton("Last", totalPages || page, "Last page", { disabled: totalPages == null })}</div></div>${position === "bottom" ? pageSizeControl() : ""}</nav>`;
+  }
   function pageSizeControl() {
     const s = state();
     return `<label class="pt-field"><span>Rows per page</span><select data-contact-change="${prefix}-page-size" aria-label="Rows per page"${r.busy() ? " disabled" : ""}>${contactPageSizes.map((size) => `<option value="${size}"${(s.pageSize || 50) === size ? " selected" : ""}>${size}</option>`).join("")}</select></label>`;
@@ -1520,7 +1711,7 @@ export function createOrganizationContactBook(
             s.countJob?.status !== "needs_review"
           ? "Counting matching contacts…"
           : `${count(s.rows.length)} contacts on this page${s.cursor ? " · more available" : ""}`;
-    return `${indexPreparation()}<section class="pt-cb-book-list ${s.density === "compact" ? "is-compact" : ""}"><div class="pt-cb-view-row">${tool("overlay", s.activeView || "All contacts", "bookmark", { value: "views" })}<span>Organization contact book</span>${b("overlay", "Save view", { secondary: true, value: "views" })}</div>${filterForm()}${updating ? notice("Contacts updating", `${s.publication.pending > 0 ? `${count(s.publication.pending)} updates pending. ` : ""}Showing published matches. Imported or edited contacts may still be updating. Refresh to check progress.`) : ""}${s.recentResults ? '<p class="pt-cb-hint" role="status">Recent results. Refresh to check for updates.</p>' : ""}<div class="pt-cb-results"><span role="status">${e(summary)}</span><span>${e(sortSummary)}</span>${tool("refresh", "Refresh", "refresh", { extra: 'aria-label="Refresh contacts"' })}</div>${s.pageError ? notice("Page loading paused", e(s.pageError)) : ""}${s.pagePaused ? notice("More matches are available", "This page has not finished loading.") + b("page-resume", "Resume loading page", { secondary: true }) : ""}${selectionTools()}${s.rows.length ? rowTable(s.rows) : notice(updating ? "No published matches on this page" : s.cursor ? "More contacts may match" : "No matching contacts", updating ? "Contact updates are still publishing. Refresh to check progress." : s.cursor ? "Continue to check the remaining results. This page does not cover the entire contact book." : "Try changing the filters or add contacts.")}<footer class="pt-cb-pagination">${pageSizeControl()}<span>Page ${count(s.pageNumber || 1)}${s.total != null ? ` of ${count(Math.max(1, Math.ceil(s.total / (s.pageSize || 50))))}` : ""} · ${count(s.rows.length)} contacts${s.pageFilling ? " · Loading page…" : ""}</span><div class="pt-actions">${b("previous", "Previous page", { secondary: true, disabled: !s.previousCursors?.length || r.busy() })}${s.pageNumber > 1 ? b("first", "First page", { secondary: true }) : ""}${b("more", "Next page", { secondary: true, disabled: !s.cursor || s.pageFilling || s.pagePaused || !!s.pageError || r.busy() })}</div></footer></section>${mode === "selector" && s.selection?.status === "ready" && s.reviewed ? notice("Recipients reviewed", `${count(s.selection.count)} contacts selected for this campaign. Only explicit provider preparation can transfer selected phone numbers.`) : ""}`;
+    return `${indexPreparation()}<section class="pt-cb-book-list ${s.density === "compact" ? "is-compact" : ""}"><div class="pt-cb-view-row">${tool("overlay", s.activeView || "All contacts", "bookmark", { value: "views" })}<span>Organization contact book</span>${b("overlay", "Save view", { secondary: true, value: "views" })}</div>${filterForm()}${updating ? notice("Contacts updating", `${s.publication.pending > 0 ? `${count(s.publication.pending)} updates pending. ` : ""}Showing published matches. Imported or edited contacts may still be updating. Refresh to check progress.`) : ""}${s.recentResults ? '<p class="pt-cb-hint" role="status">Recent results. Refresh to check for updates.</p>' : ""}<div class="pt-cb-results"><span role="status">${e(summary)}</span><span>${e(sortSummary)}</span>${tool("refresh", "Refresh", "refresh", { extra: 'aria-label="Refresh contacts"' })}</div>${s.pageError ? notice("Page loading paused", e(s.pageError)) : ""}${s.pagePaused ? notice("More matches are available", "This page has not finished loading.") + b("page-resume", "Resume loading page", { secondary: true }) : ""}${selectionTools()}${pagination("top")}${s.rows.length ? rowTable(s.rows) : notice(updating ? "No published matches on this page" : s.cursor ? "More contacts may match" : "No matching contacts", updating ? "Contact updates are still publishing. Refresh to check progress." : s.cursor ? "Continue to check the remaining results. This page does not cover the entire contact book." : "Try changing the filters or add contacts.")}${pagination("bottom")}</section>${mode === "selector" && s.selection?.status === "ready" && s.reviewed ? notice("Recipients reviewed", `${count(s.selection.count)} contacts selected for this campaign. Only explicit provider preparation can transfer selected phone numbers.`) : ""}`;
   }
   function endpointControls() {
     const s = state();
@@ -2922,9 +3113,12 @@ export function createOrganizationContactBook(
       s.detail = await api(`/contacts/${id(contact.contactId)}`);
       r.toast("Source membership removed.");
     } else if (op === "export") await downloadSelection();
-    else if (op === "more") await query({ more: true });
-    else if (op === "previous") await query({ previous: true });
-    else if (op === "first") await query();
+    else if (op === "more") await goToPage((s.pageNumber || 1) + 1);
+    else if (op === "previous") await goToPage((s.pageNumber || 1) - 1);
+    else if (op === "first") await goToPage(1);
+    else if (op === "page") await goToPage(Number(value));
+    else if (op === "last" && s.total != null)
+      await goToPage(Math.max(1, Math.ceil(s.total / s.pageSize)));
     else if (op === "field-convert") {
       s.convertField = fields().find((field) => field.fieldId === value);
       s.conversionJob = null;

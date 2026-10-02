@@ -416,7 +416,7 @@ test("sparse logical pages have a bounded read budget and resume on the same pag
   assert.equal(view.contactBook.pageNumber, 1);
   assert.equal(view.contactBook.pagePaused, true);
   assert.match(book.render(), /Resume loading page/);
-  assert.match(book.render(), /disabled>Next page/);
+  assert.match(book.render(), /aria-label="Next page" disabled>Next/);
   assert.doesNotMatch(book.render(), /Counting matching contacts|Page 1 of/);
   await book.action("book-page-resume");
   await settle();
