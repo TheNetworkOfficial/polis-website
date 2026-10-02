@@ -17,10 +17,12 @@ import {
   messageFundingReady,
 } from "./textingWorkspaceUi";
 import { prepareTextingAccess } from "./textingAccess";
+import { createRecipientOutcomes } from "./textingRecipientOutcomes";
 
 const when = (value) =>
   Number.isSafeInteger(value) ? new Date(value).toLocaleString() : "";
 export function createConversations(r) {
+  const outcomes = createRecipientOutcomes(r, "conversation-outcome");
   const state = () => (r.view().conversations ||= {});
   let pollTimer,
     pollReads = 0,
@@ -31,6 +33,7 @@ export function createConversations(r) {
   function dispose() {
     disposed = true;
     clearTimeout(pollTimer);
+    outcomes.dispose();
   }
   async function read(resource, { append = false } = {}) {
     const s = state();
@@ -194,7 +197,7 @@ export function createConversations(r) {
         "CONVERSATION",
         c.displayName || c.phone,
         c.displayName ? c.phone : "",
-        go("inbox", "All conversations", "", true),
+        go("inbox", "All conversations", "", true) + outcomes.trigger({ conversationId: c.conversationId }),
       ) +
       `${s.preparingAccess ? notice("Preparing your texting access…") : ""}${s.refreshError ? notice("Updates are delayed", "Refresh to check the saved messages. Do not resend an accepted reply.") : ""}<div class="pt-grid pt-grid--two"><section class="pt-card"><div class="pt-row"><span class="pt-tag">${c.suppressed ? "Opted out" : e(label(c.status))}</span>${button("conversations-refresh", "Refresh", { secondary: true })}</div><div class="pt-workspace-thread">${
         list(s.messages)
@@ -217,6 +220,7 @@ export function createConversations(r) {
     );
   }
   async function submit(kind, form) {
+    if (await outcomes.submit(kind, form)) return true;
     if (kind !== "reply") return false;
     const s = state(),
       c = s.conversation,
@@ -261,6 +265,7 @@ export function createConversations(r) {
     return true;
   }
   async function action(name, value) {
+    if (await outcomes.action(name, value)) return true;
     const s = state(),
       c = s.conversation;
     if (name === "conversation-attachment") {
@@ -334,11 +339,12 @@ export function createConversations(r) {
     return false;
   }
   function change(target) {
+    if (outcomes.change(target)) return true;
     if (target.name === "reply") {
       state().reply = target.value;
       return true;
     }
     return false;
   }
-  return { load, render, submit, action, change, refresh, dispose };
+  return { load, render: () => render() + outcomes.render(), submit, action, change, refresh, dispose };
 }

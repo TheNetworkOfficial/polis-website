@@ -70,6 +70,32 @@ function requireBillingAdmin(billing) {
   return billing;
 }
 
+export function billingContactError(error) {
+  const code =
+    error?.errorCode || error?.code || error?.payload?.error || error?.message;
+  return (
+    {
+      billing_contact_invalid:
+        "Enter a name, valid email, and a US phone number or leave phone blank.",
+      billing_contact_code_invalid:
+        "That code did not match. Enter the 8-digit code from your email.",
+      billing_contact_code_expired: "This code expired. Request a new code.",
+      billing_contact_code_unavailable: "Request a new code to continue.",
+      billing_contact_changed:
+        "Billing details changed. Refresh the details before editing.",
+      billing_contact_rate_limited:
+        "Please wait a minute before requesting another code.",
+      billing_contact_update_in_progress:
+        "An update is in progress. Refresh the details shortly.",
+      billing_contact_reauthentication_required:
+        "For security, sign out and sign in again, then return to Billing details.",
+      billing_contact_recovery_required:
+        "Contact payment support to finish the previous update.",
+    }[code] ||
+    "The update could not be confirmed. Refresh the details before trying again."
+  );
+}
+
 /** Organization-scoped view; server confirmation is the only source of funding state. */
 export function createTextingBalancePage({ request, context, changed }) {
   let view = {};
@@ -112,8 +138,13 @@ export function createTextingBalancePage({ request, context, changed }) {
     try {
       return await transport(...args);
     } catch (error) {
-      if (current(key, version) && [401, 403].includes(error?.status))
+      if (current(key, version) && [401, 403].includes(error?.status)) {
         view.accessDenied = true;
+        view.billing = null;
+        view.billingContact = null;
+        view.contactFields = {};
+        view.contactCode = "";
+      }
       throw error;
     }
   };
@@ -206,11 +237,11 @@ export function createTextingBalancePage({ request, context, changed }) {
       if (TERMINAL.has(view.purchase?.status)) {
         view.section = "balance";
         const amountKey = fundingRetryAmount(view.purchase);
-        retryKeys.delete(`polis.textingCheckout.${view.key}.${amountKey}`);
+        const revision = view.purchase.billingContactRevision || 0;
+        const storageKey = `polis.textingCheckout.${view.key}.${amountKey}${revision ? `.contact${revision}` : ""}`;
+        retryKeys.delete(storageKey);
         try {
-          sessionStorage.removeItem(
-            `polis.textingCheckout.${view.key}.${amountKey}`,
-          );
+          sessionStorage.removeItem(storageKey);
         } catch {
           /* Storage can be unavailable in privacy mode. */
         }
@@ -254,7 +285,10 @@ export function createTextingBalancePage({ request, context, changed }) {
       pollCount: 0,
       purchaseId: /^[A-Za-z0-9_-]{1,200}$/.test(purchaseId) ? purchaseId : "",
       canceledReturn: query.get("checkout") === "canceled",
-      section: "balance",
+      section:
+        query.get("section") === "billing-details"
+          ? "billing-details"
+          : "balance",
     };
     changed();
     try {
@@ -282,6 +316,11 @@ export function createTextingBalancePage({ request, context, changed }) {
       if (view.billing.canManageBilling) {
         await history();
         await checkPurchase();
+        if (
+          view.section === "billing-details" &&
+          view.billing.canManageBillingContact
+        )
+          await loadBillingContact();
       }
     } catch (error) {
       if (!current(key, version)) return;
@@ -375,7 +414,8 @@ export function createTextingBalancePage({ request, context, changed }) {
 
   /** Retain a retry key across uncertain HTTP results and page refreshes. */
   function checkoutKey(packId) {
-    const storageKey = `polis.textingCheckout.${view.key}.${packId}`;
+    const revision = view.billing?.billingContactRevision ?? 0;
+    const storageKey = `polis.textingCheckout.${view.key}.${packId}${revision ? `.contact${revision}` : ""}`;
     if (retryKeys.has(storageKey)) return retryKeys.get(storageKey);
     const key = crypto.randomUUID();
     try {
@@ -391,6 +431,135 @@ export function createTextingBalancePage({ request, context, changed }) {
       retryKeys.set(storageKey, key);
       return key;
     }
+  }
+
+  async function loadBillingContact() {
+    if (
+      identity() !== view.key ||
+      !view.billing?.canManageBillingContact ||
+      view.contactSaving
+    )
+      return;
+    const key = view.key,
+      version = sequence;
+    view.contactLoading = true;
+    view.contactError = "";
+    changed();
+    try {
+      const result = await request(path(context().organizationId, "contact"), {
+        auth: true,
+      });
+      if (!current(key, version)) return;
+      view.billingContact = result.contact;
+      view.contactFields = {
+        ...(result.contact.pendingChange?.details || result.contact.details),
+      };
+      view.contactCode = "";
+      view.contactOperationId = "";
+    } catch (error) {
+      if (current(key, version)) view.contactError = billingContactError(error);
+    } finally {
+      if (current(key, version)) {
+        view.contactLoading = false;
+        changed();
+      }
+    }
+  }
+
+  async function saveBillingContact(action) {
+    if (
+      identity() !== view.key ||
+      !view.billing?.canManageBillingContact ||
+      view.contactSaving ||
+      !view.billingContact
+    )
+      return;
+    const key = view.key,
+      version = sequence,
+      contact = view.billingContact;
+    const pending = contact.pendingChange;
+    if (action === "begin" && !contact.canEdit) return;
+    if (action !== "begin" && !pending) return;
+    view.contactSaving = true;
+    view.contactError = "";
+    view.contactSaved = false;
+    changed();
+    try {
+      view.contactOperationId ||= crypto.randomUUID();
+      const suffix =
+        action === "begin"
+          ? "contact/changes"
+          : `contact/changes/${encodeURIComponent(pending.operationId)}/verify`;
+      const body =
+        action === "begin"
+          ? {
+              operationId: view.contactOperationId,
+              expectedRevision: contact.revision,
+              ...view.contactFields,
+            }
+          : { code: action === "retry" ? "" : view.contactCode || "" };
+      const result = await request(path(context().organizationId, suffix), {
+        auth: true,
+        method: "POST",
+        body,
+      });
+      if (!current(key, version)) return;
+      view.billingContact = result.contact;
+      if (result.contact.status === "ready" && action !== "begin") {
+        view.contactFields = { ...result.contact.details };
+        view.contactSaved = true;
+        view.contactCode = "";
+        view.billing.billingContactRevision = result.contact.revision;
+        view.contactOperationId = "";
+        view.acceptedTerms = false;
+      }
+    } catch (error) {
+      if (current(key, version)) view.contactError = billingContactError(error);
+    } finally {
+      if (current(key, version)) {
+        view.contactSaving = false;
+        changed();
+      }
+    }
+  }
+
+  function renderBillingContact() {
+    const contact = view.billingContact,
+      fields = view.contactFields || {},
+      pending = contact?.pendingChange;
+    const busy = view.contactSaving || view.contactLoading;
+    const verifying = pending?.status === "pending_verification";
+    const recovering =
+      pending &&
+      ["applying", "verified", "needs_attention"].includes(pending.status);
+    const sendingCode = contact?.status === "sending_code";
+    const field = (key, label, type, max) =>
+      `<label class="texting-billing-contact__field">${label}<input data-billing-contact-field="${key}" type="${type}" value="${escape(fields[key] || "")}" maxlength="${max}" autocomplete="${key === "phone" ? "tel" : key}" ${busy || verifying || recovering || sendingCode ? "disabled" : ""}></label>`;
+    return `<section class="texting-balance__card texting-billing-contact" aria-busy="${Boolean(busy)}">
+      <h2>Organization billing contact</h2><p>Used for payment receipts and billing questions.</p>
+      ${view.contactSaved ? '<p role="status">Billing details saved. Your texting funds are unchanged.</p>' : ""}
+      ${view.contactError ? `<p class="texting-balance__notice" role="alert">${escape(view.contactError)}</p>` : ""}
+      ${
+        !contact
+          ? `<p>${view.contactLoading ? "Loading billing details…" : "Billing details are unavailable."}</p>`
+          : `
+        ${field("name", "Name", "text", 150)}${field("email", "Receipt email", "email", 254)}${field("phone", "Billing phone (optional)", "tel", 24)}
+        ${
+          sendingCode
+            ? '<p role="status">Sending the confirmation email… Refresh details shortly.</p>'
+            : verifying
+              ? `<p>A code was sent to ${escape(pending.emailMasked)}.</p><label class="texting-billing-contact__field">Email confirmation code<input data-billing-contact-field="code" inputmode="numeric" pattern="[0-9]{8}" maxlength="8" autocomplete="one-time-code" value="${escape(view.contactCode || "")}" ${busy ? "disabled" : ""}></label>
+          <button class="texting-balance__button texting-balance__button--primary" data-texting-action="contact-verify" ${busy ? "disabled" : ""}>${busy ? "Saving…" : "Verify and save"}</button>
+          <button class="texting-balance__link" data-texting-action="contact-new-code" ${busy ? "disabled" : ""}>Change details or request a new code</button>`
+              : recovering
+                ? `<p>Your email is confirmed. Finish checking the saved details.</p><button class="texting-balance__button texting-balance__button--primary" data-texting-action="contact-retry" ${busy ? "disabled" : ""}>${busy ? "Checking…" : "Finish update"}</button>`
+                : `<button class="texting-balance__button texting-balance__button--primary" data-texting-action="contact-begin" ${busy || !contact.canEdit ? "disabled" : ""}>${busy ? "Sending code…" : "Continue"}</button>`
+        }
+      `
+      }
+      <button class="texting-balance__link" data-texting-action="contact-refresh" ${busy ? "disabled" : ""}>Refresh details</button>
+      <details class="texting-balance__details"><summary>About payment verification</summary><p>We confirm changes at your receipt email. Your billing phone is contact information. A saved payment login or bank verification number is managed separately by its account owner.</p><p>Changing these details makes no payment and keeps your organization’s purchased texting funds.</p></details>
+    </section>`;
   }
 
   async function checkout() {
@@ -462,13 +631,27 @@ export function createTextingBalancePage({ request, context, changed }) {
     const button = event.target.closest("[data-texting-action]");
     if (!button || button.disabled || identity() !== view.key) return;
     const action = button.dataset.textingAction;
-    if (action === "refresh") void refresh();
-    else if (action === "more") void history({ append: true });
+    if (action === "refresh") {
+      if (view.section === "billing-details") void loadBillingContact();
+      else void refresh();
+    } else if (action === "more") void history({ append: true });
     else if (action === "checkout") void checkout();
     else if (action === "add-funds") show("add-funds");
     else if (action === "balance") show("balance");
     else if (action === "history") show("history");
-    else if (action === "pack" && !view.saving) {
+    else if (action === "billing-details") {
+      show("billing-details");
+      void loadBillingContact();
+    } else if (action === "contact-refresh") void loadBillingContact();
+    else if (action === "contact-begin") void saveBillingContact("begin");
+    else if (action === "contact-verify") void saveBillingContact("verify");
+    else if (action === "contact-retry") void saveBillingContact("retry");
+    else if (action === "contact-new-code" && !view.contactSaving) {
+      view.billingContact.pendingChange = null;
+      view.contactCode = "";
+      view.contactOperationId = "";
+      changed();
+    } else if (action === "pack" && !view.saving) {
       if (!view.billing?.canManageBilling || !view.billing.canPurchase) return;
       if (
         button.dataset.pack === "custom" &&
@@ -486,6 +669,21 @@ export function createTextingBalancePage({ request, context, changed }) {
     }
   });
   document.addEventListener("input", (event) => {
+    if (
+      event.target.matches("[data-billing-contact-field]") &&
+      identity() === view.key &&
+      view.section === "billing-details" &&
+      !view.contactSaving
+    ) {
+      const key = event.target.dataset.billingContactField;
+      if (key === "code") view.contactCode = event.target.value;
+      else if (["name", "email", "phone"].includes(key)) {
+        view.contactFields ||= {};
+        view.contactFields[key] = event.target.value;
+        view.contactOperationId = "";
+      }
+      return;
+    }
     if (
       !event.target.matches("[data-texting-custom-amount]") ||
       identity() !== view.key ||
@@ -526,10 +724,19 @@ export function createTextingBalancePage({ request, context, changed }) {
   /** Switch local views without creating a checkout or changing financial state. */
   function show(section = "balance") {
     if (identity() !== view.key || view.saving) return;
-    if (!["balance", "history", "add-funds"].includes(section)) return;
+    if (
+      !["balance", "history", "add-funds", "billing-details"].includes(section)
+    )
+      return;
     if (section !== "balance" && !view.billing?.canManageBilling) return;
     if (section === "add-funds" && !view.billing?.canPurchase) return;
+    if (section === "billing-details" && !view.billing?.canManageBillingContact)
+      return;
     view.section = section;
+    const url = new URL(window.location.href);
+    if (section === "billing-details") url.searchParams.set("section", section);
+    else url.searchParams.delete("section");
+    window.history?.replaceState?.(window.history.state, "", url.href);
     if (section === "add-funds") {
       view.selectedPack = "";
       view.customAmount = "";
@@ -693,6 +900,7 @@ export function createTextingBalancePage({ request, context, changed }) {
             : '<p class="texting-balance__fine">Message capacity appears once your rates are verified.</p>'
         }
         ${billing.canManageBilling && billing.canPurchase ? '<button class="texting-balance__button texting-balance__button--primary" data-texting-action="add-funds">Add texting funds</button>' : ""}
+        ${billing.canManageBillingContact ? '<button class="texting-balance__button" data-texting-action="billing-details">Billing details</button>' : ""}
         ${!billing.canManageBilling ? '<p class="texting-balance__fine">An organization administrator can add funds.</p>' : !billing.canPurchase ? '<p class="texting-balance__fine">Purchases are unavailable until your organization is eligible.</p>' : ""}
       </section>
       <section class="texting-balance__card texting-balance__usage"><h2>Usage</h2>
@@ -711,6 +919,7 @@ export function createTextingBalancePage({ request, context, changed }) {
         : null;
     const section =
       billing?.canManageBilling &&
+      (view.section !== "billing-details" || billing.canManageBillingContact) &&
       (view.section !== "add-funds" || billing.canPurchase)
         ? view.section || "balance"
         : "balance";
@@ -719,11 +928,13 @@ export function createTextingBalancePage({ request, context, changed }) {
         ? "Add texting funds"
         : section === "history"
           ? "Purchase history"
-          : "Texting balance";
+          : section === "billing-details"
+            ? "Billing details"
+            : "Texting balance";
     return `<div class="texting-balance">
       ${section !== "balance" ? '<button class="texting-balance__link texting-balance__back" data-texting-action="balance">← Back to balance</button>' : ""}
       <div class="texting-balance__header"><div><span class="texting-balance__eyebrow">${escape(billing?.organizationName || "TEXTING")}</span><h1 tabindex="-1" data-texting-heading>${title}</h1></div>
-        <button class="texting-balance__button" data-texting-action="refresh" ${view.loading || view.saving ? "disabled" : ""}>Refresh balance</button></div>
+        <button class="texting-balance__button" data-texting-action="refresh" ${view.loading || view.saving || view.contactSaving || view.contactLoading ? "disabled" : ""}>${section === "billing-details" ? "Refresh details" : "Refresh balance"}</button></div>
       ${view.error && identity() === view.key ? `<p class="texting-balance__notice" role="alert">${escape(view.error)}</p>` : ""}
       ${
         !billing
@@ -732,7 +943,7 @@ export function createTextingBalancePage({ request, context, changed }) {
           ${billing.sendingBlocked ? `<div class="texting-balance__notice"><strong>Sending is paused.</strong> ${billing.billingHold ? "Contact support to resolve the billing hold. Adding funds won't remove it." : "Funding, registration, and messaging requirements must be met before sending."}</div>` : ""}
           ${view.canceledReturn && !view.purchase ? '<p class="texting-balance__notice">Checkout was closed. Funds are added only after payment is confirmed.</p>' : ""}
           ${renderPurchase()}
-          ${section === "add-funds" ? renderPacks(billing) : section === "history" ? renderHistory(billing) : renderBalance(billing)}
+          ${section === "billing-details" ? renderBillingContact() : section === "add-funds" ? renderPacks(billing) : section === "history" ? renderHistory(billing) : renderBalance(billing)}
           ${/^[^\s@<>]+@[^\s@<>]+$/.test(billing.terms?.supportEmail || "") ? `<footer class="texting-balance__support">Payment help · <a href="mailto:${escape(billing.terms.supportEmail)}">${escape(billing.terms.supportEmail)}</a></footer>` : ""}`
       }
     </div>`;

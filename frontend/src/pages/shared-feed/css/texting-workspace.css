@@ -531,3 +531,30 @@
     animation: none;
   }
 }
+
+.pt-recipient-outcome {
+  max-width: 44rem;
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--polis-border);
+  border-radius: 12px;
+}
+.pt-recipient-outcome fieldset {
+  min-width: 0;
+  border: 0;
+  padding: 0;
+}
+.pt-recipient-outcome .pt-outcome-tag {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-height: 44px;
+}
+#shared-feed-app .pt-recipient-outcome input[type="checkbox"] {
+  appearance: auto;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  margin: 0;
+  border-radius: 2px;
+}

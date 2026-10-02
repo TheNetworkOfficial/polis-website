@@ -397,6 +397,32 @@
   color: var(--tb-muted);
   font-size: 0.75rem;
 }
+.texting-billing-contact {
+  display: grid;
+  gap: 18px;
+  max-width: 620px;
+}
+.texting-billing-contact__field {
+  display: grid;
+  gap: 8px;
+  font-size: 0.85rem;
+  color: var(--tb-ink);
+}
+.texting-billing-contact__field input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--tb-line);
+  border-radius: 10px;
+  color: var(--tb-ink);
+  background: var(--tb-raised);
+  font: inherit;
+}
+.texting-billing-contact__field input:focus-visible {
+  outline: 2px solid var(--tb-primary);
+  outline-offset: 2px;
+}
 @media (max-width: 900px) {
   .texting-balance__overview,
   .texting-balance__purchase-grid {

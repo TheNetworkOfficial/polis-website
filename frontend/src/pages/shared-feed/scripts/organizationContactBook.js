@@ -82,7 +82,11 @@ const checkbox = (name, text, checked, extra = "") =>
 /** One controller powers the organization book and campaign selector; selections are always local. */
 export function createOrganizationContactBook(
   r,
-  { mode = "book", continueAction = null } = {},
+  {
+    mode = "book",
+    continueAction = null,
+    continueLabel = "Continue to write message",
+  } = {},
 ) {
   let queryGeneration = 0,
     queryAbort = null,
@@ -1046,7 +1050,7 @@ export function createOrganizationContactBook(
             )
             .join("")
         : ""
-    }<p><strong>${count(selection.count)}</strong> selected contacts · ${count(selection.eligibleCount || 0)} eligible for texting · ${count(selection.excludedCount || 0)} held for texting.</p>${list(s.selectedRows).length ? rowTable(s.selectedRows, { review: true }) : ""}${s.selectedPage > 1 ? b("selected-first", "First selected page", { secondary: true }) : ""}${s.selectedCursor ? b("selected-more", "Next selected page", { secondary: true }) : ""}${mode === "selector" ? `<p class="pt-muted">Only this reviewed selection can be prepared with your texting provider. Opt-outs are checked again before sending.</p>${checkbox(`${prefix}-reviewed`, "I reviewed these campaign recipients", s.reviewed, selection.duplicateEndpointCount ? "disabled" : "")}${continueAction && r.context().resourceId === "new" ? `<footer class="pt-cb-panel-footer">${button(continueAction, "Continue to write message", { disabled: r.busy() || !can("campaign") || !s.reviewed || !selection.count || !!selection.duplicateEndpointCount })}</footer>` : ""}` : ""}</section>`;
+    }<p><strong>${count(selection.count)}</strong> selected contacts · ${count(selection.eligibleCount || 0)} eligible for texting · ${count(selection.excludedCount || 0)} held for texting.</p>${list(s.selectedRows).length ? rowTable(s.selectedRows, { review: true }) : ""}${s.selectedPage > 1 ? b("selected-first", "First selected page", { secondary: true }) : ""}${s.selectedCursor ? b("selected-more", "Next selected page", { secondary: true }) : ""}${mode === "selector" ? `<p class="pt-muted">Only this reviewed selection can be prepared with your texting provider. Opt-outs are checked again before sending.</p>${checkbox(`${prefix}-reviewed`, "I reviewed these campaign recipients", s.reviewed, selection.duplicateEndpointCount ? "disabled" : "")}${(typeof continueAction === "function" ? continueAction() : continueAction && r.context().resourceId === "new") ? `<footer class="pt-cb-panel-footer">${button(typeof continueAction === "function" ? continueAction() : continueAction, typeof continueLabel === "function" ? continueLabel() : continueLabel, { disabled: r.busy() || !can("campaign") || !s.reviewed || !selection.count || !!selection.duplicateEndpointCount })}</footer>` : ""}` : ""}</section>`;
   }
   function selectionActions() {
     const s = state();
@@ -1536,7 +1540,11 @@ export function createOrganizationContactBook(
           ...tagGroups().map((group) => [group.groupId, group.label]),
         ],
         tag.groupId || "",
-      ) + field("newGroupLabel", "New group name", "", { max: 120 })
+      ) +
+      field("newGroupLabel", "New group name", "", { max: 120 }) +
+      (can("manageRecipientOutcomeTags")
+        ? `<input type="hidden" name="recipientOutcomesConfigured" value="1"><label class="pt-cb-check-hit"><input type="checkbox" name="allowRecipientOutcomes"${tag.allowRecipientOutcomes === true ? " checked" : ""}><span>Available to texting volunteers</span></label>`
+        : "")
     );
   }
   function tagGroupPayload(data) {
@@ -2217,6 +2225,14 @@ export function createOrganizationContactBook(
       await api(action === "field-create" ? "/fields" : "/tags", {
         label: data.get("label"),
         ...(action === "tag-create" ? tagGroupPayload(data) : {}),
+        ...(action === "tag-create" &&
+        can("manageRecipientOutcomeTags") &&
+        data.get("recipientOutcomesConfigured") === "1"
+          ? {
+              allowRecipientOutcomes:
+                data.get("allowRecipientOutcomes") === "on",
+            }
+          : {}),
         ...(action === "field-create"
           ? {
               type: data.get("type"),
@@ -2241,6 +2257,14 @@ export function createOrganizationContactBook(
         {
           label: data.get("label"),
           ...(tag ? tagGroupPayload(data) : {}),
+          ...(tag &&
+          can("manageRecipientOutcomeTags") &&
+          data.get("recipientOutcomesConfigured") === "1"
+            ? {
+                allowRecipientOutcomes:
+                  data.get("allowRecipientOutcomes") === "on",
+              }
+            : {}),
           ...(tag ? { expectedRevision: tag.revision } : {}),
           operationId,
         },

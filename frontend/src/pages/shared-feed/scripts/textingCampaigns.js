@@ -34,6 +34,8 @@ import { createOrganizationContactBook } from "./organizationContactBook";
 import { estimateContactCampaign } from "./textingCampaignEstimate";
 import { createCampaignPreparation } from "./textingCampaignPreparation";
 import { createVolunteerPicker } from "./textingVolunteerPicker";
+import { createRecipientOutcomes } from "./textingRecipientOutcomes";
+import { createRecipientBatches } from "./textingRecipientBatches";
 import {
   availablePersonalization,
   insertPersonalization,
@@ -70,11 +72,22 @@ const mediaData = (media) =>
 export function createCampaigns(r) {
   const recipients = createOrganizationContactBook(r, {
     mode: "selector",
-    continueAction: "campaign-next",
+    continueAction: () =>
+      r.view().campaigns?.addingRecipients
+        ? "recipient-batch-review"
+        : r.context().resourceId === "new"
+          ? "campaign-next"
+          : null,
+    continueLabel: () =>
+      r.view().campaigns?.addingRecipients
+        ? "Review additions"
+        : "Continue to write message",
   });
   const state = () => (r.view().campaigns ||= {});
   const preparation = createCampaignPreparation(r, state);
   const volunteerPicker = createVolunteerPicker(r, state);
+  const outcomes = createRecipientOutcomes(r, "queue-outcome");
+  const additions = createRecipientBatches(r, state, recipients);
   async function load(resource, section) {
     const s = state();
     if (resource && resource !== "new") {
@@ -105,6 +118,9 @@ export function createCampaigns(r) {
           throw error;
         s.scheduleUnsupported = true;
       }
+    }
+    if (resource && resource !== "new" && section === "campaigns") {
+      await additions.load();
     }
     if (
       resource === "new" &&
@@ -242,7 +258,19 @@ export function createCampaigns(r) {
         c.name,
         "One person. One conversation.",
         "Take a moment to review, then send.",
-        go("campaigns", "Leave session", c.campaignId, true),
+        go("campaigns", "Leave session", c.campaignId, true) +
+          (item
+            ? outcomes.trigger({
+                campaignId: c.campaignId,
+                itemId: item.itemId,
+              })
+            : "") +
+          (s.lastOutcomeTarget?.campaignId === c.campaignId
+            ? outcomes.trigger(
+                s.lastOutcomeTarget,
+                "Record previous recipient outcome",
+              )
+            : ""),
       ) +
       (!q
         ? `<section class="pt-card"><h2>Your next conversation</h2><p class="pt-muted">Get your assigned recipients when you’re ready.</p>${button("queue-load", s.preparingAccess ? "Preparing your texting access…" : "Get my next messages", { disabled: !c.canFetchQueue || !r.can("manualQueue") || r.busy() })}${reasons(c.blockedReasons)}</section>`
@@ -258,7 +286,7 @@ export function createCampaigns(r) {
       return r.can("createCampaigns")
         ? team(s)
         : notice("Team access is restricted");
-    if (section === "send") return queue(s);
+    if (section === "send") return queue(s) + outcomes.render();
     if (section === "results") {
       const c = s.campaign;
       if (!c)
@@ -292,6 +320,7 @@ export function createCampaigns(r) {
         campaignViews(s) +
         listCards(s)
       );
+    if (s.addingRecipients) return additions.render();
     if (resource === "new" || s.editing)
       return r.can("createCampaigns") &&
         (resource !== "new" || r.can("manageBilling"))
@@ -313,6 +342,7 @@ export function createCampaigns(r) {
           go("campaigns", "All campaigns", "", true),
         ) +
           campaignDetail(s) +
+          additions.overview() +
           campaignHours(s)
       : "";
   }
@@ -334,6 +364,7 @@ export function createCampaigns(r) {
     };
   }
   async function submit(kind, form) {
+    if (await outcomes.submit(kind, form)) return true;
     if (await recipients.submit(kind, form)) return true;
     const s = state();
     if (kind === "campaign-hours") {
@@ -373,7 +404,7 @@ export function createCampaigns(r) {
         r.workspace?.()?.personalization,
       );
       if (preview.error) throw new Error(preview.error);
-      if (recipients.hasSelection())
+      if (!s.campaign && recipients.hasSelection())
         draft.audienceId = await recipients.bindCampaign(s.draft.campaignId);
       if (!draft.audienceId)
         throw new Error("Choose and review campaign recipients first.");
@@ -402,6 +433,8 @@ export function createCampaigns(r) {
     return false;
   }
   async function action(name, value) {
+    if (await outcomes.action(name, value)) return true;
+    if (await additions.action(name, value)) return true;
     if (await volunteerPicker.action(name)) return true;
     if (await recipients.action(name, value)) return true;
     const s = state(),
@@ -549,6 +582,7 @@ export function createCampaigns(r) {
           })
         ).campaign;
         preparation.observe(s.campaign);
+        await additions.load();
       } catch (error) {
         const code = error?.payload?.error || error?.code || error?.message;
         const uncertain = !error?.status || error.status >= 500;
@@ -638,6 +672,10 @@ export function createCampaigns(r) {
           (!confirming && result.state === "skipped")
         ) {
           r.releaseSend(key);
+          s.lastOutcomeTarget = {
+            campaignId: c.campaignId,
+            itemId: item.itemId,
+          };
           s.queue.items.shift();
           if (confirming) s.sent = (s.sent || 0) + 1;
           r.toast(confirming ? "Message accepted" : "Recipient skipped");
@@ -665,6 +703,7 @@ export function createCampaigns(r) {
     return false;
   }
   function change(target) {
+    if (outcomes.change(target)) return true;
     if (volunteerPicker.change(target)) return true;
     if (recipients.change(target)) return true;
     const s = state();
@@ -788,6 +827,8 @@ export function createCampaigns(r) {
       preparation.dispose();
       volunteerPicker.dispose();
       recipients.dispose();
+      outcomes.dispose();
+      additions.dispose();
     },
   };
 }
