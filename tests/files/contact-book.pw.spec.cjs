@@ -99,7 +99,7 @@ test("pending publication labels current matches and refresh removes the notice 
   ).toBeVisible();
   await expect(page.getByText(/17 updates pending/)).toBeVisible();
   await expect(
-    page.getByText("2 published matches loaded · more pages available", {
+    page.getByText("3 published matches loaded", {
       exact: true,
     }),
   ).toBeVisible();
@@ -123,7 +123,10 @@ test("pending publication labels current matches and refresh removes the notice 
     page.getByText("Contacts updating", { exact: true }),
   ).toHaveCount(0);
   await expect(
-    page.getByRole("button", { name: "Select all matching", exact: true }),
+    page.getByRole("button", {
+      name: "Select all 3 matching contacts",
+      exact: true,
+    }),
   ).toBeVisible();
   expect(errors).toEqual([]);
 });
@@ -168,20 +171,26 @@ test("campaign selection covers all pages, preserves exclusions, and binds local
     .poll(
       () =>
         calls.filter(
-          (call) => call.path.endsWith("/query") && call.body?.filter,
+          (call) =>
+            call.path.endsWith("/query") &&
+            call.body?.filter &&
+            !call.body.cursor,
         ).length,
     )
     .toBe(1);
   await page
-    .getByRole("button", { name: "Select all matching", exact: true })
+    .getByRole("button", {
+      name: "Select all 3 matching contacts",
+      exact: true,
+    })
     .click();
   await expect(
     page.getByLabel("Select Blair Example", { exact: true }),
   ).toBeChecked();
   await page.getByLabel("Select Blair Example", { exact: true }).uncheck();
-  await expect(
-    page.getByText("All matching contacts, excluding 1", { exact: true }),
-  ).toBeVisible();
+  await expect(page.locator(".pt-cb-selection-bar")).toContainText(
+    "All 3 matching contacts, excluding 1",
+  );
   await page
     .getByRole("button", { name: "Review selection", exact: true })
     .click();
@@ -263,6 +272,7 @@ test("contact import streams raw custom values into Polis without external trans
 }) => {
   const { calls, errors } = await mockBook(page);
   await page.goto(`${BASE}/organizations/org-1/texting/contacts`);
+  await expect(page.getByText("Casey Example", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Add contacts", exact: true }).click();
   await page
     .getByRole("button", { name: "Upload a file", exact: true })
@@ -374,7 +384,10 @@ test("nested audience groups preserve AND, OR and exclusions when applying", asy
     .poll(
       () =>
         calls.filter(
-          (call) => call.path.endsWith("/query") && call.body?.filter,
+          (call) =>
+            call.path.endsWith("/query") &&
+            call.body?.filter &&
+            !call.body.cursor,
         ).length,
     )
     .toBe(1);
@@ -402,7 +415,10 @@ test("nested audience groups preserve AND, OR and exclusions when applying", asy
     .poll(
       () =>
         calls.filter(
-          (call) => call.path.endsWith("/query") && call.body?.filter,
+          (call) =>
+            call.path.endsWith("/query") &&
+            call.body?.filter &&
+            !call.body.cursor,
         ).length,
     )
     .toBe(2);
@@ -519,7 +535,10 @@ test("shared destination conflicts prevent campaign confirmation and local bindi
   const { calls } = await mockBook(page, { duplicate: true });
   await page.goto(`${BASE}/organizations/org-1/texting/campaigns/new`);
   await page
-    .getByRole("button", { name: "Select all matching", exact: true })
+    .getByRole("button", {
+      name: "Select all 3 matching contacts",
+      exact: true,
+    })
     .click();
   await page
     .getByRole("button", { name: "Review selection", exact: true })

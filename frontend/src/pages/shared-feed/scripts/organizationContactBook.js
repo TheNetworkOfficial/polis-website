@@ -4,6 +4,7 @@ import {
   contactPageWindow,
   contactDirectoryHasPage,
 } from "./organizationContactPagination";
+import { canvassingJournalPresentation } from "./canvassingJournalPresentation";
 import {
   escapeText as e,
   button,
@@ -1888,6 +1889,7 @@ export function createOrganizationContactBook(
         ["notes", "Notes"],
         ["campaigns", "Campaign activity"],
         ["property", "Property history"],
+        ["journal", "Address and unit journal"],
       ]
         .map(([kind, title]) =>
           b("activity", title, { secondary: true, value: kind }),
@@ -1896,10 +1898,12 @@ export function createOrganizationContactBook(
         s.activity
           ? `<h3>${e(label(s.activity.kind))}</h3>${
               list(s.activity.items)
-                .map(
-                  (item) =>
-                    `<pre class="pt-contact-json">${e(JSON.stringify(item, null, 2))}</pre>`,
-                )
+                .map((item) => {
+                  if (s.activity.kind !== "journal")
+                    return `<pre class="pt-contact-json">${e(JSON.stringify(item, null, 2))}</pre>`;
+                  const view = canvassingJournalPresentation(item);
+                  return `<article class="pt-card"><h4>${e(view.title)}</h4>${view.lines.map((line) => `<p>${e(line)}</p>`).join("")}${view.canRetry && can("personal") ? b("journal-contact-retry", "Retry Contact Book processing", { secondary: true, value: item.submissionId }) : ""}</article>`;
+                })
                 .join("") || "<p>No linked records available.</p>"
             }${s.activity.nextCursor ? b("activity-more", "More linked records", { secondary: true, value: s.activity.kind }) : ""}`
           : ""
@@ -3248,6 +3252,21 @@ export function createOrganizationContactBook(
         ],
       };
       (s.expanded ||= new Set()).add("Linked activity");
+    } else if (op === "journal-contact-retry") {
+      const item = list(s.activity?.items).find(
+        (row) => row.submissionId === value,
+      );
+      if (
+        !can("personal") ||
+        s.activity?.kind !== "journal" ||
+        !item ||
+        !canvassingJournalPresentation(item).canRetry
+      )
+        throw new Error(
+          "Reopen an authorized address journal before retrying.",
+        );
+      const result = await api(`/canvassing-processing/${id(value)}/retry`, {});
+      item.contactProcessing = result.contactProcessing;
     } else if (op === "detail" || op === "detail-tags") {
       s.overlay = null;
       s.showAllDetailTags = op === "detail-tags";

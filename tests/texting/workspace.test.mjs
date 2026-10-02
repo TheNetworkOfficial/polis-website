@@ -14,7 +14,7 @@ async function moduleUrl(name) {
   let source = await readFile(path.join(scripts, `${name}.js`), "utf8");
   source = source.replace(/^import\s+"[^"\n]+\.css";\r?\n/gm, "");
   for (const match of [
-    ...source.matchAll(/from "\.\/((?:texting|organization)\w+)"/g),
+    ...source.matchAll(/from "\.\/((?:texting|organization|canvassing)\w+)"/g),
   ])
     source = source.replaceAll(match[0], `from "${await moduleUrl(match[1])}"`);
   const url = `data:text/javascript;base64,${Buffer.from(source).toString("base64")}`;
