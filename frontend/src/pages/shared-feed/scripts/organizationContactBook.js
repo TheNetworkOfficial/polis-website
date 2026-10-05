@@ -25,6 +25,9 @@ import {
   typedContactInput,
   contactFilterValue,
   contactCsvCell,
+  isHouseholdContact,
+  contactDisplayName,
+  householdAddressStatus,
 } from "./organizationContactsModel";
 import {
   previewContactFile,
@@ -1245,10 +1248,12 @@ export function createOrganizationContactBook(
     const key = definition.fieldId,
       value = contactValue(contact, definition);
     if (key === "displayName") {
-      const name = value || contact.fields?.fullName || "Contact";
-      const locality = [contact.fields?.city, contact.fields?.state]
-        .filter(Boolean)
-        .join(", ");
+      const name = contactDisplayName(contact);
+      const locality = isHouseholdContact(contact)
+        ? `Household · ${householdAddressStatus(contact)}`
+        : [contact.fields?.city, contact.fields?.state]
+            .filter(Boolean)
+            .join(", ");
       const initials = String(name)
         .trim()
         .split(/\s+/)
@@ -1264,9 +1269,11 @@ export function createOrganizationContactBook(
         .map((tag) => `<span class="pt-cb-tag">${e(tag.label)}</span>`)
         .join(
           "",
-        )}${assigned.length > 2 ? `<button type="button" class="pt-cb-more-tags" data-workspace-action="${prefix}-detail-tags" data-value="${e(contact.contactId)}" aria-label="Show all ${assigned.length} tags for ${e(contact.fields?.displayName || "contact")}">+${assigned.length - 2}</button>` : ""}${!assigned.length ? '<span class="pt-cb-hint">—</span>' : ""}</div>`;
+        )}${assigned.length > 2 ? `<button type="button" class="pt-cb-more-tags" data-workspace-action="${prefix}-detail-tags" data-value="${e(contact.contactId)}" aria-label="Show all ${assigned.length} tags for ${e(contactDisplayName(contact, "contact"))}">+${assigned.length - 2}</button>` : ""}${!assigned.length ? '<span class="pt-cb-hint">—</span>' : ""}</div>`;
     }
     if (key === "eligibility" || key === "consentStatus") {
+      if (isHouseholdContact(contact))
+        return '<span class="pt-cb-hint">Not a texting recipient</span>';
       const status =
         key === "eligibility" ? contact.eligibility?.status : value;
       const captions = {
@@ -1303,7 +1310,7 @@ export function createOrganizationContactBook(
         ? ""
         : ` pt-contact-pinned pt-contact-pin-${Math.min(index, 9)}`;
     };
-    return `<div class="pt-workspace-table-wrap pt-cb-table-wrap"><table class="pt-workspace-table pt-contact-table"><thead><tr>${can("select") ? '<th scope="col" class="pt-cb-select-heading"><span class="pt-cb-visually-hidden">Select</span></th>' : ""}${columns.map((item) => `<th scope="col" class="${pin(item.fieldId)}">${e(item.fieldId === "eligibility" ? "Texting status" : item.label)}</th>`).join("")}<th scope="col" class="pt-cb-open-heading"><span class="pt-cb-visually-hidden">Details</span></th></tr></thead><tbody>${rows.map((contact) => `<tr class="${selected(contact) ? "is-selected" : ""}">${can("select") ? `<td class="pt-contact-select"><label class="pt-cb-check-hit"><input type="checkbox" aria-label="Select ${e(contact.fields?.displayName || contact.fields?.fullName || "contact")}" data-contact-change="${prefix}-row" data-contact-id="${e(contact.contactId)}"${addition ? ' data-addition="true"' : ""}${(addition ? s.includeIds.has(contact.contactId) : review || selected(contact)) ? " checked" : ""}${r.busy() ? " disabled" : ""}></label></td>` : ""}${columns.map((item) => `<td data-label="${e(item.label)}" class="pt-cb-cell pt-cb-cell-${e(item.fieldId.replace(/[^a-zA-Z]/g, ""))}${pin(item.fieldId)}">${item.fieldId.startsWith("tag:") && can("tag") && mode === "book" ? `<label class="pt-cb-check-hit"><input type="checkbox" aria-label="${e(item.label)} for ${e(contact.fields?.displayName || "contact")}" data-contact-change="${prefix}-tag-cell" data-contact-id="${e(contact.contactId)}" data-tag-id="${e(item.fieldId.slice(4))}"${contactValue(contact, item) ? " checked" : ""}${r.busy() ? " disabled" : ""}></label>` : rowValue(contact, item)}</td>`).join("")}<td class="pt-contact-open">${tool("detail", "Open", "right", { value: contact.contactId })}</td></tr>`).join("")}</tbody></table></div>`;
+    return `<div class="pt-workspace-table-wrap pt-cb-table-wrap"><table class="pt-workspace-table pt-contact-table"><thead><tr>${can("select") ? '<th scope="col" class="pt-cb-select-heading"><span class="pt-cb-visually-hidden">Select</span></th>' : ""}${columns.map((item) => `<th scope="col" class="${pin(item.fieldId)}">${e(item.fieldId === "eligibility" ? "Texting status" : item.label)}</th>`).join("")}<th scope="col" class="pt-cb-open-heading"><span class="pt-cb-visually-hidden">Details</span></th></tr></thead><tbody>${rows.map((contact) => `<tr class="${selected(contact) ? "is-selected" : ""}">${can("select") ? `<td class="pt-contact-select"><label class="pt-cb-check-hit"><input type="checkbox" aria-label="Select ${e(contactDisplayName(contact, "contact"))}" data-contact-change="${prefix}-row" data-contact-id="${e(contact.contactId)}"${addition ? ' data-addition="true"' : ""}${(addition ? s.includeIds.has(contact.contactId) : review || selected(contact)) ? " checked" : ""}${r.busy() ? " disabled" : ""}></label></td>` : ""}${columns.map((item) => `<td data-label="${e(item.label)}" class="pt-cb-cell pt-cb-cell-${e(item.fieldId.replace(/[^a-zA-Z]/g, ""))}${pin(item.fieldId)}">${item.fieldId.startsWith("tag:") && can("tag") && mode === "book" ? `<label class="pt-cb-check-hit"><input type="checkbox" aria-label="${e(item.label)} for ${e(contactDisplayName(contact, "contact"))}" data-contact-change="${prefix}-tag-cell" data-contact-id="${e(contact.contactId)}" data-tag-id="${e(item.fieldId.slice(4))}"${contactValue(contact, item) ? " checked" : ""}${r.busy() ? " disabled" : ""}></label>` : rowValue(contact, item)}</td>`).join("")}<td class="pt-contact-open">${tool("detail", "Open", "right", { value: contact.contactId })}</td></tr>`).join("")}</tbody></table></div>`;
   }
   function columnOrderControls() {
     const s = state();
@@ -1417,7 +1424,7 @@ export function createOrganizationContactBook(
           ? '<section class="pt-cb-action-section"><h3>Tags</h3><p class="pt-cb-hint">No tags are available. A contact tag manager can create them.</p></section>'
           : "";
     return `<div class="pt-cb-selection-actions">${mode === "selector" ? endpointControls() : ""}${tagControls}${details("Add specific contacts", `<form data-workspace-form="${formName("add-search")}" class="pt-cb-tag-create">${field("search", "Search the rest of your contact book", s.addSearch || "", { required: true })}<button class="pt-btn pt-btn--secondary" type="submit">Search</button></form>${list(s.addRows).length ? rowTable(s.addRows, { addition: true }) : ""}${s.addCursor ? b("add-more", "Next search page", { secondary: true }) : ""}`)}${
-      mode === "book" && can("manage")
+      mode === "book" && can("manage") && !selectionHasHouseholds()
         ? details(
             "More selection actions",
             `<section class="pt-cb-action-section">${b("geography-start", "Update districts for selection", { secondary: true })}<p class="pt-cb-hint">Uses installed local boundaries. Addresses stay in Polis.</p></section>${
@@ -1437,6 +1444,12 @@ export function createOrganizationContactBook(
           )
         : ""
     }${can("export") ? `<section class="pt-cb-action-section">${b("export", "Export selected contacts", { secondary: true })}</section>` : ""}${bulkPanel()}${geographyPanel()}</div>`;
+  }
+  function selectionHasHouseholds() {
+    const s = state();
+    return [...s.rows, ...list(s.selectedRows), ...list(s.addRows)].some(
+      (contact) => isHouseholdContact(contact) && selected(contact),
+    );
   }
   function geographyPanel() {
     const s = state(),
@@ -1724,6 +1737,7 @@ export function createOrganizationContactBook(
       ).values(),
     ];
     const controls = contacts
+      .filter((contact) => !isHouseholdContact(contact))
       .map((contact) => {
         const phones = [
           ...new Set(
@@ -1736,7 +1750,7 @@ export function createOrganizationContactBook(
           ),
         ];
         if (phones.length < 2) return "";
-        return `<label class="pt-field"><span>Texting number for ${e(contact.fields?.displayName || "contact")}</span><select data-contact-change="${prefix}-endpoint" data-contact-id="${e(contact.contactId)}"><option value="">Use the primary eligible number</option>${phones.map((phone) => `<option value="${e(phone)}"${s.endpointChoices[contact.contactId] === phone ? " selected" : ""}>${e(phone)}</option>`).join("")}</select></label>`;
+        return `<label class="pt-field"><span>Texting number for ${e(contactDisplayName(contact, "contact"))}</span><select data-contact-change="${prefix}-endpoint" data-contact-id="${e(contact.contactId)}"><option value="">Use the primary eligible number</option>${phones.map((phone) => `<option value="${e(phone)}"${s.endpointChoices[contact.contactId] === phone ? " selected" : ""}>${e(phone)}</option>`).join("")}</select></label>`;
       })
       .filter(Boolean);
     return controls.length
@@ -1829,24 +1843,30 @@ export function createOrganizationContactBook(
   }
   function detail() {
     const s = state(),
-      contact = s.detail?.contact || { fields: {}, tags: [] };
+      contact = s.detail?.contact || { fields: {}, tags: [] },
+      household = isHouseholdContact(contact);
     const groups = new Map();
     for (const definition of fields()) {
+      if (household && !Object.hasOwn(contact.fields || {}, definition.fieldId))
+        continue;
       const group = definition.group || "Other information";
       if (!groups.has(group)) groups.set(group, []);
       groups.get(group).push(definition);
     }
-    const editable = can("edit");
+    const editable = can("edit") && !household;
     return (
       head(
         "CONTACT BOOK",
-        contact.fields?.displayName ||
-          contact.fields?.fullName ||
-          (s.detailNew ? "Add a contact" : "Contact details"),
-        "Contact details, voter information, and field history in one place.",
+        contactDisplayName(
+          contact,
+          s.detailNew ? "Add a contact" : "Contact details",
+        ),
+        household
+          ? "Address-only household"
+          : "Contact details, voter information, and field history in one place.",
         b("close-detail", "Back", { secondary: true }),
       ) +
-      `<section class="pt-card">${detailTagSummary(contact)}${contact.sync ? notice(contact.sync.status === "needs_attention" ? "Saved · related views need attention" : contact.sync.status === "updating_related_views" ? "Saved · updating related views" : "Saved", contact.sync.status === "needs_attention" ? "An administrator can retry pending updates from Sync status." : "") : ""}${contact.eligibility ? notice(`Texting: ${label(contact.eligibility.status)}`, list(contact.eligibility.reasons).map(label).join(", ")) : ""}${contact.contactId && editable ? `<div class="pt-actions">${b("enrich", "Update districts", { secondary: true })}${b("contact-archive", contact.status === "archived" ? "Restore contact" : "Archive contact", { secondary: true })}</div>` : ""}${s.enrichmentStatus ? notice(s.enrichmentStatus) : ""}<form data-workspace-form="${formName("contact")}">${[...groups].map(([group, definitions]) => `<details class="pt-workspace-details"${["identity", "contact", "Identity", "Contact details"].includes(group) ? " open" : ""}><summary>${e(label(group))}</summary><div class="pt-fields">${definitions.map((definition) => renderContactField(definition, contact, editable)).join("")}</div></details>`).join("")}${
+      `<section class="pt-card">${household ? notice("Household", `${householdAddressStatus(contact)}. DoorKnocker visits and property history are linked to this address. Resident contacts are listed separately. This household cannot receive texts.`) : ""}${detailTagSummary(contact)}${contact.sync ? notice(contact.sync.status === "needs_attention" ? "Saved · related views need attention" : contact.sync.status === "updating_related_views" ? "Saved · updating related views" : "Saved", contact.sync.status === "needs_attention" ? "An administrator can retry pending updates from Sync status." : "") : ""}${!household && contact.eligibility ? notice(`Texting: ${label(contact.eligibility.status)}`, list(contact.eligibility.reasons).map(label).join(", ")) : ""}${contact.contactId && can("edit") ? `<div class="pt-actions">${!household ? b("enrich", "Update districts", { secondary: true }) : ""}${b("contact-archive", contact.status === "archived" ? "Restore contact" : "Archive contact", { secondary: true })}</div>` : ""}${s.enrichmentStatus ? notice(s.enrichmentStatus) : ""}<form data-workspace-form="${formName("contact")}">${[...groups].map(([group, definitions]) => `<details class="pt-workspace-details"${["identity", "contact", "Identity", "Contact details"].includes(group) || (household && ["address", "Address"].includes(group)) ? " open" : ""}><summary>${e(label(group))}</summary><div class="pt-fields">${definitions.map((definition) => renderContactField(definition, contact, editable)).join("")}</div></details>`).join("")}${
         can("tag")
           ? `<details class="pt-workspace-details"><summary>Edit contact tags</summary><div class="pt-contact-columns">${tags()
               .map(
@@ -1864,7 +1884,7 @@ export function createOrganizationContactBook(
         list(s.detail?.sources || contact.sources)
           .map(
             (source) =>
-              `<article class="pt-card"><strong>${e(source.label || source.sourceId)}</strong><pre class="pt-contact-json">${e(JSON.stringify(source, null, 2))}</pre>${can("manage") && source.sourceRecordId ? b("source-remove", "Remove source membership", { secondary: true, value: JSON.stringify({ sourceId: source.sourceId, sourceRecordId: source.sourceRecordId }) }) : ""}</article>`,
+              `<article class="pt-card"><strong>${e(source.label || source.sourceId)}</strong><pre class="pt-contact-json">${e(JSON.stringify(source, null, 2))}</pre>${!household && can("manage") && source.sourceRecordId ? b("source-remove", "Remove source membership", { secondary: true, value: JSON.stringify({ sourceId: source.sourceId, sourceRecordId: source.sourceRecordId }) }) : ""}</article>`,
           )
           .join("") || '<p class="pt-muted">No source history recorded.</p>',
       )}${details(
@@ -1934,13 +1954,17 @@ export function createOrganizationContactBook(
   function identityControls() {
     const s = state(),
       contact = s.detail?.contact;
-    if (!can("manage") || !contact?.contactId) return "";
+    if (!can("manage") || !contact?.contactId || isHouseholdContact(contact))
+      return "";
     return details(
       "Review duplicate contacts",
       `<form data-workspace-form="${formName("identity-search")}" class="pt-contact-save">${field("search", "Find a possible duplicate", s.identitySearch || "", { required: true })}<button type="submit" class="pt-btn pt-btn--secondary">Search</button></form>${list(
         s.identityRows,
       )
-        .filter((row) => row.contactId !== contact.contactId)
+        .filter(
+          (row) =>
+            row.contactId !== contact.contactId && !isHouseholdContact(row),
+        )
         .map(
           (row) =>
             `<div class="pt-row"><span>${e(row.fields?.displayName || row.fields?.fullName || "Unnamed contact")} · ${e(row.fields?.phone || row.fields?.city || "No phone")}</span>${b("identity-choose", "Review duplicate", { value: row.contactId, secondary: true })}</div>`,
@@ -2589,6 +2613,8 @@ export function createOrganizationContactBook(
       ).job;
       await advanceConversion();
     } else if (action === "identity-search") {
+      if (isHouseholdContact(s.detail?.contact))
+        throw new Error("Household identity is managed through DoorKnocker.");
       s.identitySearch = String(data.get("search") || "").trim();
       s.identityRows = list(
         (await api("/query", { search: s.identitySearch, limit: 20 })).items,
@@ -2604,8 +2630,11 @@ export function createOrganizationContactBook(
         throw new Error("Contact editing is restricted.");
       const contact = s.detail?.contact,
         patch = {};
+      const editable = can("edit") && !isHouseholdContact(contact);
+      if (!editable && !can("tag"))
+        throw new Error("Contact editing is restricted.");
       for (const definition of fields().filter(
-        (item) => can("edit") && !item.readOnly && simpleTypes.has(item.type),
+        (item) => editable && !item.readOnly && simpleTypes.has(item.type),
       )) {
         if (
           contact?.fieldIssues?.[definition.fieldId] &&
@@ -2624,7 +2653,7 @@ export function createOrganizationContactBook(
       const result = await api(
         contact ? `/contacts/${id(contact.contactId)}` : "/contacts",
         {
-          ...(can("edit") ? { fields: patch } : {}),
+          ...(editable ? { fields: patch } : {}),
           ...(can("tag")
             ? {
                 tags: [
@@ -2699,6 +2728,8 @@ export function createOrganizationContactBook(
       );
       await schema();
     } else if (action === "bulk-source-remove") {
+      if (selectionHasHouseholds())
+        throw new Error("Household sources are managed through DoorKnocker.");
       if (!can("manage") || !data.get("sourceId"))
         throw new Error("Choose a source to remove.");
       if (
@@ -3054,6 +3085,8 @@ export function createOrganizationContactBook(
       };
       s.bookStatus = await api("/status");
     } else if (op === "geography-start") {
+      if (selectionHasHouseholds())
+        throw new Error("Household addresses are managed through DoorKnocker.");
       if (!can("manage"))
         throw new Error("District refresh review is restricted.");
       if (s.selection?.status !== "ready") await prepareSelection();
@@ -3100,6 +3133,8 @@ export function createOrganizationContactBook(
       await advanceBulk();
       await loadBulkOutcomes();
     } else if (op === "source-remove") {
+      if (isHouseholdContact(s.detail?.contact))
+        throw new Error("Household sources are managed through DoorKnocker.");
       if (
         !can("manage") ||
         !window.confirm(
@@ -3275,13 +3310,24 @@ export function createOrganizationContactBook(
       s.enrichmentStatus = null;
       s.detailNew = false;
     } else if (op === "identity-choose") {
-      s.mergeCandidate = (await api(`/contacts/${id(value)}`)).contact;
+      if (isHouseholdContact(s.detail?.contact))
+        throw new Error("Household identity is managed through DoorKnocker.");
+      const candidate = (await api(`/contacts/${id(value)}`)).contact;
+      if (isHouseholdContact(candidate))
+        throw new Error("Households cannot be merged with resident contacts.");
+      s.mergeCandidate = candidate;
       s.mergeChoices = {};
       (s.expanded ||= new Set()).add("Review duplicate contacts");
     } else if (op === "identity-merge") {
       const target = s.detail.contact,
         source = s.mergeCandidate;
-      if (!can("manage") || !source || target.contactId === source.contactId)
+      if (
+        !can("manage") ||
+        !source ||
+        target.contactId === source.contactId ||
+        isHouseholdContact(target) ||
+        isHouseholdContact(source)
+      )
         throw new Error("Review a separate duplicate contact first.");
       const result = await api("/identities/merge", {
         targetId: target.contactId,
@@ -3307,7 +3353,11 @@ export function createOrganizationContactBook(
       await query();
       r.toast("Reviewed duplicate merged.");
     } else if (op === "identity-split") {
-      if (!can("manage") || !s.lastMergeId)
+      if (
+        !can("manage") ||
+        !s.lastMergeId ||
+        isHouseholdContact(s.detail?.contact)
+      )
         throw new Error("This merge is not available to undo.");
       await api("/identities/split", {
         mergeId: s.lastMergeId,
@@ -3318,6 +3368,8 @@ export function createOrganizationContactBook(
       await query();
       r.toast("Merge undone.");
     } else if (op === "enrich") {
+      if (isHouseholdContact(s.detail?.contact))
+        throw new Error("Household addresses are managed through DoorKnocker.");
       const result = await api(
         `/contacts/${id(s.detail.contact.contactId)}/enrich`,
         { operationId: uuid() },
@@ -3640,6 +3692,13 @@ export function createOrganizationContactBook(
       return true;
     }
     if (name === `${prefix}-endpoint`) {
+      const contact = [
+        ...s.rows,
+        ...list(s.selectedRows),
+        ...list(s.addRows),
+      ].find((row) => row.contactId === target.dataset.contactId);
+      if (isHouseholdContact(contact))
+        throw new Error("Households cannot receive texts.");
       if (target.value)
         s.endpointChoices[target.dataset.contactId] = target.value;
       else delete s.endpointChoices[target.dataset.contactId];

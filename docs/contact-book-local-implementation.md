@@ -4,6 +4,24 @@ September 30, 2026. Local source, fictional fixtures, and mock verification only
 
 ## Implemented
 
+### Household records (October 5, 2026)
+
+The website recognizes top-level `recordKind: "household"`; records without it
+retain person behavior. Household rows use their address or recorded address
+label, show their verification status, and say “Not a texting recipient.” The
+detail view preserves authorized tags, archive/restore, and the existing address
+journal. Household fields stay read-only; tags-only saves omit `fields` entirely.
+District enrichment, source removal, resident identity merging, and texting
+endpoint choices are unavailable for households.
+
+Validation uses fictional fixtures: 62 focused unit tests, nine browser tests
+(including household detail and tag saves at 1280px and 390px), repository lint,
+scoped formatting, and the production frontend build pass. These checks do not
+establish live household backfill completion. The separate backend startup check
+passes with a temporary test session secret, an in-memory SQLite database,
+disabled dotenv loading, and blocked outbound networking. The local server serves
+the expected compiled assets and stops after verification.
+
 The Contacts route reads the organization contact-book API before loading a texting provider workspace. The schema controls every available standard/custom field and permission. The default table remains compact; additional fields, filters, source records, and advanced controls are expandable.
 
 | Surface                 | Behavior                                                                                                                                                                                                                                                                                                     | Implementation                                                                                      |

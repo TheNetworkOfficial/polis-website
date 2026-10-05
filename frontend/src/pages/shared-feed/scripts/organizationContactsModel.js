@@ -1,3 +1,32 @@
+export const isHouseholdContact = (contact) =>
+  contact?.recordKind === "household";
+
+/** A household's address is a display fallback, never a fabricated resident name. */
+export function contactDisplayName(contact, fallback = "Contact") {
+  const fields = contact?.fields || {};
+  if (isHouseholdContact(contact))
+    return (
+      [
+        fields.addressLine1,
+        fields.addressLine2,
+        fields.city,
+        fields.state,
+        fields.postalCode,
+      ]
+        .filter(Boolean)
+        .join(", ") ||
+      fields.addressLabel ||
+      "Household"
+    );
+  return fields.displayName || fields.fullName || fallback;
+}
+
+export function householdAddressStatus(contact) {
+  return contact?.fields?.addressResolution?.status === "verified"
+    ? "Verified address"
+    : "Address not yet verified";
+}
+
 /** Shared contact values stay typed. Identifiers, ZIP codes, and raw import cells stay strings. */
 export function contactValue(contact, field) {
   const key = typeof field === "string" ? field : field.fieldId || field.id;
