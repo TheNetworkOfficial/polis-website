@@ -59,7 +59,7 @@ test("Contacts navigation remains during a delayed fresh tab authorization and d
   expect(fixture.errors).toEqual([]);
 });
 
-test("review drawer Continue enters message step only after explicit review, without transfer", async ({
+test("review drawer requires explicit review before saving a campaign, without transfer", async ({
   page,
 }, info) => {
   const fixture = await mockBook(page);
@@ -69,6 +69,13 @@ test("review drawer Continue enters message step only after explicit review, wit
     .check();
   await page
     .getByRole("button", { name: "Create campaign", exact: true })
+    .click();
+  await expect(page.getByLabel("Campaign name", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Save campaign", exact: true }),
+  ).toBeDisabled();
+  await page
+    .getByRole("button", { name: "Review recipients", exact: true })
     .click();
   const review = page.getByRole("dialog", {
     name: "Review selection",
