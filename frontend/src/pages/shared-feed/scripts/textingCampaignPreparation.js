@@ -1,3 +1,8 @@
+export const campaignPreparationPending = (campaign) =>
+  !!campaign?.preparation &&
+  campaign.preparation.status !== "complete" &&
+  ["draft", "prepared"].includes(campaign.status);
+
 /** Poll durable preparation only. New recipient/provider approval is never created here. */
 export function createCampaignPreparation(
   r,
@@ -31,10 +36,7 @@ export function createCampaignPreparation(
       return false;
     }
   };
-  const pending = (campaign) =>
-    campaign?.preparation &&
-    campaign.preparation.status !== "complete" &&
-    !["active", "paused", "archived"].includes(campaign.status);
+  const pending = campaignPreparationPending;
   function stopTimer() {
     cancel(timer);
     timer = null;
@@ -47,6 +49,12 @@ export function createCampaignPreparation(
     )
       throw new Error("Campaign preparation status could not be verified.");
     const s = state();
+    // A status read can finish after another action saved a newer campaign.
+    if (
+      s.campaign?.campaignId === expectedId &&
+      campaign.revision < s.campaign.revision
+    )
+      return false;
     if (campaign.preparation?.preparationId !== preparationId) {
       preparationId = campaign.preparation?.preparationId;
       reads = 0;
@@ -54,6 +62,8 @@ export function createCampaignPreparation(
       progressAt = now();
       s.preparationPollingPaused = false;
       s.preparationCompletionAttempted = false;
+      s.preparationPollError = "";
+      s.preparationRetryMessage = "";
       readFailures = 0;
       recoveringWrite = false;
     }
@@ -70,6 +80,7 @@ export function createCampaignPreparation(
       s.preparationRetryMessage = "";
       recoveringWrite = false;
     }
+    return true;
   }
   function arm() {
     stopTimer();
@@ -144,7 +155,7 @@ export function createCampaignPreparation(
           await r.api(`/campaigns/${encodeURIComponent(campaignId)}`)
         ).campaign;
         if (!active()) return;
-        accept(saved, campaignId);
+        if (!accept(saved, campaignId)) return;
         readFailures = 0;
         s.preparationRetryMessage = "";
         const p = saved.preparation;
@@ -154,8 +165,9 @@ export function createCampaignPreparation(
         ) {
           recoveringWrite = false;
           s.preparationPollingPaused = true;
-          s.preparationPollError =
-            "The saved campaign still needs completion. Resume this approved preparation when you are ready.";
+          s.preparationPollError = p.canResume
+            ? "The saved campaign still needs completion. Resume this approved preparation when you are ready."
+            : "The saved preparation still needs review before it can continue. Check its saved status after the issue has been resolved.";
           return;
         }
         const automatic =

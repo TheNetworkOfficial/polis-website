@@ -124,7 +124,10 @@ test("ordinary entry and held dispatch do not start or resume provider transfer"
 
 test("manual recovery rereads current status then uses its preparation identity and revision", async () => {
   const held = campaign("needs_attention", { canResume: true });
-  const h = harness([{ ...held, revision: 9 }, campaign()]);
+  const h = harness([
+    { ...held, revision: 9 },
+    { ...campaign(), revision: 10 },
+  ]);
   h.controller.observe(held);
   await h.controller.refresh({ manual: true, resume: true });
   assert.deepEqual(
@@ -285,4 +288,58 @@ test("viewer and non-automatic statuses never trigger automatic finalization", a
     assert.equal(h.calls.filter((call) => call[1]).length, 0);
     h.controller.dispose();
   }
+});
+
+test("held preparation checks never reapprove or resume an uncertain transfer", async () => {
+  const held = campaign("needs_attention", {
+    errorCode: "prompt_provider_records_not_ready",
+    canResume: false,
+  });
+  const h = harness([held, held]);
+  h.controller.observe(held);
+  assert.equal(h.timers.size, 0);
+  await h.controller.refresh({ manual: true });
+  await h.controller.refresh({ manual: true });
+  assert.equal(h.calls.length, 2);
+  assert.ok(h.calls.every((call) => call[1] === undefined));
+  assert.equal(h.timers.size, 0);
+  h.controller.dispose();
+});
+
+test("a delayed older status cannot replace a newer campaign or finalize its old preparation", async () => {
+  let release;
+  const h = harness([() => new Promise((resolve) => (release = resolve))]);
+  h.controller.observe(campaign());
+  const reading = h.tick();
+  const newer = { ...campaign("complete"), revision: 8 };
+  h.controller.observe(newer);
+  release({
+    campaign: campaign("ready_to_finalize", {
+      canResume: true,
+      automaticResume: true,
+    }),
+  });
+  await reading;
+  assert.equal(h.state.campaign, newer);
+  assert.equal(h.state.preparingRecipients, false);
+  assert.equal(h.calls.length, 1);
+  assert.equal(h.timers.size, 0);
+  h.controller.dispose();
+});
+
+test("a lost resume followed by a nonresumable hold does not suggest another resume", async () => {
+  const ready = campaign("ready_to_finalize", {
+    canResume: true,
+    automaticResume: true,
+  });
+  const held = campaign("needs_attention", { canResume: false });
+  const h = harness([ready, new Error("lost response"), held]);
+  h.controller.observe(ready);
+  await h.tick();
+  await h.tick();
+  assert.match(h.state.preparationPollError, /needs review/);
+  assert.doesNotMatch(h.state.preparationPollError, /resume/i);
+  assert.equal(h.calls.filter((call) => call[1]).length, 1);
+  assert.equal(h.timers.size, 0);
+  h.controller.dispose();
 });
