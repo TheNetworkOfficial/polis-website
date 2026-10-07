@@ -261,88 +261,114 @@ test("archived saved queue continues with its exact allocation and permits only 
   expect(fixture.errors).toEqual([]);
 });
 
-for (const proven of [true, false])
-  test(`reply rejection ${proven ? "proves no attempt and restores draft" : "without proof preserves the hold"}`, async ({
-    page,
-  }, info) => {
-    const fixture = await setup(page),
-      replies = [];
-    await page.route(`**${PROMPT}/conversations/conversation-one`, (route) =>
-      json(route, {
-        conversation: {
-          conversationId: "conversation-one",
-          campaignId: "campaign-one",
-          phone: "+12025550124",
-          displayName: "Example Recipient",
-          canReply: true,
-          replyState: "available",
-          status: "active",
-          suppressed: false,
-        },
-        messages: [
-          {
-            messageId: "inbound-one",
-            direction: "inbound",
-            content: "Please tell me more.",
-            status: "received",
+for (const failedRead of [null, "workspace", "billing/summary", "conversation"])
+  for (const proven of failedRead ? [true] : [true, false])
+    test(`reply rejection ${proven ? "proves no attempt and restores draft" : "without proof preserves the hold"}${failedRead ? ` after failed ${failedRead} read` : ""}`, async ({
+      page,
+    }, info) => {
+      const fixture = await setup(page),
+        replies = [];
+      let readFails = Boolean(failedRead);
+      await page.route(`**${PROMPT}/conversations/conversation-one`, (route) =>
+        json(route, {
+          conversation: {
+            conversationId: "conversation-one",
+            campaignId: "campaign-one",
+            phone: "+12025550124",
+            displayName: "Example Recipient",
+            canReply: true,
+            replyState: "available",
+            status: "active",
+            suppressed: false,
           },
-        ],
-      }),
-    );
-    await page.route(
-      `**${PROMPT}/conversations/conversation-one/reply`,
-      (route) => {
-        const body = route.request().postDataJSON();
-        replies.push(body);
-        return json(
-          route,
-          {
-            error: "prompt_reply_not_permitted",
-            ...(proven
-              ? { sendOutcome: "not_attempted", actionId: body.actionId }
-              : {}),
-          },
-          409,
+          messages: [
+            {
+              messageId: "inbound-one",
+              direction: "inbound",
+              content: "Please tell me more.",
+              status: "received",
+            },
+          ],
+        }),
+      );
+      if (failedRead)
+        await page.route(
+          `**${PROMPT}/${failedRead === "conversation" ? "conversations/conversation-one" : failedRead}`,
+          (route) =>
+            replies.length && readFails
+              ? json(route, { error: "read_temporarily_unavailable" }, 503)
+              : route.fallback(),
         );
-      },
-    );
-    await page.goto(
-      `${BASE}/organizations/org-1/texting/conversation/conversation-one`,
-    );
-    await page
-      .getByLabel("Reply", { exact: true })
-      .fill("Here is the requested information.");
-    await page.getByRole("button", { name: "Send reply", exact: true }).click();
-    if (proven) {
-      await expect(
-        page.getByText(
-          "Reply was not sent. Review the current status before trying again.",
-          { exact: true },
+      await page.route(
+        `**${PROMPT}/conversations/conversation-one/reply`,
+        (route) => {
+          const body = route.request().postDataJSON();
+          replies.push(body);
+          return json(
+            route,
+            {
+              error: "prompt_reply_not_permitted",
+              ...(proven
+                ? { sendOutcome: "not_attempted", actionId: body.actionId }
+                : {}),
+            },
+            409,
+          );
+        },
+      );
+      await page.goto(
+        `${BASE}/organizations/org-1/texting/conversation/conversation-one`,
+      );
+      await page
+        .getByLabel("Reply", { exact: true })
+        .fill("Here is the requested information.");
+      await page
+        .getByRole("button", { name: "Send reply", exact: true })
+        .click();
+      if (proven) {
+        await expect(
+          page.getByText(
+            "Reply was not sent. Review the current status before trying again.",
+            { exact: true },
+          ),
+        ).toBeVisible();
+        await expect(
+          page.getByRole("textbox", { name: "Reply", exact: true }),
+        ).toHaveValue("Here is the requested information.");
+        if (failedRead) {
+          await expect(
+            page.getByText("Check reply eligibility", { exact: true }),
+          ).toBeVisible();
+          await expect(
+            page.getByRole("button", { name: "Send reply", exact: true }),
+          ).toBeDisabled();
+          readFails = false;
+          await page
+            .getByRole("button", { name: "Refresh", exact: true })
+            .click();
+        }
+        await expect(
+          page.getByRole("button", { name: "Send reply", exact: true }),
+        ).toBeEnabled();
+      } else {
+        await expect(
+          page.getByText("Reply needs review", { exact: true }),
+        ).toBeVisible();
+        await page.reload();
+        await expect(
+          page.getByText("Reply needs review", { exact: true }),
+        ).toBeVisible();
+        await expect(
+          page.getByRole("button", { name: "Send reply", exact: true }),
+        ).toHaveCount(0);
+      }
+      await page.setViewportSize({ width: 390, height: 900 });
+      await page.screenshot({
+        path: info.outputPath(
+          `reply-${proven}-${failedRead?.replace("/", "-") || "ready"}-mobile.png`,
         ),
-      ).toBeVisible();
-      await expect(
-        page.getByRole("textbox", { name: "Reply", exact: true }),
-      ).toHaveValue("Here is the requested information.");
-      await expect(
-        page.getByRole("button", { name: "Send reply", exact: true }),
-      ).toBeEnabled();
-    } else {
-      await expect(
-        page.getByText("Reply needs review", { exact: true }),
-      ).toBeVisible();
-      await page.reload();
-      await expect(
-        page.getByText("Reply needs review", { exact: true }),
-      ).toBeVisible();
-      await expect(
-        page.getByRole("button", { name: "Send reply", exact: true }),
-      ).toHaveCount(0);
-    }
-    await page.setViewportSize({ width: 390, height: 900 });
-    await page.screenshot({
-      path: info.outputPath(`reply-${proven}-mobile.png`),
-      fullPage: true,
+        fullPage: true,
+      });
+      expect(replies).toHaveLength(1);
+      expect(fixture.errors).toEqual([]);
     });
-    expect(replies).toHaveLength(1);
-    expect(fixture.errors).toEqual([]);
-  });

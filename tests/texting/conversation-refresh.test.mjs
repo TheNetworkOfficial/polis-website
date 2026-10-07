@@ -110,7 +110,7 @@ function browserStub(t) {
   return listeners;
 }
 
-function conversationHarness(api) {
+function conversationHarness(api, { refreshSendStatus = async () => {} } = {}) {
   const view = { conversations: {} },
     calls = [],
     holds = new Set(),
@@ -132,7 +132,7 @@ function conversationHarness(api) {
     sendHeld: (key) => holds.has(key),
     holdSend: (key) => holds.add(key),
     releaseSend: (key) => holds.delete(key),
-    refreshSendStatus: async () => {},
+    refreshSendStatus,
     refreshBilling: async () => {},
     api: async (route, body) => {
       if (route === "/texter/ensure") return { texter: { state: "ready" } };
@@ -173,6 +173,98 @@ test("a durable exact-action pre-send rejection releases only its hold and prese
   assert.equal(h.holds.size, 0);
   assert.equal(h.view.conversations.reply, deliveredMessage.content);
   assert.match(h.page.render(), /data-workspace-form="reply"/);
+  assert.equal(h.calls.filter((c) => c.route.endsWith("/reply")).length, 1);
+});
+
+for (const failedRead of ["sending status", "conversation"])
+  test(`a proven reply rejection stays ineligible after failed ${failedRead} read until both reads succeed`, async (t) => {
+    browserStub(t);
+    let rejected = false,
+      failing = true,
+      statusReads = 0,
+      conversationReads = 0;
+    const h = conversationHarness(
+      async (route, body) => {
+        if (route.endsWith("/reply")) {
+          rejected = true;
+          throw Object.assign(new Error("Closed hours"), {
+            status: 409,
+            payload: {
+              ok: false,
+              error: "prompt_reply_not_permitted",
+              sendOutcome: "not_attempted",
+              actionId: body.actionId,
+            },
+          });
+        }
+        conversationReads++;
+        if (rejected && failing && failedRead === "conversation")
+          throw new TypeError("Failed to fetch");
+        return response();
+      },
+      {
+        refreshSendStatus: async () => {
+          statusReads++;
+          if (failing && failedRead === "sending status")
+            throw new TypeError("Failed to fetch");
+        },
+      },
+    );
+    t.after(() => h.page.dispose());
+    await h.page.load(conversation.conversationId);
+    await acceptReply(h);
+    assert.equal(h.holds.size, 0); // The exact action is proven not attempted.
+    assert.ok(h.view.conversations.replyEligibilityActionId);
+    assert.equal(h.view.conversations.reply, deliveredMessage.content);
+    assert.match(h.page.render(), /Check reply eligibility/);
+    assert.match(h.page.render(), /type="submit" disabled>Send reply/);
+    await assert.rejects(acceptReply(h), /not eligible/);
+    // A successful conversation-only read cannot bypass the failed status read.
+    failing = false;
+    await h.page.load(conversation.conversationId);
+    assert.ok(h.view.conversations.replyEligibilityActionId);
+    await assert.rejects(acceptReply(h), /not eligible/);
+    await h.page.action("conversations-refresh");
+    assert.equal(h.view.conversations.replyEligibilityActionId, undefined);
+    assert.equal(statusReads, 2);
+    assert.equal(conversationReads, failedRead === "conversation" ? 4 : 3);
+    assert.doesNotMatch(h.page.render(), /type="submit" disabled>Send reply/);
+    assert.equal(h.view.conversations.reply, deliveredMessage.content);
+    assert.equal(h.calls.filter((c) => c.route.endsWith("/reply")).length, 1);
+  });
+
+test("a refresh started before a rejection cannot clear its new eligibility hold", async (t) => {
+  browserStub(t);
+  let reads = 0,
+    resolveEarlierRead;
+  const h = conversationHarness(async (route, body) => {
+    if (route.endsWith("/reply"))
+      throw Object.assign(new Error("Closed hours"), {
+        payload: {
+          ok: false,
+          error: "prompt_reply_not_permitted",
+          sendOutcome: "not_attempted",
+          actionId: body.actionId,
+        },
+      });
+    if (++reads === 2)
+      return new Promise((resolve) => {
+        resolveEarlierRead = resolve;
+      });
+    return response();
+  });
+  t.after(() => h.page.dispose());
+  await h.page.load(conversation.conversationId);
+  const earlierRefresh = h.page.refresh(conversation.conversationId);
+  await flush();
+  await acceptReply(h);
+  resolveEarlierRead(response());
+  await earlierRefresh;
+  assert.ok(h.view.conversations.replyEligibilityActionId);
+  await assert.rejects(acceptReply(h), /not eligible/);
+  await h.page.action("conversations-refresh");
+  assert.equal(h.view.conversations.replyEligibilityActionId, undefined);
+  assert.equal(h.view.conversations.reply, deliveredMessage.content);
   assert.equal(h.calls.filter((c) => c.route.endsWith("/reply")).length, 1);
 });
 

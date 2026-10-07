@@ -112,15 +112,22 @@ export function createConversations(r) {
   async function refresh(resource) {
     if (refreshing || disposed || !resource) return;
     refreshing = true;
+    const eligibilityActionId = state().replyEligibilityActionId;
     try {
       r.guard();
-      if (state().sendStatusNeedsRead) {
+      if (state().sendStatusNeedsRead || eligibilityActionId) {
         await r.refreshSendStatus();
         if (disposed) return;
         state().sendStatusNeedsRead = false;
       }
       await read(resource);
-      if (!disposed) state().refreshError = false;
+      if (!disposed) {
+        state().refreshError = false;
+        // Both reads must finish after this rejection. An older refresh cannot
+        // establish eligibility for a reply rejected while it was in flight.
+        if (state().replyEligibilityActionId === eligibilityActionId)
+          delete state().replyEligibilityActionId;
+      }
     } catch (error) {
       try {
         r.guard();
@@ -185,6 +192,7 @@ export function createConversations(r) {
         c.canReply === true &&
         !c.suppressed &&
         !hold &&
+        !s.replyEligibilityActionId &&
         messageFundingReady(
           r.workspace(),
           r.billing(),
@@ -200,7 +208,7 @@ export function createConversations(r) {
         go("inbox", "All conversations", "", true) +
           outcomes.trigger({ conversationId: c.conversationId }),
       ) +
-      `${s.preparingAccess ? notice("Preparing your texting access…") : ""}${s.refreshError ? notice("Updates are delayed", "Refresh to check the saved messages. Do not resend an accepted reply.") : ""}<div class="pt-grid pt-grid--two"><section class="pt-card"><div class="pt-row"><span class="pt-tag">${c.suppressed ? "Opted out" : e(label(c.status))}</span>${button("conversations-refresh", "Refresh", { secondary: true })}</div><div class="pt-workspace-thread">${
+      `${s.preparingAccess ? notice("Preparing your texting access…") : ""}${s.replyEligibilityActionId ? notice("Check reply eligibility", "Refresh to check current sending access and conversation status before trying again. Your draft is saved.") : s.refreshError ? notice("Updates are delayed", "Refresh to check the saved messages. Do not resend an accepted reply.") : ""}<div class="pt-grid pt-grid--two"><section class="pt-card"><div class="pt-row"><span class="pt-tag">${c.suppressed ? "Opted out" : e(label(c.status))}</span>${button("conversations-refresh", "Refresh", { secondary: true })}</div><div class="pt-workspace-thread">${
         list(s.messages)
           .map(
             (message) =>
@@ -233,6 +241,7 @@ export function createConversations(r) {
       !c.canReply ||
       c.suppressed ||
       r.sendHeld(key) ||
+      s.replyEligibilityActionId ||
       !r.workspace()?.canSend ||
       !messageFundingReady(r.workspace(), r.billing(), content, false, c.stream)
     )
@@ -265,6 +274,7 @@ export function createConversations(r) {
       )
         throw error;
       r.guard();
+      s.replyEligibilityActionId = actionId;
       r.releaseSend(key);
       s.reply = content;
       s.sendStatusNeedsRead = true;
