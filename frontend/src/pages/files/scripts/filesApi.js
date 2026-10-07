@@ -211,8 +211,32 @@ export class FilesApi {
     );
   }
 
-  getFolder(folderId) {
-    return this.request(`/api/files/folders/${encodeSegment(folderId)}`);
+  getFolder(folderId, query = {}) {
+    const params = new URLSearchParams(query);
+    return this.request(
+      `/api/files/folders/${encodeSegment(folderId)}${params.size ? `?${params}` : ""}`,
+    );
+  }
+
+  listChildFolders(folderId, query = {}) {
+    return this.getFolder(folderId, {
+      include: "children",
+      limit: 50,
+      ...query,
+    });
+  }
+
+  transitionFolder(folderId, transition, input, options = {}) {
+    if (!["archive", "trash", "restore"].includes(transition))
+      throw new Error("Invalid folder transition");
+    return this.request(
+      `/api/files/folders/${encodeSegment(folderId)}/${transition}`,
+      {
+        method: "POST",
+        body: input,
+        ...options,
+      },
+    );
   }
 
   updateFolder(folderId, input, options = {}) {

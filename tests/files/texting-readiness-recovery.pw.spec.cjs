@@ -28,6 +28,7 @@ async function setup(page) {
           manageBilling: true,
           manualQueue: true,
           canPrepareProviderMedia: true,
+          readReporting: true,
         },
       },
     }),
@@ -267,7 +268,8 @@ for (const failedRead of [null, "workspace", "billing/summary", "conversation"])
       page,
     }, info) => {
       const fixture = await setup(page),
-        replies = [];
+        replies = [],
+        acknowledgements = [];
       let readFails = Boolean(failedRead);
       await page.route(`**${PROMPT}/conversations/conversation-one`, (route) =>
         json(route, {
@@ -289,7 +291,15 @@ for (const failedRead of [null, "workspace", "billing/summary", "conversation"])
               status: "received",
             },
           ],
+          readToken: "visible-reply-page",
         }),
+      );
+      await page.route(
+        `**${PROMPT}/conversations/conversation-one/read`,
+        (route) => {
+          acknowledgements.push(route.request().postDataJSON());
+          return json(route, { unreadReplies: 0 });
+        },
       );
       if (failedRead)
         await page.route(
@@ -370,5 +380,11 @@ for (const failedRead of [null, "workspace", "billing/summary", "conversation"])
         fullPage: true,
       });
       expect(replies).toHaveLength(1);
+      expect(acknowledgements.length).toBeGreaterThan(0);
+      expect(
+        acknowledgements.every(
+          (body) => body.readToken === "visible-reply-page",
+        ),
+      ).toBe(true);
       expect(fixture.errors).toEqual([]);
     });

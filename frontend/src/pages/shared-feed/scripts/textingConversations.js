@@ -29,7 +29,8 @@ export function createConversations(r) {
     pollDeadline = 0,
     pendingReply,
     disposed = false,
-    refreshing = false;
+    refreshing = false,
+    readFramePending = false;
   function dispose() {
     disposed = true;
     clearTimeout(pollTimer);
@@ -51,6 +52,8 @@ export function createConversations(r) {
         ...list(result.messages),
       ];
       s.cursor = result.nextCursor;
+      if (result.readToken && r.can("readReporting"))
+        (s.readTokens ||= new Map()).set(result.readToken, resource);
       if (
         pendingReply &&
         s.messages.some(
@@ -152,6 +155,54 @@ export function createConversations(r) {
       }
     }
   }
+  // A returned page is acknowledged only after its conversation has rendered.
+  // Background preloads and hidden tabs never clear unread replies.
+  function scheduleRead() {
+    if (
+      readFramePending ||
+      disposed ||
+      !state().readTokens?.size ||
+      typeof requestAnimationFrame !== "function"
+    )
+      return;
+    readFramePending = true;
+    requestAnimationFrame(async () => {
+      readFramePending = false;
+      if (disposed || document.hidden) return;
+      const s = state(),
+        resource = r.context().resourceId;
+      for (const [readToken, conversationId] of s.readTokens || []) {
+        if (disposed || document.hidden || resource !== conversationId) return;
+        try {
+          r.guard();
+          s.readTokens.delete(readToken);
+          const result = await r.api(
+            `/conversations/${id(conversationId)}/read`,
+            { readToken },
+          );
+          if (disposed) return;
+          r.guard();
+          if (s.conversation?.conversationId === conversationId)
+            s.conversation.unreadReplies = result.unreadReplies;
+          s.readError = false;
+        } catch (error) {
+          if (disposed) return;
+          try {
+            r.guard();
+          } catch {
+            return;
+          }
+          if ([401, 403].includes(error?.status)) {
+            r.fail(error);
+            r.changed();
+            return;
+          }
+          s.readError = true;
+        }
+      }
+      if (!disposed) r.changed();
+    });
+  }
   function attachments(message, s) {
     if (s.conversation?.stream !== "opt_in") return "";
     return list(message.attachments)
@@ -182,7 +233,7 @@ export function createConversations(r) {
           "Replies and delivery updates appear here.",
           button("conversations-refresh", "Refresh", { secondary: true }),
         ) +
-        `<section class="pt-card">${list(s.items).length ? s.items.map((row) => `<div class="pt-row"><div><strong>${e(row.displayName || row.phone)}</strong><p class="pt-muted">${e(when(row.lastMessageAtMs))} · ${row.suppressed ? "Opted out" : e(label(row.status))}</p></div>${go("conversation", "Open", row.conversationId, true)}</div>`).join("") : `<h2>No conversations yet</h2><p class="pt-muted">Messages appear after verified sending and reply notifications.</p>`}${s.cursor ? button("conversations-more", "Load more", { secondary: true }) : ""}</section>`
+        `<section class="pt-card">${list(s.items).length ? s.items.map((row) => `<div class="pt-row"><div><strong>${e(row.displayName || row.phone)}</strong><p class="pt-muted">${Number.isSafeInteger(row.unreadReplies) ? `${e(row.unreadReplies)} unread · ` : ""}${e(when(row.lastMessageAtMs))} · ${row.suppressed ? "Opted out" : e(label(row.status))}</p></div>${go("conversation", "Open", row.conversationId, true)}</div>`).join("") : `<h2>No conversations yet</h2><p class="pt-muted">Messages appear after verified sending and reply notifications.</p>`}${s.cursor ? button("conversations-more", "Load more", { secondary: true }) : ""}</section>`
       );
     if (!c) return "";
     const hold = r.sendHeld(`reply:${c.conversationId}`),
@@ -382,7 +433,19 @@ export function createConversations(r) {
   }
   return {
     load,
-    render: () => render() + outcomes.render(),
+    render: () => {
+      const html = render() + outcomes.render();
+      if (r.context().resourceId && state().conversation) scheduleRead();
+      return (
+        html +
+        (state().readError
+          ? notice(
+              "Unread status could not be saved",
+              "Refresh this conversation to try again.",
+            )
+          : "")
+      );
+    },
     submit,
     action,
     change,

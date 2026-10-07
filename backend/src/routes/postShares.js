@@ -8,6 +8,9 @@ const router = express.Router();
 
 const DEFAULT_ANDROID_PACKAGE = "com.luxcorp.polis";
 const DEFAULT_BRAND_NAME = "Polis";
+const SHARED_APP_ASSET_VERSION = encodeURIComponent(
+  process.env.POLIS_WEB_ASSET_VERSION || "contact-book-ui-20260930",
+);
 const SOCIAL_CARD_WIDTH = 1200;
 const SOCIAL_CARD_HEIGHT = 630;
 const SOCIAL_CARD_FETCH_TIMEOUT_MS = 5000;
@@ -95,6 +98,15 @@ const APP_SHELL_ROUTE_DEFINITIONS = [
     routeKey: "post-analytics",
     pattern: /^\/posts\/([^/]+)\/analytics$/u,
     params: ["postId"],
+  },
+  {
+    routeKey: "organization-workspace",
+    pattern: /^\/workspace\/(coalition|candidate)\/([^/]+)(?:\/(.*))?$/u,
+    params: [
+      "organizationScopeType",
+      "organizationScopeId",
+      "organizationSection",
+    ],
   },
   { routeKey: "feed", pattern: /^\/feed$/u, params: [] },
   { routeKey: "create", pattern: /^\/create$/u, params: [] },
@@ -1045,7 +1057,7 @@ function renderWebShellPage({
     <meta name="twitter:description" content="${escapeAttribute(safeDescription)}" />
     <link rel="canonical" href="${escapeAttribute(canonicalUrl)}" />
     <link rel="icon" type="image/png" href="/Polis.png" />
-    <link rel="stylesheet" href="/css/shared-feed.css?v=contact-book-ui-20260930" />
+    <link rel="stylesheet" href="/css/shared-feed.css?v=${SHARED_APP_ASSET_VERSION}" />
     ${extraMeta}
     <style>
       :root {
@@ -1173,7 +1185,7 @@ function renderWebShellPage({
       window.__POLIS_WEB_APP__ = ${inlineConfig};
       window.__POLIS_SHARED_FEED__ = window.__POLIS_WEB_APP__;
     </script>
-    <script defer src="/scripts/shared-feed.js?v=contact-book-ui-20260930"></script>
+    <script defer src="/scripts/shared-feed.js?v=${SHARED_APP_ASSET_VERSION}"></script>
     <noscript>
       <div class="shared-feed-shell-fallback">
         <div class="shared-feed-shell-fallback__card">
@@ -1292,6 +1304,15 @@ function getAppShellPageMeta(routeMatch) {
   }
 
   switch (routeKey) {
+    case "organization-workspace":
+      return {
+        title: "Organization Workspace | Polis",
+        description:
+          "Manage organization publishing, people, audiences, roles, and social connections.",
+        eyebrow: "Organization Workspace",
+        headline: "Opening your workspace",
+        supportingCopy: "Sign in to continue your organization work.",
+      };
     case "auth":
       if (
         routePath === "/auth/signup/email" ||
@@ -2010,6 +2031,8 @@ router.get(
     "/coalitions/:coalitionId/*",
     "/missions",
     "/missions/:missionId",
+    "/workspace/:scopeType/:scopeId",
+    "/workspace/:scopeType/:scopeId/*",
     "/topics",
     "/onboarding/profile",
     "/onboarding/photo",

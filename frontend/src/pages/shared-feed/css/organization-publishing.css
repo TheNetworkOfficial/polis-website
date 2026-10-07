@@ -1,0 +1,295 @@
+/* Organization publishing uses the current theme and accommodates enlarged text.
+ * Keep these overrides scoped so personal creation retains its existing layout. */
+#shared-feed-app .shared-organization-publishing {
+  color: var(--polis-text);
+  overflow-wrap: anywhere;
+}
+
+#shared-feed-app
+  .shared-organization-publishing
+  :is(
+    .shared-create-hero,
+    .shared-create-panel,
+    .shared-settings-panel,
+    .shared-create-mention-menu
+  ) {
+  border-color: var(--polis-border);
+  background: var(--polis-surface);
+  color: var(--polis-text);
+}
+
+#shared-feed-app
+  .shared-organization-publishing
+  :is(
+    .shared-create-review__header,
+    .shared-create-review-section,
+    .shared-create-caption-composer,
+    .shared-create-branding,
+    .shared-create-save-export,
+    .shared-create-crosspost,
+    .shared-create-mode-strip,
+    .shared-create-upload-note,
+    .shared-create-inline-status,
+    .shared-create-topic-empty,
+    .shared-create-option-row,
+    .shared-create-youtube-defaults,
+    .shared-create-crosspost__summary > span,
+    .shared-create-crosspost-target,
+    .shared-create-topic-picker,
+    .shared-create-topic-group
+  ) {
+  border-color: var(--polis-border);
+  background: var(--polis-surface-raised);
+  color: var(--polis-text);
+}
+
+#shared-feed-app
+  .shared-organization-publishing
+  :is(
+    h1,
+    h2,
+    h3,
+    strong,
+    label,
+    label > span,
+    .shared-create-mode,
+    .shared-create-mention-option,
+    .shared-create-topic-group summary
+  ) {
+  color: var(--polis-text);
+}
+
+#shared-feed-app
+  .shared-organization-publishing
+  :is(
+    p,
+    small,
+    .shared-create-inline-status,
+    .shared-create-crosspost-target em,
+    .shared-create-mention-empty
+  ) {
+  color: var(--polis-text-muted);
+}
+
+#shared-feed-app
+  .shared-organization-publishing
+  :is(
+    .shared-create-review__header > span:last-child,
+    .shared-create-lock-pill,
+    .shared-create-topic-chip,
+    .shared-create-topic-option,
+    .shared-create-crosspost__providers span,
+    .shared-create-audience-preview span
+  ) {
+  border-color: var(--polis-border);
+  background: var(--polis-surface);
+  color: var(--polis-text);
+}
+
+#shared-feed-app
+  .shared-organization-publishing
+  .shared-feed-chip:not(.shared-feed-chip--primary) {
+  border-color: var(--polis-border-strong);
+  background: var(--polis-surface-raised);
+  color: var(--polis-text);
+}
+
+#shared-feed-app
+  .shared-organization-publishing
+  .shared-create-file-chip
+  :is(span, svg) {
+  color: inherit;
+}
+
+#shared-feed-app
+  .shared-organization-publishing
+  :is(.shared-feed-chip:disabled, .shared-create-file-chip.is-disabled) {
+  opacity: 1;
+  background: var(--polis-surface-raised);
+  color: var(--polis-text-muted);
+  -webkit-text-fill-color: currentColor;
+  border-style: dashed;
+}
+
+#shared-feed-app
+  .shared-organization-publishing
+  :is(
+    .shared-create-mode.is-selected,
+    .shared-create-crosspost-target.is-selected
+  ) {
+  border-color: var(--polis-primary);
+  background: var(--polis-primary-container);
+  color: var(--polis-on-primary-container);
+}
+
+#shared-feed-app
+  .shared-organization-publishing
+  :is(.shared-create-inline-status.is-error, [role="alert"]) {
+  color: var(--polis-on-danger-container);
+  background: var(--polis-danger-container);
+}
+
+#shared-feed-app
+  .shared-organization-publishing
+  :is(
+    .shared-create-hero__actions,
+    .shared-create-caption-actions,
+    .shared-create-actions,
+    .shared-create-crosspost__actions,
+    .shared-create-review__header,
+    .shared-create-youtube-defaults
+  ) {
+  flex-direction: row;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+#shared-feed-app
+  .shared-organization-publishing
+  :is(.shared-feed-chip, .shared-create-actions > label) {
+  min-width: 0;
+  max-width: 100%;
+  height: auto;
+  min-height: 44px;
+  white-space: normal;
+  line-height: 1.4;
+}
+
+#shared-feed-app
+  .shared-organization-publishing
+  :is(
+    .shared-feed-chip > span,
+    .shared-create-crosspost-target strong,
+    .shared-create-crosspost-target small,
+    .shared-create-youtube-defaults strong
+  ) {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+#shared-feed-app .shared-organization-publishing .shared-create-options-list {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+}
+
+#shared-feed-app .shared-organization-publishing .shared-create-option-row {
+  min-height: 44px;
+}
+
+#shared-feed-app
+  .shared-organization-publishing
+  .shared-create-option-row
+  strong {
+  text-transform: none;
+  font-size: 0.9375rem;
+  line-height: 1.4;
+}
+
+#shared-feed-app
+  .shared-organization-publishing
+  .shared-create-crosspost__summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 7rem), 1fr));
+}
+
+#shared-feed-app
+  .shared-organization-publishing
+  .shared-create-crosspost__summary
+  > span {
+  min-width: 0;
+}
+
+#shared-feed-app
+  .shared-organization-publishing
+  .shared-create-actions
+  > label {
+  flex: 1 0 100%;
+  display: grid;
+  gap: 0.5rem;
+  text-transform: none;
+}
+
+#shared-feed-app .shared-organization-publishing [data-org-review-reason] {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 6rem;
+  padding: 0.75rem;
+  resize: vertical;
+  font: inherit;
+  line-height: 1.5;
+  background: var(--polis-surface);
+  color: var(--polis-text);
+}
+
+#shared-feed-app
+  .shared-organization-publishing
+  :is(
+    select,
+    input:not([type="checkbox"]):not([type="radio"]):not([type="file"])
+  ) {
+  min-width: 0;
+  min-height: 44px;
+  max-width: 100%;
+  height: auto;
+  font: inherit;
+  line-height: 1.4;
+}
+
+#shared-feed-app
+  .shared-organization-publishing
+  input:is([type="checkbox"], [type="radio"]) {
+  width: 1.125rem;
+  height: 1.125rem;
+  flex-shrink: 0;
+}
+
+#shared-feed-app
+  .shared-organization-publishing
+  :is(.shared-create-hero h1, .shared-settings-panel h2) {
+  line-height: 1.2;
+}
+
+@media (max-width: 40rem) {
+  #shared-feed-app
+    .shared-organization-publishing
+    :is(
+      .shared-create-options-list,
+      .shared-create-crosspost__summary,
+      .shared-create-crosspost-youtube,
+      .shared-create-topic-picker__toolbar
+    ) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #shared-feed-app
+    .shared-organization-publishing
+    .shared-create-crosspost__summary
+    > span {
+    display: flex;
+    align-items: baseline;
+    gap: 0.75rem;
+    text-align: start;
+  }
+
+  #shared-feed-app
+    .shared-organization-publishing
+    :is(.shared-create-hero__actions, .shared-create-caption-actions)
+    .shared-feed-chip {
+    flex: 1 1 9rem;
+    width: auto;
+    justify-content: center;
+  }
+
+  #shared-feed-app
+    .shared-organization-publishing
+    .shared-create-hero__actions {
+    overflow: visible;
+  }
+
+  #shared-feed-app
+    .shared-organization-publishing
+    .shared-create-actions
+    .shared-feed-chip {
+    flex: 1 1 100%;
+    justify-content: center;
+  }
+}

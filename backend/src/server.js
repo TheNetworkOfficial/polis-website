@@ -54,6 +54,10 @@ const frontendRouteRewrites = [
   [/^\/messages(?:\/.*)?$/u, "messages/index.html"],
   [/^\/candidate-dashboard(?:\/.*)?$/u, "candidate-dashboard/index.html"],
   [/^\/organizations(?:\/.*)?$/u, "organizations/index.html"],
+  [
+    /^\/workspace\/(?:coalition|candidate)\/[^/]+(?:\/.*)?$/u,
+    "workspace/index.html",
+  ],
   [/^\/coalitions(?:\/.*)?$/u, "coalitions/index.html"],
   [/^\/files(?:\/.*)?$/u, "files/index.html"],
   [/^\/cta-invite(?:\/.*)?$/u, "cta-invite/index.html"],
@@ -293,10 +297,14 @@ function mountFrontendRoutes(app) {
   require("./models/coalitionCandidate");
   require("./models/coalitionSignup");
 
-  sequelize
-    .sync({ alter: true })
-    .then(() => console.log("All tables synced"))
-    .catch((err) => console.error("Sync error", err));
+  if (process.env.POLIS_SKIP_SCHEMA_SYNC === "true") {
+    console.log("Schema synchronization disabled for this release");
+  } else {
+    sequelize
+      .sync({ alter: true })
+      .then(() => console.log("All tables synced"))
+      .catch((err) => console.error("Sync error", err));
+  }
 
   const PORT = process.env.PORT || 3000;
   app.listen(PORT, () => console.log(`Server listening on port ${PORT}`));

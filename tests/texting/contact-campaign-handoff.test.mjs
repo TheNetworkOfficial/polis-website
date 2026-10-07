@@ -180,6 +180,33 @@ test("book handoff opens message while local selection builds; review gates save
   );
 });
 
+test("independent Contacts handoff retains reviewed scope and selected rows", async (t) => {
+  const h = await harness(t);
+  h.page.reset();
+  h.page.beginContactCampaign({
+    scopeKey: "coalition:org-one",
+    actorUserId: "admin",
+    selection: {
+      includeIds: ["contact-one"],
+      excludeIds: [],
+      allMatching: false,
+      endpointChoices: {},
+      query: {},
+    },
+  });
+  h.route({ section: "campaigns", resourceId: "new" });
+  await h.page.load();
+  const selection = h.calls.find((call) => call.url.endsWith("/selections"));
+  assert.deepEqual(selection.body.includeIds, ["contact-one"]);
+  assert.match(h.page.render(), /Review recipients/);
+  assert.equal(
+    h.calls.filter(
+      (call) => call.url.includes("/text-banking/") && call.method === "POST",
+    ).length,
+    0,
+  );
+});
+
 for (const change of ["organization", "user", "permission", "denied"])
   test(`pending campaign selection is discarded after ${change} changes`, async (t) => {
     const h = await harness(t);

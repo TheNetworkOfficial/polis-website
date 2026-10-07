@@ -49,6 +49,8 @@ const VIEW_PATHS = new Map([
   ["review", "needs_review"],
   ["recommended", "recommended_shares"],
   ["uploads", "uploads"],
+  ["archive", "archive"],
+  ["trash", "trash"],
 ]);
 const authConfig = {
   region: __COGNITO_REGION__,
@@ -295,6 +297,8 @@ function routeTitle() {
     recent: "Recent",
     shared: "Shared with me",
     review: "Needs review",
+    archive: "Archived",
+    trash: "Trash",
     recommended: "Recommended",
     uploads: "Uploads",
     reference: "Files reference",
@@ -880,6 +884,11 @@ function mergeListingItems(existing, incoming) {
 }
 
 const folderCollections = {
+  children: {
+    method: "listChildFolders",
+    keys: ["children", "folders", "items"],
+    tab: "current",
+  },
   editions: {
     method: "listEditions",
     keys: ["editions", "items", "results"],
@@ -1094,7 +1103,7 @@ async function loadIncomingGrantRequests(isCurrent = () => true) {
 }
 
 async function loadFolder(folderId, tab, isCurrent = () => true) {
-  const folderPayload = await api.getFolder(folderId);
+  const folderPayload = await api.getFolder(folderId, { limit: 50 });
   if (!isCurrent()) return;
   const folder = folderPayload?.folder || folderPayload;
   const nextFolder = {
@@ -1104,6 +1113,12 @@ async function loadFolder(folderId, tab, isCurrent = () => true) {
     revision: folderPayload?.revision ?? folder?.revision,
     etag: folderPayload?.etag || folder?.etag || "",
   };
+  state.folder = nextFolder;
+  setFolderCollection("children", {
+    children: folderPayload.children || [],
+    nextCursor: folderPayload.childrenNextCursor,
+  });
+  if (["archived", "trashed"].includes(folder.status)) return;
   const tasks = [api.listAssets(folderId), api.listEditions(folderId)];
   if (tab === "proposals") tasks.push(api.listProposals(folderId));
   if (tab === "history") tasks.push(api.listHistory(folderId));
@@ -1410,6 +1425,8 @@ function renderSidebar() {
       ${navItem({ path: "/files/shared", key: "shared", label: "Shared with me", iconName: "shared" })}
       ${navItem({ path: "/files/review", key: "review", label: "Needs review", iconName: "review", badge: pending.needsReview || pending.proposals })}
       ${navItem({ path: "/files/recommended", key: "recommended", label: "Recommended", iconName: "spark", badge: pending.suggestions })}
+      ${navItem({ path: "/files/archive", key: "archive", label: "Archived", iconName: "folder" })}
+      ${navItem({ path: "/files/trash", key: "trash", label: "Trash", iconName: "folder" })}
       ${navItem({ path: "/files/uploads", key: "uploads", label: "Uploads", iconName: "upload", badge: state.uploadQueue.filter((item) => item.status === "uploading").length })}
     </nav>
     <div class="files-sidebar__section">
@@ -1437,6 +1454,8 @@ function renderMobileNav() {
     ${navItem({ path: "/files/shared", key: "shared", label: "Shared", iconName: "shared" })}
     ${navItem({ path: "/files/review", key: "review", label: "Review", iconName: "review" })}
     ${navItem({ path: "/files/recommended", key: "recommended", label: "For you", iconName: "spark" })}
+    ${navItem({ path: "/files/archive", key: "archive", label: "Archived", iconName: "folder" })}
+    ${navItem({ path: "/files/trash", key: "trash", label: "Trash", iconName: "folder" })}
   </nav>`;
 }
 
@@ -1822,17 +1841,19 @@ function renderItem(item) {
   const id = entityId(item);
   const folder = isFolder(item);
   const selected = state.selection.has(id);
+  const recovering = folder && ["archived", "trashed"].includes(item.status);
   const edition = entityName(
     item?.edition,
     normalizeString(item?.editionLabel || item?.versionLabel),
   );
   return `<article class="files-item ${selected ? "is-selected" : ""}" data-kind="${folder ? "folder" : "asset"}">
     ${!folder && isPostSelectableMedia(item) ? `<label class="files-item__select"><span class="sr-only">Select ${escapeHtml(entityName(item))}</span><input type="checkbox" data-select-asset="${escapeHtml(id)}" ${selected ? "checked" : ""} /></label>` : ""}
-    <button class="files-item__open" ${folder ? `data-open-folder="${escapeHtml(id)}"` : isPostSelectableMedia(item) ? `data-select-asset="${escapeHtml(id)}"` : "disabled"} aria-label="${folder ? "Open" : isPostSelectableMedia(item) ? (selected ? "Deselect" : "Select") : "Preview unavailable for"} ${escapeHtml(entityName(item))}">
+    <button class="files-item__open" ${recovering && can("canManage", "files_manage") ? `data-action="folder-lifecycle" data-transition="restore" data-item-id="${escapeHtml(id)}"` : folder ? `data-open-folder="${escapeHtml(id)}"` : isPostSelectableMedia(item) ? `data-select-asset="${escapeHtml(id)}"` : "disabled"} aria-label="${folder ? "Open" : isPostSelectableMedia(item) ? (selected ? "Deselect" : "Select") : "Preview unavailable for"} ${escapeHtml(entityName(item))}">
       ${itemThumbnail(item)}
       <span class="files-item__body"><strong>${escapeHtml(entityName(item))}</strong><span>${folder ? `${Number(item?.itemCount || item?.assetCount || 0)} items` : `${escapeHtml(formatBytes(item?.size || item?.sizeBytes))}${edition ? ` · ${escapeHtml(edition)}` : ""}`}</span></span>
     </button>
     <div class="files-item__meta"><span>${escapeHtml(formatDate(item?.updatedAt || item?.createdAt))}</span>${usageBadges(item)}</div>
+    ${recovering && can("canManage", "files_manage") ? `<button class="files-button files-button--ghost" data-action="folder-lifecycle" data-transition="restore" data-item-id="${escapeHtml(id)}">Restore</button>` : ""}
     <button class="files-item__more" data-action="item-menu" data-item-id="${escapeHtml(id)}" aria-label="More actions for ${escapeHtml(entityName(item))}">${icon("more")}</button>
   </article>`;
 }
@@ -2094,7 +2115,7 @@ function renderCurrentTab() {
   const partialHint = state.cursor
     ? '<p class="files-form-note">More files are available. Filtering and sorting apply only to loaded files; load more to include later pages.</p>'
     : "";
-  return `<div class="files-folder-columns"><div><div class="files-current-banner">${icon("check")}<div><strong>Current, approved material</strong><span>People with shared access see this edition. Proposed changes stay separate until reviewed.</span></div></div>${renderToolbar({ count: items.length })}${partialHint}${renderItems(items, state.folderFilter ? "No loaded files match" : "This edition is empty", state.folderFilter ? "Change the filter or load more files to continue looking." : folderUploadIntent() === "proposal" ? "Upload material for review; it stays outside Current until approved." : folderUploadIntent() === "commit" ? "Upload approved material, or propose an addition if this folder is review-gated." : "Approved files will appear here.")}</div>${renderEditionRail()}</div>`;
+  return `<div class="files-folder-columns"><div>${(state.folderData.children || []).length || state.folderPagination.children?.cursor ? `<section class="files-section"><h3>Folders</h3><div class="files-items files-items--list">${(state.folderData.children || []).map(renderItem).join("")}</div>${renderFolderCollectionPagination("children")}</section>` : ""}<div class="files-current-banner">${icon("check")}<div><strong>Current, approved material</strong><span>People with shared access see this edition. Proposed changes stay separate until reviewed.</span></div></div>${renderToolbar({ count: items.length })}${partialHint}${renderItems(items, state.folderFilter ? "No loaded files match" : "This edition is empty", state.folderFilter ? "Change the filter or load more files to continue looking." : folderUploadIntent() === "proposal" ? "Upload material for review; it stays outside Current until approved." : folderUploadIntent() === "commit" ? "Upload approved material, or propose an addition if this folder is review-gated." : "Approved files will appear here.")}</div>${renderEditionRail()}</div>`;
 }
 
 function proposalStatus(proposal) {
@@ -2219,6 +2240,9 @@ function renderFolder() {
     return `<section class="files-page">${renderSkeletons()}</section>`;
   if (state.contentStatus === "error")
     return `<section class="files-page">${renderInlineError()}</section>`;
+  if (["archived", "trashed"].includes(state.folder?.status)) {
+    return `<section class="files-page"><button class="files-back" data-nav="/files/${state.folder.status === "trashed" ? "trash" : "archive"}">Back to files</button><h2>${escapeHtml(entityName(state.folder, "Folder"))}</h2><p>This folder and its contents are preserved. Restore its parent first if the parent is also inactive. Restore does not renew revoked or expired sharing grants.</p>${can("canManage", "files_manage") ? '<button class="files-button files-button--primary" data-action="folder-lifecycle" data-transition="restore">Restore folder</button>' : ""}</section>`;
+  }
   const context = state.folder?.context || {};
   const editionTracker = activeEditionMaterialization();
   const editionLocked = Boolean(
@@ -2248,7 +2272,7 @@ function renderFolder() {
     .map((value) => `<span>${escapeHtml(value)}</span>`)
     .join(
       "",
-    )}</div><h2>${escapeHtml(entityName(state.folder, "Folder"))}</h2><p>${escapeHtml(state.folder?.description || "Current, governed information for authorized collaborators.")}</p></div><div class="files-folder-hero__actions">${can("canManage", "files_manage") && state.folder?.access?.shared !== true ? `<button class="files-button files-button--ghost" data-action="new-folder" ${editionLocked ? "disabled" : ""}>New subfolder</button><button class="files-button files-button--ghost" data-action="folder-settings" ${editionLocked ? "disabled" : ""}>Folder settings</button><button class="files-button files-button--ghost" data-action="new-edition" ${editionLocked ? "disabled" : ""}>Start a new edition</button>` : ""}${can("canManage", "files_manage") && state.folder?.access?.shared !== true && state.folder?.status !== "archived" ? `<button class="files-button files-button--danger" data-action="archive-folder" ${editionLocked ? "disabled" : ""}>Archive folder</button>` : ""}${canOpenUpload() ? `<button class="files-button files-button--primary" data-action="open-upload" ${editionLocked ? "disabled" : ""}>${folderUploadIntent() === "proposal" ? "Upload for review" : "Upload"}</button>` : ""}</div></div></div>${renderFolderTabs()}<div class="files-folder-tab">${tabContent}</div></section>`;
+    )}</div><h2>${escapeHtml(entityName(state.folder, "Folder"))}</h2><p>${escapeHtml(state.folder?.description || "Current, governed information for authorized collaborators.")}</p></div><div class="files-folder-hero__actions">${can("canManage", "files_manage") && state.folder?.access?.shared !== true ? `<button class="files-button files-button--ghost" data-action="new-folder" ${editionLocked ? "disabled" : ""}>New subfolder</button><button class="files-button files-button--ghost" data-action="folder-settings" ${editionLocked ? "disabled" : ""}>Folder settings</button><button class="files-button files-button--ghost" data-action="new-edition" ${editionLocked ? "disabled" : ""}>Start a new edition</button>` : ""}${can("canManage", "files_manage") && state.folder?.access?.shared !== true && state.folder?.status !== "archived" ? `<button class="files-button files-button--danger" data-action="archive-folder" ${editionLocked ? "disabled" : ""}>Archive folder</button><button class="files-button files-button--danger" data-action="folder-lifecycle" data-transition="trash">Move to trash</button>` : ""}${canOpenUpload() ? `<button class="files-button files-button--primary" data-action="open-upload" ${editionLocked ? "disabled" : ""}>${folderUploadIntent() === "proposal" ? "Upload for review" : "Upload"}</button>` : ""}</div></div></div>${renderFolderTabs()}<div class="files-folder-tab">${tabContent}</div></section>`;
 }
 
 function renderUploadsPage() {
@@ -2357,6 +2381,10 @@ function renderModal() {
     "revoke-host-reference": renderRevokeHostReferenceModal,
     "suggestion-edit": renderSuggestionEditModal,
     "archive-folder": renderArchiveFolderModal,
+    "folder-lifecycle": () => {
+      const restore = state.modal.transition === "restore";
+      return `<div class="files-modal__heading"><h2 id="files-modal-title">${restore ? "Restore folder?" : "Move to trash?"}</h2><p>${restore ? "Restore the entire folder. Restore its parent first if needed. Revoked and expired sharing grants remain unavailable." : "This folder and all its contents leave active views. Restore it from Trash. Permanent removal is unavailable for at least 30 days and may be blocked longer by retention holds."}</p></div><form data-form="folder-lifecycle"><div class="files-modal__actions"><button class="files-button files-button--ghost" type="button" data-action="close-modal">Cancel</button><button class="files-button files-button--primary" type="submit">${restore ? "Restore folder" : "Move to trash"}</button></div></form>`;
+    },
     "confirm-decision": renderDecisionModal,
   }[state.modal.type]?.();
   if (!content) return "";
@@ -3222,6 +3250,17 @@ async function handleClick(event) {
     state.modal = { type: "edition" };
     render();
   }
+  if (action === "folder-lifecycle") {
+    const button = event.target.closest("[data-action]");
+    const folder =
+      state.items.find((item) => entityId(item) === button.dataset.itemId) ||
+      state.folder;
+    const transition = button.dataset.transition;
+    if (!folder || !["trash", "restore"].includes(transition)) return;
+    state.modal = { type: "folder-lifecycle", folder, transition };
+    render();
+    return;
+  }
   if (action === "archive-folder") {
     state.modal = { type: "archive-folder" };
     render();
@@ -3403,6 +3442,26 @@ async function handleSubmit(event) {
   if (name === "edition") await submitEdition(data);
   if (name === "archive-edition") await submitArchiveEdition();
   if (name === "suggestion-edit") await submitSuggestionEdit(data);
+  if (name === "folder-lifecycle") {
+    const { folder, transition } = state.modal;
+    const version = requireResourceRevision(folder, "This folder");
+    if (version === null) return;
+    const result = await withBusy(
+      `folder-${transition}`,
+      (key) =>
+        api.transitionFolder(
+          entityId(folder),
+          transition,
+          { expectedVersion: version },
+          mutationOptions(key, folder, version),
+        ),
+      transition === "restore" ? "Folder restored." : "Folder moved to trash.",
+    );
+    if (result) {
+      state.modal = null;
+      navigate(transition === "restore" ? "/files" : "/files/trash");
+    }
+  }
   if (name === "archive-folder") await submitArchiveFolder(data);
   if (name === "host-reference") await submitHostReference(data);
   if (name === "revoke-host-reference") await submitRevokeHostReference(data);
@@ -4735,6 +4794,8 @@ async function submitPostDraft(data) {
     if (revision === null) return;
     expectedAssetVersions[entityId(item)] = revision;
   }
+  const postingContext = JSON.stringify(canonicalRequest(mutationScope()));
+  const postingFolderId = entityId(state.folder);
   const result = await withBusy(
     "post",
     (actionKey) =>
@@ -4778,10 +4839,29 @@ async function submitPostDraft(data) {
     },
   );
   if (!result) return;
+  if (
+    postingContext !== JSON.stringify(canonicalRequest(mutationScope())) ||
+    postingFolderId !== entityId(state.folder)
+  )
+    return;
   state.postDraft.open = false;
   state.postDraft.description = "";
   state.selection.clear();
   render();
+  const draft = result.draft;
+  const draftScopeType = normalizeString(draft?.scopeType);
+  const draftScopeId = normalizeString(draft?.scopeId);
+  const draftId = normalizeString(draft?.draftId || result.draftId);
+  if (
+    ["coalition", "candidate"].includes(draftScopeType) &&
+    draftScopeId &&
+    draftId
+  ) {
+    window.location.assign(
+      `/workspace/${draftScopeType}/${encodeURIComponent(draftScopeId)}/work/publishing/drafts/${encodeURIComponent(draftId)}`,
+    );
+    return;
+  }
   const postPath = safePostPath(result.postPath, result.postId);
   if (postPath) window.location.assign(postPath);
 }

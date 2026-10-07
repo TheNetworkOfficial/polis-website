@@ -978,6 +978,10 @@ const sharedAppRouteRewrites = [
   [/^\/messages(?:\/.*)?$/u, "/messages/index.html"],
   [/^\/candidate-dashboard(?:\/.*)?$/u, "/candidate-dashboard/index.html"],
   [/^\/organizations(?:\/.*)?$/u, "/organizations/index.html"],
+  [
+    /^\/workspace\/(?:coalition|candidate)\/[^/]+(?:\/.*)?$/u,
+    "/workspace/index.html",
+  ],
   [/^\/coalitions(?:\/.*)?$/u, "/coalitions/index.html"],
   [/^\/cta-invite(?:\/.*)?$/u, "/cta-invite/index.html"],
   [/^\/petitions(?:\/.*)?$/u, "/petitions/index.html"],
@@ -1254,6 +1258,18 @@ module.exports = {
     staticOrganizationGovernanceShell("organizations.html"),
     staticOrganizationGovernanceShell("organizations/index.html"),
     staticOrganizationGovernanceShell("route-shells/organizations.html"),
+    ...["workspace/index.html", "route-shells/workspace.html"].map((filename) =>
+      staticSharedAppShell(filename, {
+        route: "/workspace/coalition/org/work/publishing",
+        routeKey: "organization-workspace",
+        title: "Organization Workspace | Polis",
+        description:
+          "Manage organization publishing, people, audiences, roles, and social connections.",
+        eyebrow: "Organization Workspace",
+        headline: "Opening your workspace",
+        supportingCopy: "Sign in to continue your organization work.",
+      }),
+    ),
     staticCoalitionsShell("coalitions.html"),
     staticCoalitionsShell("coalitions/index.html"),
     ...sharedAppShells.map((shell) =>
