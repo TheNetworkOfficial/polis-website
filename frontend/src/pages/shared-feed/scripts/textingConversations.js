@@ -197,7 +197,8 @@ export function createConversations(r) {
         "CONVERSATION",
         c.displayName || c.phone,
         c.displayName ? c.phone : "",
-        go("inbox", "All conversations", "", true) + outcomes.trigger({ conversationId: c.conversationId }),
+        go("inbox", "All conversations", "", true) +
+          outcomes.trigger({ conversationId: c.conversationId }),
       ) +
       `${s.preparingAccess ? notice("Preparing your texting access…") : ""}${s.refreshError ? notice("Updates are delayed", "Refresh to check the saved messages. Do not resend an accepted reply.") : ""}<div class="pt-grid pt-grid--two"><section class="pt-card"><div class="pt-row"><span class="pt-tag">${c.suppressed ? "Opted out" : e(label(c.status))}</span>${button("conversations-refresh", "Refresh", { secondary: true })}</div><div class="pt-workspace-thread">${
         list(s.messages)
@@ -244,12 +245,35 @@ export function createConversations(r) {
         list(s.messages).map((message) => String(message.messageId)),
       );
     r.holdSend(key);
-    const result = (
-      await r.api(`/conversations/${id(c.conversationId)}/reply`, {
-        actionId,
-        content,
-      })
-    ).result;
+    let result;
+    try {
+      result = (
+        await r.api(`/conversations/${id(c.conversationId)}/reply`, {
+          actionId,
+          content,
+        })
+      ).result;
+    } catch (error) {
+      const proof = error?.payload;
+      // A fresh conversation's canReply flag cannot resolve a lost response.
+      // Only the server's durable rejection of this exact action clears its hold.
+      if (
+        proof?.ok !== false ||
+        proof.sendOutcome !== "not_attempted" ||
+        proof.actionId !== actionId ||
+        typeof proof.error !== "string"
+      )
+        throw error;
+      r.guard();
+      r.releaseSend(key);
+      s.reply = content;
+      s.sendStatusNeedsRead = true;
+      r.toast(
+        "Reply was not sent. Review the current status before trying again.",
+      );
+      await refresh(c.conversationId);
+      return true;
+    }
     if (result?.actionId !== actionId)
       throw new Error("The reply outcome could not be verified.");
     if (result.state === "accepted") {
@@ -346,5 +370,13 @@ export function createConversations(r) {
     }
     return false;
   }
-  return { load, render: () => render() + outcomes.render(), submit, action, change, refresh, dispose };
+  return {
+    load,
+    render: () => render() + outcomes.render(),
+    submit,
+    action,
+    change,
+    refresh,
+    dispose,
+  };
 }

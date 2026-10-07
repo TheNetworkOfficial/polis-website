@@ -152,6 +152,83 @@ function conversationHarness(api) {
   };
 }
 
+test("a durable exact-action pre-send rejection releases only its hold and preserves reply text", async (t) => {
+  browserStub(t);
+  const h = conversationHarness(async (route, body) => {
+    if (route.endsWith("/reply"))
+      throw Object.assign(new Error("Closed hours"), {
+        status: 409,
+        payload: {
+          ok: false,
+          error: "prompt_reply_not_permitted",
+          sendOutcome: "not_attempted",
+          actionId: body.actionId,
+        },
+      });
+    return response();
+  });
+  t.after(() => h.page.dispose());
+  await h.page.load(conversation.conversationId);
+  await acceptReply(h);
+  assert.equal(h.holds.size, 0);
+  assert.equal(h.view.conversations.reply, deliveredMessage.content);
+  assert.match(h.page.render(), /data-workspace-form="reply"/);
+  assert.equal(h.calls.filter((c) => c.route.endsWith("/reply")).length, 1);
+});
+
+test("unknown, mismatched or absent pre-send evidence keeps the hold even after eligible readback", async (t) => {
+  browserStub(t);
+  for (const proof of [
+    {},
+    { sendOutcome: "not_attempted", actionId: "another-action" },
+    { sendOutcome: "unknown" },
+  ]) {
+    const h = conversationHarness(async (route, body) => {
+      if (route.endsWith("/reply"))
+        throw Object.assign(new Error("Reply failed"), {
+          status: 409,
+          payload: {
+            ok: false,
+            error: "prompt_reply_not_permitted",
+            actionId: body.actionId,
+            ...proof,
+          },
+        });
+      return response();
+    });
+    t.after(() => h.page.dispose());
+    await h.page.load(conversation.conversationId);
+    await assert.rejects(acceptReply(h));
+    await h.page.load(conversation.conversationId);
+    assert.equal(h.holds.size, 1);
+    assert.match(h.page.render(), /Reply needs review/);
+    await assert.rejects(acceptReply(h));
+    assert.equal(h.calls.filter((c) => c.route.endsWith("/reply")).length, 1);
+  }
+});
+
+test("a late pre-send rejection from another route cannot clear a held reply", async (t) => {
+  browserStub(t);
+  const h = conversationHarness(async (route, body) => {
+    if (route.endsWith("/reply")) {
+      h.changeRoute();
+      throw Object.assign(new Error("Reply failed"), {
+        payload: {
+          ok: false,
+          error: "prompt_reply_not_permitted",
+          sendOutcome: "not_attempted",
+          actionId: body.actionId,
+        },
+      });
+    }
+    return response();
+  });
+  t.after(() => h.page.dispose());
+  await h.page.load(conversation.conversationId);
+  await assert.rejects(acceptReply(h), /Workspace changed/);
+  assert.equal(h.holds.size, 1);
+});
+
 test("accepted replies refresh spending counters and recover delayed delivery without resending or clearing a later draft", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const listeners = browserStub(t),
