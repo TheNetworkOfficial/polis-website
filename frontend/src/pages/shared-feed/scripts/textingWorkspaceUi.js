@@ -111,6 +111,10 @@ export function queueCanSkip(item, now = Date.now()) {
       item.leaseExpiresAtMs <= now)
   )
     return false;
+  if (typeof item.canSkip === "boolean")
+    return (
+      item.canSkip && ["awaiting_confirmation", "blocked"].includes(item.state)
+    );
   if (item.state === "awaiting_confirmation") return true;
   const codes = list(item.blockedReasons);
   return (
@@ -123,6 +127,15 @@ export function queueCanSkip(item, now = Date.now()) {
 export function queueBlockExplanation(item) {
   if (item?.state !== "blocked") return null;
   const codes = new Set(list(item.blockedReasons));
+  if (
+    codes.has("prompt_campaign_paused") ||
+    codes.has("prompt_campaign_archived")
+  )
+    return {
+      title: "Campaign is stopped",
+      text: "Review and skip these held recipients to finish the assignment. This campaign cannot send messages.",
+      canRecheck: false,
+    };
   if (
     ["prompt_recipient_suppressed", "texting_recipient_suppressed"].some(
       (code) => codes.has(code),
@@ -259,6 +272,19 @@ export function messageFundingReady(
     billing.availableMicros >= cost
   );
 }
+/** Renew an untouched held preview only; attempted sends keep their review fence. */
+export function queueCanRefreshPreview(item, now = Date.now()) {
+  return (
+    item?.state === "awaiting_confirmation" &&
+    item.stream !== "opt_in" &&
+    !!item.humanConfirmation &&
+    typeof item.humanConfirmation === "object" &&
+    Number.isSafeInteger(item.expiresAtMs) &&
+    item.expiresAtMs <= now &&
+    list(item.blockedReasons).length === 0
+  );
+}
+
 export function queueCanConfirm(
   item,
   workspace,

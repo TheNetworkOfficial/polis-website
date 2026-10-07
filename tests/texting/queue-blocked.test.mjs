@@ -46,6 +46,7 @@ function fixture() {
             state: "awaiting_confirmation",
             blockedReasons: [],
             humanConfirmation: { recordId: "fresh-proof" },
+            expiresAtMs: Date.now() + 60_000,
           },
         ],
       };
@@ -79,6 +80,174 @@ test("technical validation is visible, stays unsendable, and rechecks the held r
     /Sending unavailable|Check recipient again/,
   );
   assert.equal(state.campaigns.sent, undefined);
+});
+
+test("an expired untouched preview renews the held queue only after explicit refresh", async () => {
+  const { page, state, calls, item } = fixture();
+  Object.assign(item, {
+    state: "awaiting_confirmation",
+    blockedReasons: [],
+    humanConfirmation: { recordId: "old-proof" },
+    expiresAtMs: Date.now() - 1,
+  });
+  assert.match(page.render("send"), /Refresh message previews/);
+  await assert.rejects(page.action("queue-confirm"), /not ready/);
+  assert.equal(calls.length, 0);
+  await page.action("queue-refresh-preview");
+  assert.deepEqual(calls, [
+    { path: "/campaigns/campaign-one/queue", body: {} },
+  ]);
+  assert.equal(state.campaigns.queue.items[0].itemId, item.itemId);
+  assert.equal(
+    state.campaigns.queue.items[0].humanConfirmation.recordId,
+    "fresh-proof",
+  );
+  assert.doesNotMatch(
+    page.render("send"),
+    /Preview expired|Refresh message previews/,
+  );
+  assert.equal(state.campaigns.sent, undefined);
+});
+
+test("preview refresh cannot bypass an attempted send, blocked recipient or provider lease", async () => {
+  const { page, state, calls, item, held } = fixture();
+  Object.assign(item, {
+    state: "awaiting_confirmation",
+    blockedReasons: [],
+    humanConfirmation: {},
+    expiresAtMs: Date.now() - 1,
+  });
+  held.add("queue:campaign-one:held-recipient");
+  await assert.rejects(page.action("queue-refresh-preview"));
+  held.clear();
+  state.campaigns.pendingItemId = item.itemId;
+  await assert.rejects(page.action("queue-refresh-preview"));
+  state.campaigns.pendingItemId = null;
+  for (const status of [
+    "provider_outcome_unknown",
+    "skip_unknown",
+    "lease_expired",
+    "blocked",
+  ]) {
+    item.state = status;
+    assert.doesNotMatch(
+      page.render("send"),
+      /data-workspace-action="queue-refresh-preview"/,
+    );
+    await assert.rejects(page.action("queue-refresh-preview"));
+  }
+  item.state = "awaiting_confirmation";
+  item.stream = "opt_in";
+  await assert.rejects(page.action("queue-refresh-preview"));
+  assert.equal(calls.length, 0);
+});
+
+test("stopped campaigns expose server-authorized Skip recovery while hiding sends", async () => {
+  const { page, state, item } = fixture();
+  Object.assign(state.campaigns.campaign, {
+    status: "archived",
+    queueRecoveryRequired: true,
+  });
+  Object.assign(item, {
+    canSkip: true,
+    blockedReasons: ["prompt_campaign_archived"],
+  });
+  assert.equal(queueCanSkip(item), true);
+  assert.match(page.render("send"), /Campaign is stopped/);
+  assert.match(
+    page.render("send"),
+    /data-workspace-action="queue-skip"[^>]*>Skip recipient/,
+  );
+  assert.doesNotMatch(
+    page.render("send"),
+    /data-workspace-action="queue-confirm"/,
+  );
+  await assert.rejects(page.action("queue-confirm"));
+  state.campaigns.queue.items = [];
+  state.campaigns.queue.state = "complete";
+  assert.match(page.render("send"), /Held recipients reviewed/);
+  assert.doesNotMatch(
+    page.render("send"),
+    /data-workspace-action="queue-load"/,
+  );
+  state.campaigns.queue.state = "preparing";
+  assert.match(page.render("send"), /Check recipients/);
+});
+
+test("explicit skip authority handles restricted held items but never uncertain attempts", () => {
+  const item = {
+    state: "blocked",
+    canSkip: true,
+    blockedReasons: ["prompt_contact_suppressed"],
+  };
+  assert.equal(queueCanSkip(item), true);
+  for (const state of [
+    "provider_outcome_unknown",
+    "skip_unknown",
+    "lease_expired",
+    "confirmed",
+  ]) {
+    assert.equal(queueCanSkip({ ...item, state }), false);
+  }
+  assert.equal(
+    queueCanSkip({ state: "awaiting_confirmation", canSkip: false }),
+    false,
+  );
+  assert.equal(
+    queueCanSkip({ ...item, leaseExpiresAtMs: Date.now() - 1 }),
+    false,
+  );
+});
+
+test("explicit queue loading continues only bounded saved checkpoints and stops errors or unknown allocations", async () => {
+  for (const mode of [
+    "complete",
+    "limit",
+    "unknown",
+    "unmarked",
+    "error",
+    "changed",
+  ]) {
+    const { page, state, item, r } = fixture();
+    let reads = 0;
+    const allocationId = "00000000-0000-4000-8000-000000000001";
+    r.api = async (path, body) => {
+      assert.equal(path, "/campaigns/campaign-one/queue");
+      assert.deepEqual(body, reads === 0 ? {} : { allocationId });
+      reads++;
+      if (mode === "error") throw new Error("Read unavailable");
+      if (mode === "unknown") return { state: "allocation_unknown", items: [] };
+      if (mode === "unmarked") return { state: "preparing", items: [] };
+      if (mode === "complete" && reads === 6)
+        return { state: "held", items: [item] };
+      return {
+        state: "preparing",
+        preparationKind: "queue_materialization",
+        allocationId:
+          mode === "changed" && reads === 2
+            ? "00000000-0000-4000-8000-000000000002"
+            : allocationId,
+        retryAfterMs: 0,
+        items: [],
+      };
+    };
+    if (mode === "error")
+      await assert.rejects(page.action("queue-load"), /Read unavailable/);
+    else if (mode === "changed")
+      await assert.rejects(page.action("queue-load"), /assignment changed/);
+    else await page.action("queue-load");
+    assert.equal(
+      reads,
+      mode === "complete"
+        ? 6
+        : mode === "limit"
+          ? 8
+          : mode === "changed"
+            ? 2
+            : 1,
+    );
+    assert.equal(state.campaigns.sent, undefined);
+  }
 });
 
 test("only explicit recipient suppression implies opt-out; unknown failures and contact restrictions do not", async () => {
