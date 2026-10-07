@@ -16,6 +16,9 @@ async function composer(page, enabled = true) {
   await page
     .getByRole("button", { name: "Create campaign", exact: true })
     .click();
+  await page
+    .getByRole("button", { name: "Review recipients", exact: true })
+    .click();
   const review = page.getByRole("dialog", {
     name: "Review selection",
     exact: true,

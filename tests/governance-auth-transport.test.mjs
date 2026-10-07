@@ -18,7 +18,7 @@ const pageSource = await readFile(
   new URL("shared-feed.js", sourceRoot),
   "utf8",
 );
-const start = pageSource.indexOf("async function fetchJson(");
+const start = pageSource.indexOf("async function fetchJsonRaw(");
 const end = pageSource.indexOf("\nfunction updateItem(", start);
 assert.ok(start >= 0 && end > start, "actual production transport is present");
 
@@ -40,7 +40,7 @@ function transport(
     },
   });
   vm.runInContext(pageSource.slice(start, end), context);
-  return { requests, fetchJson: context.fetchJson };
+  return { requests, fetchJson: context.fetchJsonRaw };
 }
 
 for (const path of [

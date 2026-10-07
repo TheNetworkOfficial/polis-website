@@ -44,6 +44,11 @@ import { createRecipientOutcomes } from "./textingRecipientOutcomes";
 import { createRecipientBatches } from "./textingRecipientBatches";
 import { createCampaignManagement } from "./textingCampaignManagement";
 import {
+  createTextingHistory,
+  readTextingReports,
+  renderTextingReport,
+} from "./textingReporting";
+import {
   availablePersonalization,
   insertPersonalization,
   personalizationPreview,
@@ -112,6 +117,7 @@ export function createCampaigns(r) {
   const outcomes = createRecipientOutcomes(r, "queue-outcome");
   const additions = createRecipientBatches(r, state, recipients);
   const management = createCampaignManagement(r, state);
+  const reporting = createTextingHistory(r, state);
   function persistDraft() {
     const s = state();
     if (
@@ -181,6 +187,13 @@ export function createCampaigns(r) {
       r.can("createCampaigns")
     )
       await volunteerPicker.loadAssigned();
+    if (r.can("readReporting") && resource !== "new") {
+      s.reports = await readTextingReports(
+        r,
+        s.campaign ? [s.campaign] : list(s.items),
+      );
+      if (section === "results" && s.campaign) await reporting.load();
+    }
   }
   function campaignViews(s) {
     return `<div class="pt-actions" aria-label="Campaign views">${["active", "paused", "archived"].map((value) => button("campaigns-view", value[0].toUpperCase() + value.slice(1), { value, secondary: value !== (s.listView || "active"), disabled: r.busy() })).join("")}</div><p class="pt-muted">${s.listView === "archived" ? "Archived campaigns keep their messages, results and history." : s.listView === "paused" ? "Paused campaigns keep their history and can be resumed when ready." : "Active campaigns and drafts ready for your next step."}</p>`;
@@ -200,7 +213,7 @@ export function createCampaigns(r) {
         : s.listView === "paused"
           ? "No paused campaigns on this page."
           : "Create your first campaign when your list is ready.";
-    return `<section class="pt-card">${list(s.items).length ? s.items.map((c) => `<div class="pt-row"><div><strong>${e(c.name)}</strong><p class="pt-muted">${e(label(c.status))}${r.can("manageBilling") ? ` · ${money(c.settledMicros)} used` : ""}</p></div>${go("campaigns", "Open", c.campaignId, true)}</div>`).join("") : `<p class="pt-muted">${e(empty)}</p>`}${s.cursor ? button("campaigns-more", "Load more", { secondary: true }) : ""}</section>`;
+    return `<section class="pt-card">${list(s.items).length ? s.items.map((c) => `<div class="pt-row"><div><strong>${e(c.name)}</strong><p class="pt-muted">${e(label(c.status))}${r.can("manageBilling") ? ` · ${money(c.settledMicros)} used` : ""}</p>${renderTextingReport(s.reports?.[c.campaignId], { compact: true })}</div>${go("campaigns", "Open", c.campaignId, true)}</div>`).join("") : `<p class="pt-muted">${e(empty)}</p>`}${s.cursor ? button("campaigns-more", "Load more", { secondary: true }) : ""}</section>`;
   }
   function recipientStep() {
     const next = () =>
@@ -333,7 +346,14 @@ export function createCampaigns(r) {
       return r.can("createCampaigns")
         ? team(s)
         : notice("Team access is restricted");
-    if (section === "send") return queue(s) + outcomes.render();
+    if (section === "send")
+      return (
+        queue(s) +
+        (r.can("readReporting")
+          ? `<section class="pt-card">${go("results", "Sent history", s.campaign.campaignId, true)}</section>`
+          : "") +
+        outcomes.render()
+      );
     if (section === "results") {
       const c = s.campaign;
       if (!c)
@@ -343,6 +363,15 @@ export function createCampaigns(r) {
             "Campaign activity",
             "Choose a campaign to review its saved status.",
           ) + listCards(s)
+        );
+      if (r.can("readReporting"))
+        return (
+          head(
+            c.name,
+            "Campaign activity",
+            "Messages and replies across sessions",
+            go("campaigns", "Back", c.campaignId, true),
+          ) + reporting.render()
         );
       return (
         head(
@@ -388,6 +417,7 @@ export function createCampaigns(r) {
           label(s.campaign.status),
           go("campaigns", "All campaigns", "", true),
         ) +
+          renderTextingReport(s.reports?.[s.campaign.campaignId]) +
           campaignDetail(s) +
           management.render() +
           additions.overview() +
@@ -484,6 +514,7 @@ export function createCampaigns(r) {
   }
   async function action(name, value) {
     if (await management.action(name, value)) return true;
+    if (await reporting.action(name)) return true;
     if (await outcomes.action(name, value)) return true;
     if (await additions.action(name, value)) return true;
     if (await volunteerPicker.action(name)) return true;
@@ -503,6 +534,7 @@ export function createCampaigns(r) {
       s.items = list(result.items);
       s.cursor = result.nextCursor;
       s.listView = value;
+      s.reports = await readTextingReports(r, s.items);
       return true;
     }
     if (name === "campaigns-more") {
@@ -511,6 +543,10 @@ export function createCampaigns(r) {
       );
       s.items.push(...list(result.items));
       s.cursor = result.nextCursor;
+      s.reports = {
+        ...s.reports,
+        ...(await readTextingReports(r, list(result.items))),
+      };
       return true;
     }
     if (name === "audiences-more") {
@@ -816,6 +852,7 @@ export function createCampaigns(r) {
   }
   function change(target) {
     if (management.change(target)) return true;
+    reporting.change(target);
     if (outcomes.change(target)) return true;
     if (volunteerPicker.change(target)) return true;
     if (recipients.change(target)) return true;

@@ -1,0 +1,31 @@
+.shared-person-field,
+.shared-person-dialog,
+.shared-person-dialog label,
+.shared-person-dialog [data-person-results] {
+  display: grid;
+  gap: 0.75rem;
+}
+.shared-person-dialog {
+  width: min(32rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+  padding: 1.5rem;
+  border: 1px solid var(--polis-border, currentColor);
+  border-radius: 1rem;
+  color: var(--polis-text, CanvasText);
+  background: var(--polis-surface, Canvas);
+}
+.shared-person-dialog:not([open]) {
+  display: none;
+}
+.shared-person-dialog::backdrop {
+  background: rgb(0 0 0 / 50%);
+}
+.shared-person-dialog input {
+  width: 100%;
+  padding: 0.75rem;
+  color: inherit;
+  background: inherit;
+  border: 1px solid currentColor;
+  border-radius: 0.5rem;
+}

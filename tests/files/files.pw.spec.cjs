@@ -5191,3 +5191,181 @@ test("stale drawer focus cannot move focus from a replacement dialog", async ({
   await expect(input).toBeFocused();
   await expect(input).toHaveValue("Keep the replacement dialog focused");
 });
+
+test("archived folders restore their whole folder with revision fences", async ({
+  page,
+}) => {
+  await seedSession(page);
+  const restored = [];
+  await mockFiles(page, {
+    onRequest: async ({ route, url, path, method, body }) => {
+      if (
+        path.endsWith("/folders") &&
+        method === "GET" &&
+        url.searchParams.get("view") === "archive"
+      ) {
+        await json(route, {
+          folders: [{ ...folder, status: "archived", archived: true }],
+          nextCursor: null,
+        });
+        return true;
+      }
+      if (path === "/api/files/folders/folder-1/restore" && method === "POST") {
+        restored.push({ body, headers: route.request().headers() });
+        await json(route, {
+          folder: { ...folder, status: "active", version: 4 },
+        });
+        return true;
+      }
+      return false;
+    },
+  });
+  await page.goto("/files/archive");
+  await page.getByRole("button", { name: "Restore", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Restore folder?" }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Restore folder", exact: true })
+    .click();
+  await expect.poll(() => restored.length).toBe(1);
+  expect(restored[0].body.expectedVersion).toBe(folder.version);
+  expect(restored[0].headers["idempotency-key"]).toBeTruthy();
+  expect(restored[0].headers["if-match"]).toBeTruthy();
+});
+
+test("folder children load later parent-authorized pages without duplicates", async ({
+  page,
+}) => {
+  await seedSession(page);
+  const cursors = [];
+  const child = {
+    ...folder,
+    folderId: "child-1",
+    name: "First child",
+    parentFolderId: "folder-1",
+  };
+  await mockFiles(page, {
+    onRequest: async ({ route, url, path, method }) => {
+      if (path !== "/api/files/folders/folder-1" || method !== "GET")
+        return false;
+      const cursor = url.searchParams.get("cursor");
+      cursors.push(cursor);
+      await json(route, {
+        folder,
+        children: cursor
+          ? [child, { ...child, folderId: "child-2", name: "Later child" }]
+          : [child],
+        childrenNextCursor: cursor ? null : "child-page-2",
+        nextCursor: cursor ? null : "child-page-2",
+      });
+      return true;
+    },
+  });
+  await page.goto("/files/folders/folder-1");
+  await expect(page.getByText("First child", { exact: true })).toBeVisible();
+  await page.locator('[data-collection="children"]').click();
+  await expect(page.getByText("Later child", { exact: true })).toBeVisible();
+  await expect(page.getByText("First child", { exact: true })).toHaveCount(1);
+  expect(cursors).toEqual([null, "child-page-2"]);
+});
+
+for (const scopeType of ["coalition", "candidate"]) {
+  test(`Files opens the returned ${scopeType} draft in the shared organization composer`, async ({
+    page,
+  }) => {
+    await seedSession(page);
+    await page.addInitScript(() => {
+      let runtime;
+      Object.defineProperty(window, "__POLIS_WEB_APP__", {
+        configurable: true,
+        get: () => runtime,
+        set: (value) => {
+          runtime = {
+            ...value,
+            apiBaseUrl: location.origin,
+            auth: {
+              ...value.auth,
+              region: "us-west-2",
+              clientId: "test",
+              enablePasswordFlow: "true",
+            },
+          };
+        },
+      });
+    });
+    const draft = {
+      draftId: "files-draft",
+      scopeType,
+      scopeId: "publishing-org",
+      state: "editing",
+      version: 1,
+      actorUserId: "user-1",
+      content: {
+        description: "Caption retained from Files",
+        type: "image",
+        visibility: "public",
+        imageUrl: "https://example.invalid/preview.png",
+      },
+    };
+    const requests = [];
+    await page.route("**/api/**", async (route) => {
+      const path = new URL(route.request().url()).pathname;
+      requests.push(path);
+      if (path === "/api/profile/me")
+        return json(route, {
+          profile: { userId: "user-1", displayName: "Media Manager" },
+        });
+      if (path === "/api/me/organization-workspaces")
+        return json(route, {
+          workspaces: [
+            {
+              scopeType,
+              scopeId: "publishing-org",
+              displayName: "Example Organization",
+              isAdmin: true,
+            },
+          ],
+        });
+      if (path.endsWith("/post-drafts/files-draft"))
+        return json(route, { draft });
+      return json(route, { items: [], groups: [], connections: [] });
+    });
+    await mockFiles(page, {
+      onRequest: async ({ route, path, method }) => {
+        if (path !== "/api/files/post-drafts" || method !== "POST")
+          return false;
+        await json(route, { ok: true, draftId: draft.draftId, draft });
+        return true;
+      },
+    });
+    const errors = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await page.goto("/files/folders/folder-1");
+    await page.getByRole("button", { name: "Select all media" }).click();
+    await page.getByRole("button", { name: /Create post/u }).click();
+    await page
+      .getByLabel("Post idea or caption")
+      .fill(draft.content.description);
+    await page
+      .getByRole("button", { name: "Create post draft", exact: true })
+      .click();
+    const path = `/workspace/${scopeType}/publishing-org/work/publishing/drafts/files-draft`;
+    await expect(page).toHaveURL(new RegExp(`${path}$`));
+    await expect
+      .poll(() =>
+        requests.includes(
+          `/api/organizations/${scopeType}/publishing-org/post-drafts/files-draft`,
+        ),
+      )
+      .toBe(true);
+    await expect(page.locator("textarea[name=description]")).toHaveValue(
+      draft.content.description,
+    );
+    await page.reload();
+    await expect(page.locator("textarea[name=description]")).toHaveValue(
+      draft.content.description,
+    );
+    expect(errors).toEqual([]);
+  });
+}

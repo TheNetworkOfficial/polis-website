@@ -5,6 +5,7 @@ import "./css/texting-workspace.css";
 import "./css/coalition-workspace.css";
 import "./css/coalition-features.css";
 import "./css/coalition-rooms.css";
+import "./css/organization-publishing.css";
 import polisLogoUrl from "../../assets/images/polis/Polis.png";
 
 import {
@@ -44,7 +45,23 @@ import {
 import { createTextingBalancePage } from "./scripts/textingBalance.js";
 import { createTextingIntakePage } from "./scripts/textingIntake.js";
 import { createTextingWorkspacePage } from "./scripts/textingWorkspace.js";
+import { createOrganizationPeoplePage } from "./scripts/organizationPeople.js";
+import {
+  createOrganizationPublishingPage,
+  organizationApiBase,
+  organizationWorkspacePath,
+  organizationPostPermissions,
+} from "./scripts/organizationPublishing.js";
 import { contactBookPermissionDefinitions } from "./scripts/organizationContactPermissions.js";
+import {
+  renderOrganizationPersonField,
+  installOrganizationPersonFields,
+} from "./scripts/organizationPersonField.js";
+installOrganizationPersonFields({
+  request: fetchJson,
+  identity: () =>
+    `${state.auth.user?.userId || ""}:${getCurrentPathWithQuery()}`,
+});
 import { createTextingSessionRequest } from "./scripts/textingSession.js";
 import {
   parseTextingRoute,
@@ -115,6 +132,82 @@ const textingWorkspacePage = createTextingWorkspacePage({
   navigate: navigateTexting,
 });
 let stripeJsLoadPromise = null;
+const organizationPeoplePage = createOrganizationPeoplePage({
+  request: fetchJson,
+  context: () => {
+    const scope = currentOrganizationWorkspaceContext();
+    if (
+      !scope ||
+      !["people", "contacts", "audiences", "roles"].includes(scope.section)
+    )
+      return null;
+    return scope;
+  },
+  changed: scheduleRender,
+  navigate: navigateTo,
+  confirm: confirmDestructiveAction,
+  beginContactCampaign: (selection) => {
+    const scope = currentOrganizationWorkspaceContext();
+    if (
+      !scope ||
+      scope.userId !== selection.actorUserId ||
+      `${scope.scopeType}:${scope.scopeId}` !== selection.scopeKey
+    )
+      throw new Error("Your account or organization changed. Reopen Contacts.");
+    textingWorkspacePage.beginContactCampaign(selection);
+    navigateTo(textingRoute(scope.scopeId, "campaigns", "new"));
+  },
+});
+const organizationPublishingPage = createOrganizationPublishingPage({
+  request: fetchJson,
+  context: currentOrganizationWorkspaceContext,
+  changed: scheduleRender,
+  navigate: navigateTo,
+  confirm: confirmDestructiveAction,
+});
+const organizationSocialResources = new Map();
+
+function currentOrganizationWorkspaceContext() {
+  const route = getCurrentRoute();
+  if (!route.routeParams?.organizationScopeType) return null;
+  return {
+    scopeType: decodeRouteSegment(route.routeParams.organizationScopeType),
+    scopeId: decodeRouteSegment(route.routeParams.organizationScopeId),
+    userId: state.auth.session
+      ? getAuthenticatedUser(state.auth.session)?.userId || ""
+      : "",
+    section: route.routeParams.organizationSection || "publishing",
+  };
+}
+
+function activeSocialResource() {
+  const scope = currentOrganizationWorkspaceContext();
+  if (!scope) return state.pages.settings.social;
+  if (
+    getCurrentRoute().routeKey === ROUTE_KEY_CREATE &&
+    state.pages.create.organizationSocial
+  ) {
+    return state.pages.create.organizationSocial;
+  }
+  const key = `${scope.userId}:${scope.scopeType}:${scope.scopeId}`;
+  if (!organizationSocialResources.has(key))
+    organizationSocialResources.set(key, {
+      connections: [],
+      loading: false,
+      loaded: false,
+      error: "",
+      actionPendingKey: "",
+      manualProvider: "",
+    });
+  return organizationSocialResources.get(key);
+}
+
+function activeSocialApiBase() {
+  const scope = currentOrganizationWorkspaceContext();
+  return scope
+    ? `${organizationApiBase(scope)}/social/connections`
+    : "/api/social/connections";
+}
 const initialCommentId =
   new URL(window.location.href).searchParams.get("commentId") || "";
 const initialEngagementCandidateId =
@@ -3003,6 +3096,39 @@ function normalizeCalendarReturnLocation() {
 function parseRouteFromLocation(pathname = window.location.pathname) {
   const calendarTargetPath = calendarReturnTargetPathFromLocation(pathname);
   const normalizedPath = calendarTargetPath || normalizePathname(pathname);
+  const organizationRoute = normalizedPath.match(
+    /^\/workspace\/(coalition|candidate)\/([^/]+)(?:\/(.*))?$/u,
+  );
+  if (organizationRoute) {
+    const section = organizationRoute[3] || "work/publishing";
+    const composer = section.match(
+      /^work\/publishing\/(new|drafts\/([^/]+))$/u,
+    );
+    const peopleSection = {
+      people: "people",
+      "people/contacts": "contacts",
+      "more/audiences": "audiences",
+      "more/roles": "roles",
+    }[section];
+    return {
+      routeKey: composer
+        ? ROUTE_KEY_CREATE
+        : peopleSection
+          ? "organization-people"
+          : section === "more/social-connections"
+            ? "organization-social"
+            : "organization-publishing",
+      routePath: normalizedPath,
+      routeParams: {
+        organizationScopeType: organizationRoute[1],
+        organizationScopeId: organizationRoute[2],
+        organizationSection:
+          peopleSection ||
+          (section === "more/social-connections" ? "social" : "publishing"),
+        organizationDraftId: composer?.[2] || "",
+      },
+    };
+  }
   const texting = parseTextingRoute(normalizedPath);
   if (texting)
     return {
@@ -14575,6 +14701,8 @@ function normalizeCandidateStaffAccessCatalog(raw = {}) {
     permissions: normalizedPermissions,
     categories,
     version: Number(catalog.version || payload.version) || 1,
+    mutationRevision: Number(payload.revision ?? catalog.mutationRevision) || 0,
+    authoritative: catalog.authoritative === true,
     canManage: parseBoolean(payload.canManage ?? catalog.canManage, false),
   };
 }
@@ -17844,6 +17972,8 @@ function normalizeMission(raw = {}) {
   const status =
     normalizeString(raw.status || raw.state).toLowerCase() || "active";
   const priority = normalizeString(raw.priority).toLowerCase() || "normal";
+  if (status !== "active" || raw.lifecycleTransition)
+    for (const job of jobs) job.isClaimable = false;
   return {
     missionId: normalizeString(raw.missionId || raw.id) || "mission",
     scopeType: normalizeMissionScopeType(raw.scopeType || raw.scope),
@@ -17859,6 +17989,8 @@ function normalizeMission(raw = {}) {
     status,
     priority,
     leadUserId: normalizeString(raw.leadUserId),
+    mutationRevision: Number(raw.mutationRevision) || 0,
+    lifecycleTransition: raw.lifecycleTransition || null,
     source: raw.source && typeof raw.source === "object" ? raw.source : null,
     templateId: normalizeString(raw.templateId),
     templateVersion: Number(raw.templateVersion) || null,
@@ -23385,7 +23517,13 @@ async function updateCandidateDashboardStaffAccess(formData) {
       {
         auth: true,
         method: "PATCH",
-        body: { role: roleKey, roleKey, permissions },
+        body: {
+          role: roleKey,
+          roleKey,
+          permissions,
+          expectedAccess: JSON.parse(formData.get("expectedAccess") || "null"),
+          expectedRevision: Number(formData.get("expectedRevision")),
+        },
       },
     );
     showToast("Staff access updated.");
@@ -23501,6 +23639,7 @@ async function createCandidateDashboardStaffRole(formData) {
         auth: true,
         method: "POST",
         body: {
+          expectedRevision: staffAdmin.catalog?.mutationRevision,
           label,
           category,
           ...(color ? { color } : {}),
@@ -23550,6 +23689,7 @@ async function updateCandidateDashboardStaffRole(formData) {
         auth: true,
         method: "PATCH",
         body: {
+          expectedRevision: staffAdmin.catalog?.mutationRevision,
           ...(label ? { label } : {}),
           ...(category ? { category } : {}),
           ...(color ? { color } : {}),
@@ -23607,7 +23747,10 @@ async function deleteCandidateDashboardStaffRole(formData) {
       {
         auth: true,
         method: "DELETE",
-        body: { replacementRole },
+        body: {
+          expectedRevision: staffAdmin.catalog?.mutationRevision,
+          replacementRole,
+        },
       },
     );
     showToast("Staff role removed.");
@@ -24282,7 +24425,13 @@ async function updateCoalitionMemberAccess(formData) {
       {
         auth: true,
         method: "PATCH",
-        body: { role: roleKey, roleKey, permissions },
+        body: {
+          role: roleKey,
+          roleKey,
+          permissions,
+          expectedAccess: JSON.parse(formData.get("expectedAccess") || "null"),
+          expectedRevision: Number(formData.get("expectedRevision")),
+        },
       },
     );
     showToast("Member access updated.");
@@ -24438,6 +24587,7 @@ async function createCoalitionAccessRole(formData) {
         auth: true,
         method: "POST",
         body: {
+          expectedRevision: workspace.catalog?.mutationRevision,
           label,
           category,
           ...(color ? { color } : {}),
@@ -24487,6 +24637,7 @@ async function updateCoalitionAccessRole(formData) {
         auth: true,
         method: "PATCH",
         body: {
+          expectedRevision: workspace.catalog?.mutationRevision,
           ...(label ? { label } : {}),
           ...(category ? { category } : {}),
           ...(color ? { color } : {}),
@@ -24545,7 +24696,10 @@ async function deleteCoalitionAccessRole(formData) {
       {
         auth: true,
         method: "DELETE",
-        body: { replacementRole },
+        body: {
+          expectedRevision: workspace.catalog?.mutationRevision,
+          replacementRole,
+        },
       },
     );
     showToast("Coalition role removed.");
@@ -25307,7 +25461,7 @@ async function createCoalitionTerritoryAssignment(formData) {
   );
   const userId = normalizeString(formData.get("userId"));
   if (!coalitionId || !territoryId || !userId) {
-    assignments.error = "Choose a territory and enter a user ID.";
+    assignments.error = "Choose a territory and an assignee.";
     showToast(assignments.error);
     scheduleRender();
     return false;
@@ -25443,7 +25597,8 @@ async function reassignCoalitionTerritoryAssignment(formData) {
   const fromUserId = normalizeString(formData.get("fromUserId"));
   const toUserId = normalizeString(formData.get("toUserId"));
   if (!coalitionId || !territoryId || !fromUserId || !toUserId) {
-    assignments.error = "Choose a territory and enter both user IDs.";
+    assignments.error =
+      "Choose a territory, current assignee, and replacement.";
     showToast(assignments.error);
     scheduleRender();
     return false;
@@ -26085,7 +26240,7 @@ async function createCandidateTerritoryAssignment(formData) {
   );
   const userId = normalizeString(formData.get("userId"));
   if (!candidateId || !territoryId || !userId) {
-    assignments.error = "Choose a territory and enter a user ID.";
+    assignments.error = "Choose a territory and an assignee.";
     showToast(assignments.error);
     scheduleRender();
     return false;
@@ -26224,7 +26379,8 @@ async function reassignCandidateTerritoryAssignment(formData) {
   const fromUserId = normalizeString(formData.get("fromUserId"));
   const toUserId = normalizeString(formData.get("toUserId"));
   if (!candidateId || !territoryId || !fromUserId || !toUserId) {
-    assignments.error = "Choose a territory and enter both user IDs.";
+    assignments.error =
+      "Choose a territory, current assignee, and replacement.";
     showToast(assignments.error);
     scheduleRender();
     return false;
@@ -34288,6 +34444,8 @@ function normalizeCoalitionAccessCatalog(raw = {}) {
       ? normalizeStringList(source.categories)
       : Array.from(new Set(normalizedRoles.map((role) => role.category))),
     version: Number(source.version) || 1,
+    mutationRevision: Number(raw.revision ?? source.mutationRevision) || 0,
+    authoritative: source.authoritative === true,
     canManage: parseBoolean(raw?.canManage ?? source.canManage),
   };
 }
@@ -53529,7 +53687,7 @@ function applyPostComposerPublishingDefaults() {
 
 function applyPostComposerCrosspostDefaults() {
   const composer = state.pages.create;
-  const social = state.pages.settings.social;
+  const social = activeSocialResource();
   const crosspost = state.pages.settings.crosspost;
   if (
     composer.crosspostSelectionInitialized ||
@@ -53560,6 +53718,40 @@ function applyPostComposerCrosspostDefaults() {
 }
 
 async function loadPostComposerPage({ refresh = false } = {}) {
+  const scope = currentOrganizationWorkspaceContext();
+  const current = state.pages.create;
+  const routeDraftId = decodeRouteSegment(
+    getCurrentRoute().routeParams?.organizationDraftId || "",
+  );
+  const ownerKey = scope
+    ? `${scope.userId}:${scope.scopeType}:${scope.scopeId}:${routeDraftId}`
+    : "";
+  if (scope) {
+    if (
+      current.organizationOwnerKey !== ownerKey ||
+      refresh ||
+      !current.organization
+    ) {
+      resetPostComposerPage();
+      const composer = state.pages.create;
+      composer.organizationOwnerKey = ownerKey;
+      composer.pending = true;
+      scheduleRender();
+      try {
+        await organizationPublishingPage.prepareComposer(composer, {
+          draftId: routeDraftId,
+        });
+      } catch (error) {
+        composer.error = error.message;
+      } finally {
+        composer.pending = false;
+      }
+    }
+    await loadPostComposerIssueCatalog({ refresh });
+    scheduleRender();
+    return;
+  }
+  if (current.organizationOwnerKey) resetPostComposerPage();
   scheduleRender();
   await Promise.all([
     loadPublishingDefaults({ refresh }).catch(() => {}),
@@ -56568,10 +56760,24 @@ function postComposerVideoDurationError(composer = state.pages.create) {
 }
 
 function postComposerCanPublish(composer = state.pages.create) {
-  if (composer.pending || !composer.file) {
+  if (composer.organizationOwnerKey && !composer.organization) return false;
+  if (
+    composer.pending ||
+    (!composer.file && !composer.existingContent) ||
+    composer.organization?.readOnly
+  ) {
     return false;
   }
-  return !postComposerVideoDurationError(composer);
+  if (composer.organization?.state === "publication_failed" && !composer.file)
+    return false;
+  if (
+    composer.organization &&
+    !organizationPublishingPage.composerAction(composer)
+  )
+    return false;
+  return composer.existingContent && !composer.file
+    ? true
+    : !postComposerVideoDurationError(composer);
 }
 
 function readVideoFileDurationMs(file) {
@@ -57731,8 +57937,8 @@ function countComposerUtf8Bytes(value) {
 }
 
 function postComposerCrosspostTargets() {
-  const connections = Array.isArray(state.pages.settings.social.connections)
-    ? state.pages.settings.social.connections
+  const connections = Array.isArray(activeSocialResource().connections)
+    ? activeSocialResource().connections
     : [];
   return connections.flatMap((connection) =>
     (Array.isArray(connection.targets) ? connection.targets : [])
@@ -57908,6 +58114,22 @@ function postComposerCrosspostTargetDisabledReason(
 function firstInvalidPostComposerCrosspostSelection(
   composer = state.pages.create,
 ) {
+  if (composer.organization) {
+    const available = new Set(
+      postComposerCrosspostTargets().map(postComposerCrosspostSelectionKey),
+    );
+    if (
+      [...postComposerSelectedCrosspostKeySet(composer)].some(
+        (key) => !available.has(key),
+      )
+    ) {
+      return {
+        target: { label: "Saved crosspost destination" },
+        reason:
+          "Reconnect this organization account or remove its saved selection.",
+      };
+    }
+  }
   for (const target of postComposerSelectedCrosspostTargets(composer)) {
     const reason = postComposerCrosspostTargetDisabledReason(target, composer);
     if (reason) {
@@ -59222,15 +59444,77 @@ async function preparePostComposerSaveDownload(postId, { attempts = 12 } = {}) {
   });
 }
 
+function organizationComposerContent(composer, media = {}) {
+  const existing = { ...(composer.existingContent || {}) };
+  if (composer.file) {
+    for (const key of [
+      "cfUid",
+      "imageKey",
+      "imageUrl",
+      "mediaUrl",
+      "videoUrl",
+      "mediaItems",
+      "trim",
+      "trimStartMs",
+      "trimEndMs",
+      "editTimeline",
+      "cover",
+      "coverUrl",
+      "coverImageKey",
+      "coverImageUrl",
+      "coverFrameMs",
+      "coverSpec",
+      "imageCrop",
+      "originalUrl",
+      "originalUri",
+      "originalEtag",
+      "masterEtag",
+      "masterSize",
+      "thumbUrl",
+      "thumbnailUrl",
+      "previewUrl",
+    ])
+      delete existing[key];
+  }
+  return {
+    ...existing,
+    ...media,
+    type: composer.mediaType,
+    description: normalizeString(composer.description),
+    visibility: composer.visibility,
+    audienceGroupIds:
+      composer.visibility === "custom"
+        ? readPostComposerAudienceGroupIds(composer.audienceGroupIds)
+        : [],
+    issueIds: readPostComposerIssueIds(composer.issueIds),
+    postReviewPreferences: postComposerReviewPreferences(composer),
+    crosspostSelections: buildPostComposerCrosspostSelections(composer),
+    crosspostDraft: buildPostComposerCrosspostDraft(composer),
+    ...(composer.organization.permissions.hideAttribution
+      ? { hideActorAttribution: composer.hideActorAttribution === true }
+      : {}),
+  };
+}
+
+function textOrganizationComposerAction(formData, composer) {
+  if (formData.get("organizationAction") === "save") return "save";
+  return organizationPublishingPage.composerAction(composer) || "save";
+}
+
 async function submitPostComposer(formData) {
   const composer = state.pages.create;
   if (composer.pending) {
     return;
   }
+  if (composer.organization?.permissions.hideAttribution)
+    composer.hideActorAttribution = formData.has("hideActorAttribution");
   updatePostComposerField("description", formData.get("description"));
   updatePostComposerField("issueIds", formData.get("issueIds"));
   updatePostComposerField("visibility", formData.get("visibility"));
-  updatePostComposerField("audienceGroupIds", formData.get("audienceGroupIds"));
+  updatePostComposerField(
+    "audienceGroupIds",
+    formData.getAll("audienceGroupIds").join(","),
+  );
   updatePostComposerField("allowComments", formData.has("allowComments"));
   updatePostComposerField(
     "allowReuseContent",
@@ -59261,12 +59545,21 @@ async function submitPostComposer(formData) {
     scheduleRender();
     return;
   }
-  if (!composer.file) {
+  if (currentOrganizationWorkspaceContext() && !composer.organization) {
+    composer.error =
+      "Organization access could not be verified. Reload before continuing.";
+    scheduleRender();
+    return;
+  }
+  if (!composer.file && !composer.existingContent) {
     composer.error = "Choose or record media before publishing.";
     scheduleRender();
     return;
   }
-  const durationError = postComposerVideoDurationError(composer);
+  const durationError =
+    composer.existingContent && !composer.file
+      ? ""
+      : postComposerVideoDurationError(composer);
   if (durationError) {
     composer.error = durationError;
     scheduleRender();
@@ -59290,6 +59583,25 @@ async function submitPostComposer(formData) {
     }
   }
 
+  const organizationAction = textOrganizationComposerAction(formData, composer);
+  if (composer.organization && composer.existingContent && !composer.file) {
+    composer.pending = true;
+    composer.error = "";
+    scheduleRender();
+    try {
+      await organizationPublishingPage.saveComposer(
+        composer,
+        organizationComposerContent(composer),
+        organizationAction,
+      );
+    } catch (error) {
+      composer.error = error.message;
+    } finally {
+      composer.pending = false;
+      scheduleRender();
+    }
+    return;
+  }
   const file = composer.file;
   if (Number(file.size) <= 0) {
     composer.error = "Selected media is empty. Choose or record it again.";
@@ -59368,6 +59680,25 @@ async function submitPostComposer(formData) {
         : null;
     composer.stage = "Saving post details";
     scheduleRender();
+    if (composer.organization) {
+      await organizationPublishingPage.saveComposer(
+        composer,
+        organizationComposerContent(composer, {
+          cfUid: upload.uid,
+          ...(mediaType === "image"
+            ? {
+                imageKey: upload.uid,
+                imageUrl: upload.deliveryUrl || upload.publicUrl || undefined,
+              }
+            : {}),
+          ...(trimPayload ? { trim: trimPayload } : {}),
+          ...(editTimeline ? { editTimeline } : {}),
+          ...(coverPayload ? { cover: coverPayload, coverFrameMs } : {}),
+        }),
+        organizationAction,
+      );
+      return;
+    }
     await fetchJson("/api/posts/metadata", {
       auth: true,
       method: "POST",
@@ -61068,7 +61399,9 @@ async function emailVoterIntelBallotGuide() {
 }
 
 async function loadSettingsSocialConnections({ refresh = false } = {}) {
-  const social = state.pages.settings.social;
+  const social = activeSocialResource();
+  const scope = currentOrganizationWorkspaceContext();
+  const apiBase = activeSocialApiBase();
   if (social.loaded && !refresh) {
     return;
   }
@@ -61076,7 +61409,12 @@ async function loadSettingsSocialConnections({ refresh = false } = {}) {
   social.error = "";
   scheduleRender();
   try {
-    const payload = await fetchJson("/api/social/connections", { auth: true });
+    if (scope) {
+      const workspace = await organizationPublishingPage.workspaceFor(scope);
+      social.canManage = organizationPostPermissions(workspace).manage;
+      social.organizationName = workspace.displayName;
+    }
+    const payload = await fetchJson(apiBase, { auth: true });
     social.connections = readArrayPayload(payload, ["connections"])
       .map(normalizeSocialConnection)
       .filter((connection) => connection.connectionId || connection.provider);
@@ -61183,6 +61521,32 @@ async function loadSettingsAudienceGroups({ refresh = false } = {}) {
       "groups",
       "audienceGroups",
     ]).map(normalizeAudienceGroup);
+    audienceGroups.people ||= {};
+    await Promise.all(
+      [
+        ...new Set(
+          audienceGroups.items.flatMap((group) => group.memberUserIds),
+        ),
+      ].map(async (userId) => {
+        if (audienceGroups.people[userId]) return;
+        try {
+          const payload = await fetchJson(
+            `/api/users/${encodeURIComponent(userId)}/profile`,
+            { auth: true },
+          );
+          const person = payload.profile || payload;
+          audienceGroups.people[userId] = {
+            displayName:
+              person.displayName || person.username || "Polis member",
+            username: person.username || "",
+          };
+        } catch {
+          audienceGroups.people[userId] = {
+            displayName: "Account unavailable",
+          };
+        }
+      }),
+    );
     audienceGroups.loaded = true;
   } catch (error) {
     audienceGroups.error = settingsErrorMessage(
@@ -61783,6 +62147,7 @@ async function loadSettingsAudienceGroupSearch(
   { refresh = false } = {},
 ) {
   const resource = state.pages.settings.audienceGroups;
+  const actor = state.auth.user?.userId;
   const search = settingsAudienceGroupSearch(resource);
   const normalizedGroupId = settingsAudienceGroupDraftKey(groupId);
   const normalizedQuery = normalizeString(query).replace(/^@/u, "");
@@ -61817,13 +62182,13 @@ async function loadSettingsAudienceGroupSearch(
       settingsAudienceMemberSearchEndpoint(normalizedQuery),
       { auth: true },
     );
-    if (search.token !== token) return;
+    if (search.token !== token || actor !== state.auth.user?.userId) return;
     search.items = normalizeSearchResultsPayload(payload, "users")
       .items.map(normalizeSettingsAudienceMemberSearchResult)
       .filter(Boolean);
     search.loaded = true;
   } catch (error) {
-    if (search.token !== token) return;
+    if (search.token !== token || actor !== state.auth.user?.userId) return;
     search.error = normalizeString(error?.message) || "Member search failed.";
     search.loaded = true;
   } finally {
@@ -61839,6 +62204,9 @@ function queueSettingsAudienceGroupSearch() {
   const resource = state.pages.settings.audienceGroups;
   const search = settingsAudienceGroupSearch(resource);
   const query = normalizeString(search.query);
+  search.token++;
+  search.loading = false;
+  search.items = [];
   if (query.replace(/^@/u, "").length < 2) {
     loadSettingsAudienceGroupSearch(query, search.groupId).catch(() => {});
     return;
@@ -61853,7 +62221,7 @@ function addSettingsAudienceSearchResultToDraft(target) {
   const groupId = normalizeString(target.getAttribute("data-group-id"));
   const userId = normalizeString(target.getAttribute("data-user-id"));
   if (!userId) {
-    showToast("Selected account is missing a user ID.");
+    showToast("This account could not be selected. Search again.");
     return;
   }
   const group = settingsAudienceGroupByKey(resource, groupId);
@@ -61863,6 +62231,11 @@ function addSettingsAudienceSearchResultToDraft(target) {
     memberUserIds.push(userId);
   }
   draft.memberUserIds = memberUserIds.join("\n");
+  resource.people ||= {};
+  const selectedPerson = settingsAudienceGroupSearch(resource).items.find(
+    (person) => person.userId === userId,
+  );
+  if (selectedPerson) resource.people[userId] = selectedPerson;
   const search = settingsAudienceGroupSearch(resource);
   search.query = "";
   search.items = [];
@@ -61970,7 +62343,7 @@ async function deleteSettingsAudienceGroup(groupId) {
 function findSettingsConnection(provider) {
   const normalizedProvider = normalizeSettingsProvider(provider);
   return (
-    state.pages.settings.social.connections.find(
+    activeSocialResource().connections.find(
       (connection) => connection.provider === normalizedProvider,
     ) || null
   );
@@ -61982,7 +62355,7 @@ async function startSettingsSocialConnection(provider, options = {}) {
     showToast("Choose a provider to connect.");
     return;
   }
-  const social = state.pages.settings.social;
+  const social = activeSocialResource();
   const allowCrosspostMentions =
     typeof options.allowCrosspostMentions === "boolean"
       ? options.allowCrosspostMentions
@@ -61997,7 +62370,7 @@ async function startSettingsSocialConnection(provider, options = {}) {
   scheduleRender();
   try {
     const payload = await fetchJson(
-      `/api/social/connections/${encodeURIComponent(normalizedProvider)}/start`,
+      `${activeSocialApiBase()}/${encodeURIComponent(normalizedProvider)}/start`,
       {
         auth: true,
         method: "POST",
@@ -62024,7 +62397,7 @@ async function startSettingsSocialConnection(provider, options = {}) {
 }
 
 async function connectSettingsBlueskyManual(formData) {
-  const social = state.pages.settings.social;
+  const social = activeSocialResource();
   const identifier = normalizeString(formData.get("identifier"));
   const appPassword = normalizeString(formData.get("appPassword"));
   if (!identifier || !appPassword) {
@@ -62036,7 +62409,7 @@ async function connectSettingsBlueskyManual(formData) {
   social.error = "";
   scheduleRender();
   try {
-    await fetchJson("/api/social/connections/bluesky/manual", {
+    await fetchJson(`${activeSocialApiBase()}/bluesky/manual`, {
       auth: true,
       method: "POST",
       body: {
@@ -62062,7 +62435,7 @@ async function connectSettingsBlueskyManual(formData) {
 }
 
 async function refreshSettingsSocialConnection(connectionId) {
-  const social = state.pages.settings.social;
+  const social = activeSocialResource();
   const normalizedConnectionId = normalizeString(connectionId);
   if (!normalizedConnectionId) {
     return;
@@ -62072,7 +62445,7 @@ async function refreshSettingsSocialConnection(connectionId) {
   scheduleRender();
   try {
     await fetchJson(
-      `/api/social/connections/${encodeURIComponent(normalizedConnectionId)}/refresh-targets`,
+      `${activeSocialApiBase()}/${encodeURIComponent(normalizedConnectionId)}/refresh-targets`,
       { auth: true, method: "POST", body: {} },
     );
     showToast("Targets refreshed.");
@@ -62087,7 +62460,7 @@ async function refreshSettingsSocialConnection(connectionId) {
 }
 
 async function updateSettingsSocialConsent(connectionId, allow) {
-  const social = state.pages.settings.social;
+  const social = activeSocialResource();
   const normalizedConnectionId = normalizeString(connectionId);
   if (!normalizedConnectionId) {
     return;
@@ -62097,7 +62470,7 @@ async function updateSettingsSocialConsent(connectionId, allow) {
   scheduleRender();
   try {
     await fetchJson(
-      `/api/social/connections/${encodeURIComponent(normalizedConnectionId)}`,
+      `${activeSocialApiBase()}/${encodeURIComponent(normalizedConnectionId)}`,
       {
         auth: true,
         method: "PATCH",
@@ -62118,7 +62491,7 @@ async function updateSettingsSocialConsent(connectionId, allow) {
 }
 
 async function disconnectSettingsSocialConnection(connectionId) {
-  const social = state.pages.settings.social;
+  const social = activeSocialResource();
   const normalizedConnectionId = normalizeString(connectionId);
   if (!normalizedConnectionId) {
     return;
@@ -62128,7 +62501,7 @@ async function disconnectSettingsSocialConnection(connectionId) {
   scheduleRender();
   try {
     await fetchJson(
-      `/api/social/connections/${encodeURIComponent(normalizedConnectionId)}`,
+      `${activeSocialApiBase()}/${encodeURIComponent(normalizedConnectionId)}`,
       { auth: true, method: "DELETE" },
     );
     showToast("Account disconnected.");
@@ -62667,6 +63040,18 @@ async function loadCurrentRoute({ refresh = false } = {}) {
   }
   if (routeKey === ROUTE_KEY_CREATE) {
     await loadPostComposerPage({ refresh });
+    return;
+  }
+  if (routeKey === "organization-people") {
+    await organizationPeoplePage.load({ force: refresh });
+    return;
+  }
+  if (routeKey === "organization-publishing") {
+    await organizationPublishingPage.load({ force: refresh });
+    return;
+  }
+  if (routeKey === "organization-social") {
+    await loadSettingsSocialConnections({ refresh });
     return;
   }
   if (routeKey === ROUTE_KEY_POST_ANALYTICS) {
@@ -67921,6 +68306,22 @@ function renderPostComposerTeleprompterPanel(composer, pending) {
 }
 
 function renderPostComposerMediaPreview(composer) {
+  if (composer.organizationMedia?.length && !composer.file) {
+    return `<div class="shared-create-timeline">${composer.organizationMedia
+      .map((media, index) => {
+        const url = normalizeString(media.url);
+        const usable =
+          /^https?:\/\//u.test(url) && media.expiresAt > Date.now();
+        return `<figure><figcaption>${index + 1} of ${composer.organizationMedia.length}</figcaption>${
+          !usable
+            ? "<p>Preview unavailable or expired. Reload to review this media.</p>"
+            : media.type === "video"
+              ? `<video src="${escapeHtml(url)}" controls playsinline preload="metadata" aria-label="Media ${index + 1}"></video>`
+              : `<img src="${escapeHtml(url)}" alt="${escapeHtml(media.altText || `Media ${index + 1}`)}" />`
+        }</figure>`;
+      })
+      .join("")}</div>`;
+  }
   const fileName = normalizeString(composer.file?.name);
   const camera = composer.camera;
   const mode = postComposerCaptureModeConfig(composer.captureMode);
@@ -68229,48 +68630,34 @@ function renderPostComposerCaptionPanel(composer, pending) {
 }
 
 function renderPostComposerAudienceGroups(composer) {
-  if (normalizePostComposerVisibility(composer.visibility) !== "custom") {
+  if (normalizePostComposerVisibility(composer.visibility) !== "custom")
     return "";
-  }
-  const audienceGroups = state.pages.settings.audienceGroups;
-  const groupIds = readPostComposerAudienceGroupIds(composer.audienceGroupIds);
-  const selected = new Set(groupIds);
-  const knownGroups = Array.isArray(audienceGroups.items)
-    ? audienceGroups.items
-    : [];
-  const selectedKnownGroups = knownGroups.filter((group) =>
-    selected.has(group.groupId),
+  const resource =
+    composer.organizationAudiences || state.pages.settings.audienceGroups;
+  const selected = new Set(
+    readPostComposerAudienceGroupIds(composer.audienceGroupIds),
   );
+  const groups = resource.items || [];
+  const missing = [...selected].some(
+    (id) => !groups.some((group) => group.groupId === id),
+  );
+  const managePath = composer.organization
+    ? `${organizationWorkspacePath(composer.organization)}/more/audiences`
+    : "/settings/audience-groups";
   return `<div class="shared-create-custom-audience">
-    <label>
-      <span>Audience group IDs</span>
-      <input name="audienceGroupIds" data-create-field="audienceGroupIds" value="${escapeHtml(composer.audienceGroupIds)}" placeholder="group-id-1, group-id-2"${disabledAttr(composer.pending)} />
-    </label>
-    ${
-      audienceGroups.loading
-        ? '<div class="shared-create-inline-status">Loading audience groups...</div>'
-        : ""
-    }
-    ${
-      audienceGroups.error
-        ? `<div class="shared-create-inline-status is-error">${escapeHtml(audienceGroups.error)}</div>`
-        : ""
-    }
-    ${
-      selectedKnownGroups.length
-        ? `<div class="shared-create-audience-preview">
-            ${selectedKnownGroups
-              .map(
-                (group) => `<span>
-                  <strong>${escapeHtml(group.name)}</strong>
-                  <small>${escapeHtml(`${formatCount(group.memberUserIds.length)} member ID${group.memberUserIds.length === 1 ? "" : "s"}`)}</small>
-                </span>`,
-              )
-              .join("")}
-          </div>`
-        : ""
-    }
-    <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/settings/audience-groups">${renderIcon("team")} <span>Manage groups</span></button>
+    ${resource.loading ? '<p role="status">Loading audiences…</p>' : ""}
+    ${resource.error || missing ? '<p role="alert">Choose an available audience before publishing.</p>' : ""}
+    ${groups
+      .map(
+        (
+          group,
+        ) => `<label class="shared-settings-toggle"><input type="checkbox" name="audienceGroupIds" data-create-audience-choice
+      value="${escapeHtml(group.groupId)}"${checkedAttr(selected.has(group.groupId))}${disabledAttr(composer.pending || composer.organization?.readOnly)} />
+      <span>${escapeHtml(group.name)}</span></label>`,
+      )
+      .join("")}
+    ${!resource.loading && !groups.length ? "<p>No audiences available.</p>" : ""}
+    <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(managePath)}">Manage audiences</button>
   </div>`;
 }
 
@@ -68335,7 +68722,9 @@ function renderPostComposerOptionRow({
 
 function renderPostComposerOptionsPanel(composer, pending) {
   const saveAvailable =
-    composer.mediaType === "video" && Boolean(composer.file);
+    !composer.organization &&
+    composer.mediaType === "video" &&
+    Boolean(composer.file);
   return `<section class="shared-create-review-section">
     <div class="shared-create-review-section__header">
       <span>${renderIcon("settings")}</span>
@@ -68511,8 +68900,10 @@ function renderPostComposerYouTubeFields(composer, pending) {
 
 function renderPostComposerCrosspostPanel(composer) {
   const visibility = normalizePostComposerVisibility(composer.visibility);
-  const social = state.pages.settings.social;
-  const crosspost = state.pages.settings.crosspost;
+  const social = activeSocialResource();
+  const crosspost = composer.organization
+    ? { item: null }
+    : state.pages.settings.crosspost;
   const connections = Array.isArray(social.connections)
     ? social.connections
     : [];
@@ -68574,7 +68965,7 @@ function renderPostComposerCrosspostPanel(composer) {
     }
     ${
       invalidSelection
-        ? `<div class="shared-create-inline-status is-error">${escapeHtml(`${invalidSelection.target.label || "Publish target"}: ${invalidSelection.reason}`)}</div>`
+        ? `<div class="shared-create-inline-status is-error">${escapeHtml(`${invalidSelection.target.label || "Publish target"}: ${invalidSelection.reason}`)}${composer.organization ? '<button class="shared-feed-chip" type="button" data-action="post-composer-clear-unavailable-crossposts">Remove unavailable selections</button>' : ""}</div>`
         : ""
     }
     ${
@@ -68617,8 +69008,8 @@ function renderPostComposerCrosspostPanel(composer) {
         : ""
     }
     <div class="shared-create-crosspost__actions">
-      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/settings/connected-accounts">${renderIcon("settings")} <span>Accounts</span></button>
-      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/settings/publishing-social">${renderIcon("share")} <span>Defaults</span></button>
+      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${composer.organization ? `${organizationWorkspacePath(composer.organization)}/more/social-connections` : "/settings/connected-accounts"}">${renderIcon("settings")} <span>Accounts</span></button>
+      ${composer.organization ? "" : `<button class="shared-feed-chip" type="button" data-action="navigate" data-route="/settings/publishing-social">${renderIcon("share")} <span>Defaults</span></button>`}
     </div>
   </section>`;
 }
@@ -68645,8 +69036,12 @@ function renderPostComposerPage() {
   const composer = state.pages.create;
   const fileName = normalizeString(composer.file?.name);
   const fileSize = formatComposerFileSize(composer.file?.size);
-  const hasMedia = Boolean(composer.file);
-  const pending = composer.pending;
+  const hasMedia = Boolean(composer.file || composer.existingContent);
+  const pending = composer.pending || composer.organization?.readOnly;
+  const mediaLocked =
+    pending || Boolean(composer.existingContent?.mediaItems?.length);
+  const organizationAction =
+    organizationPublishingPage.composerAction(composer);
   const camera = composer.camera;
   const mediaTypeLabel = postComposerMediaLabel(composer.mediaType);
   const durationLabel =
@@ -68667,24 +69062,24 @@ function renderPostComposerPage() {
   const createdRoute = composer.createdPostId
     ? `/posts/${encodeURIComponent(composer.createdPostId)}`
     : "";
-  return `<section class="shared-page shared-create-page">
+  return `<section class="shared-page shared-create-page${composer.organization ? " shared-organization-publishing shared-create-page--organization" : ""}">
     ${renderTopChrome()}
     <div class="shared-page__content">
       <section class="shared-create-hero">
         <div>
           <span class="shared-discover-eyebrow">Create</span>
-          <h1>Create a Polis post</h1>
-          <p>Capture or upload media, add context, and publish to the Polis feed.</p>
+          <h1>${composer.organization ? `Posting as ${escapeHtml(composer.organization.displayName)}` : "Create a Polis post"}</h1>
+          <p>${composer.organization ? "Review the complete post before saving or publishing." : "Capture or upload media, add context, and publish to the Polis feed."}</p>
         </div>
         <div class="shared-create-hero__actions">
           <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/feed">Feed</button>
-          <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/settings/publishing-social">Publishing defaults</button>
+          <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${composer.organization ? `${organizationWorkspacePath(composer.organization)}/work/publishing` : "/settings/publishing-social"}">${composer.organization ? "Organization drafts" : "Publishing defaults"}</button>
         </div>
       </section>
       <form class="shared-create-layout" data-route-form="post-create">
         <section class="shared-create-panel shared-create-panel--media">
-          ${renderPostComposerCaptureModeStrip(composer)}
-          <div class="shared-create-source-row">
+          ${mediaLocked ? "" : renderPostComposerCaptureModeStrip(composer)}
+          <fieldset class="shared-create-source-row" style="border:0;padding:0;min-width:0"${disabledAttr(mediaLocked)}>
             <label class="shared-feed-chip shared-create-file-chip${pending || camera.active ? " is-disabled" : ""}">
               <input type="file" accept="${escapeHtml(POST_COMPOSER_MEDIA_ACCEPT)}" data-create-file data-create-source="upload"${disabledAttr(pending || camera.active)} />
               ${renderIcon("upload")} <span>Upload</span>
@@ -68694,35 +69089,34 @@ function renderPostComposerPage() {
               ${renderIcon("camera")} <span>Photo</span>
             </label>
             <button class="shared-feed-chip" type="button" data-action="post-composer-camera-start"${disabledAttr(pending || camera.active || !camera.supported)}>${renderIcon("video")} <span>Camera</span></button>
-          </div>
+          </fieldset>
           <div class="shared-create-drop${hasMedia ? " has-image" : ""}${camera.active ? " has-camera" : ""}">
             ${renderPostComposerMediaPreview(composer)}
           </div>
           <div class="shared-create-media-meta">
             <div>
-              <strong>${escapeHtml(fileName || (camera.active ? "Browser camera" : "No media selected"))}</strong>
+              <strong>${escapeHtml(fileName || (composer.existingContent ? "Saved media" : camera.active ? "Browser camera" : "No media selected"))}</strong>
               <small>${escapeHtml(mediaDetails || `PNG, JPG, WebP, MP4, MOV, or WebM`)}</small>
             </div>
             ${
-              hasMedia
+              composer.file
                 ? `<button class="shared-feed-chip" type="button" data-action="post-composer-clear-media"${disabledAttr(pending)}>${renderIcon("close")} <span>Remove</span></button>`
                 : ""
             }
           </div>
-          ${renderPostComposerTimeline(composer)}
-          ${renderPostComposerTrimPanel(composer, pending)}
-          ${renderPostComposerCaptionsPanel(composer, pending)}
-          ${renderPostComposerTextOverlayPanel(composer, pending)}
-          ${renderPostComposerCoverPanel(composer, pending)}
+          ${composer.existingContent && !composer.file ? "" : `${renderPostComposerTimeline(composer)}${renderPostComposerTrimPanel(composer, pending)}${renderPostComposerCaptionsPanel(composer, pending)}${renderPostComposerTextOverlayPanel(composer, pending)}${renderPostComposerCoverPanel(composer, pending)}`}
           <div class="shared-create-upload-note">
             <span>${renderIcon("shield")}</span>
             <p>Media publishes through the same upload and post pipeline as the mobile app.</p>
           </div>
-          ${renderPostComposerTeleprompterPanel(composer, pending)}
+          ${composer.existingContent && !composer.file ? "" : renderPostComposerTeleprompterPanel(composer, pending)}
         </section>
         <section class="shared-create-panel shared-create-panel--form">
           ${renderPostComposerCaptionPanel(composer, pending)}
+          ${composer.organization?.rejectionReason ? `<p role="status">Changes requested: ${escapeHtml(composer.organization.rejectionReason)}</p>` : ""}
+          ${composer.organization?.publicationError ? `<p role="alert">${escapeHtml(composer.organization.publicationError.message)}</p>` : ""}
           ${renderPostComposerReviewPanel(composer, pending)}
+          ${composer.organization?.permissions.hideAttribution ? `<label class="shared-settings-toggle"><input type="checkbox" name="hideActorAttribution"${checkedAttr(composer.hideActorAttribution)}${disabledAttr(pending)} /> Hide my name on this organization post</label>` : ""}
           ${
             composer.error
               ? `<div class="shared-page__error">${escapeHtml(composer.error)}</div>`
@@ -68734,7 +69128,9 @@ function renderPostComposerPage() {
               : ""
           }
           <div class="shared-create-actions">
-            <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(!canPublish)}>${escapeHtml(pending ? composer.stage || "Publishing..." : `Publish ${hasMedia ? mediaTypeLabel : "post"}`)}</button>
+            ${composer.organization ? `<button class="shared-feed-chip" type="submit" name="organizationAction" value="save"${disabledAttr(!canPublish)}>Save draft</button>` : ""}
+            <button class="shared-feed-chip shared-feed-chip--primary" type="submit" name="organizationAction" value="${escapeHtml(organizationAction)}"${disabledAttr(!canPublish || (composer.organization && !organizationAction))}>${escapeHtml(composer.pending ? composer.stage || "Saving…" : composer.organization ? (organizationAction === "approve" ? "Approve and publish" : organizationAction === "submit" ? "Submit for approval" : "Publish") : `Publish ${hasMedia ? mediaTypeLabel : "post"}`)}</button>
+            ${composer.organization ? organizationPublishingPage.renderDraftActions(composer) : ""}
             ${
               createdRoute
                 ? `<button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(createdRoute)}">Open post</button>`
@@ -78421,12 +78817,9 @@ function renderCandidateStaffInviteForm(resource, catalog) {
         })}
       </details>
       <details class="shared-campaign-staff-details shared-campaign-staff-direct-id">
-        <summary>Can't find them? Invite by ID</summary>
+        <summary>Choose another person</summary>
         <div class="shared-campaign-staff-direct-id__body">
-          <label>
-            <span>Polis user ID</span>
-            <input name="directUserId" placeholder="Optional if search cannot find them"${disabledAttr(pending)} />
-          </label>
+          ${renderOrganizationPersonField("directUserId", "Choose a person", { disabled: pending })}
         </div>
       </details>
       <div class="shared-campaign-staff-actions">
@@ -78504,6 +78897,8 @@ function renderCandidateStaffMemberCard(member, resource, catalog, canManage) {
   const role = candidateStaffCatalogRole(catalog, member.roleKey);
   return `<article class="shared-campaign-staff-card">
     <form data-route-form="candidate-staff-access">
+      <input type="hidden" name="expectedAccess" value="${escapeHtml(JSON.stringify({ roleKey: member.roleKey, permissions: member.permissions }))}" />
+      <input type="hidden" name="expectedRevision" value="${escapeHtml(catalog.mutationRevision)}" />
       <input type="hidden" name="userId" value="${escapeHtml(member.userId)}" />
       <div class="shared-campaign-staff-card__top">
         <div class="shared-campaign-staff-person">
@@ -78664,6 +79059,7 @@ function renderCandidateStaffRoles(resource, catalog) {
       <div>
         <h2>Access presets</h2>
         <p>Maintain reusable access defaults for campaign staff assignments.</p>
+        <button type="button" class="shared-feed-chip" data-action="navigate" data-route="/workspace/candidate/${encodeURIComponent(currentCandidateDashboardId())}/more/roles">Review updated defaults</button>
       </div>
     </div>
     <form class="shared-campaign-staff-create-role" data-route-form="candidate-staff-role-create">
@@ -78840,7 +79236,11 @@ function renderCandidateMissionStaffCommandAction(
   const route = `/missions/${encodeURIComponent(mission.missionId)}?returnTo=${encodeURIComponent(getCurrentPathWithQuery())}`;
   const detailsButton = (primary = false, label = "Open details") =>
     `<button class="shared-feed-chip${primary ? " shared-feed-chip--primary" : ""}" type="button" data-action="navigate" data-route="${escapeHtml(route)}">${escapeHtml(label)}</button>`;
-  if (!jobAction) {
+  if (
+    !jobAction ||
+    mission.status !== "active" ||
+    mission.lifecycleTransition
+  ) {
     return detailsButton(true, "Open task");
   }
   const isMine = missionJobIsMine(job);
@@ -79198,7 +79598,12 @@ function renderCandidateMissionAdminCommand(resource, items, options = {}) {
 
 function renderMissionWorkspaceJobPanel(mission, job, options = {}) {
   const actionName = normalizeString(options.jobAction);
-  if (!job || !actionName) {
+  if (
+    !job ||
+    !actionName ||
+    mission.status !== "active" ||
+    mission.lifecycleTransition
+  ) {
     return "";
   }
   const resource =
@@ -88930,12 +89335,9 @@ function renderCoalitionInviteForm(resource, catalog, canManage) {
         })}
       </details>
       <details class="shared-campaign-staff-details shared-campaign-staff-direct-id">
-        <summary>Can't find them? Invite by ID</summary>
+        <summary>Choose another person</summary>
         <div class="shared-campaign-staff-direct-id__body">
-          <label>
-            <span>Polis user ID</span>
-            <input name="directUserId" placeholder="Optional if search cannot find them"${disabledAttr(!canManage || pending)} />
-          </label>
+          ${renderOrganizationPersonField("directUserId", "Choose a person", { disabled: !canManage || pending })}
         </div>
       </details>
       <div class="shared-campaign-staff-actions">
@@ -89106,6 +89508,8 @@ function renderCoalitionMemberAccessCard(member, resource, catalog, canManage) {
   const matches = coalitionMemberMatchesFilters(member, filters, catalog);
   return `<article class="shared-campaign-staff-card" data-coalition-member-card data-member-role-key="${escapeHtml(member.roleKey)}" data-member-search="${escapeHtml(coalitionMemberSearchText(member, catalog))}"${matches ? "" : " hidden"}>
     <form data-route-form="coalition-member-access">
+      <input type="hidden" name="expectedAccess" value="${escapeHtml(JSON.stringify({ roleKey: member.roleKey, permissions: member.permissions }))}" />
+      <input type="hidden" name="expectedRevision" value="${escapeHtml(catalog.mutationRevision)}" />
       <input type="hidden" name="userId" value="${escapeHtml(member.userId)}" />
       <div class="shared-campaign-staff-card__top">
         <div class="shared-campaign-staff-person">
@@ -89276,6 +89680,7 @@ function renderCoalitionAccessRoles(resource, catalog, canManage) {
       <div>
         <h2>Access presets</h2>
         <p>Maintain reusable feature access and room-synced coalition roles.</p>
+        <button type="button" class="shared-feed-chip" data-action="navigate" data-route="/workspace/coalition/${encodeURIComponent(currentCoalitionDetailId())}/more/roles">Review updated defaults</button>
       </div>
     </div>
     ${
@@ -90505,7 +90910,7 @@ function renderCoalitionTerritoryAssignmentAdmin(
         </div>
         <form class="shared-coalition-territory-form" data-route-form="${escapeHtml(prefix)}-territory-assignment-create">
           <label><span>Territory</span><select name="territoryId"${disabledAttr(Boolean(pending))}>${renderCoalitionTerritoryOptions(access, selectedTerritoryId)}</select></label>
-          <label><span>User ID</span><input name="userId" autocomplete="off"${disabledAttr(Boolean(pending))} required /></label>
+          ${renderOrganizationPersonField("userId", "Choose assignee", { disabled: Boolean(pending) })}
           <label><span>Starts at optional</span><input name="startsAt" autocomplete="off" placeholder="2026-03-01T00:00:00.000Z"${disabledAttr(Boolean(pending))} /></label>
           <label><span>Ends at optional</span><input name="endsAt" autocomplete="off" placeholder="2026-03-31T23:59:59.000Z"${disabledAttr(Boolean(pending))} /></label>
           <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(Boolean(pending) || !selectedTerritoryId)}>${pending === "assignment:create" ? "Assigning..." : "Assign user"}</button>
@@ -90520,8 +90925,8 @@ function renderCoalitionTerritoryAssignmentAdmin(
         </div>
         <form class="shared-coalition-territory-form" data-route-form="${escapeHtml(prefix)}-territory-assignment-reassign">
           <label><span>Territory</span><select name="territoryId"${disabledAttr(Boolean(pending))}>${renderCoalitionTerritoryOptions(access, selectedTerritoryId)}</select></label>
-          <label><span>From user ID</span><input name="fromUserId" autocomplete="off"${disabledAttr(Boolean(pending))} required /></label>
-          <label><span>To user ID</span><input name="toUserId" autocomplete="off"${disabledAttr(Boolean(pending))} required /></label>
+          ${renderOrganizationPersonField("fromUserId", "Choose current assignee", { disabled: Boolean(pending) })}
+          ${renderOrganizationPersonField("toUserId", "Choose replacement", { disabled: Boolean(pending) })}
           <button class="shared-feed-chip" type="submit"${disabledAttr(Boolean(pending) || !selectedTerritoryId)}>${pending === "assignment:reassign" ? "Reassigning..." : "Reassign"}</button>
         </form>
       </article>
@@ -95014,7 +95419,7 @@ function renderOrganizationGovernanceAuditPanel(page, routeInfo) {
           <form class="shared-coalition-governance-form shared-organization-governance-audit-form" data-route-form="organization-governance-audit-create">
             <input type="hidden" name="voteId" value="${escapeHtml(routeInfo.voteId)}" />
             <label><span>Receipt code</span><input name="targetReceiptCode" placeholder="Receipt code"${disabledAttr(pending)} required /></label>
-            <label><span>Named auditor user id</span><input name="namedAuditorUserId" placeholder="user-..."${disabledAttr(pending)} required /></label>
+            ${renderOrganizationPersonField("namedAuditorUserId", "Choose named auditor", { disabled: pending })}
             <label class="is-full"><span>Reason</span><textarea name="reason" rows="3" placeholder="Explain why this receipt requires exceptional review."${disabledAttr(pending)} required></textarea></label>
             <div class="shared-coalition-governance-form__actions">
               <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(pending)}>${pending ? "Opening..." : "Open audit case"}</button>
@@ -96284,6 +96689,7 @@ function renderMissionConditions(title, conditions) {
 }
 
 function renderMissionNextStepPanel(mission) {
+  if (mission.status !== "active" || mission.lifecycleTransition) return "";
   const job = missionNextJob(mission);
   if (!job) {
     return `<article class="shared-missions-panel shared-missions-panel--accent">
@@ -96401,7 +96807,13 @@ function missionJobControlFlags(mission, job) {
     job.targetMode === "role_claim" && !job.assigneeUserId;
   const sourceConversationId = normalizeString(mission?.source?.conversationId);
   const leadUserId = normalizeString(mission?.leadUserId);
+  const workActive =
+    mission.status === "active" && !mission.lifecycleTransition;
+  const canDiscuss =
+    ["active", "paused"].includes(mission.status) &&
+    !mission.lifecycleTransition;
   const canWorkJob =
+    workActive &&
     !job.isQueued &&
     !isUnclaimedRoleClaim &&
     !job.isClosed &&
@@ -96411,11 +96823,12 @@ function missionJobControlFlags(mission, job) {
     isAdmin,
     isMine,
     isUnclaimedRoleClaim,
-    canAdminActivate: isAdmin && job.isQueued && !job.isClosed,
+    canAdminActivate: workActive && isAdmin && job.isQueued && !job.isClosed,
     canWorkJob,
-    canAdminIntervene: isAdmin && !job.isClosed && !job.isQueued,
-    canPostUpdate: canWorkJob,
-    canAddFollowUp: !job.isClosed && !job.isQueued && (isMine || isAdmin),
+    canAdminIntervene: workActive && isAdmin && !job.isClosed && !job.isQueued,
+    canPostUpdate: canDiscuss && !job.isClosed && (isMine || isAdmin),
+    canAddFollowUp:
+      workActive && !job.isClosed && !job.isQueued && (isMine || isAdmin),
     canMessageLead: Boolean(
       leadUserId && (!currentUserId || leadUserId !== currentUserId),
     ),
@@ -96425,7 +96838,12 @@ function missionJobControlFlags(mission, job) {
 }
 
 function renderMissionJobSupportMenu(mission, job, flags) {
-  if (!flags.isMine || job.isClosed) {
+  if (
+    mission.status !== "active" ||
+    mission.lifecycleTransition ||
+    !flags.isMine ||
+    job.isClosed
+  ) {
     return "";
   }
   return `<details class="shared-mission-admin-actions shared-mission-admin-actions--support">
@@ -96850,7 +97268,7 @@ function renderMissionJobPanel(job, mission, jobsById) {
       </div>
       <div class="shared-mission-job__actions">
         ${renderMissionBadge(humanizeLabel(job.status), missionStatusTone(job.status))}
-        ${job.isClaimable ? renderMissionClaimButton(mission.missionId, job) : ""}
+        ${mission.status === "active" && !mission.lifecycleTransition && job.isClaimable ? renderMissionClaimButton(mission.missionId, job) : ""}
       </div>
     </div>
     ${renderMissionConditions("Start conditions", job.startConditions)}
@@ -96880,6 +97298,131 @@ function renderMissionTimeline(events) {
       )
       .join("")}
   </div>`;
+}
+
+/** Manager metadata and lifecycle use the same revision and durable transition contract as the app. */
+function renderMissionManagerControls(mission, detail) {
+  if (!missionDetailViewerCanManage(detail)) return "";
+  const pending = Boolean(detail.actionPendingKey);
+  const transition = mission.lifecycleTransition;
+  const closed = ["completed", "failed", "canceled"].includes(mission.status);
+  const options = transition
+    ? [[transition.target, "Continue update"]]
+    : closed
+      ? [["active", "Reopen mission"]]
+      : [
+          [
+            mission.status === "paused" ? "active" : "paused",
+            mission.status === "paused" ? "Resume mission" : "Pause mission",
+          ],
+          ["completed", "Complete mission"],
+          ["canceled", "Cancel mission"],
+          ["failed", "Close as failed"],
+        ];
+  const draft = detail.missionEditDraft || mission;
+  const lifecycleDraft = detail.lifecycleDraft || {};
+  return `<details class="shared-missions-panel"${transition ? " open" : ""}><summary>Manage mission</summary>
+    ${
+      !transition
+        ? `<form class="shared-form" data-route-form="mission-edit">
+      <label>Title<input name="title" value="${escapeHtml(draft.title)}" required maxlength="160" /></label>
+      <label>Description<textarea name="description" rows="3">${escapeHtml(draft.description || "")}</textarea></label>
+      <label>Priority<select name="priority">${["low", "normal", "high", "urgent"].map((priority) => `<option value="${priority}"${draft.priority === priority ? " selected" : ""}>${humanizeLabel(priority)}</option>`).join("")}</select></label>
+      ${renderOrganizationPersonField("leadUserId", "Mission lead", { value: draft.leadUserId, disabled: pending })}
+      <button class="shared-feed-chip" type="button" data-action="mission-lead-clear"${disabledAttr(pending)}>Clear lead</button>
+      <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(pending)}>Save changes</button></form>`
+        : ""
+    }
+    <form class="shared-form" data-route-form="mission-lifecycle">
+      <label>Mission status<select name="status">${options.map(([value, label]) => `<option value="${value}"${lifecycleDraft.status === value ? " selected" : ""}>${label}</option>`).join("")}</select></label>
+      <p>Pause stops work, reminders, and timeouts while keeping discussion and evidence. Resume shifts relative deadlines; fixed dates stay unchanged. Completion requires all tasks finished or approved. Cancel or fail closes unfinished tasks and linked requests. Reopen preserves completed evidence; canceled linked requests must be reopened through Requests.</p>
+      ${!transition ? `<label>Reason<textarea name="reason" rows="2" required>${escapeHtml(lifecycleDraft.reason || "")}</textarea></label>` : "<p>An update is in progress. Continue to finish it safely.</p>"}
+      <button class="shared-feed-chip" type="submit"${disabledAttr(pending)}>${transition ? "Continue update" : "Update status"}</button>
+    </form></details>`;
+}
+
+async function saveMissionMetadata(formData, lifecycle = false) {
+  const detail = state.pages.missions.detail;
+  const mission = detail.item;
+  if (
+    !mission ||
+    !missionDetailViewerCanManage(detail) ||
+    detail.actionPendingKey
+  )
+    return false;
+  const missionId = mission.missionId;
+  const actor = normalizeString(state.auth?.user?.userId);
+  const isCurrent = () =>
+    detail.item?.missionId === missionId &&
+    normalizeString(state.auth?.user?.userId) === actor;
+  const draft = lifecycle
+    ? {
+        status:
+          mission.lifecycleTransition?.target ||
+          normalizeString(formData.get("status")),
+        reason:
+          mission.lifecycleTransition?.reason ||
+          normalizeString(formData.get("reason")),
+        lifecycleRequestId:
+          mission.lifecycleTransition?.id ||
+          detail.lifecycleRequestId ||
+          (detail.lifecycleRequestId = crypto.randomUUID()),
+      }
+    : {
+        title: normalizeString(formData.get("title")),
+        description: normalizeString(formData.get("description")),
+        priority: normalizeString(formData.get("priority")),
+        leadUserId: normalizeString(formData.get("leadUserId")),
+      };
+  if (!lifecycle) detail.missionEditDraft = draft;
+  else detail.lifecycleDraft = draft;
+  detail.actionPendingKey = "mission-metadata";
+  scheduleRender();
+  try {
+    let body = { ...draft, expectedRevision: mission.mutationRevision };
+    let finished = false;
+    for (let page = 0; page < 1000; page += 1) {
+      const payload = await fetchJson(
+        `/api/missions/${encodeURIComponent(missionId)}`,
+        { auth: true, method: "PATCH", body },
+      );
+      if (!isCurrent()) return false;
+      const updated = normalizeMission(payload.mission || payload);
+      detail.item = { ...updated, jobs: detail.item.jobs };
+      if (!updated.lifecycleTransition) {
+        finished = true;
+        break;
+      }
+      body = {
+        status: updated.lifecycleTransition.target,
+        lifecycleRequestId: updated.lifecycleTransition.id,
+        expectedRevision: updated.mutationRevision,
+      };
+    }
+    if (!finished)
+      throw new Error(
+        "The update is still in progress. Continue to finish it.",
+      );
+    detail.missionEditDraft = null;
+    detail.lifecycleRequestId = null;
+    detail.lifecycleDraft = null;
+    await loadMissionDetail(missionId, { refresh: true });
+    showToast("Mission updated.");
+    return true;
+  } catch (error) {
+    if (isCurrent()) {
+      await loadMissionDetail(missionId, { refresh: true });
+      detail.error =
+        normalizeString(error?.message) ||
+        "Mission update could not finish. Your entries are kept; try again.";
+    }
+    return false;
+  } finally {
+    if (isCurrent()) {
+      detail.actionPendingKey = "";
+      scheduleRender();
+    }
+  }
 }
 
 function renderMissionDetailPage() {
@@ -96933,6 +97476,7 @@ function renderMissionDetailPage() {
           <div class="shared-mission-progress"><span style="width: ${Math.max(0, Math.min(100, progress))}%"></span></div>
         </div>
       </section>
+      ${renderMissionManagerControls(mission, detail)}
       ${detail.error ? `<div class="shared-page__error">${escapeHtml(detail.error)}</div>` : ""}
       <div class="shared-missions-metrics">
         <div><span>Tasks</span><strong>${escapeHtml(formatCount(mission.jobs.length))}</strong></div>
@@ -100801,7 +101345,7 @@ function renderMessagingPageLegacy() {
       .join("")}</div>`;
   } else if (subroute.view === "compose") {
     bodyMarkup = `<form class="shared-form" data-route-form="messaging-compose">
-      <label><span>User ID</span><input name="recipientId" value="${escapeHtml(messaging.compose.recipientId || "")}" /></label>
+      ${renderOrganizationPersonField("recipientId", "Choose recipient", { value: messaging.compose.recipientId || "" })}
       <label><span>Username</span><input name="username" /></label>
       <div class="shared-card__actions">
         <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${messaging.compose.pending ? " disabled" : ""}>${messaging.compose.pending ? "Starting..." : "Start DM"}</button>
@@ -101110,7 +101654,7 @@ function renderMessagingPageLegacy() {
       <article class="shared-card"><div class="shared-card__body"><div class="shared-card__meta"><span>${escapeHtml(humanizeLabel(subroute.view.replace(/^room-/, "")) || "Room settings")}</span></div><h3>${escapeHtml(conversation.item?.title || "Room")}</h3><p>${escapeHtml(conversation.item?.subtitle || "Manage members and room settings from the browser.")}</p><div class="shared-card__actions"><button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(buildMessagingRoomRoute(subroute.scopeType, subroute.scopeId, subroute.conversationId, "/settings/permissions"))}">Room access</button></div></div></article>
       <form class="shared-form shared-form--inline" data-route-form="messaging-room-member-add">
         <input type="hidden" name="conversationId" value="${escapeHtml(subroute.conversationId)}" />
-        <label><span>User ID</span><input name="userId" placeholder="User id" /></label>
+        ${renderOrganizationPersonField("userId")}
         <label><span>Username</span><input name="username" placeholder="Username" /></label>
         <button class="shared-feed-chip shared-feed-chip--primary" type="submit">Add member</button>
       </form>
@@ -102489,7 +103033,7 @@ function renderMessagingMembersFilterForm(subroute) {
     <input type="hidden" name="scopeId" value="${escapeHtml(subroute.scopeId)}" />
     <label>
       <span>Search members</span>
-      <input name="query" value="${escapeHtml(currentQuery)}" placeholder="Name, username, role, or user ID" />
+      <input name="query" value="${escapeHtml(currentQuery)}" placeholder="Name, username, or role" />
     </label>
     <button class="shared-feed-chip shared-feed-chip--primary" type="submit">Filter</button>
     ${currentQuery ? `<button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(buildMessagingServerRoute(subroute.scopeType, subroute.scopeId, "/members"))}">Clear</button>` : ""}
@@ -105382,13 +105926,13 @@ function renderMessagingRoomMemberSection(subroute, roomMembers) {
   return renderMessagingRoomSection({
     title: "Room members",
     subtitle:
-      "Add a person by username or user ID, then remove temporary room access without leaving the room.",
+      "Choose a person or enter their username, then manage temporary room access without leaving the room.",
     badge: `${formatCount(members.length)} listed`,
     body: `${roomMembers.error ? `<div class="shared-page__error">${escapeHtml(roomMembers.error)}</div>` : ""}
     <form class="shared-messaging-room-member-form" data-route-form="messaging-room-member-add">
       <input type="hidden" name="conversationId" value="${escapeHtml(subroute.conversationId)}" />
       <label><span>Username</span><input name="username" placeholder="@username"${disabledAttr(busy)} /></label>
-      <label><span>User ID</span><input name="userId" placeholder="user_..."${disabledAttr(busy)} /></label>
+      ${renderOrganizationPersonField("userId", "Choose a person", { disabled: busy })}
       <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(busy)}>${adding ? "Adding..." : "Add member"}</button>
     </form>
     <div class="shared-messaging-room-member-list">${
@@ -110498,12 +111042,9 @@ function renderMessagingComposePanel(messaging) {
         }
         ${renderMessagingComposePeople(compose, pending)}
         <details class="shared-messaging-compose-exact">
-          <summary>Use exact username or user ID</summary>
+          <summary>Choose a person or use an exact username</summary>
           <div class="shared-messaging-compose__fields">
-            <label>
-              <span>User ID</span>
-              <input name="recipientId" data-messaging-compose-field="recipientId" value="${escapeHtml(compose.recipientId || "")}" placeholder="user id" autocomplete="off"${disabledAttr(pending || mode === "group")} />
-            </label>
+            ${renderOrganizationPersonField("recipientId", "Choose recipient", { value: compose.recipientId || "", disabled: pending || mode === "group", extra: 'data-messaging-compose-field="recipientId"' })}
             <label>
               <span>Username</span>
               <input name="username" data-messaging-compose-field="username" value="${escapeHtml(compose.username || "")}" placeholder="username" autocomplete="off"${disabledAttr(pending || mode === "group")} />
@@ -110792,7 +111333,12 @@ function renderMessagingMissionLifecycle(message, mission, route) {
 
   const isMine = missionJobIsMine(job);
   const canWorkJob =
-    isMine && !job.isQueued && !job.isClosed && job.status !== "submitted";
+    mission.status === "active" &&
+    !mission.lifecycleTransition &&
+    isMine &&
+    !job.isQueued &&
+    !job.isClosed &&
+    job.status !== "submitted";
   const completionBlocker = missionJobCompletionBlocker(job);
   const requiresNote = missionJobHasRequiredNote(job);
 
@@ -113571,11 +114117,11 @@ function renderMessagingGroupPeopleCandidates(
       ${error ? `<div class="shared-page__error">${escapeHtml(error)}</div>` : ""}
     </div>
     <details class="shared-messaging-people-exact">
-      <summary>Add exact username or user ID</summary>
+      <summary>Choose a person or use an exact username</summary>
       <form class="shared-messaging-people-exact-form" data-route-form="messaging-group-member-add">
         <input type="hidden" name="conversationId" value="${escapeHtml(conversation.conversationId)}" />
         <label><span>Username</span><input name="username" placeholder="@username"${disabledAttr(Boolean(pendingKey))} autocomplete="off" /></label>
-        <label><span>User ID</span><input name="userId" placeholder="user_..."${disabledAttr(Boolean(pendingKey))} autocomplete="off" /></label>
+        ${renderOrganizationPersonField("userId", "Choose a person", { disabled: Boolean(pendingKey) })}
         <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(Boolean(pendingKey))}>Add person</button>
       </form>
     </details>
@@ -116466,9 +117012,7 @@ function settingsConnectionReadiness(provider, connection) {
   };
 }
 
-function getSettingsConnectedAccountStats(
-  social = state.pages.settings.social,
-) {
+function getSettingsConnectedAccountStats(social = activeSocialResource()) {
   const providers = getSettingsSocialProviders();
   const connections = social.connections || [];
   const knownProviderKeys = new Set(providers.map((provider) => provider.key));
@@ -117135,7 +117679,7 @@ function renderSettingsMentionConsent(connection) {
 }
 
 function renderSettingsBlueskyManualForm(providerKey, busy) {
-  if (state.pages.settings.social.manualProvider !== providerKey) {
+  if (activeSocialResource().manualProvider !== providerKey) {
     return "";
   }
   return `<form class="shared-settings-manual" data-route-form="settings-social-manual">
@@ -117159,9 +117703,12 @@ function renderSettingsBlueskyManualForm(providerKey, busy) {
   </form>`;
 }
 
-function renderSettingsProviderCard(provider) {
-  const social = state.pages.settings.social;
-  const connection = findSettingsConnection(provider.key);
+function renderSettingsProviderCard(provider, selectedConnection) {
+  const social = activeSocialResource();
+  const connection =
+    selectedConnection === undefined
+      ? findSettingsConnection(provider.key)
+      : selectedConnection;
   const isConnected = Boolean(connection);
   const busy = Boolean(social.actionPendingKey);
   const providerBusy =
@@ -117212,21 +117759,37 @@ function renderSettingsProviderCard(provider) {
 }
 
 function renderSettingsConnectedAccounts() {
-  const social = state.pages.settings.social;
+  const social = activeSocialResource();
+  const scope = currentOrganizationWorkspaceContext();
   return `<div class="shared-settings-main">
     <section class="shared-settings-panel">
       <div class="shared-settings-panel__header">
         <div>
-          <h2>Social connections</h2>
+          <h2>${escapeHtml(scope ? `${social.organizationName || "Organization"} accounts` : "Social connections")}</h2>
           <p>Connect the accounts Polis can publish to, then refresh targets to sync pages, channels, and profiles.</p>
         </div>
         <button class="shared-feed-chip" type="button" data-action="settings-refresh">Refresh</button>
       </div>
       ${renderSettingsResourceStatus(social, "connected accounts")}
+      <fieldset style="border:0;padding:0;margin:0;min-width:0"${disabledAttr(scope && !social.canManage)}>
       ${renderSettingsConnectedAccountsOverview(social)}
       <div class="shared-settings-provider-grid">
-        ${getSettingsSocialProviders().map(renderSettingsProviderCard).join("")}
+        ${getSettingsSocialProviders()
+          .map((provider) => {
+            const connections = social.connections.filter(
+              (c) => c.provider === provider.key,
+            );
+            return connections.length
+              ? connections
+                  .map((connection) =>
+                    renderSettingsProviderCard(provider, connection),
+                  )
+                  .join("")
+              : renderSettingsProviderCard(provider, null);
+          })
+          .join("")}
       </div>
+      </fieldset>
     </section>
   </div>`;
 }
@@ -117313,7 +117876,7 @@ function renderSettingsPublishingForm() {
 }
 
 function renderSettingsCrosspostHandoff() {
-  const social = state.pages.settings.social;
+  const social = activeSocialResource();
   const stats = getSettingsConnectedAccountStats(social);
   const statusCopy = social.loading
     ? "Refreshing provider status and publishing targets."
@@ -120009,24 +120572,22 @@ function renderSettingsVoterIntelligence() {
 
 function renderSettingsAudienceMemberChips(
   memberUserIds = [],
-  { emptyText = "No members selected", limit = 12 } = {},
+  { emptyText = "No members selected", groupId = "create" } = {},
 ) {
+  const resource = state.pages.settings.audienceGroups;
   const ids = normalizeAudienceGroupMemberIds(memberUserIds);
-  return `<div class="shared-settings-audience-members" aria-label="Audience group members">
-    ${
-      ids.length
-        ? ids
-            .slice(0, limit)
-            .map((memberId) => `<span>${escapeHtml(memberId)}</span>`)
-            .join("")
-        : `<span>${escapeHtml(emptyText)}</span>`
-    }
-    ${
-      ids.length > limit
-        ? `<span>${escapeHtml(`+${formatCount(ids.length - limit)} more`)}</span>`
-        : ""
-    }
-  </div>`;
+  return `<div class="shared-settings-audience-members" aria-label="Audience group members">${
+    ids.length
+      ? ids
+          .map((memberId) => {
+            const person = resource.people?.[memberId];
+            const name =
+              person?.displayName || person?.username || "Account unavailable";
+            return `<span>${escapeHtml(name)}${person?.username ? ` (@${escapeHtml(person.username)})` : ""}<button type="button" class="shared-feed-chip" data-action="settings-audience-person-remove" data-group-id="${escapeHtml(groupId)}" data-user-id="${escapeHtml(memberId)}" aria-label="Remove ${escapeHtml(name)}">Remove</button></span>`;
+          })
+          .join("")
+      : `<span>${escapeHtml(emptyText)}</span>`
+  }</div>`;
 }
 
 function renderSettingsAudienceSearchResult(
@@ -120090,7 +120651,7 @@ function renderSettingsAudienceMemberSearch(
                     : '<div class="shared-campaign-staff-search-message">No matching people.</div>'
             }
           </div>`
-        : `<div class="shared-campaign-staff-search-hint">Type at least two characters or paste user IDs below.</div>`
+        : `<div class="shared-campaign-staff-search-hint">Type at least two characters to find a person.</div>`
     }
   </div>`;
 }
@@ -120148,10 +120709,7 @@ function renderSettingsAudienceGroups() {
             <span>Name</span>
             <input name="name" value="${escapeHtml(createDraft.name)}" data-settings-audience-field="name" data-group-id="create" placeholder="Campaign field team" required />
           </label>
-          <label>
-            <span>Members</span>
-            <textarea name="memberUserIds" rows="4" data-settings-audience-field="memberUserIds" data-group-id="create" placeholder="Search above or paste user IDs, one per line">${escapeHtml(createDraft.memberUserIds)}</textarea>
-          </label>
+          <input type="hidden" name="memberUserIds" value="${escapeHtml(createDraft.memberUserIds)}" />
         </div>
         ${renderSettingsAudienceMemberSearch("create", createMemberIds, savingKey === "create")}
         ${renderSettingsAudienceMemberChips(createMemberIds, {
@@ -120211,14 +120769,12 @@ function renderSettingsAudienceGroups() {
                     <span>Name</span>
                     <input name="name" value="${escapeHtml(draft.name)}" data-settings-audience-field="name" data-group-id="${escapeHtml(group.groupId)}" required />
                   </label>
-                  <label>
-                    <span>Members</span>
-                    <textarea name="memberUserIds" rows="5" data-settings-audience-field="memberUserIds" data-group-id="${escapeHtml(group.groupId)}">${escapeHtml(draft.memberUserIds)}</textarea>
-                  </label>
+                  <input type="hidden" name="memberUserIds" value="${escapeHtml(draft.memberUserIds)}" />
                 </div>
                 ${renderSettingsAudienceMemberSearch(group.groupId, draftMemberIds, Boolean(savingKey))}
                 ${renderSettingsAudienceMemberChips(draftMemberIds, {
                   emptyText: "No members yet",
+                  groupId: group.groupId,
                 })}
                 <div class="shared-settings-form-actions">
                   <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(Boolean(savingKey))}>${saving ? "Saving..." : "Save"}</button>
@@ -126426,6 +126982,12 @@ function renderRouteStage() {
   if (routeKey === ROUTE_KEY_FEED) {
     return renderFeedOverviewPage();
   }
+  if (routeKey === "organization-people")
+    return organizationPeoplePage.render();
+  if (routeKey === "organization-publishing")
+    return organizationPublishingPage.render();
+  if (routeKey === "organization-social")
+    return `<section class="shared-page">${renderTopChrome()}<div class="shared-page__content">${renderSettingsConnectedAccounts()}</div></section>`;
   if (routeKey === ROUTE_KEY_CREATE) {
     return renderPostComposerPage();
   }
@@ -128765,6 +129327,24 @@ async function handleRootClick(event) {
     setPostComposerFile(null).catch(() => {});
     return;
   }
+  if (action === "post-composer-clear-unavailable-crossposts") {
+    const composer = state.pages.create;
+    if (composer.pending || composer.organization?.readOnly) return;
+    const valid = new Set(
+      postComposerCrosspostTargets()
+        .filter(
+          (target) =>
+            !postComposerCrosspostTargetDisabledReason(target, composer),
+        )
+        .map(postComposerCrosspostSelectionKey),
+    );
+    composer.selectedCrosspostTargetKeys = [
+      ...postComposerSelectedCrosspostKeySet(composer),
+    ].filter((key) => valid.has(key));
+    composer.error = "";
+    scheduleRender();
+    return;
+  }
 
   if (action === "post-composer-caption-token") {
     insertPostComposerCaptionToken(target.getAttribute("data-token"));
@@ -129563,6 +130143,15 @@ async function handleRootClick(event) {
     return;
   }
 
+  if (action === "mission-lead-clear") {
+    const field = target.closest("form")?.querySelector("[data-person-field]");
+    if (field) {
+      field.querySelector('input[name="leadUserId"]').value = "";
+      field.querySelector("[data-person-choose]").textContent =
+        "Choose mission lead";
+    }
+    return;
+  }
   if (action === "mission-job-action-open") {
     openMissionJobActionDraft({
       missionId: target.getAttribute("data-mission-id"),
@@ -130821,6 +131410,10 @@ async function handleRootClick(event) {
   }
 
   if (action === "settings-refresh") {
+    if (currentOrganizationWorkspaceContext()?.section === "social") {
+      loadSettingsSocialConnections({ refresh: true }).catch(() => {});
+      return;
+    }
     loadSettingsPage({ refresh: true }).catch(() => {
       showToast("Settings refresh failed.");
     });
@@ -130860,7 +131453,7 @@ async function handleRootClick(event) {
   }
 
   if (action === "settings-social-manual-cancel") {
-    state.pages.settings.social.manualProvider = "";
+    activeSocialResource().manualProvider = "";
     scheduleRender();
     return;
   }
@@ -130899,6 +131492,17 @@ async function handleRootClick(event) {
     return;
   }
 
+  if (action === "settings-audience-person-remove") {
+    const resource = state.pages.settings.audienceGroups;
+    const groupId = target.getAttribute("data-group-id");
+    const group = settingsAudienceGroupByKey(resource, groupId);
+    const draft = settingsAudienceGroupDraft(resource, groupId, group);
+    draft.memberUserIds = normalizeAudienceGroupMemberIds(draft.memberUserIds)
+      .filter((userId) => userId !== target.getAttribute("data-user-id"))
+      .join("\n");
+    scheduleRender();
+    return;
+  }
   if (action === "settings-audience-group-delete") {
     const groupId = normalizeString(target.getAttribute("data-group-id"));
     if (
@@ -131923,6 +132527,9 @@ async function handleRootClick(event) {
       actionPendingKey: "",
       manualProvider: "",
     };
+    organizationSocialResources.clear();
+    organizationPeoplePage.reset();
+    organizationPublishingPage.reset();
     state.pages.settings.publishing = {
       item: null,
       loading: false,
@@ -134574,6 +135181,16 @@ function syncCampaignQuestOutcomeChoices(row, outreachType) {
 }
 
 function handleRootChange(event) {
+  if (event.target.matches?.("[data-create-audience-choice]")) {
+    const form = event.target.closest("form");
+    updatePostComposerField(
+      "audienceGroupIds",
+      [...form.querySelectorAll("[data-create-audience-choice]:checked")]
+        .map((input) => input.value)
+        .join(","),
+    );
+    return;
+  }
   const governanceVoteForm = event.target.closest(
     '[data-route-form="organization-governance-vote-create"], [data-route-form="organization-governance-vote-update"]',
   );
@@ -135382,6 +135999,8 @@ function handleCommentSubmit(event) {
       return;
     }
     if (formKind === "post-create") {
+      if (event.submitter?.name === "organizationAction")
+        formData.set("organizationAction", event.submitter.value);
       submitPostComposer(formData).catch(() => {});
       return;
     }
@@ -135478,6 +136097,12 @@ function handleCommentSubmit(event) {
           if (created) routeForm.reset();
         })
         .catch(() => {});
+      return;
+    }
+    if (formKind === "mission-edit" || formKind === "mission-lifecycle") {
+      saveMissionMetadata(formData, formKind === "mission-lifecycle").catch(
+        () => {},
+      );
       return;
     }
     if (formKind === "mission-job-action") {

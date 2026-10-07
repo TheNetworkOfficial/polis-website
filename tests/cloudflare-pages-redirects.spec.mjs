@@ -10,7 +10,10 @@ test("Cloudflare Pages rewrites dynamic Files and Governance routes", () => {
   const redirectsPlugin = webpackConfig.plugins.find(
     (plugin) => plugin?.constructor?.name === "StaticTextAssetPlugin",
   );
-  assert.ok(redirectsPlugin, "webpack must emit the Cloudflare _redirects asset");
+  assert.ok(
+    redirectsPlugin,
+    "webpack must emit the Cloudflare _redirects asset",
+  );
   assert.equal(redirectsPlugin.filename, "_redirects");
 
   const rules = readFileSync(redirectsPlugin.sourcePath, "utf8")
@@ -21,6 +24,7 @@ test("Cloudflare Pages rewrites dynamic Files and Governance routes", () => {
   assert.deepEqual(rules, [
     "/files/* /route-shells/files 200",
     "/organizations/* /route-shells/organizations 200",
+    "/workspace/* /route-shells/workspace 200",
     "/posts/* /route-shells/posts 200",
   ]);
 
@@ -31,6 +35,8 @@ test("Cloudflare Pages rewrites dynamic Files and Governance routes", () => {
   );
   assert.ok(emittedHtml.has("route-shells/files.html"));
   assert.ok(emittedHtml.has("route-shells/organizations.html"));
+  assert.ok(emittedHtml.has("route-shells/workspace.html"));
+  assert.ok(emittedHtml.has("workspace/index.html"));
   assert.ok(emittedHtml.has("route-shells/posts.html"));
 });
 
@@ -68,4 +74,51 @@ test("Node and Lightsail route Files and organization Governance shells", () => 
   assert.ok(dynamicRouteLocation, "Lightsail dynamic-route proxy must exist");
   assert.match(dynamicRouteLocation, /\|files\|/u);
   assert.match(dynamicRouteLocation, /\|organizations\|/u);
+  assert.match(dynamicRouteLocation, /\|workspace\|/u);
+});
+
+test("every canonical workspace link serves the authenticated Node shell", async () => {
+  const backendRequire = createRequire(
+    new URL("../backend/package.json", import.meta.url),
+  );
+  const express = backendRequire("express");
+  const app = express();
+  app.use(backendRequire("./src/routes/postShares.js"));
+  const server = await new Promise((resolve) => {
+    const listener = app.listen(0, "127.0.0.1", () => resolve(listener));
+  });
+  try {
+    const base = `http://127.0.0.1:${server.address().port}`;
+    for (const scope of ["coalition", "candidate"]) {
+      for (const section of [
+        "",
+        "/work/publishing",
+        "/work/publishing/new",
+        "/work/publishing/drafts/draft-1",
+        "/people",
+        "/people/contacts",
+        "/more/audiences",
+        "/more/roles",
+        "/more/social-connections",
+      ]) {
+        const path = `/workspace/${scope}/org-1${section}`;
+        const response = await fetch(`${base}${path}`);
+        assert.equal(response.status, 200, path);
+        const html = await response.text();
+        assert.ok(html.includes('id="shared-feed-app"'), path);
+        assert.ok(html.includes('"requiresAuth":true'), path);
+        assert.ok(html.includes(`"route":"${path}"`), path);
+        assert.ok(html.includes('"organizationScopeId":"org-1"'), path);
+        assert.ok(html.includes("/scripts/shared-feed.js"), path);
+      }
+    }
+    assert.equal(
+      (await fetch(`${base}/workspace/user/org-1/work/publishing`)).status,
+      404,
+    );
+  } finally {
+    await new Promise((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+  }
 });

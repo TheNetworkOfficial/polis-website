@@ -166,3 +166,23 @@ npm run start:backend
 ```
 
 All checks must pass before OpenAI Codex generated code can be merged. Agents.md helps ensure OpenAI Codex follows these requirements.
+
+## Human-readable person selection
+
+Normal product workflows must never require users to find, type, or paste an
+internal Polis user ID. Provide authorized name/@username search and recognizable
+person selection. Keep IDs internal to API/storage payloads and revalidate actor
+and target eligibility on every write. Preserve existing identities when names
+change or accounts become unavailable. Apply this to audiences, memberships,
+assignments/transfers, and audit actor filters; technical IDs are not a user step.
+Future changes must include a picker-flow regression test and must not introduce
+required raw-ID form controls. The Flutter reference is
+`lib/ui/polis/polis_person_picker.dart` in the sibling app repository.
+
+Website forms use `renderOrganizationPersonField` from
+`frontend/src/pages/shared-feed/scripts/organizationPersonField.js`, or an
+existing authorized roster selector. Use `organizationPersonSearch.js` for
+paginated name/handle results with actor and stale-response fencing. Run
+`node --test tests/texting/person-selection-standard.test.mjs` after changing
+identity entry flows. Hidden payload IDs and diagnostic tooling are allowed;
+ordinary form inputs and instructions must request recognizable people.

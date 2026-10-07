@@ -43,6 +43,27 @@ async function setup(page) {
           createCampaigns: true,
           manageBilling: true,
           manualQueue: true,
+          readReporting: true,
+        },
+      },
+    }),
+  );
+  await page.route(`**${PROMPT}/campaigns/campaign-one/reporting`, (route) =>
+    json(route, {
+      report: {
+        version: 1,
+        campaignId: "campaign-one",
+        coverage: "partial",
+        unreadReplies: 2,
+        counts: {
+          accepted: 4,
+          sent: 1,
+          delivered: 2,
+          failed: 1,
+          pending: 0,
+          needsReview: 0,
+          inbound: 3,
+          outbound: 4,
         },
       },
     }),
@@ -68,6 +89,9 @@ test("active campaign raises only its limit and preserves its saved message, rec
     return json(route, { campaign });
   });
   await open(page);
+  await expect(
+    page.getByRole("region", { name: "Campaign reporting", exact: true }),
+  ).toContainText("Unread to you");
   await page
     .getByRole("button", { name: "Edit campaign limits", exact: true })
     .click();
