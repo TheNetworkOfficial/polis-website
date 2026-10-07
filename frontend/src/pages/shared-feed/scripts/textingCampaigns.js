@@ -42,6 +42,7 @@ import { createCampaignDraftStore } from "./textingCampaignDraft";
 import { createVolunteerPicker } from "./textingVolunteerPicker";
 import { createRecipientOutcomes } from "./textingRecipientOutcomes";
 import { createRecipientBatches } from "./textingRecipientBatches";
+import { createCampaignManagement } from "./textingCampaignManagement";
 import {
   availablePersonalization,
   insertPersonalization,
@@ -110,6 +111,7 @@ export function createCampaigns(r) {
   const volunteerPicker = createVolunteerPicker(r, state);
   const outcomes = createRecipientOutcomes(r, "queue-outcome");
   const additions = createRecipientBatches(r, state, recipients);
+  const management = createCampaignManagement(r, state);
   function persistDraft() {
     const s = state();
     if (
@@ -387,6 +389,7 @@ export function createCampaigns(r) {
           go("campaigns", "All campaigns", "", true),
         ) +
           campaignDetail(s) +
+          management.render() +
           additions.overview() +
           campaignHours(s)
       : "";
@@ -409,6 +412,7 @@ export function createCampaigns(r) {
     };
   }
   async function submit(kind, form) {
+    if (await management.submit(kind, form)) return true;
     if (await outcomes.submit(kind, form)) return true;
     if (await recipients.submit(kind, form)) return true;
     const s = state();
@@ -479,6 +483,7 @@ export function createCampaigns(r) {
     return false;
   }
   async function action(name, value) {
+    if (await management.action(name, value)) return true;
     if (await outcomes.action(name, value)) return true;
     if (await additions.action(name, value)) return true;
     if (await volunteerPicker.action(name)) return true;
@@ -810,6 +815,7 @@ export function createCampaigns(r) {
     return false;
   }
   function change(target) {
+    if (management.change(target)) return true;
     if (outcomes.change(target)) return true;
     if (volunteerPicker.change(target)) return true;
     if (recipients.change(target)) return true;
