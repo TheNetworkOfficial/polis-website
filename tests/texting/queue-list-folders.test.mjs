@@ -25,7 +25,7 @@ const item = (n, extra = {}) => ({
   },
   ...extra,
 });
-function queueHarness(api) {
+function queueHarness(api, { recordOutcome = false } = {}) {
   const view = {
       campaigns: {
         campaign: { campaignId: "campaign", canFetchQueue: true },
@@ -37,7 +37,9 @@ function queueHarness(api) {
   const r = {
     view: () => view,
     context: () => ({ resourceId: "campaign" }),
-    can: (key) => ["manualQueue", "queueStatus"].includes(key),
+    can: (key) =>
+      ["manualQueue", "queueStatus"].includes(key) ||
+      (recordOutcome && key === "recordRecipientOutcome"),
     workspace: () => ({ canSend: true, capabilities: { manualQueue: true } }),
     billing: () => billing,
     busy: () => false,
@@ -58,6 +60,41 @@ function queueHarness(api) {
   };
   return { page: createCampaigns(r), view, holds, calls };
 }
+
+test("accepted recipients retain an exact outcome shortcut below the remaining queue", async () => {
+  const h = queueHarness(
+    async (path) =>
+      path.endsWith("/confirm")
+        ? { result: { itemId: "recipient-1", state: "confirmed" } }
+        : {
+            outcome: {
+              capabilities: { record: true },
+              contactRevision: 1,
+              availableTags: [],
+              tags: [],
+              partyOptions: [],
+            },
+          },
+    { recordOutcome: true },
+  );
+  await h.page.action("queue-confirm", "recipient-1");
+  const html = h.page.render("send");
+  assert.ok(
+    html.indexOf("Record previous recipient outcome") >
+      html.indexOf('data-texting-recipient="recipient-3"'),
+  );
+  const match =
+    /data-workspace-action="queue-outcome-open" data-value="([^"]+)"[^>]*>Record previous recipient outcome/.exec(
+      html,
+    );
+  assert.ok(match);
+  await h.page.action("queue-outcome-open", match[1].replaceAll("&quot;", '"'));
+  assert.equal(
+    h.calls.at(-1)[0],
+    "/campaigns/campaign/queue/recipient-1/outcome",
+  );
+  assert.equal(h.calls.filter(([path]) => path.endsWith("/confirm")).length, 1);
+});
 
 test("batch exposes every explicit recipient Send and moves pending and unknown rows below ready rows", async () => {
   let resolve;

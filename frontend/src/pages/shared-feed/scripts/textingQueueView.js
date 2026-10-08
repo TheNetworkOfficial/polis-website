@@ -120,6 +120,12 @@ export function renderTextingQueue(s, r, needsReview, outcomes) {
           disabled: r.busy() || Boolean(s.pendingItemId),
         })
       : "") +
+    (s.lastOutcomeTarget?.campaignId === c.campaignId
+      ? outcomes?.trigger(
+          s.lastOutcomeTarget,
+          "Record previous recipient outcome",
+        ) || ""
+      : "") +
     (moreAllowed &&
     q?.state !== "allocation_unknown" &&
     (!c.queueRecoveryRequired || !q || q.state === "preparing")
