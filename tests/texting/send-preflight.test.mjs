@@ -214,6 +214,8 @@ function fixture(
   const container = {
     dataset: { workspaceKey: `admin:org:${section}:${context.resourceId}` },
     querySelector: () => ({ disabled: true }),
+    querySelectorAll: () =>
+      [1, 2].map((n) => ({ dataset: { value: `item-${n}` }, disabled: true })),
   };
   const imageTarget = (n) => ({
     dataset: { workspaceQueueImage: `item-${n}` },
@@ -239,10 +241,10 @@ function fixture(
     },
     image: (n) => listeners.get("load")({ target: imageTarget(n) }),
     imageError: (n) => listeners.get("error")({ target: imageTarget(n) }),
-    async click(action) {
+    async click(action, value) {
       const target = {
         disabled: false,
-        dataset: { workspaceAction: action },
+        dataset: { workspaceAction: action, value },
         closest: () => container,
       };
       listeners.get("click")({ target: { closest: () => target } });
@@ -270,8 +272,7 @@ for (const stream of ["standard", "opt_in"])
     await f.page.load();
     await f.click("queue-load");
     f.image(1);
-    await f.click("queue-confirm");
-    await f.click("queue-continue");
+    await f.click("queue-confirm", "item-1");
     assert.match(
       f.page.render(),
       /data-workspace-action="queue-confirm"[^>]*disabled/,
@@ -279,11 +280,15 @@ for (const stream of ["standard", "opt_in"])
     f.image(2);
     f.image(1);
     f.imageError(1);
-    assert.doesNotMatch(
+    assert.match(
       f.page.render(),
-      /data-workspace-action="queue-confirm"[^>]*disabled|final attachment could not/,
+      /data-workspace-action="queue-confirm" data-value="item-2">Send/,
     );
-    await f.click("queue-confirm");
+    assert.match(
+      f.page.render(),
+      /data-workspace-action="queue-confirm" data-value="item-1" disabled/,
+    );
+    await f.click("queue-confirm", "item-2");
     assert.deepEqual(
       f.calls
         .filter((c) => c.url.endsWith("/confirm"))

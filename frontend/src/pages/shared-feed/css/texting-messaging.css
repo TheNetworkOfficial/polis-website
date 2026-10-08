@@ -305,3 +305,111 @@
   font-size: 0.8rem;
   line-height: 1.5;
 }
+
+.pt-texting-folders,
+.pt-texting-campaign-nav,
+.pt-texting-row-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-block: 14px;
+}
+.pt-texting-folders .pt-btn {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+.pt-texting-session-status {
+  min-height: 2em;
+  color: var(--polis-text-muted);
+}
+.pt-texting-session-status > span {
+  display: block;
+}
+.pt-texting-recipient {
+  padding-block: 20px;
+  border-bottom: 1px solid var(--pt-line);
+}
+.pt-texting-recipient:first-child {
+  padding-top: 0;
+}
+.pt-texting-recipient:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+.pt-texting-conversation {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+}
+.pt-texting-recipient-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+}
+.pt-texting-recipient-head .pt-texting-person {
+  flex: 1 1 10em;
+}
+.pt-texting-person {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.pt-texting-person .pt-tag {
+  justify-self: start;
+}
+.pt-texting-recipient-head > .pt-btn {
+  min-width: 5.25em;
+  min-height: 48px;
+  padding-inline: 1em;
+  flex-shrink: 0;
+  white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
+  margin-left: auto;
+}
+.pt-texting-recipient--held {
+  border-left: 3px solid var(--polis-warning, #b88321);
+  padding-left: 14px;
+}
+.pt-texting-recipient .pt-texting-final-message {
+  margin-top: 14px;
+}
+.pt-texting-row-tools {
+  margin-bottom: 0;
+}
+.pt-texting-row-tools .pt-btn {
+  font-size: 0.85em;
+}
+.pt-texting-next {
+  margin-block: 20px;
+}
+.pt-texting-conversation {
+  padding-block: 18px;
+  border-bottom: 1px solid var(--pt-line);
+}
+.pt-texting-conversation:last-child {
+  border-bottom: 0;
+}
+.pt-texting-conversation-meta {
+  display: grid;
+  gap: 8px;
+  justify-items: end;
+  text-align: right;
+}
+@media (max-width: 400px) {
+  .pt-texting-recipient-head {
+    gap: 8px;
+  }
+  .pt-texting-conversation {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .pt-texting-conversation-meta {
+    justify-items: start;
+    text-align: left;
+  }
+}

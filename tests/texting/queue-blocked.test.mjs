@@ -73,7 +73,7 @@ test("technical validation is visible, stays unsendable, and rechecks the held r
   assert.equal(state.campaigns.queue.items[0].itemId, item.itemId);
   assert.match(
     page.render("send"),
-    /data-workspace-action="queue-confirm"[^>]*>Send to Example Recipient/,
+    /aria-label="Send to Example Recipient"[^>]*data-workspace-action="queue-confirm"[^>]*>Send<\/button>/,
   );
   assert.doesNotMatch(
     page.render("send"),

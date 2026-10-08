@@ -17,12 +17,10 @@ import {
   uuid,
   smsSegments,
   messagePrice,
-  streamLabel,
   queueCanConfirm,
   queueCanRefreshPreview,
   queueCanSkip,
   queueBlockExplanation,
-  checkedUrl,
   protectedMediaData,
 } from "./textingWorkspaceUi";
 import {
@@ -30,6 +28,7 @@ import {
   scheduleSummary,
   readSchedule,
 } from "./textingSchedule";
+import { renderTextingQueue, queueMediaReady } from "./textingQueueView";
 import { prepareTextingAccess, saveAssignmentChanges } from "./textingAccess";
 import { textingRequestWasNotDispatched } from "./textingSession";
 import { createOrganizationContactBook } from "./organizationContactBook";
@@ -309,8 +308,10 @@ export function createCampaigns(r) {
       `<section class="pt-card">${volunteerPicker.render()}<div class="pt-actions">${button("assignments-save", "Save team", { disabled: r.busy() || s.assignmentsNeedRead || !r.can("createCampaigns") || c.status === "archived" })}${s.assignmentsNeedRead ? button("assignments-refresh", "Check saved assignments", { secondary: true, disabled: r.busy() }) + notice("Your selections are kept", "Check saved assignments before trying again.") : ""}</div><p class="pt-muted">Assignment does not grant organization permissions.</p></section>`
     );
   }
-  const queueItem = (s) =>
-    list(s.queue?.items).find((item) => !s.queueReviewItems?.has(item.itemId));
+  const queueItem = (s, itemId) =>
+    list(s.queue?.items).find((item) =>
+      itemId ? item.itemId === itemId : !s.queueReviewItems?.has(item.itemId),
+    );
   const queueNeedsReview = (s, item) =>
     Boolean(
       item &&
@@ -323,105 +324,9 @@ export function createCampaigns(r) {
           ].includes(item.state)),
     );
   function queue(s) {
-    const c = s.campaign,
-      q = s.queue,
-      item = queueItem(s),
-      p = item?.preview,
-      block = queueBlockExplanation(item),
-      held = queueNeedsReview(s, item),
-      pending = item && s.pendingItemId === item.itemId,
-      price =
-        p &&
-        messagePrice(
-          r.billing(),
-          p.message,
-          !!(p.attachmentUrl || p.mediaId),
-          item.stream,
-        );
-    if (!c) return head("TEXTING", "Choose a campaign") + listCards(s);
-    return (
-      head(
-        c.name,
-        "One person. One conversation.",
-        c.queueRecoveryRequired
-          ? "Review and skip held recipients. Sending remains stopped."
-          : "Take a moment to review, then send.",
-        go("campaigns", "Leave session", c.campaignId, true) +
-          (!c.canFetchQueue ||
-          r.workspace()?.canSend !== true ||
-          r.billing()?.sendingBlocked !== false
-            ? button("queue-refresh-status", "Refresh sending status", {
-                secondary: true,
-                disabled: r.busy(),
-              })
-            : "") +
-          (item
-            ? outcomes.trigger({
-                campaignId: c.campaignId,
-                itemId: item.itemId,
-              })
-            : "") +
-          (s.lastOutcomeTarget?.campaignId === c.campaignId
-            ? outcomes.trigger(
-                s.lastOutcomeTarget,
-                "Record previous recipient outcome",
-              )
-            : ""),
-      ) +
-      (s.queueReviewItems?.size
-        ? notice(
-            "Recipients kept for review",
-            `${s.queueReviewItems.size} recipient outcome${s.queueReviewItems.size === 1 ? " is" : "s are"} still unconfirmed. These recipients remain held and will not be sent again.`,
-          ) +
-          button("queue-review-kept", "Review kept recipients", {
-            secondary: true,
-            disabled: r.busy(),
-          })
-        : "") +
-      (held && !pending
-        ? button("queue-continue", "Keep for review and continue", {
-            secondary: true,
-            disabled: r.busy(),
-          })
-        : "") +
-      ((held || s.queueReviewItems?.size) && r.can("queueStatus")
-        ? button("queue-status", "Check saved recipient outcomes", {
-            secondary: true,
-            disabled: r.busy() || Boolean(s.pendingItemId),
-          })
-        : "") +
-      (held &&
-      !pending &&
-      item?.state === "awaiting_confirmation" &&
-      r.can("queueItemRecovery")
-        ? button("queue-recover-preview", "Check unsent preview", {
-            secondary: true,
-            disabled: r.busy(),
-          })
-        : "") +
-      (item?.state === "rejected_not_accepted" &&
-      item.nonAcceptanceVerified === true
-        ? notice(
-            "Message was not accepted",
-            "This recipient was not sent the message. Preparing another attempt creates a new preview for your review.",
-          ) +
-          (item.stream === "opt_in" && r.can("optionalRetryPreview")
-            ? button("queue-retry-preview", "Prepare another attempt", {
-                secondary: true,
-                disabled: r.busy(),
-              })
-            : "") +
-          button("queue-next", "Continue to next recipient", {
-            secondary: true,
-            disabled: r.busy(),
-          })
-        : "") +
-      (!q
-        ? `<section class="pt-card"><h2>${c.queueRecoveryRequired ? "Held recipients need review" : "Your next conversation"}</h2><p class="pt-muted">${c.queueRecoveryRequired ? "Review your saved assignment and explicitly skip its recipients. No new recipients will be assigned." : "Get your assigned recipients when you’re ready."}</p>${button("queue-load", s.preparingAccess ? "Preparing your texting access…" : c.queueRecoveryRequired ? "Review held recipients" : "Get my next messages", { disabled: !c.canFetchQueue || !r.can("manualQueue") || r.busy() })}${reasons(c.blockedReasons)}</section>`
-        : item
-          ? `<div class="pt-grid pt-grid--two"><section class="pt-card"><div class="pt-row"><div><h2>${e(p?.contactDisplayName || "Recipient")}</h2><p class="pt-muted">${e(p?.contactPhone || "Recipient unavailable")}</p></div><span class="pt-tag${block ? " pt-tag--attention" : ""}">${e(pending ? label(s.pendingAction) : held ? "Needs review" : block?.title || label(item.state))}</span></div><div class="pt-eyebrow">FINAL MESSAGE${item.stream ? ` · ${e(streamLabel(item.stream))}` : ""}</div><div class="pt-workspace-bubble">${p?.attachmentUrl || p?.mediaId ? ((item.stream === "opt_in" && p.mediaId ? protectedMediaData(s.queueMedia?.[p.mediaId]) : checkedUrl(p.attachmentUrl)) ? `<img data-workspace-queue-image="${e(item.itemId)}" src="${e(item.stream === "opt_in" && p.mediaId ? protectedMediaData(s.queueMedia?.[p.mediaId]) : checkedUrl(p.attachmentUrl))}" alt="Final message attachment" referrerpolicy="no-referrer">` : notice("Attachment unavailable")) : ""}<p>${e(p?.message || "Final text unavailable")}</p></div>${held && !pending ? notice("Delivery needs review", "Do not send again. Its charge stays reserved until the outcome is confirmed.") : ""}${block && !held && !pending ? notice(block.title, block.text) + (block.canRecheck ? button("queue-recheck", "Check recipient again", { secondary: true, disabled: r.busy() || !r.can("manualQueue") || !c.canFetchQueue }) : "") : ""}${reasons(item.blockedReasons)}${item.state === "lease_expired" ? notice("Recipient assignment expired", "This unsent recipient needs provider release before reassignment. It has not been returned automatically.") : item.state === "awaiting_confirmation" && item.expiresAtMs <= Date.now() ? notice("Preview expired", "Refresh these message previews, then review the recipient and message again.") + (queueCanRefreshPreview(item) && !held && !pending ? button("queue-refresh-preview", "Refresh message previews", { secondary: true, disabled: r.busy() || !r.can("manualQueue") || !c.canFetchQueue }) : "") : ""}<div class="pt-row"><span>${p?.attachmentUrl || p?.mediaId ? "MMS" : "SMS"}${r.can("manageBilling") ? ` · ${price === null ? "Rate unavailable" : rateMoney(price)}` : ""}</span><div class="pt-actions">${item.state === "lease_expired" ? "" : button("queue-skip", "Skip recipient", { secondary: true, disabled: r.busy() || held || pending || !r.can("manualQueue") || !c.canFetchQueue || !queueCanSkip(item) })}${item.state === "lease_expired" || c.queueRecoveryRequired ? "" : button("queue-confirm", pending && s.pendingAction === "sending" ? "Sending…" : `Send to ${p?.contactDisplayName || p?.contactPhone || "recipient"}`, { disabled: r.busy() || held || !queueCanConfirm(item, r.workspace(), r.billing(), s.imageLoaded === item.itemId) })}</div></div><p class="pt-muted">${c.queueRecoveryRequired ? "Skipping completes this held assignment without sending." : "Sends this message to this person only."}</p></section><aside class="pt-card"><div class="pt-eyebrow">YOUR SESSION</div>${stat("Messages confirmed this session", count(s.sent || 0))}${r.can("manageBilling") ? `<div class="pt-row"><span>Available funds</span><strong>${money(r.billing()?.availableMicros)}</strong></div>` : ""}${go("inbox", "Open inbox", "", true)}</aside></div>`
-          : `<section class="pt-card"><h2>${q.state === "preparing" ? "Preparing held recipients" : q.state === "allocation_unknown" ? "Session needs review" : q.state === "lease_expired" ? "Recipient assignment expired" : c.queueRecoveryRequired ? "Held recipients reviewed" : "You’re caught up"}</h2><p class="pt-muted">${q.state === "preparing" ? "Your saved assignment is being checked. Check again to continue." : q.state === "allocation_unknown" ? "Your assigned messages could not be confirmed. An administrator must check the saved status." : q.state === "lease_expired" ? (q.automaticReclaim === true ? "Unsent contacts are available for assignment again. Get another group when you’re ready." : "This assignment needs provider release before those contacts can be reassigned.") : c.queueRecoveryRequired ? "Your saved assignment has no more recipients to review. Sending remains stopped." : "Get another group when you’re ready."}</p>${q.state !== "allocation_unknown" && (!c.queueRecoveryRequired || q.state === "preparing") ? button("queue-load", q.state === "preparing" ? "Check recipients" : "Get more messages", { disabled: !c.canFetchQueue || r.busy() }) : ""}${reasons(q.blockedReasons)}</section>`)
-    );
+    return s.campaign
+      ? renderTextingQueue(s, r, queueNeedsReview, outcomes)
+      : head("TEXTING", "Choose a campaign") + listCards(s);
   }
   function render(section) {
     persistDraft();
@@ -806,7 +711,7 @@ export function createCampaigns(r) {
       ["queue-load", "queue-recheck", "queue-refresh-preview"].includes(name)
     ) {
       if (name === "queue-recheck" || name === "queue-refresh-preview") {
-        const current = queueItem(s);
+        const current = queueItem(s, value);
         if (
           !(name === "queue-refresh-preview"
             ? queueCanRefreshPreview(current)
@@ -837,10 +742,16 @@ export function createCampaigns(r) {
           throw new Error(
             "The saved recipient assignment changed. Refresh before continuing.",
           );
-        s.queue = next;
+        const retained = list(s.queue?.items).filter(
+          (item) =>
+            queueNeedsReview(s, item) || item.state === "rejected_not_accepted",
+        );
+        const merged = new Map(retained.map((item) => [item.itemId, item]));
+        for (const item of list(next.items)) merged.set(item.itemId, item);
+        s.queue = { ...next, items: [...merged.values()] };
         // Continue only a saved materialization checkpoint, never an unknown
         // allocation or a generic preparation response. Errors stop this loop.
-        if (!nextId || list(s.queue.items).length || attempt === 7) break;
+        if (!nextId || list(next.items).length || attempt === 7) break;
         allocationId = nextId;
         r.changed?.();
         const delay = Number.isSafeInteger(s.queue.retryAfterMs)
@@ -850,6 +761,7 @@ export function createCampaigns(r) {
         r.guard?.();
       }
       s.imageLoaded = null;
+      s.queueImagesLoaded = new Set();
       s.queueMedia = {};
       for (const item of list(s.queue.items)) {
         const mediaId = item.stream === "opt_in" && item.preview?.mediaId;
@@ -877,7 +789,7 @@ export function createCampaigns(r) {
       return true;
     }
     if (name === "queue-recover-preview") {
-      const item = queueItem(s),
+      const item = queueItem(s, value),
         key = `queue:${c?.campaignId}:${item?.itemId}`;
       if (
         !r.can("queueItemRecovery") ||
@@ -953,7 +865,7 @@ export function createCampaigns(r) {
       return true;
     }
     if (name === "queue-retry-preview" || name === "queue-next") {
-      const item = queueItem(s);
+      const item = queueItem(s, value);
       if (
         item?.state !== "rejected_not_accepted" ||
         item.nonAcceptanceVerified !== true ||
@@ -995,7 +907,7 @@ export function createCampaigns(r) {
       return true;
     }
     if (name === "queue-continue") {
-      const item = queueItem(s);
+      const item = queueItem(s, value);
       if (!queueNeedsReview(s, item) || s.pendingItemId)
         throw new Error(
           "Wait for this recipient's saved outcome before continuing.",
@@ -1006,19 +918,19 @@ export function createCampaigns(r) {
       return true;
     }
     if (name === "queue-confirm" || name === "queue-skip") {
-      const item = queueItem(s),
+      const item = queueItem(s, value),
         key = `queue:${c.campaignId}:${item?.itemId}`;
       if (
         !item ||
         r.sendHeld(key) ||
-        s.pendingItemId === item.itemId ||
+        Boolean(s.pendingItemId) ||
         (name === "queue-confirm"
           ? c.queueRecoveryRequired ||
             !queueCanConfirm(
               item,
               r.workspace(),
               r.billing(),
-              s.imageLoaded === item.itemId,
+              queueMediaReady(s, item),
             )
           : !r.can("manualQueue") || !c.canFetchQueue || !queueCanSkip(item))
       )
@@ -1214,7 +1126,14 @@ export function createCampaigns(r) {
     load,
     refreshReadiness,
     render,
-    selectedQueueItem: () => queueItem(state()),
+    selectedQueueItem: (itemId) => queueItem(state(), itemId),
+    queueImageReady(itemId, loaded) {
+      const s = state();
+      if (!queueItem(s, itemId)) return;
+      const ready = (s.queueImagesLoaded ||= new Set());
+      if (loaded) ready.add(itemId);
+      else ready.delete(itemId);
+    },
     submit,
     action,
     change,

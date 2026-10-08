@@ -521,7 +521,7 @@ export function createTextingWorkspacePage({
     const contactDialogOpen = [view.contactBook, view.recipientBook].some(
       (book) => book?.overlay || book?.detail || book?.detailNew,
     );
-    return `<div data-workspace-key="${e(view.key)}" aria-busy="${view.busy ? "true" : "false"}">${view.error && !contactDialogOpen ? `<div class="pt-notice" role="alert">${e(view.error)}</div>` : ""}${view.message ? notice(view.message) : ""}${view.busy && !view.contacts?.starting ? `<div class="pt-workspace-working" role="status">${busyLabel}</div>` : ""}${html}</div>`;
+    return `<div data-workspace-key="${e(view.key)}" aria-busy="${view.busy ? "true" : "false"}">${view.error && !contactDialogOpen ? `<div class="pt-notice" role="alert">${e(view.error)}</div>` : ""}${view.message && section !== "send" ? notice(view.message) : ""}${view.busy && section !== "send" && !view.contacts?.starting ? `<div class="pt-workspace-working" role="status">${busyLabel}</div>` : ""}${html}</div>`;
   }
   function owned(target) {
     return (
@@ -533,6 +533,7 @@ export function createTextingWorkspacePage({
     const target = event.target.closest?.("[data-workspace-action]");
     if (!target || !owned(target) || target.disabled) return;
     const action = target.dataset.workspaceAction;
+    if (action === "queue-confirm" && event.detail > 1) return;
     for (const module of Object.values(modules)) {
       if (module.localAction?.(action, target.dataset.value, target)) {
         changed();
@@ -685,23 +686,28 @@ export function createTextingWorkspacePage({
     (event) => {
       const target = event.target;
       if (!owned(target) || !target.dataset.workspaceQueueImage) return;
-      const item = modules.campaigns?.selectedQueueItem();
-      if (
-        target.naturalWidth > 0 &&
-        item?.itemId === target.dataset.workspaceQueueImage
-      ) {
-        view.campaigns.imageLoaded = target.dataset.workspaceQueueImage;
-        const b = target
+      if (target.naturalWidth <= 0) return;
+      const keys = (
+        target.dataset.workspaceQueueImages ||
+        target.dataset.workspaceQueueImage
+      ).split(",");
+      for (const key of keys) {
+        const item = modules.campaigns?.selectedQueueItem(key);
+        if (!item) continue;
+        modules.campaigns.queueImageReady(key, true);
+        const buttons = target
           .closest("[data-workspace-key]")
-          .querySelector('[data-workspace-action="queue-confirm"]');
-        if (b) {
-          if (owned(target))
-            b.disabled =
-              view.busy ||
-              hasHold(
-                `${actorIdentity()}:queue:${view.campaigns.campaign.campaignId}:${item.itemId}`,
-              ) ||
-              !queueCanConfirm(item, view.workspace, view.billing, true);
+          .querySelectorAll('[data-workspace-action="queue-confirm"]');
+        for (const b of buttons) {
+          if (b.dataset.value !== key || !owned(target)) continue;
+          b.disabled =
+            view.busy ||
+            Boolean(view.campaigns.pendingItemId) ||
+            view.campaigns.campaign.queueRecoveryRequired === true ||
+            hasHold(
+              `${actorIdentity()}:queue:${view.campaigns.campaign.campaignId}:${key}`,
+            ) ||
+            !queueCanConfirm(item, view.workspace, view.billing, true);
         }
       }
     },
@@ -718,18 +724,24 @@ export function createTextingWorkspacePage({
         event.target.hidden = true;
         return;
       }
-      if (
-        owned(event.target) &&
-        event.target.dataset.workspaceQueueImage &&
-        modules.campaigns?.selectedQueueItem()?.itemId ===
-          event.target.dataset.workspaceQueueImage &&
-        view.campaigns.imageFailed !== event.target.dataset.workspaceQueueImage
-      ) {
-        view.campaigns.imageFailed = event.target.dataset.workspaceQueueImage;
-        view.campaigns.imageLoaded = null;
-        view.error =
-          "The final attachment could not be displayed. Sending is blocked.";
-        changed();
+      if (owned(event.target) && event.target.dataset.workspaceQueueImage) {
+        const keys = (
+          event.target.dataset.workspaceQueueImages ||
+          event.target.dataset.workspaceQueueImage
+        ).split(",");
+        let firstFailure = false;
+        const failed = (view.campaigns.queueImagesFailed ||= new Set());
+        for (const key of keys) {
+          if (!modules.campaigns?.selectedQueueItem(key)) continue;
+          modules.campaigns.queueImageReady(key, false);
+          if (!failed.has(key)) firstFailure = true;
+          failed.add(key);
+        }
+        if (firstFailure) {
+          view.error =
+            "The final attachment could not be displayed. Sending is blocked for those recipients.";
+          changed();
+        }
       }
     },
     true,
