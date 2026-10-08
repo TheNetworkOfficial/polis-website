@@ -21,6 +21,13 @@ import { createRecipientOutcomes } from "./textingRecipientOutcomes";
 import { mergeConversationMessages } from "./textingConversationHistory";
 import { textingReadRequest } from "./textingReadRequest";
 import { createConversationReads } from "./textingConversationReads";
+import {
+  parseTextingFolder,
+  textingFolders,
+  textingFolderRoute,
+  renderTextingFolders,
+  renderTextingInbox,
+} from "./textingFolders";
 import { textingRequestWasNotDispatched } from "./textingSession";
 
 const when = (value) =>
@@ -39,6 +46,20 @@ export function createConversations(
 ) {
   const outcomes = createRecipientOutcomes(r, "conversation-outcome");
   const state = () => (r.view().conversations ||= {});
+  const normalizeResource = (resource) => {
+    const filter = parseTextingFolder(resource);
+    if (!filter) return resource;
+    Object.assign(state(), filter);
+    return undefined;
+  };
+  const inboxPath = (query = new URLSearchParams()) => {
+    const s = state();
+    if (s.folder && s.folder !== "all") query.set("folder", s.folder);
+    if (s.campaignId) query.set("campaignId", s.campaignId);
+    if ((s.folder && s.folder !== "all") || s.campaignId)
+      query.set("order", "provider_id");
+    return `/conversations${query.size ? `?${query}` : ""}`;
+  };
   let pollTimer,
     pollReads = 0,
     pollDeadline = 0,
@@ -385,7 +406,7 @@ export function createConversations(
         const sweep = !append && s.inboxLoaded;
         const head =
           sweep && s.inboxOrder === "recent_activity"
-            ? await request("/conversations")
+            ? await request(inboxPath())
             : null;
         if (!valid()) return;
         let cursor = append ? s.cursor : sweep ? s.inboxScanCursor : null,
@@ -394,9 +415,7 @@ export function createConversations(
           const query = new URLSearchParams();
           if (sweep) query.set("order", "provider_id");
           if (cursor) query.set("cursor", cursor);
-          result = await request(
-            `/conversations${query.size ? `?${query}` : ""}`,
-          );
+          result = await request(inboxPath(query));
         } catch (error) {
           if (
             (error?.payload?.error || error?.code || error?.message) !==
@@ -404,12 +423,27 @@ export function createConversations(
           )
             throw error;
           cursor = null;
-          result = await request("/conversations");
+          result = await request(inboxPath());
           s.cursor = result.nextCursor || null;
           s.inboxScanCursor = result.nextCursor || null;
           s.inboxScanSeen = new Set();
         }
         if (!valid()) return;
+        // A filtered canonical page can contain no matching rows. Continue a
+        // small bounded group, keeping its cursor visible when more remain.
+        if ((s.folder && s.folder !== "all") || s.campaignId) {
+          for (
+            let page = 0;
+            page < 3 && !list(result.items).length && result.nextCursor;
+            page++
+          ) {
+            const query = new URLSearchParams();
+            if (sweep) query.set("order", "provider_id");
+            query.set("cursor", result.nextCursor);
+            result = await request(inboxPath(query));
+            if (!valid()) return;
+          }
+        }
         // Conversation IDs are not ordered by recent activity. Scan one page
         // per interval, retain loaded rows, and evict missing rows only after
         // a complete authorized pass through the inbox.
@@ -477,6 +511,7 @@ export function createConversations(
     pollTimer?.unref?.();
   }
   async function load(resource, options = {}) {
+    resource = normalizeResource(resource);
     resourceId = resource;
     if (!started) {
       started = true;
@@ -493,6 +528,7 @@ export function createConversations(
     scheduleUpdate();
   }
   async function refresh(resource = resourceId, { resume = false } = {}) {
+    resource = normalizeResource(resource);
     if (!active() || refreshing || !visible()) return;
     if (resume) renewPolling();
     refreshing = true;
@@ -605,7 +641,7 @@ export function createConversations(
   function render() {
     const s = state(),
       c = s.conversation;
-    if (!r.context().resourceId)
+    if (!r.context().resourceId || parseTextingFolder(r.context().resourceId))
       return (
         head(
           "INBOX",
@@ -614,7 +650,13 @@ export function createConversations(
           button("conversations-refresh", "Refresh", { secondary: true }),
         ) +
         updateNotice() +
-        `<section class="pt-card">${list(s.items).length ? s.items.map((row) => `<div class="pt-row"><div><strong>${e(row.displayName || row.phone)}</strong><p class="pt-muted">${Number.isSafeInteger(row.unreadReplies) ? `${e(row.unreadReplies)} unread Â· ` : ""}${e(when(row.lastMessageAtMs))} Â· ${row.suppressed ? "Opted out" : e(label(row.status))}</p></div>${go("conversation", "Open", row.conversationId, true)}</div>`).join("") : `<h2>No conversations yet</h2><p class="pt-muted">Messages appear after verified sending and reply notifications.</p>`}${s.cursor ? button("conversations-more", "Load more", { secondary: true }) : ""}</section>`
+        renderTextingFolders(s.folder || "all", s.campaignId) +
+        renderTextingInbox(list(s.items), {
+          folder: s.folder || "all",
+          cursor: s.cursor,
+          busy: r.busy(),
+          when,
+        })
       );
     if (!c) return "";
     const hold = r.sendHeld(`reply:${c.conversationId}`),
@@ -840,6 +882,11 @@ export function createConversations(
       }
       return true;
     }
+    if (name === "conversation-folder") {
+      if (!textingFolders.some(([key]) => key === value)) return false;
+      r.navigate("inbox", textingFolderRoute(value, s.campaignId));
+      return true;
+    }
     if (name === "conversation-attachment") {
       const [messageId, attachmentId] = JSON.parse(value);
       const message = list(s.messages).find(
@@ -866,7 +913,7 @@ export function createConversations(
     }
     if (name === "conversations-refresh" || name === "conversations-more") {
       if (name === "conversations-refresh") {
-        s.sendStatusNeedsRead = Boolean(r.context().resourceId);
+        s.sendStatusNeedsRead = Boolean(resourceId);
         await refresh(r.context().resourceId, { resume: true });
       } else {
         await load(r.context().resourceId, { append: name.endsWith("-more") });
