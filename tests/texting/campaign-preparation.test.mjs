@@ -107,6 +107,53 @@ test("reload recovers saved preparation and finalizes only the same approved att
   h.controller.dispose();
 });
 
+test("campaign activation polls saved status until active without a preparation write", async () => {
+  const opening = {
+    ...campaign("preparing", {
+      preparationId: "approved-activation-one",
+      stage: "campaign_activation",
+      selectedContactCount: null,
+    }),
+    status: "activating",
+  };
+  for (const preparation of [null, { status: "complete" }]) {
+    const active = { ...opening, revision: 8, status: "active", preparation };
+    const h = harness([opening, active]);
+    h.controller.observe(opening);
+    assert.equal(h.timers.values().next().value.delay, 5000);
+    await h.tick();
+    assert.equal(h.state.campaign.status, "activating");
+    assert.equal(h.timers.size, 1);
+    await h.tick();
+    assert.equal(h.state.campaign.status, "active");
+    assert.equal(h.state.preparingRecipients, false);
+    assert.equal(h.timers.size, 0);
+    assert.deepEqual(h.calls, [
+      ["/campaigns/campaign-one"],
+      ["/campaigns/campaign-one"],
+    ]);
+    h.controller.dispose();
+  }
+});
+
+test("activation cannot invoke recipient preparation resume even with stale resume flags", async () => {
+  const opening = {
+    ...campaign("ready_to_finalize", {
+      stage: "campaign_activation",
+      canResume: true,
+      automaticResume: true,
+    }),
+    status: "activating",
+  };
+  const h = harness([opening, opening]);
+  h.controller.observe(opening);
+  await h.tick();
+  await h.controller.refresh({ manual: true, resume: true });
+  assert.equal(h.calls.length, 2);
+  assert.ok(h.calls.every((call) => call[1] === undefined));
+  h.controller.dispose();
+});
+
 test("ordinary entry and held dispatch do not start or resume provider transfer", async () => {
   const h = harness([]);
   h.controller.observe({ ...campaign(), preparation: null });

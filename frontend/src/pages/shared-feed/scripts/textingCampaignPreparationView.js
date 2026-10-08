@@ -41,6 +41,20 @@ function savedProgress(p) {
 export function renderCampaignPreparation(state, { canManage, busy }) {
   const p = state.campaign?.preparation;
   if (!campaignPreparationPending(state.campaign)) return "";
+  if (state.campaign.status === "activating") {
+    const title = state.preparationPollError
+      ? "Campaign status could not be confirmed"
+      : state.preparationPollingPaused
+        ? "Campaign checks are paused"
+        : "Opening campaign…";
+    const text =
+      state.preparationPollError ||
+      state.preparationRetryMessage ||
+      (state.preparationPollingPaused
+        ? "Your request to open this campaign is saved. Check its status to continue."
+        : "Preparing texting access for assigned volunteers and opening this campaign. This page checks progress automatically; you can return later.");
+    return `<section aria-label="Campaign activation">${notice(title, text)}<div class="pt-actions">${button("campaign-refresh", "Check campaign now", { secondary: true, disabled: busy })}</div></section>`;
+  }
   const needsAttention = p.status === "needs_attention";
   const canResume = p.canResume === true && canManage;
   const waitingForReview = needsAttention && !canResume;

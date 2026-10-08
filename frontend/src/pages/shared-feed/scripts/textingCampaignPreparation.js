@@ -1,7 +1,9 @@
 export const campaignPreparationPending = (campaign) =>
   !!campaign?.preparation &&
   campaign.preparation.status !== "complete" &&
-  ["draft", "prepared"].includes(campaign.status);
+  (["draft", "prepared"].includes(campaign.status) ||
+    (campaign.status === "activating" &&
+      campaign.preparation.stage === "campaign_activation"));
 
 /** Poll durable preparation only. New recipient/provider approval is never created here. */
 export function createCampaignPreparation(
@@ -172,6 +174,7 @@ export function createCampaignPreparation(
         }
         const automatic =
           r.can("createCampaigns") &&
+          saved.status !== "activating" &&
           pending(saved) &&
           p?.status === "ready_to_finalize" &&
           p.automaticResume === true &&
@@ -180,6 +183,7 @@ export function createCampaignPreparation(
         if (resume || automatic) {
           if (
             !r.can("createCampaigns") ||
+            saved.status === "activating" ||
             !pending(saved) ||
             !p?.preparationId ||
             p.canResume !== true
