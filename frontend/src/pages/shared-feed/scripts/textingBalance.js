@@ -1,4 +1,5 @@
 import { rateMoney } from "./textingWorkspaceUi";
+import { renderTextingRenewals } from "./textingRenewals";
 import {
   customFundingConfig,
   customFundingQuote,
@@ -939,7 +940,7 @@ export function createTextingBalancePage({ request, context, changed }) {
       ${
         !billing
           ? `<section class="texting-balance__card" aria-live="polite"><p>${view.loading ? "Loading texting balance…" : "No balance is available."}</p></section>`
-          : `${billing.environment === "test" ? '<p class="texting-balance__notice">Test mode — no real payment is collected.</p>' : ""}
+          : `${renderTextingRenewals(billing.renewalDeadlines, true, "texting-balance__notice")}${billing.environment === "test" ? '<p class="texting-balance__notice">Test mode — no real payment is collected.</p>' : ""}
           ${billing.sendingBlocked ? `<div class="texting-balance__notice"><strong>Sending is paused.</strong> ${billing.billingHold ? "Contact support to resolve the billing hold. Adding funds won't remove it." : "Funding, registration, and messaging requirements must be met before sending."}</div>` : ""}
           ${view.canceledReturn && !view.purchase ? '<p class="texting-balance__notice">Checkout was closed. Funds are added only after payment is confirmed.</p>' : ""}
           ${renderPurchase()}

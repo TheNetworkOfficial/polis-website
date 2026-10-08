@@ -31,6 +31,7 @@ import {
   readSchedule,
 } from "./textingSchedule";
 import { prepareTextingAccess, saveAssignmentChanges } from "./textingAccess";
+import { textingRequestWasNotDispatched } from "./textingSession";
 import { createOrganizationContactBook } from "./organizationContactBook";
 import { estimateContactCampaign } from "./textingCampaignEstimate";
 import {
@@ -195,6 +196,21 @@ export function createCampaigns(r) {
       if (section === "results" && s.campaign) await reporting.load();
     }
   }
+  /** Update sending eligibility without replacing drafts, held recipients or send fences. */
+  async function refreshReadiness() {
+    const s = state(),
+      campaignId = s.campaign?.campaignId;
+    if (
+      !campaignId ||
+      r.context().section !== "send" ||
+      r.context().resourceId !== campaignId
+    )
+      return;
+    const campaign = (await r.api(`/campaigns/${id(campaignId)}`)).campaign;
+    if (campaign?.campaignId !== campaignId)
+      throw new Error("Campaign status could not be verified.");
+    s.campaign = campaign;
+  }
   function campaignViews(s) {
     return `<div class="pt-actions" aria-label="Campaign views">${["active", "paused", "archived"].map((value) => button("campaigns-view", value[0].toUpperCase() + value.slice(1), { value, secondary: value !== (s.listView || "active"), disabled: r.busy() })).join("")}</div><p class="pt-muted">${s.listView === "archived" ? "Archived campaigns keep their messages, results and history." : s.listView === "paused" ? "Paused campaigns keep their history and can be resumed when ready." : "Active campaigns and drafts ready for your next step."}</p>`;
   }
@@ -293,13 +309,26 @@ export function createCampaigns(r) {
       `<section class="pt-card">${volunteerPicker.render()}<div class="pt-actions">${button("assignments-save", "Save team", { disabled: r.busy() || s.assignmentsNeedRead || !r.can("createCampaigns") || c.status === "archived" })}${s.assignmentsNeedRead ? button("assignments-refresh", "Check saved assignments", { secondary: true, disabled: r.busy() }) + notice("Your selections are kept", "Check saved assignments before trying again.") : ""}</div><p class="pt-muted">Assignment does not grant organization permissions.</p></section>`
     );
   }
+  const queueItem = (s) =>
+    list(s.queue?.items).find((item) => !s.queueReviewItems?.has(item.itemId));
+  const queueNeedsReview = (s, item) =>
+    Boolean(
+      item &&
+        (r.sendHeld(`queue:${s.campaign?.campaignId}:${item.itemId}`) ||
+          [
+            "provider_outcome_unknown",
+            "sending",
+            "skipping",
+            "route_refresh_required",
+          ].includes(item.state)),
+    );
   function queue(s) {
     const c = s.campaign,
       q = s.queue,
-      item = list(q?.items)[0],
+      item = queueItem(s),
       p = item?.preview,
       block = queueBlockExplanation(item),
-      held = item && r.sendHeld(`queue:${c.campaignId}:${item.itemId}`),
+      held = queueNeedsReview(s, item),
       pending = item && s.pendingItemId === item.itemId,
       price =
         p &&
@@ -318,6 +347,14 @@ export function createCampaigns(r) {
           ? "Review and skip held recipients. Sending remains stopped."
           : "Take a moment to review, then send.",
         go("campaigns", "Leave session", c.campaignId, true) +
+          (!c.canFetchQueue ||
+          r.workspace()?.canSend !== true ||
+          r.billing()?.sendingBlocked !== false
+            ? button("queue-refresh-status", "Refresh sending status", {
+                secondary: true,
+                disabled: r.busy(),
+              })
+            : "") +
           (item
             ? outcomes.trigger({
                 campaignId: c.campaignId,
@@ -331,6 +368,54 @@ export function createCampaigns(r) {
               )
             : ""),
       ) +
+      (s.queueReviewItems?.size
+        ? notice(
+            "Recipients kept for review",
+            `${s.queueReviewItems.size} recipient outcome${s.queueReviewItems.size === 1 ? " is" : "s are"} still unconfirmed. These recipients remain held and will not be sent again.`,
+          ) +
+          button("queue-review-kept", "Review kept recipients", {
+            secondary: true,
+            disabled: r.busy(),
+          })
+        : "") +
+      (held && !pending
+        ? button("queue-continue", "Keep for review and continue", {
+            secondary: true,
+            disabled: r.busy(),
+          })
+        : "") +
+      ((held || s.queueReviewItems?.size) && r.can("queueStatus")
+        ? button("queue-status", "Check saved recipient outcomes", {
+            secondary: true,
+            disabled: r.busy() || Boolean(s.pendingItemId),
+          })
+        : "") +
+      (held &&
+      !pending &&
+      item?.state === "awaiting_confirmation" &&
+      r.can("queueItemRecovery")
+        ? button("queue-recover-preview", "Check unsent preview", {
+            secondary: true,
+            disabled: r.busy(),
+          })
+        : "") +
+      (item?.state === "rejected_not_accepted" &&
+      item.nonAcceptanceVerified === true
+        ? notice(
+            "Message was not accepted",
+            "This recipient was not sent the message. Preparing another attempt creates a new preview for your review.",
+          ) +
+          (item.stream === "opt_in" && r.can("optionalRetryPreview")
+            ? button("queue-retry-preview", "Prepare another attempt", {
+                secondary: true,
+                disabled: r.busy(),
+              })
+            : "") +
+          button("queue-next", "Continue to next recipient", {
+            secondary: true,
+            disabled: r.busy(),
+          })
+        : "") +
       (!q
         ? `<section class="pt-card"><h2>${c.queueRecoveryRequired ? "Held recipients need review" : "Your next conversation"}</h2><p class="pt-muted">${c.queueRecoveryRequired ? "Review your saved assignment and explicitly skip its recipients. No new recipients will be assigned." : "Get your assigned recipients when you’re ready."}</p>${button("queue-load", s.preparingAccess ? "Preparing your texting access…" : c.queueRecoveryRequired ? "Review held recipients" : "Get my next messages", { disabled: !c.canFetchQueue || !r.can("manualQueue") || r.busy() })}${reasons(c.blockedReasons)}</section>`
         : item
@@ -519,8 +604,12 @@ export function createCampaigns(r) {
     if (await additions.action(name, value)) return true;
     if (await volunteerPicker.action(name)) return true;
     if (await recipients.action(name, value)) return true;
-    const s = state(),
-      c = s.campaign;
+    const s = state();
+    let c = s.campaign;
+    if (name === "queue-refresh-status") {
+      await r.refreshSendStatus();
+      return true;
+    }
     if (name === "campaign-refresh" || name === "campaign-preparation-resume") {
       await preparation.refresh({
         manual: true,
@@ -717,7 +806,7 @@ export function createCampaigns(r) {
       ["queue-load", "queue-recheck", "queue-refresh-preview"].includes(name)
     ) {
       if (name === "queue-recheck" || name === "queue-refresh-preview") {
-        const current = list(s.queue?.items)[0];
+        const current = queueItem(s);
         if (
           !(name === "queue-refresh-preview"
             ? queueCanRefreshPreview(current)
@@ -726,6 +815,8 @@ export function createCampaigns(r) {
           r.sendHeld(`queue:${c?.campaignId}:${current?.itemId}`)
         )
           throw new Error("This recipient needs review before checking again.");
+        await r.refreshSendStatus?.();
+        c = s.campaign;
       }
       if (!r.can("manualQueue") || !c?.canFetchQueue)
         throw new Error("This campaign is not ready for texting.");
@@ -774,11 +865,148 @@ export function createCampaigns(r) {
             s.queueMedia[mediaId] = result.media;
         }
       }
-      r.armExpiry(list(s.queue.items)[0]?.expiresAtMs);
+      r.armExpiry(queueItem(s)?.expiresAtMs);
+      return true;
+    }
+    if (name === "queue-review-kept") {
+      if (s.pendingItemId)
+        throw new Error("Wait for the current recipient's outcome.");
+      s.queueReviewItems?.clear();
+      s.imageLoaded = null;
+      r.armExpiry(queueItem(s)?.expiresAtMs);
+      return true;
+    }
+    if (name === "queue-recover-preview") {
+      const item = queueItem(s),
+        key = `queue:${c?.campaignId}:${item?.itemId}`;
+      if (
+        !r.can("queueItemRecovery") ||
+        !r.sendHeld(key) ||
+        s.pendingItemId ||
+        item?.state !== "awaiting_confirmation"
+      )
+        throw new Error("This recipient's outcome must remain under review.");
+      const requests = (s.queueRecoveryRequests ||= {});
+      const requestId = (requests[item.itemId] ||=
+        r.recoveryRequestId?.(key) || uuid());
+      const response = await r.api(
+        `/campaigns/${id(c.campaignId)}/queue/${id(item.itemId)}/recover-preview`,
+        { requestId },
+      );
+      const next = response.item;
+      if (
+        response.recoveryRequestId !== requestId ||
+        response.previousReceiptFenced !== true ||
+        response.resendPermitted !== false ||
+        next?.itemId !== item.itemId ||
+        next.state !== "awaiting_confirmation" ||
+        !next.humanConfirmation
+      )
+        throw new Error("The saved preview could not be safely recovered.");
+      r.releaseSend(key);
+      s.queue.items = s.queue.items.map((row) =>
+        row.itemId === item.itemId ? next : row,
+      );
+      s.imageLoaded = null;
+      r.armExpiry(next.expiresAtMs);
+      r.toast("Unsent preview recovered. Review it before choosing Send.");
+      return true;
+    }
+    if (name === "queue-status") {
+      if (!r.can("queueStatus") || s.pendingItemId || !c?.campaignId)
+        throw new Error("Saved recipient outcomes are unavailable.");
+      const response = await r.api(`/campaigns/${id(c.campaignId)}/queue`);
+      if (response.campaignId !== c.campaignId || response.readOnly !== true)
+        throw new Error("The saved recipient outcomes could not be verified.");
+      const terminal = new Map(
+        list(response.items)
+          .filter(
+            (item) =>
+              item.resendPermitted === false &&
+              (["confirmed", "skipped"].includes(item.state) ||
+                (item.state === "rejected_not_accepted" &&
+                  item.nonAcceptanceVerified === true)),
+          )
+          .map((item) => [item.itemId, item]),
+      );
+      for (const item of list(s.queue?.items)) {
+        const outcome = terminal.get(item.itemId);
+        if (!outcome) continue;
+        r.releaseSend(`queue:${c.campaignId}:${item.itemId}`);
+        s.queueReviewItems?.delete(item.itemId);
+        if (outcome.state === "rejected_not_accepted") {
+          item.state = outcome.state;
+          item.nonAcceptanceVerified = true;
+          item.stream = outcome.stream || item.stream;
+        }
+      }
+      if (s.queue)
+        s.queue.items = list(s.queue.items).filter(
+          (item) =>
+            !["confirmed", "skipped"].includes(
+              terminal.get(item.itemId)?.state,
+            ),
+        );
+      r.toast(
+        "Saved recipient outcomes checked. Unconfirmed recipients remain held.",
+      );
+      return true;
+    }
+    if (name === "queue-retry-preview" || name === "queue-next") {
+      const item = queueItem(s);
+      if (
+        item?.state !== "rejected_not_accepted" ||
+        item.nonAcceptanceVerified !== true ||
+        s.pendingItemId
+      )
+        throw new Error(
+          "Only a verified unaccepted message can be reviewed again.",
+        );
+      if (name === "queue-next") {
+        s.queue.items = s.queue.items.filter(
+          (row) => row.itemId !== item.itemId,
+        );
+        return true;
+      }
+      if (item.stream !== "opt_in" || !r.can("optionalRetryPreview"))
+        throw new Error("Preparing another attempt is unavailable.");
+      const key = item.itemId;
+      const requestId = ((s.retryPreviewRequests ||= {})[key] ||= uuid());
+      const response = await r.api(
+        `/campaigns/${id(c.campaignId)}/queue/${id(key)}/retry-preview`,
+        { actionId: requestId },
+      );
+      const next = response.item;
+      if (
+        !next?.itemId ||
+        next.itemId === key ||
+        next.state !== "awaiting_confirmation" ||
+        !next.humanConfirmation
+      )
+        throw new Error("A new message preview could not be verified.");
+      s.queue.items = s.queue.items.map((row) =>
+        row.itemId === key ? next : row,
+      );
+      s.imageLoaded = null;
+      r.armExpiry(next.expiresAtMs);
+      r.toast(
+        "New preview prepared. Review it before confirming this recipient.",
+      );
+      return true;
+    }
+    if (name === "queue-continue") {
+      const item = queueItem(s);
+      if (!queueNeedsReview(s, item) || s.pendingItemId)
+        throw new Error(
+          "Wait for this recipient's saved outcome before continuing.",
+        );
+      (s.queueReviewItems ||= new Set()).add(item.itemId);
+      s.imageLoaded = null;
+      r.armExpiry(queueItem(s)?.expiresAtMs);
       return true;
     }
     if (name === "queue-confirm" || name === "queue-skip") {
-      const item = list(s.queue?.items)[0],
+      const item = queueItem(s),
         key = `queue:${c.campaignId}:${item?.itemId}`;
       if (
         !item ||
@@ -824,9 +1052,24 @@ export function createCampaigns(r) {
             campaignId: c.campaignId,
             itemId: item.itemId,
           };
-          s.queue.items.shift();
+          s.queue.items = s.queue.items.filter(
+            (row) => row.itemId !== item.itemId,
+          );
           if (confirming) s.sent = (s.sent || 0) + 1;
           r.toast(confirming ? "Message accepted" : "Recipient skipped");
+        } else if (
+          ["rejected_not_accepted", "rejected_not_attempted"].includes(
+            result.state,
+          ) &&
+          result.needsReview === false &&
+          result.resendPermitted === false &&
+          typeof result.actionId === "string" &&
+          result.actionId
+        ) {
+          r.releaseSend(key);
+          item.state = "rejected_not_accepted";
+          item.nonAcceptanceVerified = true;
+          r.toast("Message was not accepted. No resend was authorized.");
         } else if (
           result.state === "route_refresh_required" &&
           result.resendPermitted === false
@@ -839,13 +1082,16 @@ export function createCampaigns(r) {
           item.state = result.state || "provider_outcome_unknown";
           r.toast("Message outcome needs review");
         }
+      } catch (error) {
+        if (textingRequestWasNotDispatched(error)) r.releaseSend(key);
+        throw error;
       } finally {
         s.pendingItemId = null;
         s.pendingAction = null;
       }
       s.imageLoaded = null;
       await r.refreshSendStatus();
-      r.armExpiry(list(s.queue.items)[0]?.expiresAtMs);
+      r.armExpiry(queueItem(s)?.expiresAtMs);
       return true;
     }
     return false;
@@ -966,7 +1212,9 @@ export function createCampaigns(r) {
   }
   return {
     load,
+    refreshReadiness,
     render,
+    selectedQueueItem: () => queueItem(state()),
     submit,
     action,
     change,
@@ -975,6 +1223,7 @@ export function createCampaigns(r) {
     avatarError: volunteerPicker.avatarError,
     localAction: recipients.localAction,
     dispose() {
+      reporting.dispose();
       preparation.dispose();
       volunteerPicker.dispose();
       recipients.dispose();

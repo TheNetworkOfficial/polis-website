@@ -70,7 +70,6 @@ test("name typing is debounced, bounded and uses only the scoped eligible member
     members: [{ userId: "alex", displayName: "Alex Example" }],
   }));
   h.type("A");
-  h.tick();
   assert.equal(h.calls.length, 0);
   h.type("Al");
   h.type("Ale");
@@ -94,7 +93,7 @@ test("name typing is debounced, bounded and uses only the scoped eligible member
   assert.doesNotMatch(h.picker.render(), />Search</);
   h.type("");
   assert.deepEqual(h.state.members, []);
-  assert.match(h.picker.render(), /Type at least three characters/);
+  assert.match(h.picker.render(), /Type a name or @username/);
 });
 
 test("out-of-order responses are ignored even when the transport ignores cancellation", async () => {
@@ -369,4 +368,96 @@ test("empty team does not fetch profiles, while archived team names remain reada
   assert.equal(h.calls.length, 1);
   assert.match(h.picker.render(), /Archived teammate/);
   assert.match(h.picker.render(), /data-workspace-member="a" disabled/);
+});
+
+test("one- and two-character names support sparse scoped pagination while retaining selected teammates", async () => {
+  const h = fixture(async (path) => {
+    const query = new URL(`https://example.test${path}`).searchParams;
+    if (query.get("query") === "Q")
+      return { members: [{ userId: "q", displayName: "Q" }], nextCursor: null };
+    if (!query.get("cursor"))
+      return { members: [], nextCursor: "roster-page-2" };
+    if (query.get("cursor") === "roster-page-2")
+      return {
+        members: [{ userId: "li", displayName: "Li Example" }],
+        nextCursor: "roster-page-3",
+      };
+    return {
+      members: [{ userId: "lin", displayName: "Lin Example" }],
+      nextCursor: null,
+    };
+  });
+  h.type("Q");
+  h.tick();
+  await flush();
+  assert.equal(h.state.members[0].displayName, "Q");
+  h.state.selected.add("q");
+  h.type("Li");
+  h.tick();
+  await flush();
+  assert.equal(h.state.members.length, 0);
+  assert.match(h.picker.render(), /Keep searching/);
+  assert.match(h.picker.render(), /Find more teammates/);
+  await h.picker.action("member-search-more");
+  assert.equal(
+    h.calls.at(-1)[0],
+    "/members?query=Li&limit=20&cursor=roster-page-2",
+  );
+  h.state.selected.add("li");
+  await h.picker.action("member-search-more");
+  assert.deepEqual(
+    h.state.members.map((member) => member.userId),
+    ["li", "lin"],
+  );
+  assert.match(h.picker.render(), /Select Q/);
+  assert.match(h.picker.render(), /Select Li Example/);
+  assert.doesNotMatch(
+    h.picker.render(),
+    /data-workspace-action="member-search-more"/,
+  );
+  assert.ok(h.calls.every(([, body]) => body === undefined));
+  h.picker.dispose();
+});
+
+test("an older paginated search cannot populate a changed name, and a failed page keeps its retry cursor", async () => {
+  let resolvePage,
+    fail = true;
+  const h = fixture(async (path) => {
+    if (path.includes("query=Blair"))
+      return { members: [{ userId: "blair", displayName: "Blair Example" }] };
+    if (!path.includes("cursor="))
+      return {
+        members: [{ userId: "alex", displayName: "Alex Example" }],
+        nextCursor: "next",
+      };
+    if (fail) {
+      fail = false;
+      throw new TypeError("Network unavailable");
+    }
+    return new Promise((resolve) => {
+      resolvePage = resolve;
+    });
+  });
+  h.type("Alex");
+  h.tick();
+  await flush();
+  await h.picker.action("member-search-more");
+  assert.equal(h.state.members[0].userId, "alex");
+  assert.equal(h.state.memberSearchCursor, "next");
+  assert.match(h.picker.render(), /Retry finding more teammates/);
+  const old = h.picker.action("member-search-more");
+  h.type("Blair");
+  h.tick();
+  await flush();
+  resolvePage({
+    members: [{ userId: "another", displayName: "Alex Second" }],
+    nextCursor: "old-next",
+  });
+  await old;
+  assert.deepEqual(
+    h.state.members.map((member) => member.userId),
+    ["blair"],
+  );
+  assert.equal(h.state.memberSearchCursor, null);
+  h.picker.dispose();
 });

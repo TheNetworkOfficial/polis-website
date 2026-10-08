@@ -110,36 +110,42 @@ function browserStub(t) {
   return listeners;
 }
 
-function conversationHarness(api, { refreshSendStatus = async () => {} } = {}) {
+function conversationHarness(
+  api,
+  { refreshSendStatus = async () => {}, pollOptions } = {},
+) {
   const view = { conversations: {} },
     calls = [],
     holds = new Set(),
     failures = [];
   let current = true;
-  const page = createConversations({
-    view: () => view,
-    context: () => ({ resourceId: conversation.conversationId }),
-    workspace: () => workspace,
-    billing: () => billing,
-    can: (name) => workspace.capabilities[name] === true,
-    busy: () => false,
-    changed: () => {},
-    toast: () => {},
-    guard: () => {
-      if (!current) throw new Error("Workspace changed");
+  const page = createConversations(
+    {
+      view: () => view,
+      context: () => ({ resourceId: conversation.conversationId }),
+      workspace: () => workspace,
+      billing: () => billing,
+      can: (name) => workspace.capabilities[name] === true,
+      busy: () => false,
+      changed: () => {},
+      toast: () => {},
+      guard: () => {
+        if (!current) throw new Error("Workspace changed");
+      },
+      fail: (error) => failures.push(error),
+      sendHeld: (key) => holds.has(key),
+      holdSend: (key) => holds.add(key),
+      releaseSend: (key) => holds.delete(key),
+      refreshSendStatus,
+      refreshBilling: async () => {},
+      api: async (route, body) => {
+        if (route === "/texter/ensure") return { texter: { state: "ready" } };
+        calls.push({ route, body });
+        return api(route, body);
+      },
     },
-    fail: (error) => failures.push(error),
-    sendHeld: (key) => holds.has(key),
-    holdSend: (key) => holds.add(key),
-    releaseSend: (key) => holds.delete(key),
-    refreshSendStatus,
-    refreshBilling: async () => {},
-    api: async (route, body) => {
-      if (route === "/texter/ensure") return { texter: { state: "ready" } };
-      calls.push({ route, body });
-      return api(route, body);
-    },
-  });
+    pollOptions,
+  );
   return {
     page,
     view,
@@ -367,7 +373,7 @@ test("accepted replies refresh spending counters and recover delayed delivery wi
           result: { actionId: options.body.actionId, state: "accepted" },
         };
       }
-      assert.match(url, /\/conversations\/conversation-one$/);
+      assert.match(url, /\/conversations\/conversation-one\?order=latest$/);
       conversationReads++;
       if (conversationReads === 2) throw new TypeError("Failed to fetch");
       return {
@@ -419,7 +425,7 @@ test("accepted replies refresh spending counters and recover delayed delivery wi
     assert.equal(calls.filter((call) => call.url.endsWith(suffix)).length, 2);
 
   input("A later draft should stay here.");
-  t.mock.timers.tick(10000);
+  t.mock.timers.tick(20000);
   await flush();
   assert.match(page.render(), /Here is the requested information\./);
   assert.match(page.render(), /delivered/i);
@@ -427,14 +433,14 @@ test("accepted replies refresh spending counters and recover delayed delivery wi
   assert.equal(conversationReads, 3);
   t.mock.timers.tick(60000);
   await flush();
-  assert.equal(conversationReads, 3);
+  assert.equal(conversationReads, 4);
 
   await page.refresh();
-  assert.equal(conversationReads, 4);
+  assert.equal(conversationReads, 5);
   assert.match(page.render(), /A later draft should stay here\./);
   t.mock.timers.tick(60000);
   await flush();
-  assert.equal(conversationReads, 4);
+  assert.equal(conversationReads, 6);
   assert.equal(
     calls.filter((call) => call.options.method === "POST").length,
     1,
@@ -445,24 +451,25 @@ test("accepted replies refresh spending counters and recover delayed delivery wi
 test("accepted-reply polling is bounded and stops after disposal, route changes, or revoked access", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   browserStub(t);
-  const bounded = conversationHarness(async (route, body) =>
-    body ? accepted(body) : response(),
+  const bounded = conversationHarness(
+    async (route, body) => (body ? accepted(body) : response()),
+    { pollOptions: { maxPollReads: 6 } },
   );
   t.after(() => bounded.page.dispose());
   await bounded.page.load(conversation.conversationId);
   t.mock.timers.tick(60000);
   await flush();
-  assert.equal(bounded.calls.length, 1); // Opening a conversation does not poll.
+  assert.equal(bounded.calls.length, 2); // Foreground conversations check for new replies.
   await acceptReply(bounded);
   for (let i = 0; i < 7; i++) {
     t.mock.timers.tick(10000);
     await flush();
   }
-  assert.equal(bounded.calls.length, 9); // Initial GET, POST, immediate GET, six polls.
+  assert.equal(bounded.calls.length, 10); // Two initial GETs, POST, immediate GET, six polls.
   await bounded.page.action("conversations-refresh");
   t.mock.timers.tick(60000);
   await flush();
-  assert.equal(bounded.calls.length, 10); // Manual refresh performs one read.
+  assert.equal(bounded.calls.length, 12); // Manual refresh resumes the bounded foreground checks.
   assert.equal(
     bounded.calls.filter((call) => call.body !== undefined).length,
     1,

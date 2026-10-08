@@ -7,6 +7,7 @@ import {
   stat,
   notice,
 } from "./textingWorkspaceUi";
+import { textingReadRequest } from "./textingReadRequest";
 
 const keys = [
   "accepted",
@@ -82,7 +83,11 @@ export async function readTextingReports(r, campaigns) {
 }
 
 export function createTextingHistory(r, state) {
-  let readScheduled = false;
+  let readScheduled = false,
+    reading = false,
+    disposed = false,
+    retryAfter = 0,
+    readController;
   async function load({ more = false } = {}) {
     const s = state(),
       campaignId = s.campaign?.campaignId;
@@ -107,16 +112,34 @@ export function createTextingHistory(r, state) {
     for (const item of list(response.items)) items.set(item.entryId, item);
     h.items = [...items.values()];
     h.cursor = response.nextCursor;
-    if (!more) h.readTokens = new Set();
-    if (response.readToken)
-      (h.readTokens ||= new Set()).add(response.readToken);
+    if (!more) {
+      h.readTokens = new Map();
+      h.readPages = new Map();
+    }
+    if (response.readToken) {
+      (h.readTokens ||= new Map()).set(
+        response.readToken,
+        new Set(
+          list(response.items)
+            .filter((item) => item.direction === "inbound")
+            .map((item) => item.entryId),
+        ),
+      );
+      (h.readPages ||= new Map()).set(response.readToken, {
+        path: `/campaigns/${id(campaignId)}/history?${query}`,
+        expiresAtMs: response.readTokenExpiresAtMs || Date.now() + 14 * 60000,
+      });
+    }
     s.reports = await readTextingReports(r, [s.campaign]);
   }
   function acknowledgeVisibleHistory() {
     const s = state(),
       h = s.history;
     if (
+      disposed ||
+      reading ||
       readScheduled ||
+      Date.now() < retryAfter ||
       !h?.readTokens?.size ||
       typeof requestAnimationFrame !== "function"
     )
@@ -124,16 +147,94 @@ export function createTextingHistory(r, state) {
     readScheduled = true;
     requestAnimationFrame(async () => {
       readScheduled = false;
-      if (document.hidden || state().history !== h) return;
+      if (disposed || document.hidden || state().history !== h) return;
+      reading = true;
+      readController = new AbortController();
+      let changed = false;
       try {
         r.guard();
-        for (const readToken of h.readTokens) {
-          h.readTokens.delete(readToken);
-          const response = await r.api(
-            `/campaigns/${id(s.campaign.campaignId)}/history/read`,
-            { readToken },
+        for (const [savedToken, entries] of h.readTokens) {
+          let readToken = savedToken;
+          if (disposed || document.hidden || state().history !== h) return;
+          const visibleEntries = () =>
+            [
+              ...(document.querySelectorAll?.("[data-texting-history-entry]") ||
+                []),
+            ]
+              .filter((node) => {
+                const box = node.getBoundingClientRect();
+                return (
+                  box.bottom > 0 &&
+                  box.top < (globalThis.innerHeight || Infinity) &&
+                  box.right > 0 &&
+                  box.left < (globalThis.innerWidth || Infinity)
+                );
+              })
+              .map((node) => node.dataset.textingHistoryEntry)
+              .filter((entryId) => entries.has(entryId));
+          let visibleEntryIds = visibleEntries();
+          if (!visibleEntryIds.length) continue;
+          const savedPage = h.readPages?.get(savedToken);
+          if (savedPage?.expiresAtMs <= Date.now()) {
+            const exact = r.can("campaignReadProof");
+            if (exact) visibleEntryIds = visibleEntryIds.slice(0, 40);
+            const path = exact
+              ? `/campaigns/${id(s.campaign.campaignId)}/history/read-proof?entryIds=${id(visibleEntryIds.join(","))}`
+              : savedPage.path;
+            const renewed = await r.api(path, undefined, undefined, {
+              signal: readController.signal,
+            });
+            r.guard();
+            if (disposed || document.hidden || state().history !== h) return;
+            if (
+              !renewed.readToken ||
+              list(renewed.items).some(
+                (item) => item.campaignId !== s.campaign.campaignId,
+              )
+            )
+              throw new Error("The visible history could not be verified.");
+            const eligible = new Set(
+              exact
+                ? list(renewed.readEntryIds)
+                : list(renewed.items)
+                    .filter((item) => item.direction === "inbound")
+                    .map((item) => item.entryId),
+            );
+            const rows = new Map(h.items.map((item) => [item.entryId, item]));
+            for (const item of list(renewed.items))
+              rows.set(item.entryId, item);
+            h.items = [...rows.values()];
+            visibleEntryIds = visibleEntryIds.filter((entryId) =>
+              eligible.has(entryId),
+            );
+            if (!visibleEntryIds.length)
+              throw new Error("Refresh history to check these older messages.");
+            readToken = renewed.readToken;
+          }
+          if (document.hidden) return;
+          const stillVisible = new Set(visibleEntries());
+          visibleEntryIds = visibleEntryIds.filter((entryId) =>
+            stillVisible.has(entryId),
+          );
+          if (!visibleEntryIds.length) continue;
+          const response = await textingReadRequest(
+            (signal) =>
+              r.api(
+                `/campaigns/${id(s.campaign.campaignId)}/history/read`,
+                { readToken, visibleEntryIds },
+                undefined,
+                { signal },
+              ),
+            { signal: readController.signal },
           );
           r.guard();
+          if (disposed || state().history !== h) return;
+          for (const entryId of visibleEntryIds) entries.delete(entryId);
+          if (!entries.size) {
+            h.readTokens.delete(savedToken);
+            h.readPages?.delete(savedToken);
+          }
+          changed = true;
           s.reports[s.campaign.campaignId] = checkedTextingReport(
             response.report,
             s.campaign.campaignId,
@@ -146,10 +247,17 @@ export function createTextingHistory(r, state) {
         } catch {
           return;
         }
+        if (document.hidden || disposed) return;
+        if (error?.status === 400)
+          for (const page of h.readPages?.values() || []) page.expiresAtMs = 0;
         if ([401, 403].includes(error?.status)) r.fail(error);
         else h.readError = true;
+        retryAfter = Date.now() + 15000;
+        changed = true;
+      } finally {
+        reading = false;
       }
-      r.changed();
+      if (changed) r.changed();
     });
   }
   function render() {
@@ -197,7 +305,7 @@ export function createTextingHistory(r, state) {
             .sort((a, b) => b.createdAtMs - a.createdAtMs)
             .map(
               (item) =>
-                `<article class="pt-row"><div><strong>${e(item.displayName || "Recipient")}</strong><p class="pt-muted">${e(textingHistoryStatus(item.status))} · ${e(new Date(item.createdAtMs).toLocaleString())}</p><p>${e(item.content)}</p>${item.hasMedia ? '<p class="pt-muted">Includes an attachment</p>' : ""}</div>${item.conversationId ? go("conversation", "Open conversation", item.conversationId, true) : '<span class="pt-muted">Conversation updating</span>'}</article>`,
+                `<article class="pt-row" data-texting-history-entry="${e(item.entryId)}"><div><strong>${e(item.displayName || "Recipient")}</strong><p class="pt-muted">${e(textingHistoryStatus(item.status))} · ${e(new Date(item.createdAtMs).toLocaleString())}</p><p>${e(item.content)}</p>${item.hasMedia ? '<p class="pt-muted">Includes an attachment</p>' : ""}</div>${item.conversationId ? go("conversation", "Open conversation", item.conversationId, true) : '<span class="pt-muted">Conversation updating</span>'}</article>`,
             )
             .join("")
         : '<p class="pt-muted">No recorded messages on this page match these filters.</p>'
@@ -223,5 +331,38 @@ export function createTextingHistory(r, state) {
     state().history[key] = target.value;
     return false; // Keep focus and let Apply perform the authoritative read.
   }
-  return { load, render, action, change };
+  globalThis.document?.addEventListener?.(
+    "scroll",
+    acknowledgeVisibleHistory,
+    true,
+  );
+  globalThis.window?.addEventListener?.("resize", acknowledgeVisibleHistory);
+  const visibility = () => {
+    if (globalThis.document?.hidden) readController?.abort();
+    else acknowledgeVisibleHistory();
+  };
+  globalThis.document?.addEventListener?.("visibilitychange", visibility);
+  return {
+    load,
+    render,
+    action,
+    change,
+    dispose() {
+      disposed = true;
+      readController?.abort();
+      globalThis.document?.removeEventListener?.(
+        "visibilitychange",
+        visibility,
+      );
+      globalThis.document?.removeEventListener?.(
+        "scroll",
+        acknowledgeVisibleHistory,
+        true,
+      );
+      globalThis.window?.removeEventListener?.(
+        "resize",
+        acknowledgeVisibleHistory,
+      );
+    },
+  };
 }

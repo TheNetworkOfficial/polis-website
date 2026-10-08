@@ -174,9 +174,7 @@ test("teammate autocomplete preserves selections, input focus and photo fallback
     page.getByRole("checkbox", { name: "Select Blair Example" }),
   ).toHaveCount(0);
   await expect(
-    page
-      .getByRole("status")
-      .filter({ hasText: "Type at least three characters" }),
+    page.getByRole("status").filter({ hasText: "Type a name or @username" }),
   ).toBeVisible();
   await expect(
     page.getByRole("checkbox", { name: "Select Alex Example" }),

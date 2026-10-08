@@ -126,6 +126,12 @@
   flex-direction: column;
   gap: 22px;
   margin: 24px 0;
+  max-height: min(65vh, 680px);
+  min-height: 160px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  overflow-anchor: none;
+  padding: 4px;
 }
 .pt-workspace-message {
   align-self: flex-start;
