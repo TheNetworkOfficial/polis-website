@@ -559,6 +559,66 @@ test("a confirmed message advances only the local item; it does not confirm the 
   assert.equal(state.campaigns.sent, 1);
 });
 
+test("an uncertain recipient stays fenced while explicit continuation makes the remaining batch usable", async () => {
+  const held = new Set(),
+    calls = [];
+  const state = {
+    campaigns: {
+      campaign: { campaignId: "campaign-one", canFetchQueue: true },
+      queue: {
+        items: Array.from({ length: 30 }, (_, i) => ({
+          ...item(),
+          itemId: `item-${i}`,
+          preview: { ...item().preview, contactDisplayName: `Recipient ${i}` },
+        })),
+      },
+    },
+  };
+  const r = {
+    contactApi: {},
+    view: () => state,
+    workspace: () => workspace,
+    billing: () => billing,
+    can: () => true,
+    sendHeld: (key) => held.has(key),
+    holdSend: (key) => held.add(key),
+    releaseSend: (key) => held.delete(key),
+    api: async (path) => {
+      calls.push(path);
+      return {
+        result: {
+          itemId: path.includes("item-0/") ? "item-0" : "item-1",
+          state: path.includes("item-0/")
+            ? "provider_outcome_unknown"
+            : "accepted",
+        },
+      };
+    },
+    refreshSendStatus: async () => {},
+    changed() {},
+    context: () => ({ resourceId: "campaign-one" }),
+    busy: () => false,
+    armExpiry() {},
+    toast() {},
+  };
+  const page = createCampaigns(r);
+  await page.action("queue-confirm");
+  await assert.rejects(page.action("queue-confirm"));
+  await page.action("queue-continue");
+  assert.equal(calls.length, 1, "continuing never sends or skips");
+  assert.match(page.render("send"), /Send to Recipient 1/);
+  await page.action("queue-confirm");
+  assert.equal(calls.length, 2);
+  assert.equal(state.campaigns.queue.items.length, 29);
+  assert.equal(
+    state.campaigns.queue.items[0].state,
+    "provider_outcome_unknown",
+  );
+  assert.ok(held.has("queue:campaign-one:item-0"));
+  assert.match(page.render("send"), /Send to Recipient 2/);
+  page.dispose();
+});
+
 const importJob = (status, revision = 1) => ({
   importId: "import-one",
   file: { fileName: "example.csv" },
@@ -1196,4 +1256,84 @@ test("sending feedback remains pending until confirmation, then refreshes pilot 
   );
   assert.equal(calls.filter((call) => call.url.endsWith("/confirm")).length, 1);
   page.reset();
+});
+
+test("uncertain assignment capacity explains the concrete manager recovery action", () => {
+  assert.equal(
+    ui.customerText("prompt_queue_uncertain_capacity"),
+    "Unconfirmed send outcomes have filled the texting assignment limit. Ask an organization texting manager to review them.",
+  );
+});
+
+test("read-only queue status clears only exact terminal evidence and prepares optional retries without sending", async () => {
+  const held = new Set([
+    "queue:campaign-one:unknown",
+    "queue:campaign-one:rejected",
+    "queue:campaign-one:missing",
+  ]);
+  const items = ["unknown", "rejected", "missing"].map((itemId) => ({
+    ...item(),
+    itemId,
+    stream: "opt_in",
+    state: "provider_outcome_unknown",
+  }));
+  const state = {
+    campaigns: {
+      campaign: { campaignId: "campaign-one", canFetchQueue: true },
+      queue: { items },
+      queueReviewItems: new Set(["unknown", "missing"]),
+    },
+  };
+  const calls = [];
+  const page = createCampaigns({
+    contactApi: {},
+    view: () => state,
+    workspace: () => workspace,
+    billing: () => billing,
+    can: () => true,
+    sendHeld: (key) => held.has(key),
+    releaseSend: (key) => held.delete(key),
+    busy: () => false,
+    context: () => ({ resourceId: "campaign-one" }),
+    armExpiry() {},
+    toast() {},
+    changed() {},
+    api: async (path, body) => {
+      calls.push({ path, body });
+      if (path.endsWith("retry-preview"))
+        return { item: { ...item(), itemId: "new-attempt", stream: "opt_in" } };
+      return {
+        campaignId: "campaign-one",
+        readOnly: true,
+        items: [
+          {
+            itemId: "unknown",
+            state: "provider_outcome_unknown",
+            resendPermitted: false,
+          },
+          {
+            itemId: "rejected",
+            stream: "opt_in",
+            state: "rejected_not_accepted",
+            nonAcceptanceVerified: true,
+            resendPermitted: false,
+          },
+        ],
+      };
+    },
+  });
+  await page.action("queue-status");
+  assert.ok(held.has("queue:campaign-one:unknown"));
+  assert.ok(held.has("queue:campaign-one:missing"));
+  assert.ok(!held.has("queue:campaign-one:rejected"));
+  assert.match(page.render("send"), /Prepare another attempt/);
+  await page.action("queue-retry-preview");
+  assert.equal(calls.filter((c) => c.body).length, 1);
+  assert.ok(calls.every((c) => !c.path.endsWith("/confirm")));
+  assert.equal(state.campaigns.queue.items[1].itemId, "new-attempt");
+  assert.equal(
+    state.campaigns.queue.items[0].state,
+    "provider_outcome_unknown",
+  );
+  page.dispose();
 });

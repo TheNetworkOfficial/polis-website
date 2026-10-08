@@ -1,5 +1,10 @@
 import { personalizationError } from "./textingPersonalization";
 
+const operationalErrors = {
+  prompt_queue_uncertain_capacity:
+    "Unconfirmed send outcomes have filled the texting assignment limit. Ask an organization texting manager to review them.",
+};
+
 export const escapeText = (value) =>
   String(value ?? "").replace(
     /[&<>"']/g,
@@ -9,7 +14,11 @@ export const escapeText = (value) =>
       ],
   );
 export const customerText = (value) =>
-  String(personalizationError(value) || (value ?? ""))
+  String(
+    (Object.hasOwn(operationalErrors, value) ? operationalErrors[value] : "") ||
+      personalizationError(value) ||
+      (value ?? ""),
+  )
     .replace(/\b(?:prompt|telnyx)_/gi, "texting_")
     .replace(/\b(?:Prompt(?:\.io)?|Telnyx)(?:'s)?\b/gi, "texting service");
 export const label = (value) =>

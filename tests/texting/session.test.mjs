@@ -9,9 +9,10 @@ const source = await readFile(
   ),
   "utf8",
 );
-const { createTextingSessionRequest } = await import(
-  `data:text/javascript;base64,${Buffer.from(source).toString("base64")}`
-);
+const { createTextingSessionRequest, textingRequestWasNotDispatched } =
+  await import(
+    `data:text/javascript;base64,${Buffer.from(source).toString("base64")}`
+  );
 
 test("texting refreshes an expired session once before requests without retrying a mutation", async () => {
   let session = { userId: "admin", expiresAt: 0, token: "old-test-token" },
@@ -43,7 +44,11 @@ test("texting refreshes an expired session once before requests without retrying
     method: "POST",
     body: {},
   });
-  const rejected = assert.rejects(mutation, /Failed to fetch/);
+  const rejected = assert.rejects(mutation, (error) => {
+    assert.match(error.message, /Failed to fetch/);
+    assert.equal(textingRequestWasNotDispatched(error), false);
+    return true;
+  });
   await Promise.resolve();
   assert.equal(calls.length, 0);
   assert.equal(restoreCount, 1);
@@ -85,10 +90,12 @@ test("texting blocks transport when session recovery fails or the route or opera
         if (change === "operation") throw new Error("Workspace changed");
       },
     });
-    const rejection = assert.rejects(
-      pending,
-      change === "expired" ? { status: 401 } : /Workspace changed/,
-    );
+    const rejection = assert.rejects(pending, (error) => {
+      if (change === "expired") assert.equal(error.status, 401);
+      else assert.match(error.message, /Workspace changed/);
+      assert.equal(textingRequestWasNotDispatched(error), true);
+      return true;
+    });
     await Promise.resolve();
     if (change === "actor") session = { userId: "other-admin" };
     if (change === "route") route = "other-organization";

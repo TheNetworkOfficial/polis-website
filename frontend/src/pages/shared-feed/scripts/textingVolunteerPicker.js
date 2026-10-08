@@ -64,7 +64,7 @@ export function createVolunteerPicker(
     for (const key of profiles.keys())
       if (!retained.has(key)) profiles.delete(key);
   };
-  async function search(s, query, ticket) {
+  async function search(s, query, ticket, more = false) {
     if (!current(s, ticket)) return;
     controller = new AbortController();
     const signal = controller.signal;
@@ -72,21 +72,33 @@ export function createVolunteerPicker(
     r.changed();
     try {
       const result = await r.api(
-        `/members?query=${id(query)}&limit=20`,
+        `/members?query=${id(query)}&limit=20${more && s.memberSearchCursor ? `&cursor=${id(s.memberSearchCursor)}` : ""}`,
         undefined,
         undefined,
         { signal },
       );
       if (signal.aborted || !current(s, ticket)) return;
-      s.members = list(result.members)
+      const members = list(result.members)
         .filter((member) => typeof member?.userId === "string" && member.userId)
         .slice(0, 20);
+      s.members = [
+        ...new Map(
+          [...(more ? list(s.members) : []), ...members].map((member) => [
+            member.userId,
+            member,
+          ]),
+        ).values(),
+      ];
+      s.memberSearchCursor =
+        typeof result.nextCursor === "string" ? result.nextCursor : null;
       remember(s, s.members);
       s.memberSearchStatus = "ready";
     } catch (error) {
       if (signal.aborted || !current(s, ticket)) return;
-      s.members = [];
+      if (!more) s.members = [];
       if ([401, 403].includes(error?.status)) {
+        s.members = [];
+        s.memberSearchCursor = null;
         s.memberProfiles?.clear();
         r.fail?.(error);
         return;
@@ -108,10 +120,11 @@ export function createVolunteerPicker(
     stop();
     s.query = query;
     s.members = [];
+    s.memberSearchCursor = null;
     remember(s, []);
     const normalized = query.trim();
-    s.memberSearchStatus = normalized.length < 3 ? "idle" : "waiting";
-    if (normalized.length < 3) return Promise.resolve();
+    s.memberSearchStatus = !normalized && !immediate ? "idle" : "waiting";
+    if (!normalized && !immediate) return Promise.resolve();
     const ticket = sequence;
     if (immediate) return search(s, normalized, ticket);
     timer = schedule(() => {
@@ -258,9 +271,11 @@ export function createVolunteerPicker(
             : status === "ready"
               ? list(s.members).length
                 ? `${list(s.members).length} matching teammate${list(s.members).length === 1 ? "" : "s"}.`
-                : "No teammates with texting access match this name."
-              : "Type at least three characters to find teammates with texting access.";
-    return `<div class="pt-volunteer-picker"><form data-workspace-form="members" role="search"><label class="pt-field"><span>Find a teammate</span><input name="query" type="search" value="${e(s.query || "")}" maxlength="100" autocomplete="off" placeholder="Start typing a name" data-workspace-volunteer-query="true" aria-describedby="volunteer-search-status" aria-controls="volunteer-search-results"${!editable(s) ? " disabled" : ""}></label></form><p class="pt-muted pt-volunteer-status" id="volunteer-search-status" role="status" aria-live="polite">${e(message)}</p><div id="volunteer-search-results">${retained.length ? `<section class="pt-volunteer-group" aria-label="Campaign team"><h3>Campaign team <span class="pt-muted">${selected.size} selected</span></h3>${retained.map((userId) => memberRow(s, userId)).join("")}</section>` : `<p class="pt-muted">No teammates selected yet.</p>`}${profileControls(s)}${found.length ? `<section class="pt-volunteer-group" aria-label="Matching teammates"><h3>Matching teammates</h3>${found.map((member) => memberRow(s, member.userId)).join("")}</section>` : ""}</div></div>`;
+                : s.memberSearchCursor
+                  ? "No matches in this part of the roster. Keep searching to check more teammates."
+                  : "No teammates with texting access match this name."
+              : "Type a name or @username to find teammates with texting access.";
+    return `<div class="pt-volunteer-picker"><form data-workspace-form="members" role="search"><label class="pt-field"><span>Find a teammate</span><input name="query" type="search" value="${e(s.query || "")}" maxlength="100" autocomplete="off" placeholder="Start typing a name" data-workspace-volunteer-query="true" aria-describedby="volunteer-search-status" aria-controls="volunteer-search-results"${!editable(s) ? " disabled" : ""}></label></form><p class="pt-muted pt-volunteer-status" id="volunteer-search-status" role="status" aria-live="polite">${e(message)}</p><div id="volunteer-search-results">${retained.length ? `<section class="pt-volunteer-group" aria-label="Campaign team"><h3>Campaign team <span class="pt-muted">${selected.size} selected</span></h3>${retained.map((userId) => memberRow(s, userId)).join("")}</section>` : `<p class="pt-muted">No teammates selected yet.</p>`}${profileControls(s)}${found.length ? `<section class="pt-volunteer-group" aria-label="Matching teammates"><h3>Matching teammates</h3>${found.map((member) => memberRow(s, member.userId)).join("")}</section>` : ""}${s.memberSearchCursor ? button("member-search-more", status === "error" ? "Retry finding more teammates" : "Find more teammates", { secondary: true, disabled: r.busy() || ["waiting", "searching"].includes(status) }) : ""}</div></div>`;
   }
   return {
     render,
@@ -277,6 +292,16 @@ export function createVolunteerPicker(
       }
     },
     async action(name) {
+      if (name === "member-search-more") {
+        const s = state();
+        if (
+          !s.memberSearchCursor ||
+          ["waiting", "searching"].includes(s.memberSearchStatus)
+        )
+          return true;
+        await search(s, String(s.query || "").trim(), sequence, true);
+        return true;
+      }
       if (!["members-more", "members-refresh"].includes(name)) return false;
       await loadAssigned(name === "members-more");
       return true;

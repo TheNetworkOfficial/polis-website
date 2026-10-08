@@ -6639,6 +6639,7 @@ function renderCurrentTextingPage() {
     organizationName: meta.organizationName || "",
     manageBilling: shellAccess.manageBilling === true,
     readContactBook: shellAccess.readContactBook === true,
+    recovery: shellAccess.recovery === true,
     userName:
       user?.displayName || user?.username || user?.name || "Your account",
     logoUrl: resolveSharedAssetUrl(polisLogoUrl),
@@ -19108,7 +19109,8 @@ function normalizeNotificationKind(raw = {}) {
     raw.type || raw.notificationType || raw.notification_type,
   ).toLowerCase();
   const source = rawKind || rawType;
-  if (source === "texting") return "texting";
+  if (source === "texting" || source === "texting_inbound_reply")
+    return "texting";
   if (source === "post_comment" || source === "comment") {
     return "post_comment";
   }
@@ -19168,7 +19170,11 @@ function normalizeNotificationTarget(raw = {}) {
       target.conversationId || target.conversation_id,
     ),
     messageId: normalizeString(target.messageId || target.message_id),
-    surfaceType: normalizeString(target.surfaceType || target.surface_type),
+    surfaceType: normalizeString(
+      target.surfaceType ||
+        target.surface_type ||
+        (target.target === "text_banking_workspace" ? target.target : ""),
+    ),
     profileUserId: normalizeString(
       target.profileUserId || target.profile_user_id,
     ),
@@ -19260,7 +19266,13 @@ function normalizeAccountLifecycleNotification(raw = {}) {
 
 function normalizeNotification(raw = {}) {
   const rawTarget =
-    raw.target && typeof raw.target === "object" ? raw.target : raw;
+    raw.target && typeof raw.target === "object"
+      ? raw.target
+      : raw.type === "texting_inbound_reply" &&
+          raw.data &&
+          typeof raw.data === "object"
+        ? raw.data
+        : raw;
   const rawPreview =
     raw.preview && typeof raw.preview === "object" ? raw.preview : raw;
   const kind = normalizeNotificationKind(raw);

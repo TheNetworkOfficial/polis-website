@@ -83,7 +83,29 @@ test("only a visible rendered conversation acknowledges exact returned pages; pr
     requestAnimationFrame: globalThis.requestAnimationFrame,
   };
   let frames = [];
-  globalThis.document = { hidden: false };
+  globalThis.document = {
+    hidden: false,
+    querySelector: () => ({
+      dataset: { conversationId: "conversation" },
+      getBoundingClientRect: () => ({
+        top: 0,
+        bottom: 300,
+        left: 0,
+        right: 300,
+      }),
+      querySelectorAll: () => [
+        {
+          dataset: { textingMessageId: "message-1" },
+          getBoundingClientRect: () => ({
+            top: 10,
+            bottom: 50,
+            left: 10,
+            right: 290,
+          }),
+        },
+      ],
+    }),
+  };
   globalThis.requestAnimationFrame = (callback) => frames.push(callback);
   t.after(() => {
     for (const [key, value] of Object.entries(previous)) {
@@ -119,7 +141,13 @@ test("only a visible rendered conversation acknowledges exact returned pages; pr
                 canReply: false,
                 displayName: "Example",
               },
-              messages: [{ direction: "inbound", content: "A reply" }],
+              messages: [
+                {
+                  messageId: "message-1",
+                  direction: "inbound",
+                  content: "A reply",
+                },
+              ],
               readToken: "opaque-page-token",
             };
       },
@@ -137,14 +165,14 @@ test("only a visible rendered conversation acknowledges exact returned pages; pr
   assert.equal(f.calls.length, 1);
   globalThis.document.hidden = true;
   f.page.render();
-  await frames.shift()();
+  assert.equal(frames.length, 0);
   assert.equal(f.calls.length, 1);
   globalThis.document.hidden = false;
   f.page.render();
   await frames.shift()();
   assert.deepEqual(f.calls[1], {
     route: "/conversations/conversation/read",
-    body: { readToken: "opaque-page-token" },
+    body: { readToken: "opaque-page-token", visibleMessageIds: ["message-1"] },
   });
   f.page.render();
   assert.equal(frames.length, 0);
@@ -165,7 +193,20 @@ test("Replies history acknowledges visible evidence in its original campaign wit
     previousFrame = globalThis.requestAnimationFrame,
     frames = [],
     calls = [];
-  globalThis.document = { hidden: false };
+  globalThis.document = {
+    hidden: false,
+    querySelectorAll: () => [
+      {
+        dataset: { textingHistoryEntry: "old-reply" },
+        getBoundingClientRect: () => ({
+          top: 10,
+          bottom: 40,
+          left: 0,
+          right: 300,
+        }),
+      },
+    ],
+  };
   globalThis.requestAnimationFrame = (fn) => frames.push(fn);
   t.after(() => {
     if (previousDocument === undefined) delete globalThis.document;
@@ -212,8 +253,86 @@ test("Replies history acknowledges visible evidence in its original campaign wit
     [
       {
         route: "/campaigns/campaign/history/read",
-        body: { readToken: "history-page" },
+        body: { readToken: "history-page", visibleEntryIds: ["old-reply"] },
       },
     ],
   );
 });
+
+for (const exact of [false, true])
+  test(`expired history proofs renew ${exact ? "exact cached IDs" : "their original page"} without acknowledging offscreen entries`, async (t) => {
+    const saved = {
+      document: globalThis.document,
+      requestAnimationFrame: globalThis.requestAnimationFrame,
+    };
+    const frames = [],
+      calls = [];
+    let reads = 0;
+    globalThis.document = {
+      hidden: false,
+      querySelectorAll: () => [
+        {
+          dataset: { textingHistoryEntry: "visible" },
+          getBoundingClientRect: () => ({
+            top: 10,
+            bottom: 30,
+            left: 10,
+            right: 200,
+          }),
+        },
+      ],
+    };
+    globalThis.requestAnimationFrame = (fn) => frames.push(fn);
+    const item = (entryId) => ({
+      entryId,
+      campaignId: "campaign",
+      direction: "inbound",
+      content: entryId,
+    });
+    const state = {
+      campaign: { campaignId: "campaign" },
+      history: { direction: "inbound", items: [] },
+    };
+    const page = createTextingHistory(
+      {
+        can: (key) => key !== "campaignReadProof" || exact,
+        guard() {},
+        busy: () => false,
+        changed() {},
+        api: async (path, body) => {
+          calls.push({ path, body });
+          if (path.endsWith("/reporting") || body) return { report: report() };
+          reads++;
+          if (path.includes("/read-proof?")) {
+            assert.ok(path.endsWith("entryIds=visible"));
+            return {
+              readToken: "renewed",
+              readTokenExpiresAtMs: Date.now() + 60000,
+              readEntryIds: ["visible"],
+            };
+          }
+          return {
+            items: [item("visible"), item("offscreen")],
+            readToken: reads === 1 ? "expired" : "renewed",
+            readTokenExpiresAtMs: reads === 1 ? 1 : Date.now() + 60000,
+          };
+        },
+      },
+      () => state,
+    );
+    t.after(() => {
+      page.dispose();
+      Object.assign(globalThis, saved);
+    });
+    await page.load();
+    state.history.items.push(item("retained-older"));
+    page.render();
+    await frames.shift()();
+    assert.equal(reads, 2);
+    assert.deepEqual(calls.find((c) => c.body).body, {
+      readToken: "renewed",
+      visibleEntryIds: ["visible"],
+    });
+    assert.ok(state.history.items.some((i) => i.entryId === "retained-older"));
+    assert.ok(state.history.readTokens.get("expired").has("offscreen"));
+  });

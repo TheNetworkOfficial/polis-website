@@ -1,3 +1,8 @@
+import {
+  snapshotConversationScroll,
+  restoreConversationScroll,
+} from "./textingConversationHistory";
+
 const sections = new Set([
   "home",
   "registration",
@@ -10,6 +15,7 @@ const sections = new Set([
   "conversation",
   "results",
   "balance",
+  "recovery",
 ]);
 
 export const escapeTextingHtml = (value) =>
@@ -100,6 +106,7 @@ export function createTextingShellAccess() {
         permissions = {
           readContactBook: capabilities?.readContactBook === true,
           manageBilling: capabilities?.manageBilling === true,
+          recovery: capabilities?.recovery === true,
         };
       return { ...permissions };
     },
@@ -115,6 +122,7 @@ export function renderTextingShell({
   content,
   manageBilling = false,
   readContactBook = false,
+  recovery = false,
 }) {
   const setup = section === "registration";
   const active =
@@ -127,11 +135,20 @@ export function renderTextingShell({
   const navigation = (
     setup
       ? ["home", "settings"]
-      : ["home", "campaigns", "contacts", "inbox", "balance", "settings"]
+      : [
+          "home",
+          "campaigns",
+          "contacts",
+          "inbox",
+          "recovery",
+          "balance",
+          "settings",
+        ]
   )
     .filter(
       (key) =>
         (key !== "balance" || manageBilling === true) &&
+        (key !== "recovery" || recovery === true) &&
         (key !== "contacts" || readContactBook === true),
     )
     .map((key) =>
@@ -170,13 +187,16 @@ export function renderTextingShell({
 /** Keep typing stable when a scoped controller re-renders after validation. */
 export function snapshotTextingFocus(root, identity) {
   const active = document.activeElement;
+  const threadScroll = identity ? snapshotConversationScroll(root) : null;
   if (
     !identity ||
     !root.contains(active) ||
     !active.closest(".texting-workspace") ||
     !active.matches("input,textarea,select")
   )
-    return null;
+    return threadScroll
+      ? { identity, path: location.pathname, threadScroll }
+      : null;
   const fields = [
     ...root.querySelectorAll(
       ".texting-workspace input,.texting-workspace textarea,.texting-workspace select",
@@ -195,6 +215,7 @@ export function snapshotTextingFocus(root, identity) {
     : [];
   return {
     identity,
+    threadScroll,
     path: location.pathname,
     id: active.id,
     name: active.name,
@@ -220,10 +241,15 @@ export function snapshotTextingFocus(root, identity) {
 }
 
 export function restoreTextingFocus(root, snapshot, identity) {
+  const current =
+    snapshot?.identity === identity && snapshot?.path === location.pathname;
+  if (identity)
+    restoreConversationScroll(root, current ? snapshot?.threadScroll : null);
   if (
     !snapshot ||
     snapshot.identity !== identity ||
-    snapshot.path !== location.pathname
+    snapshot.path !== location.pathname ||
+    !snapshot.tag
   )
     return;
   [...root.querySelectorAll(".texting-workspace details")].forEach(

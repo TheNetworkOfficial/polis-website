@@ -161,3 +161,69 @@ test("attachment preparation respects capability and text-only campaigns keep ac
     /data-workspace-action="transition-activate"/,
   );
 });
+
+test("reopening a neutral API campaign uses its authorized attachment metadata to enable preparation", async (t) => {
+  const view = { neutralApi: true },
+    calls = [];
+  const campaign = {
+    campaignId: "campaign-one",
+    revision: 4,
+    status: "prepared",
+    mediaId: "image-one",
+    mediaReady: false,
+    canActivate: false,
+    assignedUserIds: [],
+    templateText: "Example Team. Reply STOP to opt out.",
+  };
+  const page = createCampaigns({
+    context: () => ({
+      userId: "admin",
+      organizationId: "example",
+      section: "campaigns",
+      resourceId: "campaign-one",
+    }),
+    view: () => view,
+    workspace: () => ({}),
+    billing: () => ({}),
+    can: (key) => ["createCampaigns", "canPrepareProviderMedia"].includes(key),
+    contactApi: { invalidate() {} },
+    busy: () => false,
+    guard() {},
+    changed() {},
+    api: async (path) => {
+      calls.push(path);
+      if (path === "/campaigns/campaign-one") return { campaign };
+      if (path === "/campaigns/campaign-one/media/image-one/content")
+        return {
+          media: {
+            mediaId: "image-one",
+            state: "local_ready",
+            providerReady: false,
+            mimeType: "image/png",
+            dataBase64: "aGVsbG8=",
+          },
+        };
+      if (path === "/delivery-schedule")
+        return {
+          schedule: {
+            status: "verified",
+            timeZone: "America/Denver",
+            startTime: "08:00",
+            endTime: "20:00",
+          },
+        };
+      throw Error(`Unexpected ${path}`);
+    },
+  });
+  t.after(() => page.dispose());
+  await page.load("campaign-one", "campaigns");
+  assert.ok(calls.includes("/campaigns/campaign-one/media/image-one/content"));
+  assert.match(
+    page.render("campaigns"),
+    /data-workspace-action="media-prepare"[^>]*>Prepare attachment/,
+  );
+  assert.doesNotMatch(
+    page.render("campaigns"),
+    /data-workspace-action="media-prepare"[^>]* disabled/,
+  );
+});

@@ -14,12 +14,16 @@ import {
   reasons,
   queueCanConfirm,
   customerText,
+  uuid,
 } from "./textingWorkspaceUi";
 import { createOrganizationContactBook } from "./organizationContactBook";
 import { createOrganizationContactsApi } from "./organizationContactsApi";
 import { loadContactCities } from "./organizationContactCities";
 import { createCampaigns } from "./textingCampaigns";
 import { createConversations } from "./textingConversations";
+import { textingReadRequest } from "./textingReadRequest";
+import { createTextingRecovery } from "./textingRecovery";
+import { renderTextingRenewals, renderTextingSetup } from "./textingRenewals";
 import { readTextingReports, renderTextingReport } from "./textingReporting";
 
 /** Authenticated customer workspace. Every async result is fenced to both user and route. Texting access setup runs only in send and reply flows. */
@@ -38,31 +42,82 @@ export function createTextingWorkspacePage({
     fundsDismissed = false,
     pendingContactCampaign = null;
   const sendHolds = new Set();
+  const sendActions = new Map();
+  const resolvedHolds = new Map();
   const holdStorage = (key) => `polis.texting.uncertain.${key}`;
   function hasHold(key) {
     try {
       return (
-        sendHolds.has(key) || sessionStorage.getItem(holdStorage(key)) === "1"
+        sendHolds.has(key) ||
+        (() => {
+          const saved = sessionStorage.getItem(holdStorage(key));
+          return Boolean(saved && resolvedHolds.get(key) !== saved);
+        })()
       );
     } catch {
       return sendHolds.has(key);
     }
   }
-  function storeHold(key) {
-    sendHolds.add(key);
+  function readHold(key) {
     try {
-      sessionStorage.setItem(holdStorage(key), "1");
+      const value =
+        sendActions.get(key) ||
+        JSON.parse(sessionStorage.getItem(holdStorage(key)) || "null");
+      return value?.version === 1 &&
+        /^[A-Za-z0-9_-]{1,100}$/.test(value.actionId || "") &&
+        /^[A-Za-z0-9_-]{1,100}$/.test(value.conversationId || "")
+        ? value
+        : null;
+    } catch {
+      return sendActions.get(key) || null;
+    }
+  }
+  function storeHold(key, action) {
+    resolvedHolds.delete(key);
+    sendHolds.add(key);
+    const value = action ? { version: 1, ...action } : null;
+    if (value) sendActions.set(key, value);
+    try {
+      sessionStorage.setItem(
+        holdStorage(key),
+        value ? JSON.stringify(value) : "1",
+      );
     } catch {
       /* In-memory fence remains active if browser storage is disabled. */
     }
   }
   function clearHold(key) {
+    try {
+      const saved = sessionStorage.getItem(holdStorage(key));
+      if (saved) resolvedHolds.set(key, saved);
+    } catch {
+      /* In-memory state remains authoritative for this session. */
+    }
     sendHolds.delete(key);
+    sendActions.delete(key);
     try {
       sessionStorage.removeItem(holdStorage(key));
     } catch {
       /* The server still enforces its durable send fence. */
     }
+  }
+  function recoveryRequestId(key) {
+    let value = sendActions.get(key);
+    if (!value) {
+      try {
+        value = JSON.parse(sessionStorage.getItem(holdStorage(key)) || "null");
+      } catch {
+        /* Storage may be unavailable. */
+      }
+    }
+    if (/^[A-Za-z0-9_-]{1,100}$/.test(value?.recoveryRequestId || ""))
+      return value.recoveryRequestId;
+    const recoveryRequestId = uuid();
+    storeHold(key, {
+      ...(value && typeof value === "object" ? value : {}),
+      recoveryRequestId,
+    });
+    return recoveryRequestId;
   }
   const identity = () => {
     const c = context();
@@ -114,6 +169,7 @@ export function createTextingWorkspacePage({
       view.recipientBook = null;
       view.campaigns = null;
       view.conversations = null;
+      view.recovery = null;
       view.error =
         error?.status === 401
           ? "Your session could not be refreshed. Please sign in again."
@@ -132,15 +188,20 @@ export function createTextingWorkspacePage({
     };
     const api = async (suffix, body, method, { signal } = {}) => {
       guard();
-      const result = await request(
-        `/api/text-banking/${view.neutralApi ? "workspaces" : "prompt/scopes"}/${id(`coalition:${organizationId}`)}${suffix}`,
-        {
-          auth: true,
-          ...(signal ? { signal } : {}),
-          beforeRequest: guard,
-          ...(body === undefined ? {} : { method: method || "POST", body }),
-        },
-      );
+      const perform = (requestSignal) =>
+        request(
+          `/api/text-banking/${view.neutralApi ? "workspaces" : "prompt/scopes"}/${id(`coalition:${organizationId}`)}${suffix}`,
+          {
+            auth: true,
+            ...(requestSignal ? { signal: requestSignal } : {}),
+            beforeRequest: guard,
+            ...(body === undefined ? {} : { method: method || "POST", body }),
+          },
+        );
+      const result =
+        body === undefined
+          ? await textingReadRequest(perform, { signal })
+          : await perform(signal);
       guard();
       if (result?.ok !== true)
         throw new Error("The workspace response could not be verified.");
@@ -162,8 +223,10 @@ export function createTextingWorkspacePage({
       view.neutralApi =
         workspace.capabilities?.neutralWorkspaceApi === true ||
         workspace.contractVersion === 2;
-      if (workspace.status === "configured") await refreshBilling();
-      else view.billing = null;
+      if (workspace.status === "configured") {
+        await refreshBilling();
+        await modules.campaigns?.refreshReadiness();
+      } else view.billing = null;
     };
     return {
       api,
@@ -214,9 +277,15 @@ export function createTextingWorkspacePage({
         guard();
         view.message = message;
       },
+      clearError: () => {
+        guard();
+        view.error = "";
+      },
       sendHeld: (key) => hasHold(`${actor}:${key}`),
-      holdSend: (key) => storeHold(`${actor}:${key}`),
+      sendHold: (key) => readHold(`${actor}:${key}`),
+      holdSend: (key, action) => storeHold(`${actor}:${key}`, action),
       releaseSend: (key) => clearHold(`${actor}:${key}`),
+      recoveryRequestId: (key) => recoveryRequestId(`${actor}:${key}`),
       armExpiry: (ms) => {
         clearTimeout(timer);
         if (Number.isSafeInteger(ms))
@@ -255,6 +324,7 @@ export function createTextingWorkspacePage({
       contacts: createOrganizationContactBook(r),
       campaigns: createCampaigns(r),
       conversations: createConversations(r),
+      recovery: createTextingRecovery(r),
     };
     changed();
     try {
@@ -290,6 +360,7 @@ export function createTextingWorkspacePage({
           await modules.campaigns.load(resourceId, section);
         else if (["inbox", "conversation"].includes(section))
           await modules.conversations.load(resourceId);
+        else if (section === "recovery") await modules.recovery.load();
         else {
           view.homeCampaigns = list((await r.api("/campaigns?limit=5")).items);
           view.homeReports = await readTextingReports(r, view.homeCampaigns);
@@ -318,8 +389,10 @@ export function createTextingWorkspacePage({
       r = runtime(key, version);
     try {
       await r.refreshSendStatus();
-      if (context().section === "conversation" && context().resourceId)
-        await modules.conversations.refresh(context().resourceId);
+      if (["inbox", "conversation"].includes(context().section))
+        await modules.conversations.refresh(context().resourceId, {
+          resume: true,
+        });
     } catch (error) {
       if (current(key, version)) fail(error);
     } finally {
@@ -404,10 +477,11 @@ export function createTextingWorkspacePage({
         ) + button("reload", "Refresh", { secondary: true });
     else if (w.status !== "configured")
       html =
-        head("TEXTING", "Your workspace is being prepared") +
+        head("TEXTING", "Complete your texting setup") +
         notice(
-          "Setup in progress",
-          "Your registration details are saved. Organization messaging will appear here after workspace setup.",
+          "Manual setup review required",
+          w.setup?.nextStep ||
+            "Your registration details are saved. Contact Polis support to complete your organization's texting setup.",
         ) +
         go("registration", "View registration", "", true);
     else {
@@ -416,8 +490,16 @@ export function createTextingWorkspacePage({
         html = modules.campaigns.render(section);
       else if (["inbox", "conversation"].includes(section))
         html = modules.conversations.render();
+      else if (section === "recovery") html = modules.recovery.render();
       else html = home();
-      html = financialNotice() + html;
+      html =
+        renderTextingSetup(w.setup) +
+        renderTextingRenewals(
+          w.renewalDeadlines || view.billing?.renewalDeadlines,
+          can("manageBilling"),
+        ) +
+        financialNotice() +
+        html;
       if (!w.canSend)
         html += `<section class="pt-card"><strong>Sending is paused</strong><p class="pt-muted">You can prepare your work while the remaining setup is completed.</p>${reasons(w.blockedReasons)}</section>`;
       if (w.sendingMode === "pilot" && w.pilot)
@@ -603,17 +685,16 @@ export function createTextingWorkspacePage({
     (event) => {
       const target = event.target;
       if (!owned(target) || !target.dataset.workspaceQueueImage) return;
+      const item = modules.campaigns?.selectedQueueItem();
       if (
         target.naturalWidth > 0 &&
-        view.campaigns?.queue?.items?.[0]?.itemId ===
-          target.dataset.workspaceQueueImage
+        item?.itemId === target.dataset.workspaceQueueImage
       ) {
         view.campaigns.imageLoaded = target.dataset.workspaceQueueImage;
         const b = target
           .closest("[data-workspace-key]")
           .querySelector('[data-workspace-action="queue-confirm"]');
         if (b) {
-          const item = view.campaigns.queue.items[0];
           if (owned(target))
             b.disabled =
               view.busy ||
@@ -640,6 +721,8 @@ export function createTextingWorkspacePage({
       if (
         owned(event.target) &&
         event.target.dataset.workspaceQueueImage &&
+        modules.campaigns?.selectedQueueItem()?.itemId ===
+          event.target.dataset.workspaceQueueImage &&
         view.campaigns.imageFailed !== event.target.dataset.workspaceQueueImage
       ) {
         view.campaigns.imageFailed = event.target.dataset.workspaceQueueImage;
