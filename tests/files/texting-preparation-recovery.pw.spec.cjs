@@ -164,3 +164,127 @@ test("a different manager sees who must continue and checking shared progress cr
   expect(fixture.calls.filter((call) => call.method !== "GET")).toEqual([]);
   expect(fixture.errors).toEqual([]);
 });
+
+test("opening a campaign displays setup progress and polls until texting is available", async ({
+  page,
+}, info) => {
+  await page.route("**/*", (route) =>
+    new URL(route.request().url()).hostname === "127.0.0.1"
+      ? route.fallback()
+      : route.abort(),
+  );
+  const fixture = await mockBook(page);
+  const calls = [];
+  let complete = false;
+  let campaign = {
+    campaignId: "campaign-one",
+    revision: 7,
+    name: "Fictional campaign",
+    status: "prepared",
+    templateText: "Example Civic Team: hello. Reply STOP to opt out.",
+    assignedUserIds: ["volunteer-one"],
+    blockedReasons: [],
+    canActivate: true,
+    canFetchQueue: false,
+  };
+  await page.route(`**${PROMPT}/workspace`, (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        ok: true,
+        workspace: {
+          provider: "prompt",
+          scopeKey: "coalition:org-1",
+          manualOnly: true,
+          status: "configured",
+          canSend: true,
+          capabilities: { createCampaigns: true, manualQueue: true },
+        },
+      }),
+    }),
+  );
+  await page.route(`**${PROMPT}/campaigns/campaign-one`, (route) => {
+    calls.push({ method: route.request().method() });
+    if (complete)
+      campaign = {
+        ...campaign,
+        revision: 8,
+        status: "active",
+        preparation: null,
+        canFetchQueue: true,
+      };
+    return route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ ok: true, campaign }),
+    });
+  });
+  await page.route(`**${PROMPT}/campaigns/campaign-one/transition`, (route) => {
+    calls.push({
+      method: route.request().method(),
+      body: route.request().postDataJSON(),
+    });
+    campaign = {
+      ...campaign,
+      status: "activating",
+      canActivate: false,
+      preparation: {
+        preparationId: "approved-activation-one",
+        status: "preparing",
+        stage: "campaign_activation",
+        canResume: false,
+        automaticResume: false,
+        pollAfterMs: 5000,
+        contentPrepared: true,
+        selectedContactCount: null,
+        progress: null,
+        recoveryAction: "none",
+      },
+    };
+    return route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ ok: true, campaign }),
+    });
+  });
+  await page.goto(`${BASE}/organizations/org-1/texting/campaigns/campaign-one`);
+  page.once("dialog", (dialog) => dialog.accept());
+  await page
+    .getByRole("button", { name: "Open campaign", exact: true })
+    .click();
+  const notice = page.getByRole("region", {
+    name: "Campaign activation",
+    exact: true,
+  });
+  await expect(notice.getByText("Opening campaign…")).toBeVisible();
+  await expect(notice).toContainText(
+    "Preparing texting access for assigned volunteers",
+  );
+  await expect(notice).not.toContainText(/recipient|resume|Prompt|Telnyx/i);
+  await expect(
+    page.getByRole("button", { name: "Edit", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Start texting", exact: true }),
+  ).toHaveCount(0);
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.screenshot({
+      path: info.outputPath(`campaign-opening-${width}.png`),
+      fullPage: true,
+    });
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+  }
+  complete = true;
+  await expect(
+    page.getByRole("button", { name: "Start texting", exact: true }),
+  ).toBeVisible();
+  await expect(notice).toHaveCount(0);
+  expect(calls.filter((call) => call.method !== "GET")).toEqual([
+    { method: "POST", body: { expectedRevision: 7, action: "activate" } },
+  ]);
+  expect(fixture.calls.filter((call) => call.method !== "GET")).toEqual([]);
+  expect(fixture.errors).toEqual([]);
+});

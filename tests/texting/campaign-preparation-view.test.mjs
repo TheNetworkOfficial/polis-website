@@ -168,3 +168,48 @@ test("a saved hold prevents another Prepare even when the local loading flag is 
   assert.equal(calls.length, 0);
   page.dispose();
 });
+
+test("opening a campaign describes volunteer setup without recipient import or resume actions", () => {
+  const state = {
+    campaign: {
+      status: "activating",
+      preparation: preparation({
+        status: "preparing",
+        stage: "campaign_activation",
+        selectedContactCount: null,
+        progress: null,
+        canResume: false,
+        automaticResume: false,
+      }),
+    },
+  };
+  const options = { canManage: true, busy: false };
+  const html = renderCampaignPreparation(state, options);
+  assert.match(html, /aria-label="Campaign activation"/);
+  assert.match(html, /Opening campaign…/);
+  assert.match(html, /Preparing texting access for assigned volunteers/);
+  assert.match(html, /checks progress automatically/);
+  assert.match(html, /Check campaign now/);
+  assert.doesNotMatch(html, /recipient|resume|Prompt|Telnyx/i);
+  assert.match(
+    renderCampaignPreparation(
+      { ...state, preparationPollingPaused: true },
+      options,
+    ),
+    /Campaign checks are paused/,
+  );
+  assert.match(
+    renderCampaignPreparation(
+      { ...state, preparationPollError: "Check the saved result." },
+      options,
+    ),
+    /Campaign status could not be confirmed/,
+  );
+  assert.equal(
+    renderCampaignPreparation(
+      { campaign: { ...state.campaign, status: "active" } },
+      options,
+    ),
+    "",
+  );
+});
