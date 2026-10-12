@@ -56,8 +56,6 @@ export function createConversations(
     const s = state();
     if (s.folder && s.folder !== "all") query.set("folder", s.folder);
     if (s.campaignId) query.set("campaignId", s.campaignId);
-    if ((s.folder && s.folder !== "all") || s.campaignId)
-      query.set("order", "provider_id");
     return `/conversations${query.size ? `?${query}` : ""}`;
   };
   let pollTimer,
@@ -403,6 +401,9 @@ export function createConversations(
         )
           pendingReply = null;
       } else {
+        const filtered = Boolean(
+          (s.folder && s.folder !== "all") || s.campaignId,
+        );
         const sweep = !append && s.inboxLoaded;
         const head =
           sweep && s.inboxOrder === "recent_activity"
@@ -425,13 +426,13 @@ export function createConversations(
           cursor = null;
           result = await request(inboxPath());
           s.cursor = result.nextCursor || null;
-          s.inboxScanCursor = result.nextCursor || null;
+          s.inboxScanCursor = filtered ? null : result.nextCursor || null;
           s.inboxScanSeen = new Set();
         }
         if (!valid()) return;
         // A filtered canonical page can contain no matching rows. Continue a
         // small bounded group, keeping its cursor visible when more remain.
-        if ((s.folder && s.folder !== "all") || s.campaignId) {
+        if (filtered) {
           for (
             let page = 0;
             page < 3 && !list(result.items).length && result.nextCursor;
@@ -462,7 +463,14 @@ export function createConversations(
         s.items = [...items.values()].sort(
           (a, b) => (b.lastMessageAtMs || 0) - (a.lastMessageAtMs || 0),
         );
-        if (!s.inboxLoaded || append || (s.cursor && s.cursor === cursor))
+        // Filter cursors are sealed to the requested order. Keep the default
+        // activity page separate from the canonical permission sweep, even
+        // when the server falls back to canonical rows while its index builds.
+        if (
+          !s.inboxLoaded ||
+          append ||
+          (!filtered && s.cursor && s.cursor === cursor)
+        )
           s.cursor = next;
         s.inboxLoaded = true;
         s.inboxOrder =
@@ -471,7 +479,9 @@ export function createConversations(
           "provider_id";
         if (!append)
           s.inboxScanCursor =
-            !sweep && s.inboxOrder === "recent_activity" ? null : next;
+            !sweep && (filtered || s.inboxOrder === "recent_activity")
+              ? null
+              : next;
       }
     };
     const pending = operation();

@@ -158,6 +158,29 @@ function conversationHarness(
   };
 }
 
+test("opted-out unread replies remain readable while reply submission stays blocked", async (t) => {
+  browserStub(t);
+  const h = conversationHarness(async () => ({
+    ...response([{ ...originalMessage, content: "STOP" }]),
+    conversation: {
+      ...conversation,
+      suppressed: true,
+      canReply: false,
+      unreadReplies: 1,
+    },
+  }));
+  t.after(() => h.page.dispose());
+  await h.page.load(conversation.conversationId);
+  assert.match(h.page.render(), /STOP/);
+  assert.match(h.page.render(), /This person opted out/);
+  assert.doesNotMatch(h.page.render(), /data-workspace-form="reply"/);
+  await assert.rejects(
+    h.page.submit("reply", { values: { reply: "Must not send" } }),
+    /not eligible to send/,
+  );
+  assert.equal(h.calls.filter((call) => call.body !== undefined).length, 0);
+});
+
 test("a durable exact-action pre-send rejection releases only its hold and preserves reply text", async (t) => {
   browserStub(t);
   const h = conversationHarness(async (route, body) => {
