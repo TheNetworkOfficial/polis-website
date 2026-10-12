@@ -260,3 +260,142 @@ for (const folder of ["replies", "opt_outs"])
     await page.refresh(resourceId);
     assert.match(page.render(), /Late Matching Person/);
   });
+
+function filteredInboxHarness(t, api, folder = "unread") {
+  const view = {},
+    calls = [],
+    resourceId = `folder:${folder}:campaign`;
+  const page = createConversations(
+    {
+      view: () => view,
+      context: () => ({ resourceId }),
+      workspace: () => ({}),
+      can: () => false,
+      guard() {},
+      busy: () => false,
+      changed() {},
+      sendHeld: () => false,
+      api: async (path) => {
+        calls.push(path);
+        const query = new URL(path, "https://example.invalid").searchParams;
+        assert.equal(query.get("folder"), folder);
+        assert.equal(query.get("campaignId"), "campaign");
+        return api(query);
+      },
+    },
+    { schedule: () => 1, cancel() {} },
+  );
+  t.after(() => page.dispose());
+  return { page, view, calls, resourceId };
+}
+
+for (const folder of ["unread", "replies"])
+  test(`${folder} keeps opted-out replies visible with their unread count and conversation access`, async (t) => {
+    const h = filteredInboxHarness(
+      t,
+      async () => ({
+        items: [
+          {
+            conversationId: "opted-out-reply",
+            displayName: "Person With An Unread Reply",
+            unreadReplies: 1,
+            hasReceivedReply: true,
+            suppressed: true,
+            canReply: false,
+          },
+        ],
+        nextCursor: null,
+        order: "recent_activity",
+      }),
+      folder,
+    );
+    await h.page.load(h.resourceId);
+    const html = h.page.render();
+    assert.match(html, /Person With An Unread Reply/);
+    assert.match(html, /Opted out/);
+    assert.match(html, /1 unread/);
+    assert.match(html, /opted-out-reply[^>]+>Open/);
+    assert.doesNotMatch(html, /No unread yet|No replies yet/);
+  });
+
+for (const indexed of [true, false])
+  test(`unread opens in activity order and keeps order-bound cursors separate during ${indexed ? "indexed" : "fallback"} paging and permission checks`, async (t) => {
+    const unread = {
+      conversationId: "unread-person",
+      displayName: "Unread Person",
+      unreadReplies: 2,
+    };
+    const h = filteredInboxHarness(t, async (query) => {
+      const order = query.get("order"),
+        cursor = query.get("cursor");
+      if (order === "provider_id") {
+        assert.ok(cursor === null || cursor === "canonical-next");
+        return {
+          items: [unread],
+          nextCursor: cursor ? null : "canonical-next",
+          order: "provider_id",
+        };
+      }
+      assert.equal(order, null, "allow the server to select its ready index");
+      assert.ok(cursor === null || cursor === "activity-next");
+      return {
+        items: [unread],
+        nextCursor: cursor ? null : "activity-next",
+        order: indexed ? "recent_activity" : "provider_id",
+      };
+    });
+    await h.page.load(h.resourceId);
+    assert.equal(h.calls.length, 1);
+    assert.match(h.page.render(), /Unread Person/);
+    assert.match(h.page.render(), /2 unread/);
+    assert.equal(h.view.conversations.inboxScanCursor, null);
+    await h.page.refresh(h.resourceId);
+    assert.equal(h.view.conversations.inboxScanCursor, "canonical-next");
+    assert.equal(h.view.conversations.cursor, "activity-next");
+    await h.page.action("conversations-more");
+    assert.equal(h.view.conversations.cursor, null);
+    await h.page.refresh(h.resourceId);
+    assert.equal(h.view.conversations.inboxScanCursor, null);
+    assert.equal(h.view.conversations.refreshError, false);
+  });
+
+test("filtered activity-index withdrawal restarts pagination without reusing its cursor for permission scans", async (t) => {
+  let indexed = true;
+  const h = filteredInboxHarness(t, async (query) => {
+    const order = query.get("order"),
+      cursor = query.get("cursor");
+    if (cursor === "activity-index-next")
+      throw Object.assign(Error("Unavailable index"), {
+        status: 409,
+        code: "texting_inbox_index_not_ready",
+      });
+    if (order === "provider_id") assert.equal(cursor, null);
+    else assert.ok(cursor === null || cursor === "default-fallback-next");
+    return {
+      items: [
+        {
+          conversationId: indexed ? "saved" : "newer",
+          displayName: indexed ? "Saved Person" : "Newer Person",
+          unreadReplies: 1,
+        },
+      ],
+      nextCursor: indexed
+        ? "activity-index-next"
+        : order === "provider_id" || cursor
+          ? null
+          : "default-fallback-next",
+      order: indexed ? "recent_activity" : "provider_id",
+    };
+  });
+  await h.page.load(h.resourceId);
+  indexed = false;
+  await h.page.action("conversations-more");
+  assert.match(h.page.render(), /Saved Person/);
+  assert.match(h.page.render(), /Newer Person/);
+  assert.equal(h.view.conversations.inboxScanCursor, null);
+  assert.equal(h.view.conversations.cursor, "default-fallback-next");
+  await h.page.refresh(h.resourceId);
+  assert.equal(h.view.conversations.refreshError, false);
+  await h.page.action("conversations-more");
+  assert.equal(h.view.conversations.cursor, null);
+});
