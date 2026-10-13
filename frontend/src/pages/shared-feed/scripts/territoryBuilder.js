@@ -8,6 +8,7 @@ import {
   sampledGeometryVertices,
   hasCompleteAssignments,
   publishBlockReason,
+  sourceReady,
 } from "./territoryBuilderModel";
 import { escapeText as e } from "./textingWorkspaceUi";
 import "../css/territory-builder.css";
@@ -63,11 +64,12 @@ export function createTerritoryBuilder({
     handles = [],
     fitKey = "",
     drag = null,
-    reviewOpen = false;
+    reviewOpen = false,
+    viewportTimer;
   const model = createTerritoryBuilderModel({
     request,
     context,
-    changed: () => render(),
+    changed: (_, kind) => (kind === "viewport" ? renderViewport() : render()),
   });
   const button = (
     action,
@@ -81,6 +83,7 @@ export function createTerritoryBuilder({
   };
 
   function destroyMap() {
+    clearTimeout(viewportTimer);
     mapGeneration++;
     handles.forEach((h) => h.remove());
     handles = [];
@@ -211,8 +214,8 @@ export function createTerritoryBuilder({
         "",
       )}<select class="tb-blank-select" aria-label="Blank filter dropdown placeholder" disabled><option value=""></option></select>`;
     const error = q("[data-tb-error]");
-    error.hidden = !s.error;
-    error.textContent = s.error || "";
+    error.hidden = !(s.error || s.sourceError || s.viewportError);
+    error.textContent = s.error || s.sourceError || s.viewportError || "";
     if (!s.loaded) {
       if (map) destroyMap();
       q("[data-tb-panel]").innerHTML =
@@ -272,9 +275,9 @@ export function createTerritoryBuilder({
             ? cutPanel(s)
             : assignPanel(s)) +
       `<div class="tb-existing-link">${button("existing", "Existing territories")}</div>`;
-    const counts = localCounts(s);
+    const summary = s.review?.summary;
     q("[data-tb-status]").innerHTML =
-      `<strong>${s.notice ? e(s.notice) : `${counts.eligible} addresses in area`}</strong><span>${counts.excluded ? `${counts.excluded} excluded · ` : ""}${s.bootstrap.source.unmappedRecordCount ? `${e(s.bootstrap.source.unmappedRecordCount)} records have no map location` : s.dirty ? "Changes stay in your draft until published" : "Current authorized map data"}</span>`;
+      `<strong>${s.notice ? e(s.notice) : !sourceReady(s) ? "Preparing addresses…" : summary ? `${summary.eligibleAddressCount} addresses in area` : "Check coverage for address totals"}</strong><span>${summary?.excludedAddressCount ? `${summary.excludedAddressCount} excluded · ` : ""}${s.source?.unmappedRecordCount ? `${e(s.source.unmappedRecordCount)} records have no map location` : s.viewportBusy ? "Loading visible addresses…" : s.clustered ? "Nearby addresses are grouped on the map" : "Changes stay in your draft until published"}</span>${button("refresh-source", s.sourceBusy ? "Checking…" : "Refresh addresses", { disabled: s.sourceBusy })}`;
     q("[data-tb-next]").innerHTML = s.published
       ? button("new", "Plan another area")
       : s.step === "area"
@@ -285,31 +288,19 @@ export function createTerritoryBuilder({
         : s.step === "cut"
           ? button("next-assign", "Assign staff →", {
               primary: true,
-              disabled: !s.draft.territories.length || drawing.length > 0,
+              disabled:
+                !s.draft.territories.length ||
+                drawing.length > 0 ||
+                !sourceReady(s),
             })
           : button("review", "Review & publish →", {
               primary: true,
-              disabled: !hasCompleteAssignments(s),
+              disabled: !hasCompleteAssignments(s) || !sourceReady(s),
             });
     renderReview();
     if (!map && !mapLoading && !mapError) void loadMap();
     updateMap();
-  }
-  function localCounts(s) {
-    const points = s.bootstrap.points.filter((point) =>
-      pointInGeometry(point.coordinates, s.draft.areaGeojson),
-    );
-    const ex = s.draft.contactExclusions;
-    const excluded = points.filter(
-      (p) =>
-        (ex.excludeDoNotKnock && p.doNotKnock === true) ||
-        (ex.excludeReportedDanger && p.reportedDanger === true),
-    ).length;
-    return {
-      total: points.length,
-      excluded,
-      eligible: points.length - excluded,
-    };
+    scheduleViewport();
   }
   function drawingControls() {
     return drawing.length
@@ -317,7 +308,7 @@ export function createTerritoryBuilder({
       : "";
   }
   function areaPanel(s) {
-    return `<h3>Choose an area</h3><p>Start with an available boundary or draw one on the map.</p><div class="tb-area-list">${s.bootstrap.areas.map((area, i) => button("area", e(area.name || "Available area"), { value: i, pressed: JSON.stringify(s.draft.areaGeojson) === JSON.stringify(area.geojson) })).join("")}</div>${s.bootstrap.boundary ? button("boundary", "Use full boundary", { disabled: !s.bootstrap.boundary }) : ""}${button("tool", `${icon("draw")} Draw an area`, { value: "draw", pressed: tool === "draw" })}${drawingControls()}${s.draft.areaGeojson ? `<div class="tb-stat"><strong>${localCounts(s).eligible}</strong><span>addresses included</span></div>` : ""}<p class="tb-subtle">Use the map controls to move around and zoom in.</p>`;
+    return `<h3>Choose an area</h3><p>Start with an available boundary or draw one on the map.</p><div class="tb-area-list">${s.bootstrap.areas.map((area, i) => button("area", e(area.name || "Available area"), { value: i, pressed: JSON.stringify(s.draft.areaGeojson) === JSON.stringify(area.geojson) })).join("")}</div>${s.bootstrap.boundary ? button("boundary", "Use full boundary", { disabled: !s.bootstrap.boundary }) : ""}${button("tool", `${icon("draw")} Draw an area`, { value: "draw", pressed: tool === "draw" })}${drawingControls()}${s.draft.areaGeojson ? `<div class="tb-stat"><strong>${s.review?.summary.eligibleAddressCount ?? "—"}</strong><span>addresses included</span></div>${button("preview", "Check coverage", { disabled: !sourceReady(s) })}` : ""}<p class="tb-subtle">Use the map controls to move around and zoom in.</p>`;
   }
   function territoryRows(s, assignment = false) {
     return s.draft.territories
@@ -361,6 +352,11 @@ export function createTerritoryBuilder({
     const action = control.dataset.tbAction,
       value = control.dataset.value,
       s = model.state;
+    if (action === "refresh-source") {
+      await model.refreshSource();
+      if (mapReady) requestViewport(true);
+      return;
+    }
     if (action === "back") {
       if (
         s.dirty &&
@@ -664,8 +660,18 @@ export function createTerritoryBuilder({
           type: "circle",
           source: "tb-points",
           paint: {
-            "circle-radius": 3,
-            "circle-color": ["case", ["get", "excluded"], "#88939e", "#153b43"],
+            "circle-radius": [
+              "interpolate",
+              ["linear"],
+              ["get", "count"],
+              1,
+              3,
+              100,
+              9,
+              10000,
+              18,
+            ],
+            "circle-color": "#153b43",
             "circle-opacity": 0.7,
           },
         });
@@ -695,6 +701,7 @@ export function createTerritoryBuilder({
       map.on("touchstart", onMapDown);
       map.on("touchmove", onMapMove);
       map.on("touchend", onMapUp);
+      map.on("moveend", scheduleViewport);
     } catch {
       if (generation === mapGeneration) {
         mapError = "The map could not load. Reload to try again.";
@@ -707,17 +714,11 @@ export function createTerritoryBuilder({
   function fitMap(force = false) {
     if (!mapReady) return;
     const s = model.state;
-    const bounds =
-      geometryBounds(
-        s.draft.areaGeojson ||
-          s.bootstrap?.boundary ||
-          s.bootstrap?.areas[0]?.geojson,
-      ) ||
-      (s.bootstrap?.points.length
-        ? geometryBounds({
-            coordinates: s.bootstrap.points.map((p) => p.coordinates),
-          })
-        : null);
+    const bounds = geometryBounds(
+      s.draft.areaGeojson ||
+        s.bootstrap?.boundary ||
+        s.bootstrap?.areas[0]?.geojson,
+    );
     if (!bounds) return;
     const key = JSON.stringify(bounds);
     if (!force && fitKey === key) return;
@@ -730,10 +731,28 @@ export function createTerritoryBuilder({
       { padding: 48, maxZoom: 17, duration: 0 },
     );
   }
+  function scheduleViewport() {
+    clearTimeout(viewportTimer);
+    if (!mapReady || !host?.isConnected || !sourceReady(model.state)) return;
+    viewportTimer = setTimeout(() => requestViewport(), 200);
+  }
+  function requestViewport(force = false) {
+    if (!mapReady || !host?.isConnected) return;
+    const bounds = map.getBounds();
+    const bbox = [
+      Math.max(-180, bounds.getWest()),
+      Math.max(-90, bounds.getSouth()),
+      Math.min(180, bounds.getEast()),
+      Math.min(90, bounds.getNorth()),
+    ];
+    if (bbox[0] < bbox[2] && bbox[1] < bbox[3])
+      void model.viewport(bbox, Math.min(24, Math.max(0, map.getZoom())), {
+        force,
+      });
+  }
   function updateMap() {
     if (!mapReady || !model.state.loaded) return;
-    const s = model.state,
-      ex = s.draft.contactExclusions;
+    const s = model.state;
     map
       .getSource("tb-area")
       .setData(
@@ -761,20 +780,7 @@ export function createTerritoryBuilder({
             .map((t) => feature(t.trimGeometry)),
         ),
       );
-    map.getSource("tb-points").setData(
-      collection(
-        s.bootstrap.points.map((p) =>
-          feature(
-            { type: "Point", coordinates: p.coordinates },
-            {
-              excluded:
-                (ex.excludeDoNotKnock && p.doNotKnock === true) ||
-                (ex.excludeReportedDanger && p.reportedDanger === true),
-            },
-          ),
-        ),
-      ),
-    );
+    renderViewport();
     map
       .getSource("tb-drawing")
       .setData(
@@ -791,6 +797,33 @@ export function createTerritoryBuilder({
         : "";
     drawHandles();
     fitMap();
+  }
+  // Camera updates must not replace a control while the user is clicking it.
+  function renderViewport() {
+    if (!host?.isConnected) return;
+    const s = model.state;
+    const error = q("[data-tb-error]");
+    error.hidden = !(s.error || s.sourceError || s.viewportError);
+    error.textContent = s.error || s.sourceError || s.viewportError || "";
+    const label = q(".tb-map-bottom > span");
+    label.textContent = s.viewportBusy
+      ? "Loading visible addresses…"
+      : s.clustered
+        ? "● Grouped address locations"
+        : "● Address locations";
+    if (mapReady && map.getSource("tb-points"))
+      map
+        .getSource("tb-points")
+        .setData(
+          collection(
+            s.points.map((p) =>
+              feature(
+                { type: "Point", coordinates: p.coordinates },
+                { count: p.count },
+              ),
+            ),
+          ),
+        );
   }
   function editable() {
     const s = model.state;

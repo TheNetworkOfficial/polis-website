@@ -41,20 +41,28 @@ const territory = {
   locked: false,
   assigneeUserId: null,
 };
+const snapshotId = "a".repeat(64);
 const bootstrap = (draft = null) => ({
   ok: true,
+  protocolVersion: 2,
   revision: 2,
   areas: [{ id: "area-one", name: "Operational area", geojson: area }],
   boundary: area,
-  points: [
-    { id: "a", coordinates: [1, 1], doNotKnock: true, reportedDanger: false },
-  ],
+  points: [],
   staff: [{ userId: "staff-one", displayName: "Sam Example", username: "sam" }],
   draft,
-  source: { mappedAddressCount: 1, unmappedRecordCount: 0, complete: true },
+  source: {
+    status: "ready",
+    snapshotId,
+    mappedAddressCount: 500000,
+    unmappedRecordCount: 0,
+    complete: true,
+  },
 });
 const preview = (rows = [territory]) => ({
   ok: true,
+  snapshotId,
+  planHash: "b".repeat(64),
   territories: rows.map((t) => ({ ...t, addressCount: 1 })),
   summary: {
     totalAddressCount: 1,
@@ -64,10 +72,11 @@ const preview = (rows = [territory]) => ({
     unallocatedAddressCount: 0,
   },
 });
-function harness(request) {
+function harness(request, timers = {}) {
   let context = { scopeType: "coalition", scopeId: "org-a", userId: "actor-a" };
   const calls = [];
   const model = createTerritoryBuilderModel({
+    ...timers,
     context: () => context,
     request: async (path, options) => {
       calls.push({ path, options });
@@ -153,7 +162,7 @@ test("incomplete source never becomes a ready plan", async () => {
   }));
   await model.load();
   assert.equal(model.state.loaded, false);
-  assert.match(model.state.error, /Complete territory planning data/);
+  assert.match(model.state.error, /Address preparation status/);
 });
 
 test("late bootstrap cannot overwrite a new actor or organization's data", async () => {
@@ -419,4 +428,203 @@ test("whole-boundary movement preserves all polygon rings and moves trim geometr
     translateGeometry(area, 0.2, -0.3).coordinates,
     shifted.coordinates[0],
   );
+});
+
+const viewportResult = (count = 500000, id = "cluster:0:0") => ({
+  ok: true,
+  points: [
+    { id, coordinates: [1, 1], count, doNotKnock: true, reportedDanger: true },
+  ],
+  source: bootstrap().source,
+  viewportComplete: true,
+  clustered: true,
+});
+const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+test("metadata opens before source preparation finishes; draft saves and polling preserve unsaved geometry", async () => {
+  let ready = false,
+    poll;
+  const pending = {
+    ...bootstrap(),
+    source: { status: "preparing", complete: false, snapshotId: null },
+  };
+  const h = harness(
+    (path, options) => {
+      if (path.includes("/source")) return { status: "preparing" };
+      if (options.method === "PUT") return { revision: 3 };
+      return ready ? bootstrap() : pending;
+    },
+    {
+      schedule: (fn) => {
+        poll = fn;
+        return 1;
+      },
+      cancel: () => {},
+    },
+  );
+  await h.model.load();
+  await settle();
+  assert.equal(h.model.state.loaded, true);
+  assert.equal(h.model.state.source.status, "preparing");
+  assert.equal(h.calls[0].path.endsWith("?protocol=2"), true);
+  h.model.edit((d) => {
+    d.areaGeojson = area;
+    d.territories = [{ ...territory, name: "Unsaved custom name" }];
+  });
+  assert.equal(await h.model.run("draft"), true);
+  h.model.edit((d) => {
+    d.territories[0].name = "Keep this edit";
+  });
+  ready = true;
+  poll();
+  await settle();
+  assert.equal(h.model.state.source.status, "ready");
+  assert.equal(h.model.state.revision, 3);
+  assert.equal(h.model.state.draft.territories[0].name, "Keep this edit");
+  assert.equal(
+    h.calls.filter(({ path }) => path.includes("/source")).length,
+    1,
+  );
+  assert.equal(
+    h.calls.some(({ path }) => path.includes("/points")),
+    false,
+  );
+  h.model.reset();
+});
+
+test("candidate metadata appends protocol without losing explicit candidate scope", async () => {
+  assert.equal(
+    territoryBuilderBase(
+      { scopeType: "candidate", scopeId: "one two" },
+      "",
+      true,
+    ),
+    "/api/candidate-dashboard/voter-map/territory-builder?candidateId=one%20two&protocol=2",
+  );
+});
+
+test("cluster counts never become area totals and camera responses are accepted only for the latest viewport", async () => {
+  const pending = [];
+  const h = await loaded((path) =>
+    path.endsWith("/points")
+      ? new Promise((resolve) => pending.push(resolve))
+      : bootstrap(),
+  );
+  const older = h.model.viewport([0, 0, 2, 2], 10);
+  const newer = h.model.viewport([0, 0, 4, 4], 11);
+  pending[1](viewportResult(500000, "new"));
+  await newer;
+  pending[0](viewportResult(1, "old"));
+  await older;
+  assert.equal(h.model.state.points[0].id, "new");
+  assert.equal(h.model.state.points[0].count, 500000);
+  assert.equal(h.model.state.review, null);
+  assert.equal(h.model.state.draft.territories[0].addressCount, undefined);
+  assert.equal(await h.model.viewport([0, 0, 4, 4], 11), false);
+  assert.equal(pending.length, 2);
+});
+
+test("filter changes clear visible points immediately and reject a delayed response with old exclusions", async () => {
+  let resolve;
+  const h = await loaded((path) =>
+    path.endsWith("/points")
+      ? new Promise((done) => {
+          resolve = done;
+        })
+      : bootstrap(),
+  );
+  const old = h.model.viewport([0, 0, 4, 4], 11);
+  h.model.edit((d) => {
+    d.contactExclusions.excludeDoNotKnock = true;
+  });
+  resolve(viewportResult());
+  await old;
+  assert.deepEqual(h.model.state.points, []);
+  assert.equal(h.model.state.viewportKey, "");
+  assert.equal(
+    h.calls.at(-1).options.body.contactExclusions.excludeDoNotKnock,
+    false,
+  );
+});
+
+test("oversized, incomplete and wrong-snapshot viewport responses never show partial inventory", async () => {
+  for (const result of [
+    {
+      ...viewportResult(),
+      points: Array.from({ length: 1001 }, () => viewportResult().points[0]),
+    },
+    { ...viewportResult(), viewportComplete: false },
+    {
+      ...viewportResult(),
+      source: { ...bootstrap().source, snapshotId: "c".repeat(64) },
+    },
+  ]) {
+    const h = await loaded((path) =>
+      path.endsWith("/points") ? result : bootstrap(),
+    );
+    assert.equal(await h.model.viewport([0, 0, 4, 4], 10), false);
+    assert.deepEqual(h.model.state.points, []);
+    assert.match(h.model.state.viewportError, /incomplete/);
+  }
+});
+
+test("source-change preview recovery preserves geometry without turning into a revision conflict", async () => {
+  const h = await loaded((path) => {
+    if (path.endsWith("/preview"))
+      throw Object.assign(new Error("territory_builder_source_changed"), {
+        status: 409,
+      });
+    if (path.endsWith("/source")) return { status: "ready" };
+    return bootstrap();
+  });
+  const draft = structuredClone(h.model.state.draft);
+  assert.equal(await h.model.run("preview"), false);
+  assert.deepEqual(h.model.state.draft, draft);
+  assert.equal(h.model.state.conflict, undefined);
+  assert.equal(h.model.state.source.status, "ready");
+  assert.equal(h.model.state.review, null);
+  assert.equal(
+    h.calls.filter(({ path }) => path.endsWith("/source")).length,
+    1,
+  );
+});
+
+test("revoked viewport access invalidates an in-flight preview before it can restore authorized data", async () => {
+  let resolvePreview;
+  const h = await loaded((path) => {
+    if (path.endsWith("/preview"))
+      return new Promise((resolve) => {
+        resolvePreview = resolve;
+      });
+    if (path.endsWith("/points"))
+      throw Object.assign(new Error("Forbidden"), { status: 403 });
+    return bootstrap();
+  });
+  const pending = h.model.run("preview");
+  await h.model.viewport([0, 0, 4, 4], 11);
+  resolvePreview(preview());
+  await pending;
+  assert.equal(h.model.state.loaded, false);
+  assert.equal(h.model.state.bootstrap, null);
+  assert.equal(h.model.state.review, null);
+  assert.deepEqual(h.model.state.points, []);
+  assert.deepEqual(h.model.state.draft.territories, []);
+});
+
+test("actor change prevents a pending camera response from entering the next workspace", async () => {
+  let resolve;
+  const h = await loaded((path) =>
+    path.endsWith("/points")
+      ? new Promise((done) => {
+          resolve = done;
+        })
+      : bootstrap(),
+  );
+  const pending = h.model.viewport([0, 0, 4, 4], 10);
+  h.setContext({ scopeType: "coalition", scopeId: "other", userId: "other" });
+  h.model.reset();
+  resolve(viewportResult());
+  await pending;
+  assert.deepEqual(h.model.state.points, []);
+  assert.equal(h.model.state.loaded, false);
 });

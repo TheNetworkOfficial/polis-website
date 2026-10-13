@@ -2,6 +2,7 @@ const { test, expect } = require("@playwright/test");
 const fs = require("node:fs");
 const path = require("node:path");
 const BASE = "http://127.0.0.1:9086";
+const SNAPSHOT = "a".repeat(64);
 const ARTIFACTS =
   process.env.TERRITORY_BUILDER_ARTIFACTS ||
   path.join(__dirname, "../test-results/territory-builder");
@@ -57,11 +58,20 @@ const POINTS = [0, 1, 2, 3, 4, 5].map((i) => ({
 }));
 async function fixture(
   page,
-  { deny = false, conflict = false, incomplete = false } = {},
+  {
+    deny = false,
+    conflict = false,
+    incomplete = false,
+    preparing = false,
+    clustered = false,
+  } = {},
 ) {
   const writes = [],
     errors = [],
-    reads = [];
+    reads = [],
+    viewports = [],
+    sourceRequests = [];
+  let sourceReady = !preparing;
   let revision = 0,
     draft = null;
   const token = `e30.${Buffer.from(JSON.stringify({ sub: "territory-test-actor", name: "Alex Example" })).toString("base64url")}.test`;
@@ -174,17 +184,19 @@ async function fixture(
       });
     if (pathname.includes("/territory-builder")) {
       if (request.method() === "GET") {
+        expect(url.searchParams.get("protocol")).toBe("2");
         reads.push(pathname);
         return deny
           ? json({ message: "Forbidden" }, 403)
           : json({
               ok: true,
+              protocolVersion: 2,
               revision,
               areas: [
                 { id: "area", name: "Test operational area", geojson: AREA },
               ],
               boundary: AREA,
-              points: POINTS,
+              points: [],
               staff: [
                 {
                   userId: "eligible-staff",
@@ -194,14 +206,41 @@ async function fixture(
               ],
               draft,
               source: {
+                status: sourceReady ? "ready" : "preparing",
+                snapshotId: sourceReady ? SNAPSHOT : null,
                 mappedAddressCount: 6,
                 unmappedRecordCount: 2,
-                complete: !incomplete,
+                complete: sourceReady && !incomplete,
               },
               limits: { maxTerritories: 12 },
             });
       }
       const body = request.postDataJSON();
+      if (pathname.endsWith("/source")) {
+        sourceRequests.push(body);
+        return json({ ok: true, status: sourceReady ? "ready" : "preparing" });
+      }
+      if (pathname.endsWith("/points")) {
+        viewports.push(body);
+        expect(body.snapshotId).toBe(SNAPSHOT);
+        expect(body.bbox).toHaveLength(4);
+        const points = POINTS.filter(
+          (p) =>
+            !(
+              (body.contactExclusions.excludeDoNotKnock && p.doNotKnock) ||
+              (body.contactExclusions.excludeReportedDanger && p.reportedDanger)
+            ),
+        );
+        return json({
+          ok: true,
+          points: clustered
+            ? [{ ...POINTS[0], count: 500000 }]
+            : points.map((p) => ({ ...p, count: 1 })),
+          source: { status: "ready", snapshotId: SNAPSHOT, complete: true },
+          viewportComplete: true,
+          clustered,
+        });
+      }
       writes.push({
         pathname,
         method: request.method(),
@@ -222,6 +261,8 @@ async function fixture(
           Number(body.contactExclusions.excludeReportedDanger);
         return json({
           ok: true,
+          snapshotId: SNAPSHOT,
+          planHash: "b".repeat(64),
           territories: rows,
           summary: {
             totalAddressCount: 6,
@@ -327,7 +368,16 @@ async function fixture(
       territories: [],
     });
   });
-  return { writes, errors, reads };
+  return {
+    writes,
+    errors,
+    reads,
+    viewports,
+    sourceRequests,
+    ready: () => {
+      sourceReady = true;
+    },
+  };
 }
 const open = async (page) => {
   await page.goto(
@@ -541,12 +591,79 @@ test("incomplete authorized data blocks planning instead of inventing totals", a
     `${BASE}/coalitions/territory-fixture/voter-map/territories/admin`,
   );
   await expect(
-    page.getByText(/Complete territory planning data is unavailable/),
+    page.getByText(/Address preparation status is unavailable/),
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "Use this area" })).toHaveCount(
     0,
   );
   expect(capture.writes).toHaveLength(0);
+});
+
+test("preparing addresses leaves geometry editing and draft save usable without invented totals", async ({
+  page,
+}) => {
+  const capture = await fixture(page, { preparing: true });
+  await open(page);
+  await page
+    .getByRole("button", { name: "Test operational area", exact: true })
+    .click();
+  await expect(page.locator(".tb-stat strong")).toHaveText("—");
+  await expect(
+    page.getByText("Preparing addresses…", { exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Save draft", exact: true }).click();
+  expect(
+    capture.writes.filter((r) => r.pathname.endsWith("/draft")),
+  ).toHaveLength(1);
+  expect(capture.viewports).toHaveLength(0);
+  await page.getByRole("button", { name: "Use this area" }).click();
+  await page.getByRole("button", { name: "Draw", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Draw territory", exact: true }).first(),
+  ).toBeVisible();
+  capture.ready();
+  await page
+    .getByRole("button", { name: "Refresh addresses", exact: true })
+    .click();
+  await expect(page.getByText("Draft saved", { exact: true })).toBeVisible();
+  await expect.poll(() => capture.viewports.length).toBeGreaterThan(0);
+  expect(capture.errors).toEqual([]);
+});
+
+test("500,000-address cluster remains map-only; preview provides authoritative totals and both optional filters refresh the viewport", async ({
+  page,
+}) => {
+  const capture = await fixture(page, { clustered: true });
+  await open(page);
+  await page
+    .getByRole("button", { name: "Test operational area", exact: true })
+    .click();
+  await expect.poll(() => capture.viewports.length).toBeGreaterThan(0);
+  await expect(page.locator(".tb-stat strong")).toHaveText("—");
+  await page
+    .getByRole("button", { name: "Check coverage", exact: true })
+    .click();
+  await expect(page.locator(".tb-stat strong")).toHaveText("6");
+  await page.getByLabel("Do not knock requests", { exact: true }).check();
+  await expect(page.locator(".tb-stat strong")).toHaveText("—");
+  await expect
+    .poll(() => capture.viewports.at(-1)?.contactExclusions.excludeDoNotKnock)
+    .toBe(true);
+  await page.getByLabel("Reported danger issues", { exact: true }).check();
+  await expect
+    .poll(
+      () => capture.viewports.at(-1)?.contactExclusions.excludeReportedDanger,
+    )
+    .toBe(true);
+  await page.getByLabel("Do not knock requests", { exact: true }).uncheck();
+  await page.getByLabel("Reported danger issues", { exact: true }).uncheck();
+  await expect
+    .poll(() => capture.viewports.at(-1)?.contactExclusions)
+    .toEqual({ excludeDoNotKnock: false, excludeReportedDanger: false });
+  await expect(
+    page.getByLabel("Blank filter dropdown placeholder"),
+  ).toBeDisabled();
+  expect(capture.errors).toEqual([]);
 });
 
 test("existing territory tools and named person selection remain available; back preserves the draft", async ({
