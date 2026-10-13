@@ -49,8 +49,8 @@ export function renderTextingReport(report, { compact = false } = {}) {
   if (!report) return "";
   const c = report.counts;
   if (compact)
-    return `<p class="pt-muted">${e(c.delivered)} delivered · ${e(report.unreadReplies)} unread to you${report.coverage === "partial" ? " · Partial history" : ""}</p>`;
-  return `<section class="pt-card" aria-label="Campaign reporting"><h2>Campaign activity</h2><div class="pt-grid pt-grid--three">${stat("Accepted", c.accepted)}${stat("Sent · awaiting delivery", c.sent)}${stat("Delivered", c.delivered)}${stat("Failed", c.failed)}${stat("Status pending", c.pending)}${stat("Needs review", c.needsReview)}${stat("Replies received", c.inbound)}${stat("Unread to you", report.unreadReplies)}</div><p class="pt-muted">Accepted does not mean delivered. Counts reflect recorded message evidence.${report.coverage === "partial" ? " Earlier activity may be missing." : ""}</p>${Number.isSafeInteger(report.asOfMs) ? `<p class="pt-muted">Updated ${e(new Date(report.asOfMs).toLocaleString())}</p>` : ""}</section>`;
+    return `<p class="pt-muted">${e(c.delivered)} delivered · ${e(report.unreadReplies)} unread messages (includes opt-outs)${report.coverage === "partial" ? " · Partial history" : ""}</p>`;
+  return `<section class="pt-card" aria-label="Campaign reporting"><h2>Campaign activity</h2><div class="pt-grid pt-grid--three">${stat("Accepted", c.accepted)}${stat("Sent · awaiting delivery", c.sent)}${stat("Delivered", c.delivered)}${stat("Failed", c.failed)}${stat("Status pending", c.pending)}${stat("Needs review", c.needsReview)}${stat("Replies received", c.inbound)}${stat("Unread messages · includes opt-outs", report.unreadReplies)}</div><p class="pt-muted">Accepted does not mean delivered. Counts reflect recorded message evidence.${report.coverage === "partial" ? " Earlier activity may be missing." : ""}</p>${Number.isSafeInteger(report.asOfMs) ? `<p class="pt-muted">Updated ${e(new Date(report.asOfMs).toLocaleString())}</p>` : ""}</section>`;
 }
 
 /** Current scoped reads only. No queue allocation, confirmation or financial

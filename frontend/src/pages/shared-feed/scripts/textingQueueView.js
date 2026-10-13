@@ -92,7 +92,7 @@ export function renderTextingQueue(s, r, needsReview, outcomes) {
       "One press sends to one person.",
       go("campaigns", "Leave session", c.campaignId, true),
     ) +
-    `<nav class="pt-texting-folders" aria-label="Campaign messages"><span class="pt-btn" aria-current="page">To send${ready.length ? ` (${ready.length})` : ""}</span>${go("inbox", "Replies", textingFolderRoute("replies", c.campaignId), true)}${go("inbox", "Sent", textingFolderRoute("sent", c.campaignId), true)}</nav>` +
+    `<nav class="pt-texting-folders" aria-label="Campaign messages"><span class="pt-btn" aria-current="page">To send${ready.length ? ` (${ready.length})` : ""}</span>${go("inbox", "Replies", textingFolderRoute("replies", c.campaignId), true)}${go("inbox", "All messages", textingFolderRoute("all", c.campaignId), true)}</nav>` +
     `<div class="pt-texting-session-status" role="status">${e(s.pendingItemId ? "Sending…" : r.view().message || `${s.sent || 0} accepted this session`)}${r.can("manageBilling") ? `<span>Available funds: ${money(r.billing()?.availableMicros)}</span>` : ""}</div>` +
     (!c.canFetchQueue ||
     r.workspace()?.canSend !== true ||

@@ -28,7 +28,7 @@ test("reporting rejects unavailable counts and distinguishes acceptance, deliver
   const html = renderTextingReport(checkedTextingReport(report(), "campaign"));
   assert.match(html, /Accepted does not mean delivered/);
   assert.match(html, /Earlier activity may be missing/);
-  assert.match(html, /Unread to you/);
+  assert.match(html, /Unread messages · includes opt-outs/);
   assert.doesNotMatch(html, /budget|balance|charge|\$/i);
   assert.throws(() =>
     checkedTextingReport({ ...report(), counts: {} }, "campaign"),

@@ -358,9 +358,10 @@ export function createTextingWorkspacePage({
       const loadSection = async () => {
         if (["campaigns", "team", "send", "results"].includes(section))
           await modules.campaigns.load(resourceId, section);
-        else if (["inbox", "conversation"].includes(section))
+        else if (["inbox", "conversation"].includes(section)) {
           await modules.conversations.load(resourceId);
-        else if (section === "recovery") await modules.recovery.load();
+          if (section === "inbox") void modules.conversations.loadCampaigns();
+        } else if (section === "recovery") await modules.recovery.load();
         else {
           view.homeCampaigns = list((await r.api("/campaigns?limit=5")).items);
           view.homeReports = await readTextingReports(r, view.homeCampaigns);
@@ -517,7 +518,9 @@ export function createTextingWorkspacePage({
             ? view.campaigns?.pendingAction === "sending"
               ? "Sending…"
               : "Updating session…"
-            : "Saving…";
+            : section === "inbox"
+              ? "Refreshing conversations…"
+              : "Saving…";
     const contactDialogOpen = [view.contactBook, view.recipientBook].some(
       (book) => book?.overlay || book?.detail || book?.detailNew,
     );

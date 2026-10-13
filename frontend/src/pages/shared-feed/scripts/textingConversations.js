@@ -29,6 +29,8 @@ import {
   renderTextingInbox,
 } from "./textingFolders";
 import { textingRequestWasNotDispatched } from "./textingSession";
+import { conversationInView } from "./textingFolders";
+import "../css/texting-inbox.css";
 
 const when = (value) =>
   Number.isSafeInteger(value) ? new Date(value).toLocaleString() : "";
@@ -58,6 +60,24 @@ export function createConversations(
     if (s.campaignId) query.set("campaignId", s.campaignId);
     return `/conversations${query.size ? `?${query}` : ""}`;
   };
+  const inboxRows = (items) =>
+    list(items).filter((row) => conversationInView(row, state()));
+  const inboxTime = (value) => {
+    if (!Number.isSafeInteger(value)) return "";
+    const date = new Date(value),
+      today = new Date(now());
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    return date.toDateString() === today.toDateString()
+      ? date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+      : date.toDateString() === yesterday.toDateString()
+        ? "Yesterday"
+        : date.toLocaleDateString([], { month: "short", day: "numeric" });
+  };
+  const pageCursors = new Set();
+  let searchTimer,
+    campaignAbort,
+    inboxListeners = false;
   let pollTimer,
     pollReads = 0,
     pollDeadline = 0,
@@ -110,6 +130,8 @@ export function createConversations(
   function dispose() {
     disposed = true;
     cancel(pollTimer);
+    cancel(searchTimer);
+    campaignAbort?.abort();
     readAbort?.abort();
     recoveryAbort?.abort();
     receipts.dispose();
@@ -118,6 +140,8 @@ export function createConversations(
       visibilityChanged,
     );
     globalThis.window?.removeEventListener?.("focus", visibilityChanged);
+    globalThis.document?.removeEventListener?.("keydown", folderKeyboard);
+    globalThis.document?.removeEventListener?.("click", dismissFolderMenu);
     outcomes.dispose();
   }
   function renewPolling() {
@@ -131,6 +155,7 @@ export function createConversations(
     if (!visible()) {
       visibilityVersion++;
       cancel(pollTimer);
+      cancel(searchTimer);
       readAbort?.abort();
       recoveryAbort?.abort();
     } else {
@@ -145,6 +170,114 @@ export function createConversations(
     visibilityChanged,
   );
   globalThis.window?.addEventListener?.("focus", visibilityChanged);
+  function folderKeyboard(event) {
+    const menu = event.target?.closest?.(".pt-inbox-folder");
+    if (!menu || !active()) return;
+    const summary = menu.querySelector("summary");
+    const options = [
+      ...menu.querySelectorAll('[role="menuitemradio"]:not(:disabled)'),
+    ];
+    if (event.key === "Escape") {
+      menu.open = false;
+      summary.focus();
+      event.preventDefault();
+    } else if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+      event.preventDefault();
+      menu.open = true;
+      const current = options.indexOf(event.target);
+      const next =
+        event.key === "Home"
+          ? 0
+          : event.key === "End"
+            ? options.length - 1
+            : current < 0
+              ? event.key === "ArrowUp"
+                ? options.length - 1
+                : 0
+              : (current +
+                  (event.key === "ArrowUp" ? -1 : 1) +
+                  options.length) %
+                options.length;
+      options[next]?.focus();
+    }
+  }
+  function dismissFolderMenu(event) {
+    if (event.target?.closest?.(".pt-inbox-folder")) return;
+    globalThis.document
+      ?.querySelectorAll?.(".pt-inbox-folder[open]")
+      .forEach((menu) => {
+        menu.open = false;
+      });
+  }
+  function listenToInbox() {
+    if (inboxListeners) return;
+    inboxListeners = true;
+    globalThis.document?.addEventListener?.("keydown", folderKeyboard);
+    globalThis.document?.addEventListener?.("click", dismissFolderMenu);
+  }
+
+  /** Names load independently so a slow campaign picker never hides inbox rows. */
+  async function loadCampaigns({ more = false } = {}) {
+    if (!active() || state().campaignsLoading) return;
+    const s = state(),
+      controller = new AbortController();
+    campaignAbort = controller;
+    s.campaignsLoading = true;
+    try {
+      const result = await readApi(
+        `/campaigns?limit=50${more && s.campaignCursor ? `&cursor=${id(s.campaignCursor)}` : ""}`,
+        controller.signal,
+      );
+      if (!active() || controller.signal.aborted) return;
+      const campaigns = new Map(
+        list(s.campaigns).map((row) => [row.campaignId, row]),
+      );
+      for (const row of list(result.items)) campaigns.set(row.campaignId, row);
+      s.campaigns = [...campaigns.values()];
+      s.campaignCursor = result.nextCursor || null;
+      s.campaignError = false;
+    } catch (error) {
+      if (!active() || error?.name === "AbortError") return;
+      if ([401, 403].includes(error?.status)) r.fail(error);
+      else s.campaignError = true;
+    } finally {
+      s.campaignsLoading = false;
+      if (active()) r.changed();
+    }
+  }
+
+  function continueInboxSearch() {
+    cancel(searchTimer);
+    searchTimer = null;
+    if (resourceId || !active() || !visible()) return;
+    const s = state();
+    if (!s.cursor || s.searchError || inboxRows(s.items).length) {
+      s.searching = false;
+      return;
+    }
+    s.searching = true;
+    searchTimer = schedule(async () => {
+      searchTimer = null;
+      if (!active() || !visible()) return;
+      if (r.busy() || refreshing || readFlight) {
+        continueInboxSearch();
+        return;
+      }
+      try {
+        await load(r.context().resourceId, { append: true });
+      } catch {
+        if (active()) {
+          s.searchError = true;
+          s.refreshError = true;
+        }
+      }
+      if (active()) {
+        s.searching = Boolean(searchTimer);
+        r.changed();
+      }
+    }, 300);
+    searchTimer?.unref?.();
+  }
 
   /** Reads an exact actor-bound action; generic eligibility never releases a hold. */
   async function reconcileReply(resource) {
@@ -401,8 +534,9 @@ export function createConversations(
         )
           pendingReply = null;
       } else {
+        if (!append) s.windowEnd = now();
         const filtered = Boolean(
-          (s.folder && s.folder !== "all") || s.campaignId,
+          (s.folder && s.folder !== "all") || s.campaignId || s.last24Hours,
         );
         const sweep = !append && s.inboxLoaded;
         const head =
@@ -424,18 +558,29 @@ export function createConversations(
           )
             throw error;
           cursor = null;
+          pageCursors.clear();
           result = await request(inboxPath());
           s.cursor = result.nextCursor || null;
           s.inboxScanCursor = filtered ? null : result.nextCursor || null;
           s.inboxScanSeen = new Set();
         }
         if (!valid()) return;
+        if (!sweep && !append) pageCursors.clear();
+        const checkCursor = (page) => {
+          if (sweep || !page.nextCursor) return;
+          if (pageCursors.has(page.nextCursor))
+            throw new Error(
+              "Conversation pages could not advance. Refresh to try again.",
+            );
+          pageCursors.add(page.nextCursor);
+        };
+        checkCursor(result);
         // A filtered canonical page can contain no matching rows. Continue a
         // small bounded group, keeping its cursor visible when more remain.
         if (filtered) {
           for (
             let page = 0;
-            page < 3 && !list(result.items).length && result.nextCursor;
+            page < 3 && !inboxRows(result.items).length && result.nextCursor;
             page++
           ) {
             const query = new URLSearchParams();
@@ -443,6 +588,7 @@ export function createConversations(
             query.set("cursor", result.nextCursor);
             result = await request(inboxPath(query));
             if (!valid()) return;
+            checkCursor(result);
           }
         }
         // Conversation IDs are not ordered by recent activity. Scan one page
@@ -523,6 +669,9 @@ export function createConversations(
   async function load(resource, options = {}) {
     resource = normalizeResource(resource);
     resourceId = resource;
+    if (!resourceId) listenToInbox();
+    cancel(searchTimer);
+    if (!options.append) state().searchError = false;
     if (!started) {
       started = true;
       renewPolling();
@@ -536,11 +685,16 @@ export function createConversations(
     if (!active()) return;
     if (await reconcileReply(resource)) await refresh(resource);
     scheduleUpdate();
+    continueInboxSearch();
   }
   async function refresh(resource = resourceId, { resume = false } = {}) {
     resource = normalizeResource(resource);
     if (!active() || refreshing || !visible()) return;
     if (resume) renewPolling();
+    if (resume) {
+      state().searchError = false;
+      state().windowEnd = now();
+    }
     refreshing = true;
     let eligibilityActionId = state().replyEligibilityActionId;
     try {
@@ -583,6 +737,7 @@ export function createConversations(
       refreshing = false;
       if (active()) {
         scheduleUpdate();
+        continueInboxSearch();
         r.changed();
       }
     }
@@ -653,20 +808,20 @@ export function createConversations(
       c = s.conversation;
     if (!r.context().resourceId || parseTextingFolder(r.context().resourceId))
       return (
-        head(
-          "INBOX",
-          "Keep the conversation going",
-          "Replies and delivery updates appear here.",
-          button("conversations-refresh", "Refresh", { secondary: true }),
-        ) +
+        `<div class="pt-simple-inbox"><header class="pt-inbox-heading"><div><h1>Inbox</h1><p>Text banking${r.context().organizationName ? ` · ${e(r.context().organizationName)}` : ""}</p></div><button type="button" class="pt-inbox-refresh" data-workspace-action="conversations-refresh" aria-label="Refresh conversations"${r.busy() ? " disabled" : ""}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M6 8a7 7 0 0 1 12-2l2 3M4 15l2 3a7 7 0 0 0 12-2"/></svg></button></header>` +
         updateNotice() +
-        renderTextingFolders(s.folder || "all", s.campaignId) +
+        renderTextingFolders(s.folder || "all", s.campaignId, {
+          ...s,
+          busy: r.busy(),
+        }) +
         renderTextingInbox(list(s.items), {
+          ...s,
           folder: s.folder || "all",
           cursor: s.cursor,
           busy: r.busy(),
-          when,
-        })
+          when: inboxTime,
+        }) +
+        "</div>"
       );
     if (!c) return "";
     const hold = r.sendHeld(`reply:${c.conversationId}`),
@@ -894,7 +1049,15 @@ export function createConversations(
     }
     if (name === "conversation-folder") {
       if (!textingFolders.some(([key]) => key === value)) return false;
-      r.navigate("inbox", textingFolderRoute(value, s.campaignId));
+      navigateInbox(value, s.campaignId, s.last24Hours);
+      return true;
+    }
+    if (name === "conversation-time") {
+      navigateInbox(s.folder, s.campaignId, value === "24h");
+      return true;
+    }
+    if (name === "conversation-campaigns-more") {
+      await loadCampaigns({ more: !s.campaignError });
       return true;
     }
     if (name === "conversation-attachment") {
@@ -926,6 +1089,7 @@ export function createConversations(
         s.sendStatusNeedsRead = Boolean(resourceId);
         await refresh(r.context().resourceId, { resume: true });
       } else {
+        s.searchError = false;
         await load(r.context().resourceId, { append: name.endsWith("-more") });
       }
       return true;
@@ -967,8 +1131,39 @@ export function createConversations(
     }
     return false;
   }
+  function navigateInbox(folder, campaignId, last24Hours) {
+    const s = state();
+    globalThis.document
+      ?.querySelectorAll?.(".pt-inbox-folder[open]")
+      .forEach((menu) => {
+        menu.open = false;
+      });
+    if (
+      folder === s.folder &&
+      campaignId === s.campaignId &&
+      last24Hours === s.last24Hours
+    )
+      return;
+    // The router changes scope before its next paint. Prevent a second filter
+    // change from reaching that old, still-visible scope during the transition.
+    globalThis.document
+      ?.querySelectorAll?.(".pt-simple-inbox button, .pt-simple-inbox select")
+      .forEach((control) => {
+        control.disabled = true;
+      });
+    r.navigate("inbox", textingFolderRoute(folder, campaignId, last24Hours));
+  }
   function change(target) {
     if (outcomes.change(target)) return true;
+    if (target.dataset?.workspaceChange === "inbox-campaign") {
+      if (
+        target.value &&
+        !list(state().campaigns).some((row) => row.campaignId === target.value)
+      )
+        return false;
+      navigateInbox(state().folder, target.value, state().last24Hours);
+      return true;
+    }
     if (target.name === "reply") {
       state().reply = target.value;
       state().replyRevision = (state().replyRevision || 0) + 1;
@@ -978,6 +1173,7 @@ export function createConversations(
   }
   return {
     load,
+    loadCampaigns,
     render: () => {
       const html = render() + outcomes.render();
       if (r.context().resourceId && state().conversation) receipts.schedule();
