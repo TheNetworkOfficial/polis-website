@@ -91,7 +91,7 @@ test("active campaign raises only its limit and preserves its saved message, rec
   await open(page);
   await expect(
     page.getByRole("region", { name: "Campaign reporting", exact: true }),
-  ).toContainText("Unread to you");
+  ).toContainText("Unread messages · includes opt-outs");
   await page
     .getByRole("button", { name: "Edit campaign limits", exact: true })
     .click();

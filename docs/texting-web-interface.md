@@ -34,6 +34,26 @@ All deep links require normal Polis authentication. Organization entry is availa
 - Customer state and late responses are fenced to the signed-in user, organization and current view.
 - Metrics unavailable from the current API are not invented; results show recorded campaign status and spending.
 
+## Inbox views
+
+The inbox has four views: **All messages**, **Replies**, **Opt outs**, and
+**Needs review**. Campaign and time choices persist when switching views.
+**24 hr** uses the latest received-message time in Replies and the latest
+conversation activity in the other views. Replies excludes opted-out contacts;
+their history remains readable in All messages and Opt outs, without a reply
+form. Legacy Unread and Sent routes open Replies and All messages respectively.
+
+Message snippets arrive with the conversation list and appear automatically.
+Unread conversational replies use bold names/snippets and a numbered blue
+badge; opt-outs never contribute to those indicators. Campaign reports retain
+their raw historical unread count and explicitly label it as including opt-outs.
+Unavailable snippets do not block readable rows. Refresh keeps existing rows,
+and sparse filtered pages continue loading automatically while this inbox is
+visible, stopping on an error or repeated cursor. Conversation history is only
+requested when a conversation is opened.
+
+Focused browser coverage is in `tests/files/texting-simple-inbox.pw.spec.cjs`.
+
 ## Optional opt-in texting
 
 The first workspace read negotiates `capabilities.neutralWorkspaceApi`; supported

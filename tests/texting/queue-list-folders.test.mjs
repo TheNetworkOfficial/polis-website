@@ -246,7 +246,7 @@ for (const folder of ["replies", "opt_outs"])
     t.after(() => page.dispose());
     await page.load(resourceId);
     assert.equal(calls.length, 4);
-    assert.match(page.render(), /More conversations to check/);
+    assert.match(page.render(), /Searching conversations/);
     assert.match(page.render(), /Load more/);
     assert.doesNotMatch(page.render(), /No replies yet|No opt outs yet/);
     await page.action("conversations-more");
@@ -261,7 +261,7 @@ for (const folder of ["replies", "opt_outs"])
     assert.match(page.render(), /Late Matching Person/);
   });
 
-function filteredInboxHarness(t, api, folder = "unread") {
+function filteredInboxHarness(t, api, folder = "replies") {
   const view = {},
     calls = [],
     resourceId = `folder:${folder}:campaign`;
@@ -278,7 +278,7 @@ function filteredInboxHarness(t, api, folder = "unread") {
       api: async (path) => {
         calls.push(path);
         const query = new URL(path, "https://example.invalid").searchParams;
-        assert.equal(query.get("folder"), folder);
+        assert.equal(query.get("folder"), folder === "all" ? null : folder);
         assert.equal(query.get("campaignId"), "campaign");
         return api(query);
       },
@@ -289,8 +289,32 @@ function filteredInboxHarness(t, api, folder = "unread") {
   return { page, view, calls, resourceId };
 }
 
-for (const folder of ["unread", "replies"])
-  test(`${folder} keeps opted-out replies visible with their unread count and conversation access`, async (t) => {
+test("index reset starts a fresh cursor traversal even when the reset token matches a prior page", async (t) => {
+  let reset = false;
+  const row = {
+    conversationId: "kept",
+    displayName: "Kept reply",
+    hasReceivedReply: true,
+  };
+  const h = filteredInboxHarness(t, async (query) => {
+    if (query.get("cursor") && !reset) {
+      reset = true;
+      throw Object.assign(new Error("Unavailable index"), {
+        code: "texting_inbox_index_not_ready",
+        status: 409,
+      });
+    }
+    return { items: [row], nextCursor: "same-next", order: "recent_activity" };
+  });
+  await h.page.load(h.resourceId);
+  await h.page.action("conversations-more");
+  assert.equal(reset, true);
+  assert.equal(h.view.conversations.cursor, "same-next");
+  assert.match(h.page.render(), /Kept reply/);
+});
+
+for (const folder of ["all", "opt_outs"])
+  test(`${folder} keeps opted-out replies readable without an unread badge`, async (t) => {
     const h = filteredInboxHarness(
       t,
       async () => ({
@@ -313,17 +337,18 @@ for (const folder of ["unread", "replies"])
     const html = h.page.render();
     assert.match(html, /Person With An Unread Reply/);
     assert.match(html, /Opted out/);
-    assert.match(html, /1 unread/);
-    assert.match(html, /opted-out-reply[^>]+>Open/);
-    assert.doesNotMatch(html, /No unread yet|No replies yet/);
+    assert.doesNotMatch(html, /1 unread/);
+    assert.match(html, /data-conversation-id="opted-out-reply"/);
+    assert.doesNotMatch(html, /No conversations in this view/);
   });
 
 for (const indexed of [true, false])
-  test(`unread opens in activity order and keeps order-bound cursors separate during ${indexed ? "indexed" : "fallback"} paging and permission checks`, async (t) => {
+  test(`replies opens in activity order and keeps order-bound cursors separate during ${indexed ? "indexed" : "fallback"} paging and permission checks`, async (t) => {
     const unread = {
       conversationId: "unread-person",
       displayName: "Unread Person",
       unreadReplies: 2,
+      hasReceivedReply: true,
     };
     const h = filteredInboxHarness(t, async (query) => {
       const order = query.get("order"),
@@ -377,6 +402,7 @@ test("filtered activity-index withdrawal restarts pagination without reusing its
           conversationId: indexed ? "saved" : "newer",
           displayName: indexed ? "Saved Person" : "Newer Person",
           unreadReplies: 1,
+          hasReceivedReply: true,
         },
       ],
       nextCursor: indexed
