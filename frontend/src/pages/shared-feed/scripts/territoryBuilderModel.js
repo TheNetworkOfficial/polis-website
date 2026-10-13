@@ -3,6 +3,11 @@ const filters = (value = {}) => ({
   excludeDoNotKnock: value.excludeDoNotKnock === true,
   excludeReportedDanger: value.excludeReportedDanger === true,
 });
+const sourceErrors = new Set([
+  "territory_builder_source_changed",
+  "territory_builder_source_preparing",
+  "territory_builder_source_generation_changed",
+]);
 const validationMessages = {
   territory_builder_area_outside_boundary:
     "Keep the area inside your campaign boundary.",
@@ -27,6 +32,10 @@ const validationMessages = {
   territory_builder_area_required: "Choose or draw an area first.",
   territory_builder_invalid_start:
     "Choose a valid start time or start immediately.",
+  territory_builder_source_preparing:
+    "Addresses are being prepared. You can keep editing or save your draft.",
+  territory_builder_source_changed:
+    "Address data changed. Refresh addresses, then check coverage again.",
 };
 const failureMessage = (error) =>
   validationMessages[error.message] ||
@@ -35,10 +44,25 @@ const failureMessage = (error) =>
     : error.message) ||
   "The change could not be completed. Try again.";
 
-export const territoryBuilderBase = ({ scopeType, scopeId }, suffix = "") =>
-  scopeType === "candidate"
-    ? `/api/candidate-dashboard/voter-map/territory-builder${suffix}?candidateId=${encodeURIComponent(scopeId)}`
-    : `/api/coalitions/${encodeURIComponent(scopeId)}/voter-map/territory-builder${suffix}`;
+export const territoryBuilderBase = (
+  { scopeType, scopeId },
+  suffix = "",
+  metadata = false,
+) => {
+  const base =
+    scopeType === "candidate"
+      ? `/api/candidate-dashboard/voter-map/territory-builder${suffix}?candidateId=${encodeURIComponent(scopeId)}`
+      : `/api/coalitions/${encodeURIComponent(scopeId)}/voter-map/territory-builder${suffix}`;
+  return metadata
+    ? `${base}${scopeType === "candidate" ? "&" : "?"}protocol=2`
+    : base;
+};
+const snapshotValid = (value) =>
+  typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
+export const sourceReady = (state) =>
+  state.source?.status === "ready" &&
+  state.source.complete === true &&
+  snapshotValid(state.source.snapshotId);
 
 export function geometryBounds(geometry) {
   const points = [];
@@ -168,6 +192,11 @@ export function hasCompleteAssignments(state) {
 
 export function publishBlockReason(state) {
   if (!state.review) return "Review the current plan before publishing.";
+  if (
+    !sourceReady(state) ||
+    state.review.snapshotId !== state.source.snapshotId
+  )
+    return "Refresh addresses and review the current plan before publishing.";
   if (!hasCompleteAssignments(state))
     return "Choose staff for each territory before publishing.";
   const counts = new Map(
@@ -186,6 +215,7 @@ export function publishBlockReason(state) {
 /** Only approved geometry and operational exclusions cross the API boundary. */
 export function builderPayload(state, mode = "manual") {
   return {
+    protocolVersion: 2,
     revision: state.revision,
     areaGeojson: copy(state.draft.areaGeojson),
     territories: state.draft.territories.map((territory) => ({
@@ -222,8 +252,13 @@ export function createTerritoryBuilderModel({
   request,
   context,
   changed = () => {},
+  schedule = (callback, delay) => setTimeout(callback, delay),
+  cancel = (timer) => clearTimeout(timer),
 }) {
-  let epoch = 0;
+  let epoch = 0,
+    viewportEpoch = 0,
+    sourceTimer,
+    sourceRequest = false;
   let state = {
     key: "",
     loading: false,
@@ -239,14 +274,23 @@ export function createTerritoryBuilderModel({
     review: null,
     dirty: false,
     publishKey: "",
+    source: null,
+    points: [],
+    viewportKey: "",
+    viewportBusy: false,
+    sourceBusy: false,
   };
   const current = () => state.key && state.key === identity(context());
-  const notify = () => changed(state);
+  const notify = (kind) => changed(state, kind);
   const guard = (key, version) => {
     if (!current() || state.key !== key || epoch !== version)
       throw new Error("Account or organization changed. Reopen Territories.");
   };
   function reset() {
+    cancel(sourceTimer);
+    sourceTimer = null;
+    sourceRequest = false;
+    viewportEpoch++;
     epoch++;
     state = {
       key: "",
@@ -263,6 +307,11 @@ export function createTerritoryBuilderModel({
       review: null,
       dirty: false,
       publishKey: "",
+      source: null,
+      points: [],
+      viewportKey: "",
+      viewportBusy: false,
+      sourceBusy: false,
     };
   }
   async function call(suffix, options = {}) {
@@ -270,14 +319,163 @@ export function createTerritoryBuilderModel({
       version = epoch,
       scope = context();
     guard(key, version);
-    const result = await request(territoryBuilderBase(scope, suffix), {
-      auth: true,
-      ...options,
-      headers: { "X-Polis-Expected-Actor": scope.userId },
-      beforeRequest: () => guard(key, version),
-    });
+    const { metadata = false, ...requestOptions } = options;
+    const result = await request(
+      territoryBuilderBase(scope, suffix, metadata),
+      {
+        auth: true,
+        ...requestOptions,
+        headers: { "X-Polis-Expected-Actor": scope.userId },
+        beforeRequest: () => guard(key, version),
+      },
+    );
     guard(key, version);
     return result;
+  }
+  function clearViewport() {
+    viewportEpoch++;
+    state.points = [];
+    state.viewportKey = "";
+    state.viewportBusy = false;
+  }
+  function receiveSource(value) {
+    if (
+      !value ||
+      !["ready", "preparing", "unavailable"].includes(value.status) ||
+      (value.status === "ready" &&
+        (value.complete !== true || !snapshotValid(value.snapshotId)))
+    )
+      throw new Error(
+        "Address preparation status is unavailable. Refresh to try again.",
+      );
+    if (value.snapshotId !== state.source?.snapshotId) {
+      state.review = null;
+      state.publishKey = "";
+      clearViewport();
+    }
+    state.source = copy(value);
+  }
+  function failAccess(error) {
+    if (error.status !== 401 && error.status !== 403) return false;
+    epoch++;
+    sourceRequest = false;
+    cancel(sourceTimer);
+    clearViewport();
+    state.bootstrap = null;
+    state.source = null;
+    state.draft = emptyDraft();
+    state.review = null;
+    state.history = [];
+    state.loaded = false;
+    state.loading = false;
+    state.busy = "";
+    state.sourceBusy = false;
+    state.error = "You no longer have permission to manage these territories.";
+    notify();
+    return true;
+  }
+  /** Poll only metadata; never replace an unsaved plan when its source is ready. */
+  async function refreshSource({ prepare = true } = {}) {
+    if (!current() || !state.loaded || sourceRequest) return false;
+    cancel(sourceTimer);
+    const version = epoch;
+    sourceRequest = true;
+    state.sourceBusy = true;
+    state.sourceError = "";
+    notify();
+    try {
+      if (prepare)
+        await call("/source", { method: "POST", body: { protocolVersion: 2 } });
+      const payload = await call("", { metadata: true });
+      if (payload.protocolVersion !== 2)
+        throw new Error("Address preparation is unavailable. Try again.");
+      receiveSource(payload.source);
+      if (!sourceReady(state) && state.source.status === "preparing") {
+        sourceTimer = schedule(() => {
+          if (version === epoch && current())
+            void refreshSource({ prepare: false });
+        }, 5000);
+      }
+      return true;
+    } catch (error) {
+      if (version !== epoch || !current()) return false;
+      if (!failAccess(error)) state.sourceError = failureMessage(error);
+      return false;
+    } finally {
+      if (version === epoch && current()) {
+        sourceRequest = false;
+        state.sourceBusy = false;
+        notify();
+      }
+    }
+  }
+  async function recoverSource() {
+    state.source = { status: "preparing", complete: false, snapshotId: null };
+    state.review = null;
+    state.publishKey = "";
+    clearViewport();
+    await refreshSource();
+  }
+  /** Each response belongs to one actor, source, filter set and camera request. */
+  async function viewport(bbox, zoom, { force = false } = {}) {
+    if (!current() || !state.loaded || !sourceReady(state)) return false;
+    const body = {
+      snapshotId: state.source.snapshotId,
+      bbox,
+      zoom,
+      contactExclusions: filters(state.draft.contactExclusions),
+    };
+    const viewportKey = JSON.stringify(body);
+    if (!force && state.viewportKey === viewportKey) return false;
+    const version = epoch,
+      ticket = ++viewportEpoch;
+    state.viewportKey = viewportKey;
+    state.points = [];
+    state.viewportBusy = true;
+    state.viewportError = "";
+    notify("viewport");
+    try {
+      const result = await call("/points", { method: "POST", body });
+      if (version !== epoch || ticket !== viewportEpoch || !current())
+        return false;
+      if (
+        result.viewportComplete !== true ||
+        result.source?.complete !== true ||
+        result.source?.snapshotId !== body.snapshotId ||
+        !Array.isArray(result.points) ||
+        result.points.length > 1000 ||
+        result.points.some(
+          (p) =>
+            !p ||
+            typeof p.id !== "string" ||
+            !Array.isArray(p.coordinates) ||
+            p.coordinates.length !== 2 ||
+            !p.coordinates.every(Number.isFinite) ||
+            Math.abs(p.coordinates[0]) > 180 ||
+            Math.abs(p.coordinates[1]) > 90 ||
+            !Number.isSafeInteger(p.count) ||
+            p.count < 1,
+        )
+      )
+        throw new Error(
+          "Map addresses are incomplete. Refresh addresses to try again.",
+        );
+      state.points = copy(result.points);
+      state.clustered = result.clustered === true;
+      return true;
+    } catch (error) {
+      if (version !== epoch || ticket !== viewportEpoch || !current())
+        return false;
+      if (failAccess(error)) return false;
+      if (sourceErrors.has(error.message)) await recoverSource();
+      else state.viewportError = failureMessage(error);
+      return false;
+    } finally {
+      if (version === epoch && ticket === viewportEpoch && current()) {
+        state.viewportBusy = false;
+        notify("viewport");
+      }
+    }
   }
   async function load({ force = false } = {}) {
     const key = identity(context());
@@ -293,10 +491,9 @@ export function createTerritoryBuilderModel({
     notify();
     const version = epoch;
     try {
-      const payload = await call("");
+      const payload = await call("", { metadata: true });
       if (
-        payload.source?.complete !== true ||
-        !Array.isArray(payload.points) ||
+        payload.protocolVersion !== 2 ||
         !Array.isArray(payload.staff) ||
         !Array.isArray(payload.areas)
       )
@@ -304,6 +501,7 @@ export function createTerritoryBuilderModel({
           "Complete territory planning data is unavailable. Try again.",
         );
       state.bootstrap = payload;
+      receiveSource(payload.source);
       state.revision = payload.revision;
       state.draft = payload.draft ? copy(payload.draft) : emptyDraft();
       state.draft.contactExclusions = filters(state.draft.contactExclusions);
@@ -314,6 +512,7 @@ export function createTerritoryBuilderModel({
         Math.max(1, state.draft.territories.length || 4),
       );
       state.loaded = true;
+      if (!sourceReady(state)) void refreshSource();
     } catch (error) {
       if (version !== epoch || !current()) return;
       state.error =
@@ -331,7 +530,14 @@ export function createTerritoryBuilderModel({
     if (!current() || !state.loaded || state.busy) return false;
     state.history.push(copy(state.draft));
     if (state.history.length > 30) state.history.shift();
+    const previousFilters = JSON.stringify(
+      filters(state.draft.contactExclusions),
+    );
     change(state.draft);
+    if (
+      previousFilters !== JSON.stringify(filters(state.draft.contactExclusions))
+    )
+      clearViewport();
     state.review = null;
     state.publishKey = "";
     state.published = null;
@@ -344,6 +550,7 @@ export function createTerritoryBuilderModel({
   function undo() {
     if (!current() || state.busy || !state.history.length) return;
     state.draft = state.history.pop();
+    clearViewport();
     state.review = null;
     state.publishKey = "";
     state.error = "";
@@ -361,10 +568,17 @@ export function createTerritoryBuilderModel({
       return false;
     const key = state.key,
       version = epoch;
+    if (action !== "draft" && !sourceReady(state)) {
+      state.error = validationMessages.territory_builder_source_preparing;
+      notify();
+      void refreshSource();
+      return false;
+    }
     state.busy = action;
     state.error = "";
     state.notice = "";
     const body = builderPayload(state, mode);
+    if (action !== "draft") body.snapshotId = state.source.snapshotId;
     if (action === "publish") {
       const blocked = publishBlockReason(state);
       if (blocked) {
@@ -384,7 +598,31 @@ export function createTerritoryBuilderModel({
       });
       guard(key, version);
       if (action === "preview") {
-        if (!Array.isArray(response.territories) || !response.summary)
+        if (state.source?.snapshotId !== body.snapshotId)
+          throw Object.assign(new Error("territory_builder_source_changed"), {
+            status: 409,
+          });
+        if (
+          !Array.isArray(response.territories) ||
+          !response.summary ||
+          response.snapshotId !== body.snapshotId ||
+          !snapshotValid(response.planHash) ||
+          [
+            "totalAddressCount",
+            "eligibleAddressCount",
+            "excludedAddressCount",
+            "allocatedAddressCount",
+            "unallocatedAddressCount",
+          ].some(
+            (key) =>
+              !Number.isSafeInteger(response.summary[key]) ||
+              response.summary[key] < 0,
+          ) ||
+          response.territories.some(
+            (row) =>
+              !Number.isSafeInteger(row.addressCount) || row.addressCount < 0,
+          )
+        )
           throw new Error("The territory preview is incomplete. Try again.");
         if (mode !== "manual") {
           state.history.push(copy(state.draft));
@@ -412,16 +650,17 @@ export function createTerritoryBuilderModel({
       return true;
     } catch (error) {
       if (version !== epoch || !current()) return false;
+      if (sourceErrors.has(error.message)) {
+        state.error = validationMessages.territory_builder_source_changed;
+        await recoverSource();
+        return false;
+      }
       if (
         (error.status === 403 &&
           error.message !== "territory_builder_area_outside_boundary") ||
         error.status === 401
       ) {
-        state.bootstrap = null;
-        state.draft = emptyDraft();
-        state.review = null;
-        state.history = [];
-        state.loaded = false;
+        failAccess(error);
       }
       if (error.status === 409) state.conflict = true;
       state.error =
@@ -470,6 +709,8 @@ export function createTerritoryBuilderModel({
     setStep,
     select,
     setCount,
+    refreshSource,
+    viewport,
     get state() {
       return state;
     },
