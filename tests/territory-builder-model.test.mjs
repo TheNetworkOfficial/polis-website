@@ -512,16 +512,70 @@ test("cluster counts never become area totals and camera responses are accepted 
   );
   const older = h.model.viewport([0, 0, 2, 2], 10);
   const newer = h.model.viewport([0, 0, 4, 4], 11);
-  pending[1](viewportResult(500000, "new"));
-  await newer;
+  assert.equal(pending.length, 1, "only one source read is in flight");
   pending[0](viewportResult(1, "old"));
   await older;
+  assert.deepEqual(h.model.state.points, []);
+  assert.equal(pending.length, 2);
+  pending[1](viewportResult(500000, "new"));
+  await newer;
   assert.equal(h.model.state.points[0].id, "new");
   assert.equal(h.model.state.points[0].count, 500000);
   assert.equal(h.model.state.review, null);
   assert.equal(h.model.state.draft.territories[0].addressCount, undefined);
   assert.equal(await h.model.viewport([0, 0, 4, 4], 11), false);
   assert.equal(pending.length, 2);
+});
+
+test("slow map requests coalesce a pan storm into only the newest follow-up", async () => {
+  const pending = [];
+  const h = await loaded((path, options) =>
+    path.endsWith("/points")
+      ? new Promise((resolve) => pending.push({ resolve, body: options.body }))
+      : bootstrap(),
+  );
+  const first = h.model.viewport([0, 0, 2, 2], 10);
+  const skipped = [];
+  for (let i = 0; i < 30; i++)
+    skipped.push(h.model.viewport([0, 0, 3 + i, 3], 11));
+  const camera = [0, 0, 40, 4];
+  const last = h.model.viewport(camera, 12);
+  camera[2] = 90;
+  assert.equal(pending.length, 1);
+  assert.deepEqual(await Promise.all(skipped), Array(30).fill(false));
+  pending[0].resolve(viewportResult(1, "stale"));
+  assert.equal(await first, false);
+  assert.equal(pending.length, 2);
+  assert.deepEqual(pending[1].body.bbox, [0, 0, 40, 4]);
+  assert.deepEqual(h.model.state.points, []);
+  pending[1].resolve(viewportResult(500000, "latest"));
+  assert.equal(await last, true);
+  assert.equal(h.model.state.points[0].id, "latest");
+  assert.equal(h.model.state.viewportBusy, false);
+});
+
+test("reset and filter invalidation discard queued reads without releasing the active slot early", async () => {
+  const pending = [];
+  const h = await loaded((path) =>
+    path.endsWith("/points")
+      ? new Promise((resolve) => pending.push(resolve))
+      : bootstrap(),
+  );
+  const active = h.model.viewport([0, 0, 2, 2], 10);
+  const queued = h.model.viewport([0, 0, 3, 3], 11);
+  h.model.edit((d) => {
+    d.contactExclusions.excludeReportedDanger = true;
+  });
+  assert.equal(await queued, false);
+  const filtered = h.model.viewport([0, 0, 3, 3], 11);
+  assert.equal(pending.length, 1);
+  h.model.reset();
+  assert.equal(await filtered, false);
+  pending[0](viewportResult());
+  assert.equal(await active, false);
+  assert.equal(pending.length, 1);
+  assert.deepEqual(h.model.state.points, []);
+  assert.equal(h.model.state.loaded, false);
 });
 
 test("filter changes clear visible points immediately and reject a delayed response with old exclusions", async () => {
@@ -627,4 +681,35 @@ test("actor change prevents a pending camera response from entering the next wor
   await pending;
   assert.deepEqual(h.model.state.points, []);
   assert.equal(h.model.state.loaded, false);
+});
+
+test("revocation from an older camera cancels the newest queued view and any pending preview", async () => {
+  let rejectPoints,
+    resolvePreview,
+    pointsCalls = 0;
+  const h = await loaded((path) => {
+    if (path.endsWith("/points")) {
+      pointsCalls++;
+      return new Promise((_, reject) => {
+        rejectPoints = reject;
+      });
+    }
+    if (path.endsWith("/preview"))
+      return new Promise((resolve) => {
+        resolvePreview = resolve;
+      });
+    return bootstrap();
+  });
+  const previewRequest = h.model.run("preview");
+  const active = h.model.viewport([0, 0, 2, 2], 10);
+  const queued = h.model.viewport([0, 0, 4, 4], 11);
+  rejectPoints(Object.assign(new Error("Forbidden"), { status: 403 }));
+  assert.equal(await active, false);
+  assert.equal(await queued, false);
+  resolvePreview(preview());
+  assert.equal(await previewRequest, false);
+  assert.equal(pointsCalls, 1);
+  assert.equal(h.model.state.loaded, false);
+  assert.equal(h.model.state.review, null);
+  assert.deepEqual(h.model.state.points, []);
 });
