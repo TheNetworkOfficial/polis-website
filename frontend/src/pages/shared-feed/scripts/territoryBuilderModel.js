@@ -258,7 +258,9 @@ export function createTerritoryBuilderModel({
   let epoch = 0,
     viewportEpoch = 0,
     sourceTimer,
-    sourceRequest = false;
+    sourceRequest = false,
+    viewportFlight = false,
+    pendingViewport = null;
   let state = {
     key: "",
     loading: false,
@@ -287,6 +289,7 @@ export function createTerritoryBuilderModel({
       throw new Error("Account or organization changed. Reopen Territories.");
   };
   function reset() {
+    discardPendingViewport();
     cancel(sourceTimer);
     sourceTimer = null;
     sourceRequest = false;
@@ -333,10 +336,15 @@ export function createTerritoryBuilderModel({
     return result;
   }
   function clearViewport() {
+    discardPendingViewport();
     viewportEpoch++;
     state.points = [];
     state.viewportKey = "";
     state.viewportBusy = false;
+  }
+  function discardPendingViewport() {
+    pendingViewport?.resolve(false);
+    pendingViewport = null;
   }
   function receiveSource(value) {
     if (
@@ -421,7 +429,7 @@ export function createTerritoryBuilderModel({
     if (!current() || !state.loaded || !sourceReady(state)) return false;
     const body = {
       snapshotId: state.source.snapshotId,
-      bbox,
+      bbox: Array.isArray(bbox) ? [...bbox] : bbox,
       zoom,
       contactExclusions: filters(state.draft.contactExclusions),
     };
@@ -434,6 +442,18 @@ export function createTerritoryBuilderModel({
     state.viewportBusy = true;
     state.viewportError = "";
     notify("viewport");
+    // A long source read must not multiply with every camera movement. Retain
+    // one newest pending view while the existing request keeps its slot.
+    if (viewportFlight) {
+      discardPendingViewport();
+      return new Promise((resolve) => {
+        pendingViewport = { body, version, ticket, resolve };
+      });
+    }
+    return performViewport({ body, version, ticket });
+  }
+  async function performViewport({ body, version, ticket }) {
+    viewportFlight = true;
     try {
       const result = await call("/points", { method: "POST", body });
       if (version !== epoch || ticket !== viewportEpoch || !current())
@@ -464,9 +484,9 @@ export function createTerritoryBuilderModel({
       state.clustered = result.clustered === true;
       return true;
     } catch (error) {
-      if (version !== epoch || ticket !== viewportEpoch || !current())
-        return false;
+      if (version !== epoch || !current()) return false;
       if (failAccess(error)) return false;
+      if (ticket !== viewportEpoch) return false;
       if (sourceErrors.has(error.message)) await recoverSource();
       else state.viewportError = failureMessage(error);
       return false;
@@ -474,6 +494,20 @@ export function createTerritoryBuilderModel({
       if (version === epoch && ticket === viewportEpoch && current()) {
         state.viewportBusy = false;
         notify("viewport");
+      }
+      viewportFlight = false;
+      const next = pendingViewport;
+      pendingViewport = null;
+      if (next) {
+        if (
+          next.version === epoch &&
+          next.ticket === viewportEpoch &&
+          current() &&
+          sourceReady(state) &&
+          state.source.snapshotId === next.body.snapshotId
+        )
+          void performViewport(next).then(next.resolve);
+        else next.resolve(false);
       }
     }
   }
