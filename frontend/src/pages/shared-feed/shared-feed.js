@@ -46,6 +46,7 @@ import { createTextingBalancePage } from "./scripts/textingBalance.js";
 import { createTextingIntakePage } from "./scripts/textingIntake.js";
 import { createTextingWorkspacePage } from "./scripts/textingWorkspace.js";
 import { createOrganizationPeoplePage } from "./scripts/organizationPeople.js";
+import { createTerritoryBuilder } from "./scripts/territoryBuilder.js";
 import {
   createOrganizationPublishingPage,
   organizationApiBase,
@@ -93,6 +94,45 @@ const textingRequest = createTextingSessionRequest({
   },
   userId: (session) => getAuthenticatedUser(session)?.userId || "",
   contextKey: getCurrentPathWithQuery,
+});
+const territoryBuilder = createTerritoryBuilder({
+  request: textingRequest,
+  context: () => {
+    const userId = state.auth.session
+      ? getAuthenticatedUser(state.auth.session)?.userId || ""
+      : "";
+    if (candidateVoterMapSectionForRoute() === "territories/admin") {
+      const scopeId = currentCandidateDashboardId();
+      return {
+        userId,
+        scopeId,
+        scopeType: "candidate",
+        backPath: candidateVoterMapPath("map", scopeId),
+      };
+    }
+    if (coalitionVoterMapSectionForRoute() === "territories/admin") {
+      const scopeId = currentCoalitionDetailId();
+      return {
+        userId,
+        scopeId,
+        scopeType: "coalition",
+        backPath: coalitionSectionPath(scopeId, "voter-map/map"),
+      };
+    }
+    return null;
+  },
+  mapLoader: ensureMapLibreLoader,
+  mapStyle: getMapStyle,
+  navigate: navigateTo,
+  confirm: confirmDestructiveAction,
+  openExisting: () => {
+    const admin = isCandidateVoterMapRoute()
+      ? candidateTerritoryAdminWorkspace()
+      : coalitionTerritoryAdminWorkspace();
+    admin.showExisting = true;
+    admin.activeTab = "editor";
+    scheduleRender();
+  },
 });
 const textingBalancePage = createTextingBalancePage({
   request: textingRequest,
@@ -84396,6 +84436,7 @@ function renderCandidateVoterMapTerritoryAdmin(detail, access, candidateId) {
     voterMapAccess.canManageTerritories ||
     access?.isOwner ||
     candidateDashboardPermissionSet(access).has("voter_map_manager");
+  if (canManage && !admin.showExisting) return territoryBuilder.markup();
   const accessLabel = canManage
     ? "Manager access"
     : territories.length
@@ -84419,12 +84460,13 @@ function renderCandidateVoterMapTerritoryAdmin(detail, access, candidateId) {
   }
   return `<div class="shared-campaign-section shared-candidate-voter-map-territories">
     ${voterMap.error ? `<div class="shared-page__error">${escapeHtml(voterMap.error)}</div>` : ""}
+    ${canManage ? `<button class="shared-feed-chip" type="button" data-action="territory-builder-return" data-territory-legacy>Back to builder</button>` : ""}
     <div class="shared-coalition-territory-admin-page shared-candidate-territory-admin-page">
       <article class="shared-coalition-panel shared-coalition-territory-admin-hero">
         <div class="shared-coalition-panel__header">
           <div>
             <span class="shared-card__meta"><span>Campaign voter map</span><span>${escapeHtml(accessLabel)}</span></span>
-            <h2>Territory Admin</h2>
+            <h2>Existing territories</h2>
             <p>Generate campaign territory plans, edit unit membership, publish versions, and manage staff access from the browser.</p>
           </div>
           <div class="shared-card__actions">
@@ -84854,6 +84896,9 @@ function renderCandidateVoterMapPage() {
   const candidate = detail.candidate || {};
   const access = detail.access || findCandidateDashboardAccess(candidateId);
   const activeSection = candidateVoterMapSectionForRoute();
+  if (activeSection === "territories/admin") {
+    return `<section class="shared-page shared-campaign-dashboard shared-candidate-voter-map">${renderTopChrome()}<div class="shared-page__content">${renderCandidateVoterMapNav(candidateId, activeSection)}${renderCandidateVoterMapBody(activeSection, detail, candidateId, access)}</div></section>`;
+  }
   return `<section class="shared-page shared-campaign-dashboard shared-candidate-voter-map">
     ${renderTopChrome()}
     <div class="shared-page__content">
@@ -90963,6 +91008,7 @@ function renderCoalitionVoterMapTerritoryAdminPanel(
     0,
   );
   const canManage = access.canManageTerritories === true || membership?.isAdmin;
+  if (canManage && !admin.showExisting) return territoryBuilder.markup();
   let activeBody = "";
   if (activeTab === "editor") {
     activeBody = renderCoalitionTerritoryEditor(access, admin);
@@ -90972,10 +91018,11 @@ function renderCoalitionVoterMapTerritoryAdminPanel(
     activeBody = renderCoalitionTerritoryWizard(admin);
   }
   return `<div class="shared-coalition-territory-admin-page">
+    ${canManage ? `<button class="shared-feed-chip" type="button" data-action="territory-builder-return" data-territory-legacy>Back to builder</button>` : ""}
     <article class="shared-coalition-panel shared-coalition-territory-admin-hero">
       <div class="shared-coalition-panel__header">
         <div>
-          <h2>Territory Admin</h2>
+          <h2>Existing territories</h2>
           <p>Generate territory plans, edit unit membership, publish versions, and manage staff access from the browser.</p>
         </div>
         <button class="shared-feed-chip" type="button" data-action="coalition-voter-map-refresh"${disabledAttr(workspace.loading)}>Refresh access</button>
@@ -92844,6 +92891,9 @@ function renderCoalitionVoterMap(coalition, membership, detail) {
   }
   if (!membership.canAccessVoterMap) {
     return `<div class="shared-page__empty">This coalition role does not include voter map access.</div>`;
+  }
+  if (activeSection === "territories/admin") {
+    return `<div class="shared-coalition-section shared-coalition-voter-map">${renderCoalitionSubrouteNav(coalition, COALITION_VOTER_MAP_SECTION_CONFIG, activeSection, "Coalition voter map routes")}${renderCoalitionVoterMapBody(activeSection, coalition, membership, detail, access, workspace)}</div>`;
   }
   return `<div class="shared-coalition-section shared-coalition-voter-map">
     <div class="shared-coalition-metrics">
@@ -128281,6 +128331,7 @@ function renderApp() {
       ${renderCandidateDonationFlowModal()}
       ${renderToast()}`;
   root.innerHTML = shell;
+  territoryBuilder.mount(root);
   restoreFeedScrollState(scrollSnapshot);
   restorePetitionAddressFocusState(petitionAddressFocusSnapshot);
   restoreTextingFocus(root, textingFocus, textingIdentity);
@@ -130433,6 +130484,14 @@ async function handleRootClick(event) {
     return;
   }
 
+  if (action === "territory-builder-return") {
+    const admin = isCandidateVoterMapRoute()
+      ? candidateTerritoryAdminWorkspace()
+      : coalitionTerritoryAdminWorkspace();
+    admin.showExisting = false;
+    scheduleRender();
+    return;
+  }
   if (action === "coalition-territory-admin-tab") {
     setCoalitionTerritoryAdminTab(target.getAttribute("data-tab"));
     return;
