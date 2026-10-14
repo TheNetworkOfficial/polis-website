@@ -102,7 +102,7 @@ test("expired unsent provider leases expose release guidance without Send or Ski
   });
   const html = controller.render("send");
   assert.match(html, /Recipient assignment expired/);
-  assert.match(html, /not been returned automatically/);
+  assert.match(html, /provider release before reassignment/);
   assert.doesNotMatch(html, /data-workspace-action="queue-(confirm|skip)"/);
 });
 

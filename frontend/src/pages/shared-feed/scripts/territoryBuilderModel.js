@@ -45,7 +45,7 @@ const failureMessage = (error) =>
   "The change could not be completed. Try again.";
 
 export const territoryBuilderBase = (
-  { scopeType, scopeId },
+  { scopeType, scopeId, contactSelectionId, ballotChase },
   suffix = "",
   metadata = false,
 ) => {
@@ -53,9 +53,16 @@ export const territoryBuilderBase = (
     scopeType === "candidate"
       ? `/api/candidate-dashboard/voter-map/territory-builder${suffix}?candidateId=${encodeURIComponent(scopeId)}`
       : `/api/coalitions/${encodeURIComponent(scopeId)}/voter-map/territory-builder${suffix}`;
-  return metadata
+  const result = metadata
     ? `${base}${scopeType === "candidate" ? "&" : "?"}protocol=2`
     : base;
+  if (!metadata || !contactSelectionId || !ballotChase) return result;
+  const query = new URLSearchParams({
+    contactSelectionId,
+    electionId: ballotChase.electionId,
+    ballotSnapshotId: ballotChase.snapshotId,
+  });
+  return `${result}&${query}`;
 };
 const snapshotValid = (value) =>
   typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
@@ -232,13 +239,19 @@ export function builderPayload(state, mode = "manual") {
     mode,
     targetCount: state.targetCount,
     startsAt: state.draft.startsAt || null,
+    ...(state.contactSelectionId && state.ballotChase
+      ? {
+          contactSelectionId: state.contactSelectionId,
+          ballotChase: copy(state.ballotChase),
+        }
+      : {}),
     ...(mode === "split" ? { splitTerritoryId: state.selectedId } : {}),
   };
 }
 
 const identity = (context) =>
   context?.userId && context?.scopeId
-    ? `${context.userId}:${context.scopeType}:${context.scopeId}`
+    ? `${context.userId}:${context.scopeType}:${context.scopeId}${context.contactSelectionId ? `:${context.contactSelectionId}:${context.ballotChase?.snapshotId || ""}` : ""}`
     : "";
 const emptyDraft = () => ({
   areaGeojson: null,
@@ -393,7 +406,18 @@ export function createTerritoryBuilderModel({
     notify();
     try {
       if (prepare)
-        await call("/source", { method: "POST", body: { protocolVersion: 2 } });
+        await call("/source", {
+          method: "POST",
+          body: {
+            protocolVersion: 2,
+            ...(state.contactSelectionId && state.ballotChase
+              ? {
+                  contactSelectionId: state.contactSelectionId,
+                  ballotChase: copy(state.ballotChase),
+                }
+              : {}),
+          },
+        });
       const payload = await call("", { metadata: true });
       if (payload.protocolVersion !== 2)
         throw new Error("Address preparation is unavailable. Try again.");
@@ -432,6 +456,12 @@ export function createTerritoryBuilderModel({
       bbox: Array.isArray(bbox) ? [...bbox] : bbox,
       zoom,
       contactExclusions: filters(state.draft.contactExclusions),
+      ...(state.contactSelectionId && state.ballotChase
+        ? {
+            contactSelectionId: state.contactSelectionId,
+            ballotChase: copy(state.ballotChase),
+          }
+        : {}),
     };
     const viewportKey = JSON.stringify(body);
     if (!force && state.viewportKey === viewportKey) return false;
@@ -521,6 +551,10 @@ export function createTerritoryBuilderModel({
     if (current() && (state.loading || (state.loaded && !force))) return;
     reset();
     state.key = key;
+    state.contactSelectionId = context().contactSelectionId || null;
+    state.ballotChase = context().ballotChase
+      ? copy(context().ballotChase)
+      : null;
     state.loading = true;
     notify();
     const version = epoch;

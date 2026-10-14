@@ -79,7 +79,9 @@ export function createTerritoryBuilder({
     `<button type="button" data-tb-action="${e(action)}" data-value="${e(value)}"${primary ? ' class="tb-primary"' : ""}${disabled || model.state.busy ? " disabled" : ""}${pressed === undefined ? "" : ` aria-pressed="${pressed}"`}${title ? ` aria-label="${e(title)}" title="${e(title)}"` : ""}>${label}</button>`;
   const stateKey = () => {
     const c = context();
-    return c?.userId ? `${c.userId}:${c.scopeType}:${c.scopeId}` : "";
+    return c?.userId
+      ? `${c.userId}:${c.scopeType}:${c.scopeId}${c.contactSelectionId ? `:${c.contactSelectionId}:${c.ballotChase?.snapshotId || ""}` : ""}`
+      : "";
   };
 
   function destroyMap() {

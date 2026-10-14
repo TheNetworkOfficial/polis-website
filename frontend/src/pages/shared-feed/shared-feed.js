@@ -46,6 +46,7 @@ import { createTextingBalancePage } from "./scripts/textingBalance.js";
 import { createTextingIntakePage } from "./scripts/textingIntake.js";
 import { createTextingWorkspacePage } from "./scripts/textingWorkspace.js";
 import { createOrganizationPeoplePage } from "./scripts/organizationPeople.js";
+import { createBallotChaser } from "./scripts/ballotChaser.js";
 import { createTerritoryBuilder } from "./scripts/territoryBuilder.js";
 import {
   createOrganizationPublishingPage,
@@ -95,6 +96,7 @@ const textingRequest = createTextingSessionRequest({
   userId: (session) => getAuthenticatedUser(session)?.userId || "",
   contextKey: getCurrentPathWithQuery,
 });
+let pendingBallotTerritories = null;
 const territoryBuilder = createTerritoryBuilder({
   request: textingRequest,
   context: () => {
@@ -117,6 +119,13 @@ const territoryBuilder = createTerritoryBuilder({
         scopeId,
         scopeType: "coalition",
         backPath: coalitionSectionPath(scopeId, "voter-map/map"),
+        ...(pendingBallotTerritories?.actorUserId === userId &&
+        pendingBallotTerritories.scopeKey === `coalition:${scopeId}`
+          ? {
+              contactSelectionId: pendingBallotTerritories.contactSelectionId,
+              ballotChase: pendingBallotTerritories.ballotChase,
+            }
+          : {}),
       };
     }
     return null;
@@ -170,6 +179,10 @@ const textingWorkspacePage = createTextingWorkspacePage({
   },
   changed: scheduleRender,
   navigate: navigateTexting,
+  openBallotChaser: (organizationId) =>
+    navigateTo(
+      `/workspace/coalition/${encodeURIComponent(organizationId)}/work/ballot-chaser`,
+    ),
 });
 let stripeJsLoadPromise = null;
 const organizationPeoplePage = createOrganizationPeoplePage({
@@ -196,6 +209,43 @@ const organizationPeoplePage = createOrganizationPeoplePage({
       throw new Error("Your account or organization changed. Reopen Contacts.");
     textingWorkspacePage.beginContactCampaign(selection);
     navigateTo(textingRoute(scope.scopeId, "campaigns", "new"));
+  },
+});
+const ballotChaserPage = createBallotChaser({
+  request: fetchJson,
+  context: currentOrganizationWorkspaceContext,
+  changed: scheduleRender,
+  beginContactCampaign: (selection) => {
+    const scope = currentOrganizationWorkspaceContext();
+    if (
+      !scope ||
+      scope.scopeType !== "coalition" ||
+      scope.userId !== selection.actorUserId ||
+      `coalition:${scope.scopeId}` !== selection.scopeKey
+    )
+      throw new Error(
+        "Your account or organization changed. Reopen Ballot Chaser.",
+      );
+    textingWorkspacePage.beginContactCampaign(selection);
+    navigateTo(textingRoute(scope.scopeId, "campaigns", "new"));
+  },
+  beginTerritories: (selection) => {
+    const scope = currentOrganizationWorkspaceContext();
+    if (
+      !scope ||
+      scope.scopeType !== "coalition" ||
+      scope.userId !== selection.actorUserId ||
+      `coalition:${scope.scopeId}` !== selection.scopeKey ||
+      !selection.contactSelectionId ||
+      !selection.ballotChase
+    )
+      throw new Error(
+        "Review your organization’s ballot contact selection first.",
+      );
+    pendingBallotTerritories = structuredClone(selection);
+    navigateTo(
+      coalitionSectionPath(scope.scopeId, "voter-map/territories/admin"),
+    );
   },
 });
 const organizationPublishingPage = createOrganizationPublishingPage({
@@ -3151,18 +3201,22 @@ function parseRouteFromLocation(pathname = window.location.pathname) {
       "more/roles": "roles",
     }[section];
     return {
-      routeKey: composer
-        ? ROUTE_KEY_CREATE
-        : peopleSection
-          ? "organization-people"
-          : section === "more/social-connections"
-            ? "organization-social"
-            : "organization-publishing",
+      routeKey:
+        section === "work/ballot-chaser" && organizationRoute[1] === "coalition"
+          ? "organization-ballot-chaser"
+          : composer
+            ? ROUTE_KEY_CREATE
+            : peopleSection
+              ? "organization-people"
+              : section === "more/social-connections"
+                ? "organization-social"
+                : "organization-publishing",
       routePath: normalizedPath,
       routeParams: {
         organizationScopeType: organizationRoute[1],
         organizationScopeId: organizationRoute[2],
         organizationSection:
+          (section === "work/ballot-chaser" ? "ballot-chaser" : null) ||
           peopleSection ||
           (section === "more/social-connections" ? "social" : "publishing"),
         organizationDraftId: composer?.[2] || "",
@@ -63015,6 +63069,7 @@ async function registerSettingsGovernancePasskey() {
 
 async function loadCurrentRoute({ refresh = false } = {}) {
   const route = getCurrentRoute();
+  if (route.routeKey !== "organization-ballot-chaser") ballotChaserPage.reset();
   state.renderError = "";
   const texting = currentTextingContext();
   if (!texting || !state.auth.session) {
@@ -63096,6 +63151,10 @@ async function loadCurrentRoute({ refresh = false } = {}) {
   }
   if (routeKey === "organization-people") {
     await organizationPeoplePage.load({ force: refresh });
+    return;
+  }
+  if (routeKey === "organization-ballot-chaser") {
+    await ballotChaserPage.load({ force: refresh });
     return;
   }
   if (routeKey === "organization-publishing") {
@@ -88506,6 +88565,7 @@ function renderCoalitionTabs(coalition, membership, activeSection) {
   return `<nav class="shared-coalition-tabs" aria-label="Coalition sections">${items}
     ${filesRoute ? `<a class="shared-coalition-tab" href="${escapeHtml(filesRoute)}" data-route="${escapeHtml(filesRoute)}"><span>${renderIcon("file")}</span><strong>Files</strong></a>` : ""}
     ${active ? `<button class="shared-coalition-tab coalition-ui-texting-link" type="button" data-action="navigate" data-route="${escapeHtml(textingRoute(coalition.coalitionId))}"><span>${renderIcon("messages")}</span><strong>Texting</strong></button>` : ""}
+    ${active && coalitionHasAnyPermission(membership, ["contact_book_view"]) ? `<button class="shared-coalition-tab" type="button" data-action="navigate" data-route="/workspace/coalition/${encodeURIComponent(coalition.coalitionId)}/work/ballot-chaser"><span>${renderIcon("election")}</span><strong>Ballot Chaser</strong></button>` : ""}
     ${active && membership.isLeader ? `<button class="shared-coalition-tab${activeSection === "admin" ? " is-active" : ""}" type="button" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, "admin"))}"><span>${renderIcon("settings")}</span><strong>Administration</strong></button>` : ""}
   </nav>`;
 }
@@ -88585,6 +88645,7 @@ function renderCoalitionOverview(detail, coalition, membership) {
         : ""
     }
     <div class="shared-coalition-overview-grid">
+      ${membership.isActive && !membership.isPending && coalitionHasAnyPermission(membership, ["contact_book_view"]) ? `<article class="shared-coalition-panel pt-org-entry"><span class="pt-eyebrow">WORK · GET OUT THE VOTE</span><h2>Ballot Chaser</h2><p>Upload county ballot reports, see what changed, and build the next texting or DoorKnocker list.</p><button class="pt-btn" data-action="navigate" data-route="/workspace/coalition/${encodeURIComponent(coalition.coalitionId)}/work/ballot-chaser">Open Ballot Chaser</button></article>` : ""}
       ${
         membership.isActive && !membership.isPending
           ? `<article class="shared-coalition-panel pt-org-entry">
@@ -127046,6 +127107,8 @@ function renderRouteStage() {
   }
   if (routeKey === "organization-people")
     return organizationPeoplePage.render();
+  if (routeKey === "organization-ballot-chaser")
+    return ballotChaserPage.render();
   if (routeKey === "organization-publishing")
     return organizationPublishingPage.render();
   if (routeKey === "organization-social")

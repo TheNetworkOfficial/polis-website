@@ -42,6 +42,42 @@ const territory = {
   assigneeUserId: null,
 };
 const snapshotId = "a".repeat(64);
+test("ballot territory handoff carries a frozen audience through metadata and plan payloads", () => {
+  const ballotChase = {
+    electionId: "az-general",
+    snapshotId: "county-snapshot",
+    outstandingOnly: true,
+  };
+  const path = territoryBuilderBase(
+    {
+      scopeType: "coalition",
+      scopeId: "org-a",
+      contactSelectionId: "selection-one",
+      ballotChase,
+    },
+    "",
+    true,
+  );
+  const url = new URL(path, "https://fixture.example");
+  assert.equal(url.searchParams.get("contactSelectionId"), "selection-one");
+  assert.equal(url.searchParams.get("electionId"), "az-general");
+  assert.equal(url.searchParams.get("ballotSnapshotId"), "county-snapshot");
+  const payload = builderPayload({
+    revision: 1,
+    draft: {
+      areaGeojson: area,
+      territories: [territory],
+      contactExclusions: {},
+    },
+    targetCount: 1,
+    contactSelectionId: "selection-one",
+    ballotChase,
+  });
+  assert.equal(payload.contactSelectionId, "selection-one");
+  assert.deepEqual(payload.ballotChase, ballotChase);
+  payload.ballotChase.electionId = "changed";
+  assert.equal(ballotChase.electionId, "az-general");
+});
 const bootstrap = (draft = null) => ({
   ok: true,
   protocolVersion: 2,
@@ -552,6 +588,46 @@ test("slow map requests coalesce a pan storm into only the newest follow-up", as
   assert.equal(await last, true);
   assert.equal(h.model.state.points[0].id, "latest");
   assert.equal(h.model.state.viewportBusy, false);
+});
+
+test("coalesced camera requests retain the frozen ballot audience on both active and newest queued reads", async () => {
+  const pending = [],
+    ballotChase = {
+      electionId: "az-general",
+      snapshotId: "county-snapshot",
+      outstandingOnly: true,
+    };
+  const h = harness((path, options) =>
+    path.endsWith("/points")
+      ? new Promise((resolve) => pending.push({ resolve, body: options.body }))
+      : bootstrap(),
+  );
+  h.setContext({
+    scopeType: "coalition",
+    scopeId: "org-a",
+    userId: "actor-a",
+    contactSelectionId: "selection-one",
+    ballotChase,
+  });
+  await h.model.load();
+  const first = h.model.viewport([0, 0, 2, 2], 10),
+    skipped = [];
+  for (let i = 0; i < 30; i++)
+    skipped.push(h.model.viewport([0, 0, 3 + i, 3], 11));
+  const latest = h.model.viewport([0, 0, 40, 4], 12);
+  assert.equal(pending.length, 1);
+  assert.deepEqual(await Promise.all(skipped), Array(30).fill(false));
+  assert.equal(pending[0].body.contactSelectionId, "selection-one");
+  assert.deepEqual(pending[0].body.ballotChase, ballotChase);
+  pending[0].resolve(viewportResult(1, "old"));
+  assert.equal(await first, false);
+  assert.equal(pending.length, 2);
+  assert.deepEqual(pending[1].body.ballotChase, ballotChase);
+  assert.equal(pending[1].body.contactSelectionId, "selection-one");
+  assert.deepEqual(pending[1].body.bbox, [0, 0, 40, 4]);
+  pending[1].resolve(viewportResult(1, "current"));
+  assert.equal(await latest, true);
+  assert.equal(h.model.state.points[0].id, "current");
 });
 
 test("reset and filter invalidation discard queued reads without releasing the active slot early", async () => {

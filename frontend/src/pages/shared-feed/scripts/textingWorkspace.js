@@ -32,6 +32,7 @@ export function createTextingWorkspacePage({
   context,
   changed,
   navigate,
+  openBallotChaser,
 }) {
   let view = {},
     sequence = 0,
@@ -267,6 +268,12 @@ export function createTextingWorkspacePage({
         };
         navigate("campaigns", "new");
       },
+      openBallotChaser: openBallotChaser
+        ? () => {
+            guard();
+            openBallotChaser(organizationId);
+          }
+        : undefined,
       takeContactCampaign: () => {
         guard();
         const pending = pendingContactCampaign;

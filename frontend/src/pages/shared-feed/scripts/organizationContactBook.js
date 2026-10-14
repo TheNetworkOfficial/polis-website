@@ -95,6 +95,7 @@ export function createOrganizationContactBook(
     mode = "book",
     continueAction = null,
     continueLabel = "Continue to write message",
+    ballotChase = null,
   } = {},
 ) {
   let queryGeneration = 0,
@@ -120,7 +121,10 @@ export function createOrganizationContactBook(
       columns: [...defaults],
       pinnedColumns: [],
       filters: [],
-      query: { sort: { field: "displayName", direction: "asc" } },
+      query: {
+        sort: { field: "displayName", direction: "asc" },
+        ...(ballotChase ? { ballotChase: structuredClone(ballotChase) } : {}),
+      },
       includeIds: new Set(),
       excludeIds: new Set(),
       panel: "contacts",
@@ -134,7 +138,14 @@ export function createOrganizationContactBook(
     });
   const details = (title, content) =>
     `<details class="pt-workspace-details" data-contact-change="${prefix}-disclosure" data-disclosure="${e(title)}"${state().expanded?.has(title) ? " open" : ""}><summary>${e(title)}</summary>${content}</details>`;
-  const api = (...args) => r.contactApi(...args);
+  const api = (suffix, body, ...args) =>
+    r.contactApi(
+      suffix,
+      suffix === "/query" && state().query.ballotChase
+        ? { ...body, ballotChase: structuredClone(state().query.ballotChase) }
+        : body,
+      ...args,
+    );
   const can = (name) => state().schema?.capabilities?.[name] === true;
   const b = (action, text, options = {}) =>
     button(`${prefix}-${action}`, text, { disabled: r.busy(), ...options });
@@ -1443,7 +1454,7 @@ export function createOrganizationContactBook(
             }`,
           )
         : ""
-    }${can("export") ? `<section class="pt-cb-action-section">${b("export", "Export selected contacts", { secondary: true })}</section>` : ""}${bulkPanel()}${geographyPanel()}</div>`;
+    }${mode === "book" && s.query.ballotChase && typeof r.beginBallotTerritories === "function" ? `<section class="pt-cb-action-section">${b("territories-start", "Build DoorKnocker territories", { secondary: true })}<p class="pt-cb-hint">Uses this selected list and the current election. People without mapped addresses remain in your contact book.</p></section>` : ""}${can("export") ? `<section class="pt-cb-action-section">${b("export", "Export selected contacts", { secondary: true })}</section>` : ""}${bulkPanel()}${geographyPanel()}</div>`;
   }
   function selectionHasHouseholds() {
     const s = state();
@@ -2300,7 +2311,7 @@ export function createOrganizationContactBook(
     if (mode === "book" && s.panel === "imports")
       return `<div class="pt-contact-book">${importPanel()}</div>`;
     const showingDetail = s.detail || s.detailNew;
-    const main = `${mode === "book" ? `<div class="pt-cb-breadcrumb">Text banking ${icon("right")} <span>Contact book</span></div><header class="pt-cb-heading"><div><h1>Contact book</h1><p>Your people, together in one place.</p></div><div class="pt-actions">${can("import") || can("edit") ? tool("overlay", "Add contacts", "plus", { value: "add", primary: true }) : ""}${tool("overlay", "More contact tools", "more", { value: "more", extra: 'aria-label="More contact tools"' })}</div></header>` : '<header class="pt-cb-heading"><div><h2>Choose campaign recipients</h2><p>Filter across your contact book, then select matching contacts or individual people.</p></div></header>'}${renderRows()}`;
+    const main = `${mode === "book" ? `<div class="pt-cb-breadcrumb">Organization ${icon("right")} <span>Contact book</span></div><header class="pt-cb-heading"><div><h1>Contact book</h1><p>${s.query.ballotChase ? "Ballots not returned for this election. Your usual filters narrow this list." : "Your people, together in one place."}</p></div><div class="pt-actions">${typeof r.openBallotChaser === "function" ? b("ballot-chaser", s.query.ballotChase ? "Ballot progress" : "GOTV / Ballot Chaser", { secondary: true }) : ""}${can("import") || can("edit") ? tool("overlay", "Add contacts", "plus", { value: "add", primary: true }) : ""}${tool("overlay", "More contact tools", "more", { value: "more", extra: 'aria-label="More contact tools"' })}</div></header>` : '<header class="pt-cb-heading"><div><h2>Choose campaign recipients</h2><p>Filter across your contact book, then select matching contacts or individual people.</p></div></header>'}${renderRows()}`;
     return `<div class="pt-contact-book"><div${s.overlay || showingDetail ? ' inert aria-hidden="true"' : ""}>${main}</div>${showingDetail ? dialog(s.detailNew ? "Add a contact" : "Contact details", detail()) : overlayPanel()}</div>`;
   }
   function normalizedSimpleFilters() {
@@ -2963,7 +2974,22 @@ export function createOrganizationContactBook(
     const s = state(),
       op = name.slice(prefix.length + 1);
     if (localAction(name, value)) return true;
-    if (op === "refresh") await query({ refresh: true });
+    if (op === "ballot-chaser") r.openBallotChaser?.();
+    else if (op === "territories-start") {
+      if (
+        !can("select") ||
+        !s.query.ballotChase ||
+        !r.beginBallotTerritories ||
+        (!s.allMatching && !s.includeIds.size)
+      )
+        throw new Error("Select this election’s outreach contacts first.");
+      if (s.selection?.status !== "ready") await prepareSelection();
+      if (s.selection?.status !== "ready")
+        throw new Error(
+          "Wait for the complete contact selection before building territories.",
+        );
+      await r.beginBallotTerritories(s.selection);
+    } else if (op === "refresh") await query({ refresh: true });
     else if (op === "page-size") {
       if (!contactPageSizes.includes(s.pageSize)) s.pageSize = 50;
       await query();

@@ -117,6 +117,13 @@ export function createOrganizationPeoplePage({
           selection,
         });
       },
+      openBallotChaser:
+        context().scopeType === "coalition"
+          ? () => {
+              check();
+              navigate(route("work/ballot-chaser"));
+            }
+          : undefined,
     };
   }
   async function load({ force = false } = {}) {

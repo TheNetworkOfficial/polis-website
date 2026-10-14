@@ -1,0 +1,93 @@
+.ballot-chaser {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 24px;
+}
+.bc-nav,
+.bc-election-picker,
+.bc-history,
+.bc-progress-card,
+.bc-outcome {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.bc-nav {
+  margin-bottom: 24px;
+}
+.bc-nav a {
+  color: inherit;
+}
+.bc-election-picker {
+  margin-bottom: 24px;
+  align-items: end;
+}
+.bc-dashboard {
+  margin: 24px 0;
+}
+.bc-progress-card {
+  justify-content: space-between;
+}
+.bc-progress-card progress {
+  width: min(380px, 100%);
+  height: 24px;
+  accent-color: #5ce1c1;
+}
+.bc-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  margin: 16px 0;
+}
+.bc-stat strong {
+  display: block;
+  font-size: clamp(28px, 4vw, 46px);
+  font-variant-numeric: tabular-nums;
+}
+.bc-stat h3 {
+  margin: 8px 0;
+  font-size: 16px;
+}
+.bc-stat p,
+.bc-impact-note {
+  font-size: 13px;
+  line-height: 1.55;
+}
+.bc-history {
+  justify-content: space-between;
+  padding: 16px 0;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.25);
+}
+.bc-outcome {
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.25);
+}
+.bc-question {
+  border: 1px solid rgba(128, 128, 128, 0.35);
+  border-radius: 12px;
+  padding: 16px;
+  margin: 16px 0;
+}
+.ballot-chaser .pt-card {
+  margin-bottom: 16px;
+}
+@media (max-width: 800px) {
+  .bc-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 480px) {
+  .ballot-chaser {
+    padding: 12px;
+  }
+  .bc-stats {
+    gap: 8px;
+  }
+  .bc-stat {
+    padding: 12px;
+  }
+  .bc-election-picker .pt-field {
+    width: 100%;
+  }
+}
