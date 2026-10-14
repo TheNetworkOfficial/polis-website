@@ -16,6 +16,7 @@ const session = require("express-session");
 const cors = require("cors");
 const { createClient } = require("redis");
 const { RedisStore } = require("connect-redis");
+const { sendFrontendFile } = require("./frontendAuthRuntime");
 
 function resolveFrontendDistPath() {
   const configured = process.env.FRONTEND_DIST_PATH;
@@ -124,16 +125,6 @@ function mountFrontendRoutes(app) {
   const frontendDistPath = resolveFrontendDistPath();
   app.use(redirectLegacyHtml);
 
-  if (fs.existsSync(frontendDistPath)) {
-    app.use(
-      express.static(frontendDistPath, {
-        extensions: ["html"],
-        index: "index.html",
-        maxAge: "1h",
-      }),
-    );
-  }
-
   app.get(
     frontendRouteRewrites.map(([pattern]) => pattern),
     (req, res, next) => {
@@ -146,12 +137,22 @@ function mountFrontendRoutes(app) {
       }
       const filePath = fileIfExists(frontendDistPath, rewrite[1]);
       if (filePath) {
-        res.sendFile(filePath);
+        sendFrontendFile(req, res, next, filePath);
         return;
       }
       next();
     },
   );
+
+  if (fs.existsSync(frontendDistPath)) {
+    app.use(
+      express.static(frontendDistPath, {
+        extensions: ["html"],
+        index: "index.html",
+        maxAge: "1h",
+      }),
+    );
+  }
 }
 
 (async () => {
