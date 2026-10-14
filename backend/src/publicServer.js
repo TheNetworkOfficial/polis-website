@@ -7,6 +7,7 @@ const helmet = require("helmet");
 
 const postShareRoutes = require("./routes/postShares");
 const socialOAuthRoutes = require("./routes/socialOAuth");
+const { sendFrontendFile } = require("./frontendAuthRuntime");
 
 function resolveFrontendDistPath() {
   const configured = process.env.FRONTEND_DIST_PATH;
@@ -126,7 +127,7 @@ function sendFrontendRoute(req, res, next) {
   }
   const filePath = fileIfExists(frontendDistPath, rewrite[1]);
   if (filePath) {
-    res.sendFile(filePath);
+    sendFrontendFile(req, res, next, filePath);
     return;
   }
   next();
@@ -147,6 +148,11 @@ app.use(redirectLegacyHtml);
 app.use(postShareRoutes);
 app.use(socialOAuthRoutes);
 
+app.get(
+  frontendRouteRewrites.map(([pattern]) => pattern),
+  sendFrontendRoute,
+);
+
 if (fs.existsSync(frontendDistPath)) {
   app.use(
     express.static(frontendDistPath, {
@@ -156,11 +162,6 @@ if (fs.existsSync(frontendDistPath)) {
     }),
   );
 }
-
-app.get(
-  frontendRouteRewrites.map(([pattern]) => pattern),
-  sendFrontendRoute,
-);
 
 app.get("/", (_req, res) => {
   if (defaultIndexPath) {
