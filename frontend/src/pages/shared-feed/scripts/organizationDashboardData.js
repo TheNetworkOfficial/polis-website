@@ -165,28 +165,62 @@ export function createDashboardData({
       return {
         base,
         configuration,
-        campaigns: campaigns.filter(
-          (campaign) => campaign.status !== "archived",
-        ),
+        campaigns: [
+          ...new Map(
+            campaigns
+              .filter((campaign) => campaign.status !== "archived")
+              .map((campaign) => [campaign.campaignId, campaign]),
+          ).values(),
+        ],
       };
     });
   const textReports = () =>
     share("reports", async () => {
       const value = await text();
-      if (value.configuration.capabilities?.readReporting !== true)
-        throw new Error("Reports unavailable");
+      const selected = value.campaigns.slice(0, 3);
       const reports = await Promise.all(
-        value.campaigns.slice(0, 3).map(async (campaign) => {
-          const response = await call(
-            `${value.base}/campaigns/${id(campaign.campaignId)}/reporting`,
-          );
-          return {
-            campaign,
-            report: checkedTextingReport(response.report, campaign.campaignId),
-          };
+        selected.map(async (campaign) => {
+          if (value.configuration.capabilities?.readReporting !== true)
+            return { campaign, report: null };
+          try {
+            const response = await call(
+              `${value.base}/campaigns/${id(campaign.campaignId)}/reporting`,
+            );
+            return {
+              campaign,
+              report: checkedTextingReport(
+                response.report,
+                campaign.campaignId,
+              ),
+            };
+          } catch (error) {
+            if (error?.status === 401) throw error;
+            return { campaign, report: null };
+          }
         }),
       );
-      return { ...value, reports };
+      const known = reports.filter((item) => item.report);
+      const complete =
+        reports.length > 0 &&
+        known.length === reports.length &&
+        known.every((item) => item.report.coverage === "complete");
+      const counts = Object.fromEntries(
+        ["delivered", "outbound", "inbound"].map((key) => [
+          key,
+          known.length
+            ? known.reduce((sum, item) => sum + item.report.counts[key], 0)
+            : value.campaigns.length === 0
+              ? 0
+              : null,
+        ]),
+      );
+      return {
+        ...value,
+        reports,
+        complete,
+        counts,
+        partial: !complete && value.campaigns.length > 0,
+      };
     });
   const files = () =>
     share("files", async () => {
@@ -207,7 +241,7 @@ export function createDashboardData({
         tag: "Current round",
         metrics: fieldMetrics(value),
         action: "Open field overview",
-        route: routes.field,
+        route: routes.fieldOverview,
       });
     },
     async coverage() {
@@ -240,10 +274,16 @@ export function createDashboardData({
       return data({
         tag: "Current round",
         metrics: [{ label: "Field members", value: members.length }],
+        details: members.map((member) => ({
+          title: title(member.displayName, "Team member"),
+          note: "doors visited",
+          value: checkedCount(member.doorsKnocked),
+          icon: "users",
+        })),
         rows: members.slice(0, 3).map((member) => ({
           title: title(member.displayName, "Team member"),
-          note: `${checkedCount(member.doorsKnocked) ?? "—"} doors visited`,
-          value: checkedCount(member.points),
+          note: "doors visited",
+          value: checkedCount(member.doorsKnocked),
           icon: "users",
         })),
         action: "View field team",
@@ -262,6 +302,11 @@ export function createDashboardData({
       return data({
         tag: "Open requests",
         metrics: [{ label: "open follow-ups", value: open.length }],
+        details: open.map((row) => ({
+          title: human(row.type || "Follow-up"),
+          note: title(row.addressLabel, human(row.status || "Open")),
+          icon: "signpost",
+        })),
         rows: open.slice(0, 3).map((row) => ({
           title: human(row.type || "Follow-up"),
           note: title(row.addressLabel, human(row.status || "Open")),
@@ -398,15 +443,11 @@ export function createDashboardData({
           ? personalJobProgress(other[2].value).completed
           : null;
       const textValue =
-        other[3].status === "fulfilled" &&
-        other[3].value.reports.every(
-          (item) => item.report.coverage === "complete",
-        )
-          ? other[3].value.reports.reduce(
-              (sum, item) => sum + item.report.counts.delivered,
-              0,
-            )
+        other[3].status === "fulfilled"
+          ? other[3].value.counts.delivered
           : null;
+      const textPartial =
+        other[3].status === "fulfilled" && other[3].value.partial;
       return data({
         tag: "Recent activity",
         bars: recentActivityBars(events || []),
@@ -433,7 +474,8 @@ export function createDashboardData({
           {
             label: "Texts delivered",
             value: textValue,
-            note: "Recent campaigns",
+            partial: textPartial && textValue !== null,
+            note: textPartial ? "Available reports" : "Recent campaigns",
           },
           { label: "Your tasks completed", value: taskValue, note: "All time" },
         ],
@@ -443,7 +485,7 @@ export function createDashboardData({
       });
     },
     async attention() {
-      const rows = [];
+      const groups = [];
       if (
         hasPermission(
           workspace,
@@ -454,94 +496,179 @@ export function createDashboardData({
           "mission_templates_manage",
         )
       )
-        rows.push({
-          title: "Tasks needing review",
-          value: (await missions("attention")).length,
-          note: "Your organization",
+        groups.push({
+          key: "missions",
+          title: "Tasks to review",
           icon: "check-circle",
-          route: routes.missions,
+          route: routes.reviewTasks,
+          read: async () => {
+            const pending = await missions("attention");
+            return {
+              value: pending.length,
+              items: pending.slice(0, 2).map((mission) => ({
+                title: title(mission.title, "Task to review"),
+                note: "Task review",
+                icon: "check-circle",
+                route: `/missions/${id(mission.missionId)}`,
+              })),
+            };
+          },
         });
-      if (hasPermission(workspace, "posts_approve_manage")) {
-        const drafts = await allPages(`${org}/post-drafts`, { limit: 100 }, [
-          "drafts",
-          "items",
-        ]);
-        rows.push({
-          title: "Posts needing review",
-          value: drafts.filter((row) =>
-            ["submitted", "pending_approval", "publication_failed"].includes(
-              row.state,
-            ),
-          ).length,
+      if (
+        workspace.features?.organizationPublishing === true &&
+        hasPermission(workspace, "posts_approve_manage")
+      )
+        groups.push({
+          key: "posts",
+          title: "Posts to review",
           icon: "messages",
           route: routes.publishing,
+          read: async () => {
+            const drafts = (
+              await allPages(`${org}/post-drafts`, { limit: 100 }, [
+                "drafts",
+                "items",
+              ])
+            ).filter((row) =>
+              ["submitted", "pending_approval", "publication_failed"].includes(
+                row.state,
+              ),
+            );
+            return {
+              value: drafts.length,
+              items: drafts
+                .filter((draft) => draft.draftId)
+                .slice(0, 2)
+                .map((draft) => ({
+                  title: title(
+                    draft.description ||
+                      draft.content?.description ||
+                      draft.content?.title,
+                    "Post to review",
+                  ).slice(0, 90),
+                  note:
+                    draft.state === "publication_failed"
+                      ? "Publishing failed"
+                      : "Post review",
+                  icon: "messages",
+                  route: `${routes.publishing}/drafts/${id(draft.draftId)}`,
+                })),
+            };
+          },
         });
-      }
       if (
         hasPermission(workspace, "files_review") &&
         workspace.features?.organizationFiles
-      ) {
-        const { bootstrap } = await files(),
-          count = checkedCount(bootstrap.pendingCounts?.proposals);
-        if (count !== null)
-          rows.push({
-            title: "File proposals",
-            value: count,
-            icon: "folder",
-            route: routes.files,
-          });
-      }
+      )
+        groups.push({
+          key: "files",
+          title: "File proposals",
+          icon: "folder",
+          route: routes.files,
+          read: async () => {
+            const { bootstrap } = await files();
+            return {
+              value: checkedCount(bootstrap.pendingCounts?.proposals),
+              items: [],
+            };
+          },
+        });
+      const results = await Promise.allSettled(
+        groups.map((group) => group.read()),
+      );
+      const revoked = results.find(
+        (result) =>
+          result.status === "rejected" &&
+          [401, 403].includes(result.reason?.status),
+      );
+      if (revoked) throw revoked.reason;
+      const allRows = groups.map((group, index) => ({
+        key: group.key,
+        title: group.title,
+        icon: group.icon,
+        route: group.route,
+        value:
+          results[index].status === "fulfilled"
+            ? checkedCount(results[index].value.value)
+            : null,
+      }));
+      allRows.forEach((row) => {
+        if (row.value === null) row.note = "Unavailable";
+      });
+      const unknownGroups = allRows.filter((row) => row.value === null).length;
+      const knownTotal = allRows.reduce(
+        (sum, row) => sum + (row.value || 0),
+        0,
+      );
+      const allClear =
+        allRows.length > 0 && unknownGroups === 0 && knownTotal === 0;
       return data({
-        tag: `${rows.reduce((sum, row) => sum + (row.value || 0), 0)} items`,
-        rows,
+        tag: allClear
+          ? "All clear"
+          : knownTotal > 0
+            ? `${knownTotal} waiting`
+            : "Reviews",
+        rows: allRows.filter((row) => row.value === null || row.value > 0),
+        allRows,
+        priorityItems: results
+          .filter((result) => result.status === "fulfilled")
+          .flatMap((result) => result.value.items)
+          .slice(0, 4),
+        knownTotal,
+        unknownGroups,
+        allClear,
         action: "Review priorities",
-        route: routes.work,
-        empty: "No review items",
+        route: routes.priorities,
+        empty: allClear ? "No reviews waiting" : "No review summary available",
       });
     },
     async texting() {
-      const value = await textReports(),
-        complete = value.reports.every(
-          (item) => item.report.coverage === "complete",
-        );
-      const delivered = complete
-        ? value.reports.reduce(
-            (sum, item) => sum + item.report.counts.delivered,
-            0,
-          )
-        : null;
-      const outbound = complete
-        ? value.reports.reduce(
-            (sum, item) => sum + item.report.counts.outbound,
-            0,
-          )
-        : null;
-      const inbound = complete
-        ? value.reports.reduce(
-            (sum, item) => sum + item.report.counts.inbound,
-            0,
-          )
-        : null;
+      const value = await textReports();
+      const activeCampaigns = value.campaigns.filter(
+        (campaign) => campaign.status === "active",
+      ).length;
+      const pausedCampaigns = value.campaigns.filter(
+        (campaign) => campaign.status === "paused",
+      ).length;
+      const { delivered, outbound, inbound } = value.counts;
       return data({
-        tag: `${value.reports.length} campaigns`,
+        tag: value.complete
+          ? `${value.reports.length} campaigns`
+          : `${activeCampaigns} active`,
+        activeCampaigns,
+        pausedCampaigns,
+        campaignCount: value.campaigns.length,
+        partial: value.partial,
         metrics: [
-          { label: "delivered", value: delivered },
-          { label: "Replies received", value: inbound },
+          { label: "active campaigns", value: activeCampaigns },
+          {
+            label: "Delivered",
+            value: delivered,
+            partial: value.partial && delivered !== null,
+          },
+          {
+            label: "Replies received",
+            value: inbound,
+            partial: value.partial && inbound !== null,
+          },
         ],
         ratio:
-          delivered !== null && outbound > 0 && delivered <= outbound
+          value.complete &&
+          delivered !== null &&
+          outbound > 0 &&
+          delivered <= outbound
             ? {
                 value: delivered,
                 total: outbound,
                 percent: (delivered * 100) / outbound,
               }
             : null,
-        rows: value.reports.slice(0, 2).map(({ campaign, report }) => ({
+        rows: value.reports.map(({ campaign, report }) => ({
           title: title(campaign.name, "Campaign"),
-          note:
-            report.coverage === "complete"
-              ? `${report.counts.delivered} delivered`
-              : "Report incomplete",
+          note: human(campaign.status || "Draft"),
+          value: report ? checkedCount(report.counts.delivered) : null,
+          partial: report?.coverage === "partial",
+          route: routes.texting,
           icon: "messages",
         })),
         action: "View campaigns",

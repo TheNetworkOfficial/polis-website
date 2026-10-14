@@ -4,7 +4,7 @@ const path = require("node:path");
 const BASE = "http://127.0.0.1:9086";
 const ART =
   process.env.DASHBOARD_ARTIFACTS ||
-  "D:/CodexHome/artifacts/polis-visual-corrections-20261014/website";
+  "D:/CodexHome/artifacts/polis-dashboard-live-refresh-20261014/website";
 async function fixture(
   page,
   {
@@ -94,14 +94,21 @@ async function fixture(
     isAdmin: role === "admin",
     permissions,
     dashboardPreferences: { status: "ready", revision, preference },
-    features: {},
+    features: { organizationPublishing: true },
     featureFlags: {},
   };
   const mission = {
+    title: "Review Westside canvass results",
     missionId: "mission1",
     scopeType: "coalition",
     scopeId: "dashboard-fixture",
     jobs: [
+      {
+        jobId: "reviewjob",
+        title: "Review Westside canvass results",
+        assigneeUserId: "review-member",
+        status: "submitted",
+      },
       {
         jobId: "job1",
         title: "Westside door team",
@@ -214,7 +221,16 @@ async function fixture(
         })),
       });
     if (p.endsWith("/post-drafts"))
-      return json({ drafts: [{ state: "submitted" }], nextCursor: null });
+      return json({
+        drafts: [
+          {
+            draftId: "draft1",
+            description: "Weekend canvass announcement",
+            state: "submitted",
+          },
+        ],
+        nextCursor: null,
+      });
     if (p.includes("/canvassing/operations"))
       return json({
         items: [
@@ -461,7 +477,9 @@ test("pointer handle reorders without activating cards; field footer keeps the e
   await page
     .getByRole("button", { name: "Open field overview", exact: false })
     .click();
-  await expect(page).toHaveURL(/\/coalitions\/dashboard-fixture\/voter-map$/);
+  await expect(page).toHaveURL(
+    /\/coalitions\/dashboard-fixture\/field-overview$/,
+  );
 });
 
 test("candidate overview uses the same saved graphical cards and existing candidate navigation", async ({
@@ -549,4 +567,225 @@ test("saved dark theme retains the same blue graphical layout", async ({
     .locator(".organization-dashboard")
     .screenshot({ path: path.join(ART, "actual-dashboard-dark-wide.png") });
   expect(capture.errors).toEqual([]);
+});
+test("zero attention has a neutral all-clear state and dedicated graphical priorities", async ({
+  page,
+}) => {
+  await fixture(page);
+  await page.route(`${BASE}/api/**`, (route) => {
+    const p = new URL(route.request().url()).pathname;
+    const json = (body) =>
+      route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify(body),
+      });
+    if (p === "/api/missions") return json({ items: [] });
+    if (p.endsWith("/post-drafts")) return json({ drafts: [] });
+    return route.fallback();
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await open(page);
+  const card = page.locator("[data-dashboard-card=attention]");
+  await expect(card).toContainText("All clear");
+  await expect(card.locator(".pd-amber")).toHaveCount(0);
+  await expect(card).not.toContainText("Task approvals");
+  await page
+    .getByRole("button", { name: "Review priorities", exact: false })
+    .click();
+  await expect(page).toHaveURL(/\/priorities$/);
+  await expect(
+    page.getByRole("heading", { name: "Priorities", exact: true }),
+  ).toBeVisible();
+  await expect(page.locator(".pd-priority-hero")).toContainText("All clear");
+  await page
+    .locator(".organization-dashboard")
+    .screenshot({ path: path.join(ART, "priorities-clear-phone.png") });
+  await page.getByRole("button", { name: "Dashboard", exact: true }).click();
+  await expect(page.locator(".pd-grid")).toBeVisible();
+});
+
+test("partial or unavailable reports preserve useful active-campaign summary", async ({
+  page,
+}) => {
+  await fixture(page);
+  await page.route("**/reporting", (route) => {
+    const id = new URL(route.request().url()).pathname.split("/").at(-2);
+    if (id === "campaign1")
+      return route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ message: "Report unavailable" }),
+      });
+    return route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        report: {
+          version: 1,
+          campaignId: id,
+          coverage: "partial",
+          counts: {
+            accepted: 0,
+            sent: 0,
+            delivered: 480,
+            failed: 8,
+            pending: 12,
+            needsReview: 0,
+            inbound: 63,
+            outbound: 500,
+          },
+          unreadReplies: 5,
+        },
+      }),
+    });
+  });
+  await open(page);
+  const card = page.locator("[data-dashboard-card=texting]");
+  await expect(card).toContainText("2active campaigns");
+  await expect(card).toContainText("480+");
+  await expect(card).not.toContainText("%");
+  await expect(card).not.toContainText("Not available right now");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({
+    path: path.join(ART, "dashboard-partial-reports-phone.png"),
+    fullPage: true,
+  });
+});
+
+test("hidden-visible and focus refresh retain card DOM and good data with one in-flight load", async ({
+  page,
+}) => {
+  const capture = await fixture(page);
+  await open(page);
+  await expect(
+    page.getByRole("button", { name: "Refresh", exact: true }),
+  ).toBeEnabled();
+  await page.evaluate(() => {
+    window.__savedFieldCard = document.querySelector(
+      "[data-dashboard-card=field]",
+    );
+  });
+  let release;
+  const gate = new Promise((resolve) => (release = resolve));
+  let requests = 0;
+  await page.route("**/api/voter-map/canvassing/progress?**", async (route) => {
+    requests++;
+    await gate;
+    return route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ message: "Refresh unavailable" }),
+    });
+  });
+  await page.evaluate(() => {
+    Object.defineProperty(document, "hidden", {
+      configurable: true,
+      value: true,
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    Object.defineProperty(document, "hidden", {
+      configurable: true,
+      value: false,
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    window.dispatchEvent(new Event("focus"));
+  });
+  await expect.poll(() => requests).toBe(1);
+  await expect(page.locator("[data-dashboard-card=field]")).toContainText(
+    "1,240",
+  );
+  expect(
+    await page.evaluate(
+      () =>
+        window.__savedFieldCard ===
+        document.querySelector("[data-dashboard-card=field]"),
+    ),
+  ).toBe(true);
+  await expect(page.locator(".pd-module .pd-card-state")).toHaveCount(0);
+  release();
+  await expect(
+    page.getByRole("button", { name: "Refresh", exact: true }),
+  ).toBeEnabled();
+  await expect(page.locator("[data-dashboard-card=field]")).toContainText(
+    "1,240",
+  );
+  expect(
+    await page.evaluate(
+      () =>
+        window.__savedFieldCard ===
+        document.querySelector("[data-dashboard-card=field]"),
+    ),
+  ).toBe(true);
+  expect(requests).toBe(1);
+  expect(capture.errors).toEqual([]);
+});
+
+test("priorities and field overview provide real concise drilldowns on phone and wide", async ({
+  page,
+}) => {
+  const capture = await fixture(page);
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  await open(page);
+  await page
+    .getByRole("button", { name: "Review priorities", exact: false })
+    .click();
+  await expect(page.locator(".pd-priority-tile")).toHaveCount(2);
+  await expect(page.locator(".pd-priority-items")).toContainText(
+    "Review Westside canvass results",
+  );
+  await expect(page.locator(".pd-priority-items")).toContainText(
+    "Weekend canvass announcement",
+  );
+  await page
+    .locator(".organization-dashboard")
+    .screenshot({ path: path.join(ART, "priorities-wide.png") });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page
+    .locator(".organization-dashboard")
+    .screenshot({ path: path.join(ART, "priorities-phone.png") });
+  await page.getByRole("button", { name: "Dashboard", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Open field overview", exact: false })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Field overview", exact: true }),
+  ).toBeVisible();
+  await expect(page.locator("[data-dashboard-card=teams]")).toContainText(
+    "Sam Example",
+  );
+  await expect(page.locator("[data-dashboard-card=followups]")).toContainText(
+    "2",
+  );
+  await page
+    .locator(".organization-dashboard")
+    .screenshot({ path: path.join(ART, "field-overview-phone.png") });
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  await page
+    .locator(".organization-dashboard")
+    .screenshot({ path: path.join(ART, "field-overview-wide.png") });
+  await page
+    .getByRole("button", { name: "View field team", exact: false })
+    .click();
+  await expect(
+    page.getByRole("region", { name: "Field team details" }),
+  ).toContainText("Jordan Example");
+  await page
+    .getByRole("button", { name: "Close field details", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Open DoorKnocker", exact: false })
+    .click();
+  await expect(page).toHaveURL(/\/voter-map\/map$/);
+  expect(capture.errors).toEqual([]);
+});
+test("activity hour labels remain12hour in a24hour locale", async ({
+  browser,
+}) => {
+  const context = await browser.newContext({ locale: "en-GB" });
+  const page = await context.newPage();
+  await fixture(page);
+  await open(page);
+  await expect(page.locator(".pd-hour > span:last-child").first()).toHaveText(
+    /\d{1,2}\s?(am|pm)/i,
+  );
+  await context.close();
 });

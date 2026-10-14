@@ -328,10 +328,26 @@ function currentOrganizationDashboardContext() {
     scopeId,
     userId: user.userId,
     actorName: user.displayName || user.name || user.username || "",
+    page: ["priorities", "field-overview"].includes(route.routeParams?.section)
+      ? route.routeParams.section
+      : "dashboard",
     routes: {
+      reviewTasks: `/missions?scopeType=${scopeType}&scopeId=${encodedId}&view=attention`,
+      dashboard: coalition
+        ? coalitionSectionPath(scopeId)
+        : candidateDashboardSectionPath(scopeId),
+      priorities: coalition
+        ? `/coalitions/${encodedId}/priorities`
+        : `/candidate-dashboard/${encodedId}/priorities`,
+      fieldOverview: coalition
+        ? `/coalitions/${encodedId}/field-overview`
+        : `/candidate-dashboard/${encodedId}/field-overview`,
+      territory: coalition
+        ? `/coalitions/${encodedId}/voter-map/territories/admin`
+        : `/candidate/voter-map/territories/admin?candidateId=${encodedId}`,
       field: coalition
-        ? coalitionSectionPath(scopeId, "voter-map")
-        : `/candidate/voter-map?candidateId=${encodedId}`,
+        ? `/coalitions/${encodedId}/voter-map/map`
+        : `/candidate/voter-map/map?candidateId=${encodedId}`,
       missions: coalition
         ? coalitionSectionPath(scopeId, "missions")
         : candidateDashboardSectionPath(scopeId, "missions"),
@@ -136854,6 +136870,9 @@ function refreshTextingOnResume() {
 
 function attachGlobalListeners() {
   window.addEventListener("focus", refreshTextingOnResume);
+  window.addEventListener("focus", () =>
+    organizationDashboardPage.resume().catch(() => {}),
+  );
   root?.addEventListener("click", handleRootClick);
   root?.addEventListener("keydown", handleRootKeydown);
   root?.addEventListener("input", handleRootInput);
@@ -136877,6 +136896,7 @@ function attachGlobalListeners() {
       return;
     }
     refreshTextingOnResume();
+    organizationDashboardPage.resume().catch(() => {});
     if (isElectionDayRoute()) {
       configureElectionPolling();
       loadElectionResults().catch(() => {});

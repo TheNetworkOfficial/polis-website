@@ -48,7 +48,13 @@ const scope = {
   userId: "actor",
   routes: {},
 };
-const workspace = { ...scope, isAdmin: true, permissions: [], role: "admin" };
+const workspace = {
+  ...scope,
+  isAdmin: true,
+  permissions: [],
+  role: "admin",
+  features: { organizationPublishing: true },
+};
 const deferred = () => {
   let resolve;
   const promise = new Promise((done) => (resolve = done));
@@ -85,7 +91,7 @@ test("actual event buckets retain timestamps and never create member counts or i
   assert.equal(model.checkedCount(undefined), null);
   assert.equal(model.personalJobProgress([]).percent, null);
 });
-test("personal progress exhausts pagination, filters other assignees and rejects a scope mismatch", async () => {
+test("personal progress filters other assignees and rejects a scope mismatch", async () => {
   const reads = [];
   const data = createDashboardData({
     scope,
@@ -168,7 +174,7 @@ test("activity source failures stay unknown while authorized useful summaries re
     1,
   );
 });
-test("partial campaign reporting never becomes a full delivery ratio or hero total", async () => {
+test("partial campaign reporting retains lower bounds without a full delivery ratio", async () => {
   const data = createDashboardData({
     scope,
     workspace,
@@ -210,7 +216,8 @@ test("partial campaign reporting never becomes a full delivery ratio or hero tot
     },
   });
   assert.equal((await data.load("texting")).ratio, null);
-  assert.equal((await data.load("texting")).metrics[0].value, null);
+  assert.equal((await data.load("texting")).metrics[1].value, 2);
+  assert.equal((await data.load("texting")).partial, true);
 });
 test("reply queue excludes suppressed opt-outs and read conversations", async () => {
   const data = createDashboardData({
@@ -318,4 +325,202 @@ test("access revocation clears all card data and fences later private responses"
   assert.deepEqual(dashboard.state().cards, {});
   assert.equal(dashboard.render().includes("Private late title"), false);
   assert.equal(dashboard.state().workspace, null);
+});
+test("confirmed zero attention is neutral; failed groups remain unknown", async () => {
+  const card = createDashboardData({
+    scope,
+    workspace,
+    routes: {},
+    call: async (path) =>
+      path.includes("/missions?")
+        ? { items: [] }
+        : path.endsWith("/post-drafts?limit=100")
+          ? { drafts: [] }
+          : (() => {
+              throw new Error(path);
+            })(),
+  });
+  const clear = await card.load("attention");
+  assert.equal(clear.allClear, true);
+  assert.equal(clear.knownTotal, 0);
+  assert.equal(clear.unknownGroups, 0);
+  assert.deepEqual(clear.rows, []);
+  const partial = createDashboardData({
+    scope,
+    workspace,
+    routes: {},
+    call: async (path) => {
+      if (path.includes("/missions?")) return { items: [] };
+      throw new Error("Temporarily unavailable");
+    },
+  });
+  const unknown = await partial.load("attention");
+  assert.equal(unknown.allClear, false);
+  assert.equal(unknown.unknownGroups, 1);
+  assert.equal(unknown.rows[0].value, null);
+});
+
+test("active campaigns survive missing and partial reports without fabricated delivery ratio", async () => {
+  const data = createDashboardData({
+    scope,
+    workspace,
+    routes: {},
+    call: async (path) => {
+      if (path.endsWith("/workspace"))
+        return {
+          workspace: {
+            scopeKey: "coalition:one",
+            status: "configured",
+            manualOnly: true,
+            capabilities: { readReporting: true },
+          },
+        };
+      if (path.includes("/campaigns?"))
+        return {
+          items: [
+            {
+              campaignId: "first",
+              status: "active",
+              scopeKey: "coalition:one",
+            },
+            {
+              campaignId: "second",
+              status: "active",
+              scopeKey: "coalition:one",
+            },
+            {
+              campaignId: "third",
+              status: "paused",
+              scopeKey: "coalition:one",
+            },
+          ],
+        };
+      if (path.includes("/first/")) throw new Error("One report unavailable");
+      return {
+        report: {
+          version: 1,
+          campaignId: path.includes("/second/") ? "second" : "third",
+          coverage: "partial",
+          counts: Object.fromEntries(
+            [
+              "accepted",
+              "sent",
+              "delivered",
+              "failed",
+              "pending",
+              "needsReview",
+              "inbound",
+              "outbound",
+            ].map((key) => [key, 4]),
+          ),
+          unreadReplies: 0,
+        },
+      };
+    },
+  });
+  const card = await data.load("texting");
+  assert.equal(card.activeCampaigns, 2);
+  assert.equal(card.pausedCampaigns, 1);
+  assert.equal(card.campaignCount, 3);
+  assert.equal(card.metrics[1].value, 8);
+  assert.equal(card.metrics[1].partial, true);
+  assert.equal(card.ratio, null);
+  assert.equal(card.rows.length, 3);
+});
+
+test("refresh keeps good same-actor cards and coalesces concurrent forced requests", async () => {
+  let phase = 0,
+    bootstraps = 0;
+  const pending = deferred();
+  const bootstrap = {
+    workspaces: [
+      {
+        ...workspace,
+        dashboardPreferences: { status: "ready", ...snapshot(["field"]) },
+      },
+    ],
+  };
+  const dashboard = createOrganizationDashboard({
+    context: () => scope,
+    changed: () => {},
+    navigate: () => {},
+    request: async (path) => {
+      if (path === "/api/me/organization-workspaces") {
+        bootstraps++;
+        return phase ? pending.promise : bootstrap;
+      }
+      if (path.includes("/canvassing/progress")) {
+        if (phase) throw new Error("Refresh unavailable");
+        return {
+          status: "ready",
+          leaderboardScope: { status: "ready" },
+          totals: { doorsKnocked: 123 },
+        };
+      }
+      throw new Error("Unused");
+    },
+  });
+  await dashboard.load();
+  const previous = dashboard.state().cards.field.value;
+  phase = 1;
+  const refreshing = dashboard.load({ force: true });
+  await dashboard.load({ force: true });
+  assert.equal(bootstraps, 2);
+  assert.equal(dashboard.state().loaded, true);
+  assert.equal(dashboard.state().cards.field.value, previous);
+  assert.equal(dashboard.render().includes("123"), true);
+  pending.resolve(bootstrap);
+  await refreshing;
+  assert.equal(dashboard.state().cards.field.value, previous);
+  assert.equal(dashboard.state().reading, false);
+  assert.match(dashboard.state().message, /last update/);
+});
+test("priority previews use already fetched bounded mission/post records and direct detail links", async () => {
+  const reads = [];
+  const data = createDashboardData({
+    scope,
+    workspace,
+    routes: {
+      reviewTasks: "/missions?scopeType=coalition&scopeId=one&view=attention",
+      publishing: "/workspace/coalition/one/work/publishing",
+    },
+    call: async (path) => {
+      reads.push(path);
+      if (path.includes("/missions?"))
+        return {
+          items: [0, 1, 2].map((i) => ({
+            missionId: `m${i}`,
+            scopeType: "coalition",
+            scopeId: "one",
+            title: `Waiting mission ${i}`,
+            jobs: [],
+          })),
+        };
+      return {
+        drafts: [0, 1, 2].map((i) => ({
+          draftId: `d${i}`,
+          state: "submitted",
+          content: { description: `Waiting post ${i}` },
+        })),
+      };
+    },
+  });
+  const value = await data.load("attention");
+  assert.equal(value.knownTotal, 6);
+  assert.equal(value.priorityItems.length, 4);
+  assert.deepEqual(
+    value.priorityItems.map((item) => item.title),
+    [
+      "Waiting mission 0",
+      "Waiting mission 1",
+      "Waiting post 0",
+      "Waiting post 1",
+    ],
+  );
+  assert.equal(value.priorityItems[0].route, "/missions/m0");
+  assert.equal(
+    value.priorityItems[2].route,
+    "/workspace/coalition/one/work/publishing/drafts/d0",
+  );
+  assert.equal(reads.length, 2);
 });

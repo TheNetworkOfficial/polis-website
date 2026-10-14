@@ -1408,3 +1408,198 @@
 .organization-dashboard {
   color-scheme: inherit;
 }
+
+.organization-dashboard .pd-all-clear {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 18px 8px;
+  color: var(--pd-muted);
+  min-height: 150px;
+}
+.organization-dashboard .pd-clear-icon {
+  width: 52px;
+  height: 52px;
+  display: grid;
+  place-items: center;
+  color: var(--pd-accent);
+  background: var(--pd-secondary);
+  border-radius: 50%;
+}
+.organization-dashboard .pd-clear-icon svg {
+  width: 28px;
+  height: 28px;
+}
+.organization-dashboard .pd-all-clear strong {
+  color: var(--pd-ink);
+  font-size: 19px;
+  font-weight: 500;
+}
+.organization-dashboard .pd-all-clear > span:last-child {
+  font-size: 12px;
+}
+.organization-dashboard .pd-subtle {
+  font-size: 11px;
+  color: var(--pd-muted);
+}
+.organization-dashboard .pd-refresh-control {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 4px;
+  margin-bottom: -12px;
+}
+.organization-dashboard .pd-overview-back {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 22px;
+}
+.organization-dashboard .pd-overview-back button:first-child svg {
+  transform: rotate(-90deg);
+}
+.organization-dashboard .pd-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+.organization-dashboard .pd-field-kpis {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+  padding: 16px 0;
+}
+.organization-dashboard .pd-field-kpis > div {
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+}
+.organization-dashboard .pd-field-kpis .pd-metric strong {
+  font-size: 38px;
+}
+.organization-dashboard .pd-field-kpis .pd-icon-tile {
+  width: 38px;
+  height: 38px;
+}
+.organization-dashboard .pd-priority-hero {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  border: 1px solid var(--pd-line);
+  background: var(--pd-surface);
+  padding: 25px;
+  border-radius: 16px;
+  margin: 18px 0;
+}
+.organization-dashboard .pd-priority-hero > div {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex: 1;
+}
+.organization-dashboard .pd-priority-hero strong {
+  font-size: 44px;
+  font-weight: 500;
+  line-height: 1.1;
+}
+.organization-dashboard .pd-priority-hero.is-clear strong {
+  font-size: 29px;
+}
+.organization-dashboard .pd-priority-hero > div > span {
+  color: var(--pd-muted);
+  font-size: 12px;
+}
+.organization-dashboard .pd-priority-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+.organization-dashboard .pd-priority-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 13px;
+  padding: 22px;
+  border: 1px solid var(--pd-line);
+  border-radius: 16px;
+  background: var(--pd-surface);
+  text-align: left;
+}
+.organization-dashboard .pd-priority-tile strong {
+  font-size: 36px;
+  font-weight: 500;
+  line-height: 1;
+}
+.organization-dashboard .pd-priority-tile > span {
+  font-size: 13px;
+}
+.organization-dashboard .pd-priority-tile small {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  align-items: center;
+  color: var(--pd-muted);
+  font-size: 11px;
+}
+.organization-dashboard .pd-priority-tile small svg {
+  width: 15px;
+  height: 15px;
+}
+.organization-dashboard .pd-priority-tile.is-waiting .pd-icon-tile {
+  background: var(--pd-amber-bg);
+  color: var(--pd-amber);
+}
+.organization-dashboard .pd-priority-tile.is-clear strong {
+  color: var(--pd-muted);
+}
+.organization-dashboard .pd-field-actions h2 {
+  font-size: 15px;
+}
+@container (max-width:1050px) {
+  .organization-dashboard .pd-overview-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@container (max-width:650px) {
+  .organization-dashboard .pd-overview-grid,
+  .organization-dashboard .pd-priority-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .organization-dashboard .pd-field-kpis {
+    gap: 9px;
+  }
+  .organization-dashboard .pd-field-kpis .pd-metric strong {
+    font-size: 27px;
+  }
+  .organization-dashboard .pd-field-kpis .pd-metric span {
+    font-size: 10px;
+  }
+  .organization-dashboard .pd-priority-tile {
+    display: grid;
+    grid-template-columns: 38px minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+    padding: 18px;
+  }
+  .organization-dashboard .pd-priority-tile > strong {
+    grid-column: 3;
+    grid-row: 1;
+    font-size: 28px;
+  }
+  .organization-dashboard .pd-priority-tile > span:not(.pd-icon-tile) {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .organization-dashboard .pd-priority-tile small {
+    grid-column: 2 / 4;
+  }
+  .organization-dashboard .pd-priority-hero {
+    gap: 12px;
+    padding: 19px;
+  }
+}
+
+.organization-dashboard .pd-priority-items {
+  margin-top: 16px;
+}
