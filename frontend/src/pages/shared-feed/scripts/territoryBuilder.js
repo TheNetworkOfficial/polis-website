@@ -37,6 +37,16 @@ const icons = {
   move: '<path d="M12 3v18M3 12h18m-12-6 3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3m12-6 3 3-3 3"/>',
   undo: '<path d="m7 4-4 4 4 4M3 8h10a7 7 0 0 1 0 14"/>',
   lock: '<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
+  pan: '<path d="M8 13V5a2 2 0 0 1 4 0v7-8a2 2 0 0 1 4 0v8-6a2 2 0 0 1 4 0v10c0 4-3 6-7 6h-1c-2 0-3-1-5-3l-4-6a2 2 0 0 1 3-2l2 2"/>',
+  users:
+    '<circle cx="9" cy="7" r="4"/><path d="M2 21v-2a7 7 0 0 1 14 0v2m2-18a4 4 0 0 1 0 8m1 4a5 5 0 0 1 3 4v2"/>',
+  shield: '<path d="m12 3 8 3v6c0 5-8 10-8 10S4 17 4 12V6ZM8 12l3 3 5-6"/>',
+  area: '<path d="m3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3zM9 3v15m6-12v15"/>',
+  pin: '<path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="3"/>',
+  sparkles:
+    '<path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5ZM20 2v4m-2-2h4"/>',
+  pencil: '<path d="m4 16 12-12 4 4L8 20H4ZM14 6l4 4"/>',
+  close: '<path d="m6 6 12 12M6 18 18 6"/>',
 };
 const icon = (name) =>
   `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name] || icons.select}</svg>`;
@@ -50,6 +60,7 @@ export function createTerritoryBuilder({
   navigate,
   confirm,
   openExisting,
+  openContacts,
 }) {
   let host,
     map,
@@ -62,10 +73,12 @@ export function createTerritoryBuilder({
     method = "auto",
     drawing = [],
     handles = [],
+    labels = [],
     fitKey = "",
     drag = null,
     reviewOpen = false,
-    viewportTimer;
+    viewportTimer,
+    dialog = null;
   const model = createTerritoryBuilderModel({
     request,
     context,
@@ -85,10 +98,15 @@ export function createTerritoryBuilder({
   };
 
   function destroyMap() {
+    window.removeEventListener("pointerup", onMapUp);
+    window.removeEventListener("pointercancel", cancelMapDrag);
+    window.removeEventListener("blur", cancelMapDrag);
     clearTimeout(viewportTimer);
     mapGeneration++;
     handles.forEach((h) => h.remove());
     handles = [];
+    labels.forEach((label) => label.remove());
+    labels = [];
     map?.remove();
     map = null;
     mapReady = false;
@@ -105,10 +123,11 @@ export function createTerritoryBuilder({
     drawing = [];
     reviewOpen = false;
     mapError = "";
+    dialog = null;
   }
   function shell() {
     return `<section class="territory-builder" aria-label="Territory builder">
-      <header class="tb-header"><button type="button" data-tb-action="back" aria-label="Back to voter map">${icon("back")}</button><div><h2>Territories</h2><span data-tb-scope></span></div><span data-tb-draft></span><div data-tb-save></div></header>
+      <header class="tb-header"><button type="button" data-tb-action="back" aria-label="Back to voter map">${icon("back")}</button><div><h2>Territories</h2><span data-tb-scope></span></div><span class="tb-draft-badge" data-tb-draft></span><div data-tb-save></div>${button("access", icon("shield"), { title: "Your map access" })}</header>
       <nav class="tb-steps" aria-label="Territory setup" data-tb-steps></nav>
       <div class="tb-filters" role="group" aria-label="Address exclusions" data-tb-filters></div>
       <div class="tb-alert" role="alert" data-tb-error hidden></div>
@@ -138,10 +157,16 @@ export function createTerritoryBuilder({
       host.innerHTML = shell();
       host.addEventListener("click", onClick);
       host.addEventListener("change", onChange);
+      host.addEventListener("input", (event) => {
+        if (event.target.hasAttribute("data-tb-count"))
+          q(".tb-count output").value = event.target.value;
+      });
       host.addEventListener("keydown", (event) => {
-        if (reviewOpen && event.key === "Tab") {
+        if ((reviewOpen || dialog) && event.key === "Tab") {
           const focusable = [
-            ...q(".tb-dialog").querySelectorAll("button:not(:disabled)"),
+            ...q(".tb-dialog").querySelectorAll(
+              "button:not(:disabled),input:not(:disabled),select:not(:disabled)",
+            ),
           ];
           const first = focusable[0],
             last = focusable.at(-1);
@@ -162,9 +187,11 @@ export function createTerritoryBuilder({
           }
         }
         if (event.key === "Escape") {
+          cancelMapDrag();
           drawing = [];
           tool = "select";
           reviewOpen = false;
+          dialog = null;
           render();
         }
       });
@@ -204,17 +231,18 @@ export function createTerritoryBuilder({
       )
       .join('<span aria-hidden="true">›</span>');
     const ex = s.draft.contactExclusions;
+    const summary = s.review?.summary;
     q("[data-tb-filters]").innerHTML = `<span>Exclude</span>${[
       ["excludeDoNotKnock", "Do not knock requests"],
       ["excludeReportedDanger", "Reported danger issues"],
     ]
       .map(
         ([key, label]) =>
-          `<label><input type="checkbox" data-tb-filter="${key}"${ex[key] ? " checked" : ""}${!s.loaded || s.busy || s.published ? " disabled" : ""}>${label}</label>`,
+          `<label><input type="checkbox" data-tb-filter="${key}"${ex[key] ? " checked" : ""}${!s.loaded || s.busy || s.published ? " disabled" : ""}><span>${label}</span>${Number.isSafeInteger(summary?.[key === "excludeDoNotKnock" ? "doNotKnockAddressCount" : "reportedDangerAddressCount"]) ? `<small>${summary[key === "excludeDoNotKnock" ? "doNotKnockAddressCount" : "reportedDangerAddressCount"]}</small>` : ""}</label>`,
       )
       .join(
         "",
-      )}<select class="tb-blank-select" aria-label="Blank filter dropdown placeholder" disabled><option value=""></option></select>`;
+      )}<select class="tb-blank-select" aria-label="Blank filter dropdown placeholder"><option value=""></option></select><span class="tb-filter-summary">${summary ? `${summary.eligibleAddressCount} included · ${summary.excludedAddressCount} excluded` : ""}</span>`;
     const error = q("[data-tb-error]");
     error.hidden = !(s.error || s.sourceError || s.viewportError);
     error.textContent = s.error || s.sourceError || s.viewportError || "";
@@ -229,14 +257,22 @@ export function createTerritoryBuilder({
     }
     q("[data-tb-map-title]").textContent =
       s.step === "area"
-        ? "Choose your working area"
+        ? s.bootstrap.areas.find(
+            (area) =>
+              JSON.stringify(area.geojson) ===
+              JSON.stringify(s.draft.areaGeojson),
+          )?.name || "Your working area"
         : `${s.draft.territories.length} territories`;
     q("[data-tb-tools]").innerHTML =
       [
-        ["select", "Select / resize"],
-        ["draw", s.step === "area" ? "Draw area" : "Draw territory"],
-        ["move", "Move boundary"],
-        ["trim", "Trim selected territory"],
+        ["select", "Select and reshape"],
+        ["pan", "Pan map"],
+        ...(s.step === "cut"
+          ? [
+              ["draw", "Draw territory"],
+              ["trim", "Trim territory"],
+            ]
+          : []),
       ]
         .map(([key, title]) =>
           button("tool", icon(key), {
@@ -244,28 +280,31 @@ export function createTerritoryBuilder({
             title,
             pressed: tool === key,
             disabled:
-              s.step === "assign" ||
-              Boolean(s.published) ||
+              (key !== "pan" &&
+                (s.step === "assign" || Boolean(s.published))) ||
               (key === "trim" && (s.step === "area" || !selected(s))),
           }),
         )
         .join("") +
-      button("undo", icon("undo"), {
-        title: "Undo last change",
-        disabled: !s.history.length || Boolean(s.published),
-      });
+      (s.step === "cut"
+        ? button("undo", icon("undo"), {
+            title: "Undo last edit",
+            disabled: !s.history.length || Boolean(s.published),
+          })
+        : "");
     const hints = {
       select: "Select a territory. Drag its corners to resize.",
       draw: "Tap the map to add corners, then finish the shape.",
       trim: "Draw a part to remove from the selected territory.",
       move: "Drag the selected boundary on the map.",
+      pan: "Drag to move around the map.",
     };
     q("[data-tb-hint]").textContent =
       mapError ||
       (s.busy
         ? "Checking your plan…"
         : s.step === "assign"
-          ? "Review each territory and choose a staff member."
+          ? "Choose a person for each territory."
           : hints[tool]);
     q("[data-tb-panel]").innerHTML =
       (s.conflict ? button("reload", "Reload latest plan") : "") +
@@ -277,9 +316,8 @@ export function createTerritoryBuilder({
             ? cutPanel(s)
             : assignPanel(s)) +
       `<div class="tb-existing-link">${button("existing", "Existing territories")}</div>`;
-    const summary = s.review?.summary;
     q("[data-tb-status]").innerHTML =
-      `<strong>${s.notice ? e(s.notice) : !sourceReady(s) ? "Preparing addresses…" : summary ? `${summary.eligibleAddressCount} addresses in area` : "Check coverage for address totals"}</strong><span>${summary?.excludedAddressCount ? `${summary.excludedAddressCount} excluded · ` : ""}${s.source?.unmappedRecordCount ? `${e(s.source.unmappedRecordCount)} records have no map location` : s.viewportBusy ? "Loading visible addresses…" : s.clustered ? "Nearby addresses are grouped on the map" : "Changes stay in your draft until published"}</span>${button("refresh-source", s.sourceBusy ? "Checking…" : "Refresh addresses", { disabled: s.sourceBusy })}`;
+      `<strong>${s.notice ? e(s.notice) : !sourceReady(s) ? "Preparing addresses…" : s.step === "assign" ? `${s.draft.territories.filter((t) => t.assigneeUserId).length} of ${s.draft.territories.length} assigned` : summary ? (s.step === "cut" ? `${s.draft.territories.length} territories · ${summary.allocatedAddressCount} doors` : `${summary.eligibleAddressCount} addresses`) : "Choose your working area"}</strong><span>${summary && s.step !== "area" ? `${summary.unallocatedAddressCount} doors outside territories` : s.source?.unmappedRecordCount ? `${e(s.source.unmappedRecordCount)} without a mapped address` : s.viewportBusy ? "Loading visible addresses…" : ""}</span>`;
     q("[data-tb-next]").innerHTML = s.published
       ? button("new", "Plan another area")
       : s.step === "area"
@@ -288,14 +326,14 @@ export function createTerritoryBuilder({
             disabled: !s.draft.areaGeojson || drawing.length > 0,
           })
         : s.step === "cut"
-          ? button("next-assign", "Assign staff →", {
+          ? button("next-assign", "Assign people →", {
               primary: true,
               disabled:
                 !s.draft.territories.length ||
                 drawing.length > 0 ||
                 !sourceReady(s),
             })
-          : button("review", "Review & publish →", {
+          : button("review", "Review →", {
               primary: true,
               disabled: !hasCompleteAssignments(s) || !sourceReady(s),
             });
@@ -309,42 +347,109 @@ export function createTerritoryBuilder({
       ? `<div class="tb-drawing-controls"><p>${drawing.length} corners</p>${button("finish", "Finish shape", { primary: true, disabled: drawing.length < 3 })}${button("cancel-draw", "Cancel")}</div>`
       : "";
   }
+  function sourcePanel(s) {
+    const count = s.source?.mappedAddressCount,
+      missing = s.source?.unmappedRecordCount;
+    return `<div class="tb-contact-source"><strong>Contact book</strong><span>${Number.isSafeInteger(count) ? `${count.toLocaleString()} mapped` : "Preparing addresses…"}${Number.isSafeInteger(missing) ? ` · ${missing.toLocaleString()} need a map location` : ""}</span>${button("address-issues", "Review address issues", { disabled: !s.loaded })}</div><label class="tb-permitted"><input type="checkbox" checked disabled>Within your permitted map area</label>`;
+  }
   function areaPanel(s) {
-    return `<h3>Choose an area</h3><p>Start with an available boundary or draw one on the map.</p><div class="tb-area-list">${s.bootstrap.areas.map((area, i) => button("area", e(area.name || "Available area"), { value: i, pressed: JSON.stringify(s.draft.areaGeojson) === JSON.stringify(area.geojson) })).join("")}</div>${s.bootstrap.boundary ? button("boundary", "Use full boundary", { disabled: !s.bootstrap.boundary }) : ""}${button("tool", `${icon("draw")} Draw an area`, { value: "draw", pressed: tool === "draw" })}${drawingControls()}${s.draft.areaGeojson ? `<div class="tb-stat"><strong>${s.review?.summary.eligibleAddressCount ?? "—"}</strong><span>addresses included</span></div>${button("preview", "Check coverage", { disabled: !sourceReady(s) })}` : ""}<p class="tb-subtle">Use the map controls to move around and zoom in.</p>`;
+    return `<span class="tb-eyebrow">Start with a place</span><h3>Where are we working?</h3><p>Choose a boundary or draw your own.</p><div class="tb-area-list">${s.bootstrap.areas.map((area, i) => button("area", `${icon("area")}<span>Saved area<small>${e(area.name || "Available area")}</small></span>`, { value: i, pressed: JSON.stringify(s.draft.areaGeojson) === JSON.stringify(area.geojson) })).join("")}${s.bootstrap.boundary ? button("boundary", `${icon("pin")}<span>Boundary<small>Neighborhood / precinct</small></span>`, { pressed: JSON.stringify(s.draft.areaGeojson) === JSON.stringify(s.bootstrap.boundary) && !s.bootstrap.areas.some((area) => JSON.stringify(area.geojson) === JSON.stringify(s.draft.areaGeojson)) }) : ""}${button("tool", `${icon("draw")}<span>Draw an area<small>Tap around its edges</small></span>`, { value: "draw", pressed: tool === "draw" })}</div>${sourcePanel(s)}${drawingControls()}${s.draft.areaGeojson && !s.review ? button("preview", "Check coverage", { disabled: !sourceReady(s) }) : ""}`;
   }
   function territoryRows(s, assignment = false) {
     return s.draft.territories
-      .map(
-        (t, index) =>
-          `<div class="tb-territory-row${t.id === s.selectedId ? " is-selected" : ""}"><button type="button" data-tb-action="select" data-value="${e(t.id)}" aria-pressed="${t.id === s.selectedId}"><span class="tb-number">${index + 1}</span><span><strong>${e(t.name)}</strong><small>${Number.isInteger(t.addressCount) && s.review ? `${t.addressCount} addresses` : "Awaiting preview"}${t.locked ? " · Locked" : ""}</small></span></button>${assignment ? `<label class="tb-assignee"><span class="tb-sr-only">Assign ${e(t.name)}</span><select data-tb-assignee="${e(t.id)}"${s.busy ? " disabled" : ""}><option value="">Unassigned</option>${s.bootstrap.staff.map((p) => `<option value="${e(p.userId)}"${p.userId === t.assigneeUserId ? " selected" : ""}>${e(p.displayName || p.username || "Team member")}${p.username ? ` (@${e(p.username)})` : ""}</option>`).join("")}${t.assigneeUserId && !s.bootstrap.staff.some((p) => p.userId === t.assigneeUserId) ? '<option selected value="">Staff member unavailable — choose again</option>' : ""}</select></label>` : ""}</div>`,
-      )
+      .map((t, index) => {
+        const person = s.bootstrap.staff.find(
+          (p) => p.userId === t.assigneeUserId,
+        );
+        const caption = assignment
+          ? person?.displayName ||
+            person?.username ||
+            (t.assigneeUserId ? "Choose another person" : "Choose person")
+          : `${t.locked ? "Locked · " : ""}${Number.isInteger(t.addressCount) && s.review ? `${t.addressCount} doors` : "Check coverage"}`;
+        return `<div class="tb-territory-row${t.id === s.selectedId ? " is-selected" : ""}">${button(assignment ? "choose-person" : "select", `<span class="tb-number">T${index + 1}</span><span><strong>${e(t.name)}</strong><small>${e(caption)}</small></span>${assignment ? icon(person ? "lock" : "select") : ""}`, { value: t.id, pressed: t.id === s.selectedId, title: `${assignment ? "Assign" : "Select"} ${t.name}` })}</div>`;
+      })
       .join("");
   }
   function cutPanel(s) {
-    const t = selected(s);
-    return `<h3>Cut your territories</h3><p>Balance the workload, then adjust the boundaries.</p><div class="tb-methods">${["auto", "guided", "draw"].map((name) => button("method", name[0].toUpperCase() + name.slice(1), { value: name, pressed: method === name })).join("")}</div>${method !== "draw" ? `<label class="tb-count"><span>Territories</span><input type="number" data-tb-count min="1" max="${s.bootstrap.limits?.maxTerritories || 12}" value="${s.targetCount}"${s.busy ? " disabled" : ""}></label><p class="tb-subtle">${method === "guided" ? "Locked territories stay in place. Split the remaining area." : "Divide the area by geography and address workload."}</p>${button("generate", method === "guided" ? "Fill remaining area" : "Create territories", { primary: true })}` : `<p class="tb-subtle">Draw each territory, then drag its corners to refine it.</p>${button("tool", `${icon("draw")} Draw territory`, { value: "draw", primary: true })}`}${drawingControls()}<div class="tb-territories">${territoryRows(s)}</div>${t ? `<label class="tb-name">Territory name<input type="text" data-tb-name value="${e(t.name)}" maxlength="80"${s.busy ? " disabled" : ""}></label><div class="tb-edit-actions">${button("lock", t.locked ? "Unlock" : "Lock", { pressed: t.locked })}${button("split", "Split", { disabled: t.locked })}${button("tool", "Trim", { value: "trim", disabled: t.locked })}${t.trimGeometry ? button("clear-trim", "Restore trim", { disabled: t.locked }) : ""}${button("remove", "Remove", { disabled: t.locked })}</div>` : ""}${s.draft.territories.length ? button("preview", "Check coverage") : ""}${s.review ? `<p class="tb-subtle">${s.review.summary.allocatedAddressCount} allocated · ${s.review.summary.unallocatedAddressCount} unassigned to a territory${s.review.summary.boundaryAddressCount ? ` · ${s.review.summary.boundaryAddressCount} on an edge; move the boundary to include them` : ""}</p>` : ""}`;
+    const t = selected(s),
+      total = s.review?.summary.eligibleAddressCount;
+    return `<span class="tb-eyebrow">Make it manageable</span><h3>${s.draft.territories.length ? "Shape your territories" : "How do you want to cut?"}</h3><div class="tb-methods">${["auto", "guided", "draw"].map((name) => button("method", `${name === "auto" ? icon("sparkles") : ""}${name[0].toUpperCase() + name.slice(1)}`, { value: name, pressed: method === name })).join("")}</div>${drawing.length ? drawingControls() : method === "draw" ? `<p>Your lines. Live address counts.</p>${button("tool", `${icon("draw")}Draw a territory`, { value: "draw" })}` : `${method === "guided" ? `<p>${s.draft.territories.length ? "Lock a territory you like. Fill the rest." : "Draw one territory. Fill the rest automatically."}</p>${!s.draft.territories.length ? button("tool", `${icon("draw")}Draw first territory`, { value: "draw" }) : ""}` : ""}<label class="tb-count" for="tb-territory-count"><span>Territories</span><output>${s.targetCount}</output></label><input id="tb-territory-count" type="range" data-tb-count min="1" max="${s.bootstrap.limits?.maxTerritories || 12}" value="${s.targetCount}"${s.busy ? " disabled" : ""}><div class="tb-small-row"><span>${Number.isInteger(total) ? `About ${Math.round(total / s.targetCount)} doors each` : ""}</span><span>Balanced by doors</span></div>${button("generate", `${icon("sparkles")}${method === "guided" ? "Fill remaining area" : s.draft.territories.length ? "Rebalance territories" : `Preview ${s.targetCount} territories`}`, { primary: !s.draft.territories.length })}`}${s.draft.territories.length ? `<hr class="tb-rule"><div class="tb-inline-controls"><span class="tb-eyebrow">${s.draft.territories.length} territories</span>${button("rename", `${icon("pencil")}Rename`, { disabled: !t })}</div><div class="tb-territories">${territoryRows(s)}</div>${t ? `<div class="tb-edit-actions">${button("lock", `${icon("lock")}${t.locked ? "Unlock" : "Keep shape"}`, { pressed: t.locked })}${button("split", "Split", { disabled: t.locked })}${button("remove", "Remove", { disabled: t.locked })}${!s.review ? button("preview", "Check coverage", { disabled: !sourceReady(s) }) : ""}</div><details class="tb-extra-tools"><summary>Boundary tools</summary>${button("tool", `${icon("move")}Move boundary`, { value: "move", disabled: t.locked })}${t.trimGeometry ? button("clear-trim", "Restore trim", { disabled: t.locked }) : ""}</details>` : ""}` : ""}`;
   }
   function assignPanel(s) {
-    const localDate = s.draft.startsAt
-      ? new Date(
-          new Date(s.draft.startsAt).getTime() -
-            new Date(s.draft.startsAt).getTimezoneOffset() * 60000,
-        )
-          .toISOString()
-          .slice(0, 16)
-      : "";
-    return `<h3>Assign your team</h3><p>Choose staff for each territory. Save a draft to finish later.</p>${!s.bootstrap.staff.length ? '<p class="tb-subtle">No eligible staff are available yet.</p>' : ""}<div class="tb-territories">${territoryRows(s, true)}</div><label class="tb-start">Start time <span class="tb-subtle">Optional</span><input type="datetime-local" data-tb-start value="${e(localDate)}"${s.busy ? " disabled" : ""}></label>${localDate ? button("clear-start", "Start immediately") : ""}`;
+    const start = s.draft.startsAt
+      ? new Date(s.draft.startsAt).toLocaleString(undefined, {
+          month: "short",
+          day: "numeric",
+          hour: "numeric",
+          minute: "2-digit",
+        })
+      : "When published";
+    return `<span class="tb-eyebrow">Put names on the map</span><h3>Who’s taking each area?</h3><p>Choose from people with map clearance.</p>${!s.bootstrap.staff.length ? '<p class="tb-subtle">No eligible people are available yet.</p>' : ""}<div class="tb-territories">${territoryRows(s, true)}</div>${button("assign-available", `${icon("users")}Assign available people`, { disabled: !s.bootstrap.staff.length })}<hr class="tb-rule"><div class="tb-small-row"><span>Starts</span>${button("schedule", `${e(start)} ⌄`)}</div><div class="tb-small-row"><span>Access</span><span>Assigned area only</span></div>${button("team-access", "View team clearance →")}`;
   }
   function publishedPanel(s) {
     return `<h3>Territories are ready</h3><p>Your published boundaries and staff assignments are saved.</p><div class="tb-stat"><strong>${s.draft.territories.length}</strong><span>territories published</span></div>${button("back", "Return to voter map", { primary: true })}`;
   }
   function renderReview() {
     const s = model.state;
+    if (dialog) {
+      renderDialog();
+      return;
+    }
     const blocked = publishBlockReason(s);
     q("[data-tb-review]").innerHTML =
       reviewOpen && s.review
-        ? `<div class="tb-scrim"><section class="tb-dialog" role="dialog" aria-modal="true" aria-label="Review territories" tabindex="-1"><h3>Ready to publish?</h3><p>Review the final plan before staff can use it.</p><dl><div><dt>Territories</dt><dd>${s.draft.territories.length}</dd></div><div><dt>Addresses allocated</dt><dd>${s.review.summary.allocatedAddressCount}</dd></div><div><dt>Not in a territory</dt><dd>${s.review.summary.unallocatedAddressCount}</dd></div><div><dt>Excluded addresses</dt><dd>${s.review.summary.excludedAddressCount}</dd></div><div><dt>Staff assignments</dt><dd>${s.draft.territories.filter((t) => t.assigneeUserId).length}</dd></div></dl>${s.review.summary.unallocatedAddressCount > 0 ? '<p class="tb-warning">Some addresses in your area are outside these territories.</p>' : ""}${blocked ? `<p class="tb-warning">${e(blocked)}</p>` : ""}${s.error ? `<p role="alert">${e(s.error)}</p>` : ""}<div class="tb-dialog-actions">${button("close-review", "Back")}${button("publish", s.busy === "publish" ? "Publishing…" : "Publish territories", { primary: true, disabled: s.conflict || Boolean(blocked) })}</div></section></div>`
+        ? `<div class="tb-scrim"><section class="tb-dialog" role="dialog" aria-modal="true" aria-label="Review territories" tabindex="-1"><h3>Ready to publish?</h3><p>Review the final plan before staff can use it.</p><dl><div><dt>Territories</dt><dd>${s.draft.territories.length}</dd></div><div><dt>Addresses allocated</dt><dd>${s.review.summary.allocatedAddressCount}</dd></div><div><dt>Not in a territory</dt><dd>${s.review.summary.unallocatedAddressCount}</dd></div><div><dt>Excluded addresses</dt><dd>${s.review.summary.excludedAddressCount}</dd></div><div><dt>Staff assignments</dt><dd>${s.draft.territories.filter((t) => t.assigneeUserId).length}</dd></div></dl>${s.review.summary.unallocatedAddressCount > 0 ? '<p class="tb-warning">Some addresses in your area are outside these territories.</p>' : ""}${blocked ? `<p class="tb-warning">${e(blocked)}</p>` : ""}${s.error ? `<p role="alert">${e(s.error)}</p>` : ""}<div class="tb-dialog-actions">${button("close-review", "Back")}${button("save-review", "Keep as draft")}${button("publish", s.busy === "publish" ? "Publishing…" : "Publish territories", { primary: true, disabled: s.conflict || Boolean(blocked) })}</div></section></div>`
         : "";
+  }
+  function renderDialog() {
+    const s = model.state,
+      t = s.draft.territories.find((item) => item.id === dialog?.territoryId);
+    let title = "Your map access",
+      body = "";
+    if (dialog.kind === "people") {
+      title = `Assign ${t?.name || "territory"}`;
+      body = `<p>${Number.isInteger(t?.addressCount) && s.review ? `${t.addressCount} doors · ` : ""}Eligible members only</p><div class="tb-people-list">${s.bootstrap.staff
+        .map((person) =>
+          button(
+            "assign-person",
+            `<span class="tb-avatar">${e(
+              (person.displayName || person.username || "Team member")
+                .split(/\s+/)
+                .slice(0, 2)
+                .map((part) => part[0])
+                .join(""),
+            )}</span><span><strong>${e(person.displayName || person.username || "Team member")}</strong><small>${e(person.roleLabel || (person.username ? `@${person.username}` : "Map access"))} · ${s.draft.territories.filter((item) => item.assigneeUserId === person.userId).length} assigned</small></span><span>Choose</span>`,
+            { value: person.userId },
+          ),
+        )
+        .join(
+          "",
+        )}</div>${t?.assigneeUserId ? button("unassign-person", "Remove assignment") : ""}`;
+    } else if (dialog.kind === "rename") {
+      title = "Rename territory";
+      body = `<label class="tb-name">Territory name<input type="text" data-tb-rename maxlength="80" value="${e(t?.name || "")}" autocomplete="off"></label>${button("save-name", "Save name", { primary: true })}`;
+    } else if (dialog.kind === "schedule") {
+      title = "When should this start?";
+      const local = s.draft.startsAt
+        ? new Date(
+            new Date(s.draft.startsAt).getTime() -
+              new Date(s.draft.startsAt).getTimezoneOffset() * 60000,
+          )
+            .toISOString()
+            .slice(0, 16)
+        : "";
+      body = `<label class="tb-start">Start time<input type="datetime-local" data-tb-schedule value="${e(local)}"></label>${button("save-start", "Use this time", { primary: true })}${button("clear-start", "When published")}`;
+    } else if (dialog.kind === "team-access") {
+      title = "Team clearance";
+      body = `<p>These people can receive territories in this area.</p><div class="tb-people-list">${s.bootstrap.staff.map((person) => `<div class="tb-person-readout"><span class="tb-avatar">${icon("users")}</span><span><strong>${e(person.displayName || person.username || "Team member")}</strong><small>${e(person.roleLabel || "Map access")}</small></span></div>`).join("")}</div>`;
+    } else if (dialog.kind === "address-issues") {
+      title = "Address issues";
+      const missing = s.source?.unmappedRecordCount;
+      body = `<p>${Number.isInteger(missing) ? `${missing} ${missing === 1 ? "contact needs" : "contacts need"} a map location.` : "Address locations are still being checked."}</p><p>Review their addresses in Contact Book.</p>${openContacts ? button("open-contacts", "Open Contact Book", { primary: true }) : ""}${button("refresh-source", s.sourceBusy ? "Checking…" : "Refresh addresses", { disabled: s.sourceBusy })}`;
+    } else
+      body = `<p>Plan territories within your permitted map area.</p><div class="tb-small-row"><span>Eligible people</span><strong>${s.bootstrap.staff.length}</strong></div><div class="tb-small-row"><span>Volunteers can work</span><span>Assigned area only</span></div>`;
+    q("[data-tb-review]").innerHTML =
+      `<div class="tb-scrim"><section class="tb-dialog" role="dialog" aria-modal="true" aria-label="${e(title)}" tabindex="-1"><div class="tb-dialog-head"><h3>${e(title)}</h3>${button("close-dialog", icon("close"), { title: "Close dialog" })}</div>${body}</section></div>`;
   }
   async function onClick(event) {
     const control = event.target.closest("[data-tb-action]");
@@ -357,6 +462,36 @@ export function createTerritoryBuilder({
     if (action === "refresh-source") {
       await model.refreshSource();
       if (mapReady) requestViewport(true);
+      return;
+    }
+    if (
+      [
+        "access",
+        "team-access",
+        "address-issues",
+        "schedule",
+        "rename",
+        "choose-person",
+      ].includes(action)
+    ) {
+      if (!s.loaded) return;
+      dialog = {
+        kind: action === "choose-person" ? "people" : action,
+        territoryId: action === "choose-person" ? value : s.selectedId,
+      };
+      if (action === "choose-person") model.select(value);
+      renderDialog();
+      q(".tb-dialog")?.focus();
+      return;
+    }
+    if (action === "close-dialog") {
+      dialog = null;
+      renderReview();
+      return;
+    }
+    if (action === "open-contacts") {
+      dialog = null;
+      openContacts?.();
       return;
     }
     if (action === "back") {
@@ -412,6 +547,7 @@ export function createTerritoryBuilder({
       return;
     }
     if (action === "tool") {
+      cancelMapDrag();
       tool = value;
       drawing = [];
       render();
@@ -424,6 +560,7 @@ export function createTerritoryBuilder({
       return;
     }
     if (action === "step") {
+      cancelMapDrag();
       tool = "select";
       drawing = [];
       reviewOpen = false;
@@ -444,6 +581,73 @@ export function createTerritoryBuilder({
     }
     if (action === "save") {
       await model.run("draft");
+      return;
+    }
+    if (action === "save-review") {
+      if (await model.run("draft")) {
+        reviewOpen = false;
+        render();
+      }
+      return;
+    }
+    if (action === "assign-available") {
+      if (!s.bootstrap.staff.length) return;
+      model.edit((draft) => {
+        const workloads = new Map(
+          s.bootstrap.staff.map((person) => [
+            person.userId,
+            draft.territories.filter(
+              (item) => item.assigneeUserId === person.userId,
+            ).length,
+          ]),
+        );
+        for (const territory of draft.territories.filter(
+          (item) => !item.assigneeUserId,
+        )) {
+          const person = [...s.bootstrap.staff].sort(
+            (a, b) =>
+              workloads.get(a.userId) - workloads.get(b.userId) ||
+              (a.displayName || a.username || "").localeCompare(
+                b.displayName || b.username || "",
+              ),
+          )[0];
+          territory.assigneeUserId = person.userId;
+          workloads.set(person.userId, workloads.get(person.userId) + 1);
+        }
+      });
+      return;
+    }
+    if (["assign-person", "unassign-person", "save-name"].includes(action)) {
+      const territory = s.draft.territories.find(
+        (item) => item.id === dialog?.territoryId,
+      );
+      if (!territory) return;
+      const name = q("[data-tb-rename]")?.value.trim();
+      if (action === "save-name" && !name) {
+        q("[data-tb-rename]")?.focus();
+        return;
+      }
+      if (
+        action === "assign-person" &&
+        !s.bootstrap.staff.some((person) => person.userId === value)
+      )
+        return;
+      dialog = null;
+      model.edit(() => {
+        if (action === "save-name") territory.name = name;
+        else
+          territory.assigneeUserId =
+            action === "unassign-person" ? null : value;
+      });
+      return;
+    }
+    if (action === "save-start") {
+      const value = q("[data-tb-schedule]")?.value;
+      if (!value || !Number.isFinite(new Date(value).getTime())) return;
+      dialog = null;
+      model.edit((draft) => {
+        draft.startsAt = new Date(value).toISOString();
+      });
       return;
     }
     if (action === "select") {
@@ -503,6 +707,7 @@ export function createTerritoryBuilder({
           d.territories = [];
         });
         fitMap(true);
+        if (sourceReady(s)) await model.run("preview");
       }
       return;
     }
@@ -526,6 +731,7 @@ export function createTerritoryBuilder({
       return;
     }
     if (action === "clear-start") {
+      dialog = null;
       model.edit((d) => {
         d.startsAt = null;
       });
@@ -563,7 +769,7 @@ export function createTerritoryBuilder({
         drawing = [];
         tool = "select";
         render();
-        if (s.step !== "area") await model.run("preview");
+        if (sourceReady(s)) await model.run("preview");
       } catch (error) {
         q("[data-tb-hint]").textContent = error.message;
       }
@@ -608,6 +814,8 @@ export function createTerritoryBuilder({
         center: [-98, 39],
         zoom: 3,
         attributionControl: true,
+        dragPan: true,
+        touchZoomRotate: true,
       });
       map.on("load", () => {
         if (generation !== mapGeneration) return;
@@ -640,7 +848,10 @@ export function createTerritoryBuilder({
           id: "tb-territory-fill",
           type: "fill",
           source: "tb-territories",
-          paint: { "fill-color": ["get", "color"], "fill-opacity": 0.2 },
+          paint: {
+            "fill-color": ["get", "color"],
+            "fill-opacity": ["case", ["get", "selected"], 0.22, 0.12],
+          },
         });
         map.addLayer({
           id: "tb-territory-line",
@@ -673,7 +884,7 @@ export function createTerritoryBuilder({
               10000,
               18,
             ],
-            "circle-color": "#153b43",
+            "circle-color": "#1d67b8",
             "circle-opacity": 0.7,
           },
         });
@@ -703,6 +914,9 @@ export function createTerritoryBuilder({
       map.on("touchstart", onMapDown);
       map.on("touchmove", onMapMove);
       map.on("touchend", onMapUp);
+      window.addEventListener("pointerup", onMapUp);
+      window.addEventListener("pointercancel", cancelMapDrag);
+      window.addEventListener("blur", cancelMapDrag);
       map.on("moveend", scheduleViewport);
     } catch {
       if (generation === mapGeneration) {
@@ -760,7 +974,7 @@ export function createTerritoryBuilder({
       .setData(
         collection(s.draft.areaGeojson ? [feature(s.draft.areaGeojson)] : []),
       );
-    const colors = ["#1d67b8", "#287e75", "#945b30", "#7255ab", "#a03c65"];
+    const colors = ["#1d67b8"];
     map.getSource("tb-territories").setData(
       collection(
         s.draft.territories.map((t, i) =>
@@ -792,13 +1006,17 @@ export function createTerritoryBuilder({
             : [],
         ),
       );
+    map.dragPan?.enable();
     map.getCanvas().style.cursor = ["draw", "trim"].includes(tool)
       ? "crosshair"
       : tool === "move"
         ? "move"
-        : "";
+        : "grab";
     drawHandles();
-    fitMap();
+    drawTerritoryLabels();
+    // Camera changes belong to the user. Fit only on initial load, explicit
+    // area selection or the Fit control; draft/viewport updates must not snap
+    // a dragged map back to its previous boundary.
   }
   // Camera updates must not replace a control while the user is clicking it.
   function renderViewport() {
@@ -849,6 +1067,32 @@ export function createTerritoryBuilder({
             },
           }
         : null;
+  }
+  function drawTerritoryLabels() {
+    labels.forEach((label) => label.remove());
+    labels = [];
+    const s = model.state;
+    s.draft.territories.forEach((territory, index) => {
+      const bounds = geometryBounds(territory.geojson);
+      if (!bounds) return;
+      const element = document.createElement("div");
+      element.className = "tb-map-label";
+      const person = s.bootstrap.staff.find(
+        (item) => item.userId === territory.assigneeUserId,
+      );
+      const caption =
+        s.step === "assign" && person
+          ? person.displayName || person.username || "Assigned"
+          : s.review && Number.isSafeInteger(territory.addressCount)
+            ? `${territory.addressCount} doors`
+            : "";
+      element.innerHTML = `<strong>T${index + 1}</strong>${caption ? `<span>${e(caption)}</span>` : ""}`;
+      labels.push(
+        new mapLibrary.Marker({ element })
+          .setLngLat([(bounds[0] + bounds[2]) / 2, (bounds[1] + bounds[3]) / 2])
+          .addTo(map),
+      );
+    });
   }
   function drawHandles() {
     handles.forEach((h) => h.remove());
@@ -920,6 +1164,7 @@ export function createTerritoryBuilder({
       render();
       return;
     }
+    if (tool === "pan") return;
     const hit = map.queryRenderedFeatures(event.point, {
       layers: ["tb-territory-fill"],
     })[0];
@@ -966,6 +1211,12 @@ export function createTerritoryBuilder({
         if (completed.target.setTrim) completed.target.setTrim(completed.trim);
       });
     else updateMap();
+  }
+  function cancelMapDrag() {
+    const active = Boolean(drag);
+    drag = null;
+    map?.dragPan?.enable();
+    if (active && mapReady) updateMap();
   }
   return {
     markup: () => "<div data-territory-builder-host></div>",

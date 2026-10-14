@@ -528,3 +528,521 @@
     padding: 80px 12px 12px;
   }
 }
+
+/* Approved territory studio proportions and blue palette. */
+.territory-builder {
+  --polis-background: light-dark(#f5f8fd, #081020);
+  --polis-surface: light-dark(#fff, #111d34);
+  --polis-surface-raised: light-dark(#eaf2fc, #172746);
+  --polis-border: light-dark(#c6d7ea, #30537f);
+  --polis-text: light-dark(#101828, #f5f8ff);
+  --polis-text-muted: light-dark(#475467, #a7b5c8);
+  --polis-primary: light-dark(#1d67b8, #5ea1ff);
+  --polis-primary-container: var(--polis-surface-raised);
+  --polis-on-primary: light-dark(#fff, #081020);
+  --polis-on-primary-container: var(--polis-primary);
+  font-family: Inter, "Segoe UI", Arial, sans-serif;
+  box-shadow: 0 16px 50px light-dark(#123b740a, #0002);
+}
+.territory-builder svg {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+.territory-builder button {
+  font-weight: 500;
+}
+.tb-header {
+  min-height: 76px;
+  padding: 12px 20px;
+  gap: 10px;
+}
+.tb-header > button:first-child,
+.tb-header > button:last-child {
+  border: 0;
+  background: transparent;
+  width: 42px;
+  padding: 0;
+}
+.tb-header > span.tb-draft-badge {
+  display: inline-block;
+  background: var(--polis-surface-raised);
+  color: var(--polis-primary);
+  padding: 6px 10px;
+  border-radius: 20px;
+  margin: 0;
+}
+.tb-steps {
+  gap: 18px;
+  padding: 10px 12px;
+}
+.tb-steps button {
+  min-height: 34px;
+  padding: 3px 8px;
+  background: transparent;
+}
+.tb-filters {
+  min-height: 58px;
+  gap: 8px 16px;
+  padding: 9px 20px;
+}
+.tb-filters > span:first-child {
+  font-size: 11px;
+}
+.tb-filters label {
+  font-size: 12px;
+}
+.tb-filters label small {
+  border-radius: 20px;
+  font-size: 10px;
+  background: var(--polis-surface-raised);
+  color: var(--polis-primary);
+  padding: 2px 6px;
+}
+.tb-filters .tb-filter-summary {
+  font-size: 10px;
+  margin-left: auto;
+}
+.territory-builder .tb-blank-select {
+  width: 116px;
+  background: var(--polis-background);
+}
+.tb-workspace {
+  grid-template-columns: minmax(0, 1fr) 275px;
+  min-height: 500px;
+}
+.tb-map-wrap {
+  min-height: 500px;
+  overflow: hidden;
+}
+.tb-map-top > span {
+  font-size: 11px;
+  padding: 9px 11px;
+}
+.tb-map-tools {
+  top: 70px;
+  gap: 6px;
+}
+.tb-map-tools button {
+  padding: 0;
+}
+.tb-map-hint {
+  bottom: 72px;
+  left: 14px;
+  right: 14px;
+  max-width: max-content;
+  margin: auto;
+  border-radius: 20px;
+  padding: 8px 12px;
+}
+.tb-map-bottom {
+  bottom: 23px;
+  font-size: 10px;
+}
+.tb-map-bottom button {
+  min-height: 32px;
+  width: 32px;
+  padding: 0;
+}
+.tb-panel {
+  padding: 20px 18px;
+  max-height: 740px;
+  min-width: 0;
+}
+.territory-builder h3 {
+  font-weight: 600;
+  line-height: 1.2;
+  margin-bottom: 7px;
+}
+.territory-builder p {
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0 0 20px;
+}
+.tb-eyebrow {
+  font-size: 10px;
+  color: var(--polis-text-muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  display: block;
+  margin-bottom: 8px;
+}
+.tb-area-list {
+  gap: 8px;
+}
+.tb-area-list button {
+  justify-content: flex-start;
+  text-align: left;
+  padding: 14px;
+  margin: 0;
+  gap: 11px;
+}
+.tb-area-list button > svg {
+  width: 21px;
+  height: 21px;
+  color: var(--polis-primary);
+}
+.tb-area-list button > span {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.tb-area-list small {
+  font-size: 11px;
+  color: var(--polis-text-muted);
+  font-weight: 400;
+}
+.tb-contact-source {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  border-top: 1px solid var(--polis-border);
+  padding-top: 20px;
+  margin-top: 20px;
+  font-size: 12px;
+}
+.tb-contact-source > span {
+  font-size: 11px;
+  color: var(--polis-text-muted);
+}
+.tb-contact-source button,
+.tb-existing-link button {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: var(--polis-primary);
+  justify-content: flex-start;
+  min-height: 32px;
+  font-size: 11px;
+}
+.tb-permitted {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 11px;
+  color: var(--polis-text-muted);
+  margin: 14px 0;
+}
+.tb-permitted input {
+  accent-color: var(--polis-primary);
+  width: 17px;
+  height: 17px;
+}
+.tb-methods {
+  gap: 4px;
+  margin: 18px 0;
+}
+.tb-methods button {
+  min-width: 0;
+  font-size: 12px;
+  padding: 9px 6px;
+}
+.tb-count {
+  font-size: 12px;
+  margin: 20px 0 0;
+}
+.tb-count output {
+  font-size: 24px;
+  color: var(--polis-primary);
+  font-weight: 500;
+}
+.tb-panel input[type="range"] {
+  width: 100%;
+  accent-color: var(--polis-primary);
+  margin: 13px 0 10px;
+  min-height: 20px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+}
+.tb-small-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px;
+  font-size: 12px;
+  margin: 13px 0;
+}
+.tb-small-row > span:last-child {
+  color: var(--polis-text-muted);
+  text-align: right;
+}
+.tb-small-row button {
+  min-height: 30px;
+  border: 0;
+  padding: 0;
+  color: var(--polis-primary);
+  font-size: 12px;
+  background: transparent;
+}
+.tb-small-row + button {
+  margin-top: 10px;
+}
+.tb-rule {
+  border: 0;
+  border-top: 1px solid var(--polis-border);
+  margin: 20px 0;
+}
+.tb-inline-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.tb-inline-controls .tb-eyebrow {
+  margin: 0;
+}
+.tb-inline-controls button {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--polis-primary);
+  min-height: 30px;
+  font-size: 11px;
+}
+.tb-territories {
+  gap: 6px;
+  margin: 10px 0;
+}
+.tb-territory-row > button {
+  min-height: 53px;
+  padding: 10px 11px;
+  font-size: 12px;
+}
+.tb-territory-row > button > span:nth-child(2) {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.tb-territory-row > button > svg {
+  width: 15px;
+  color: var(--polis-text-muted);
+}
+.tb-number {
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  font-size: 11px;
+}
+.tb-extra-tools {
+  margin-top: 12px;
+  font-size: 11px;
+  color: var(--polis-text-muted);
+}
+.tb-extra-tools summary {
+  cursor: pointer;
+  margin-bottom: 8px;
+}
+.tb-extra-tools button {
+  font-size: 11px;
+}
+.tb-existing-link {
+  margin-top: 12px;
+}
+.tb-footer {
+  min-height: 78px;
+}
+.tb-footer strong {
+  font-size: 13px;
+  font-weight: 500;
+}
+.tb-dialog {
+  max-height: calc(100vh - 100px);
+  overflow: auto;
+}
+.tb-dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.tb-dialog-head h3 {
+  margin: 0;
+}
+.tb-dialog-head > button {
+  border: 0;
+  padding: 0;
+  width: 32px;
+  min-height: 32px;
+  background: transparent;
+}
+.tb-people-list {
+  display: grid;
+  gap: 8px;
+}
+.tb-people-list > button,
+.tb-person-readout {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: flex-start;
+  text-align: left;
+  padding: 10px;
+  border: 1px solid var(--polis-border);
+  border-radius: 12px;
+}
+.tb-people-list > button > span:nth-child(2),
+.tb-person-readout > span:nth-child(2) {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.tb-people-list small {
+  font-size: 11px;
+  color: var(--polis-text-muted);
+}
+.tb-avatar {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  color: var(--polis-primary);
+  background: var(--polis-surface-raised);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+.tb-dialog input {
+  max-width: 100%;
+  min-height: 42px;
+  padding: 9px;
+  border: 1px solid var(--polis-border);
+  border-radius: 10px;
+  color: var(--polis-text);
+  background: var(--polis-background);
+}
+@media (max-width: 1050px) {
+  .tb-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .tb-map-wrap {
+    min-height: 430px;
+  }
+  .tb-panel {
+    max-height: none;
+  }
+}
+@media (max-width: 600px) {
+  .tb-header {
+    padding: 12px;
+    min-height: 70px;
+    flex-wrap: nowrap;
+    gap: 5px;
+  }
+  .tb-header h2 {
+    font-size: 19px;
+  }
+  .tb-header > div > span {
+    font-size: 10px;
+  }
+  .tb-header > button {
+    font-size: 11px;
+    padding: 8px;
+  }
+  .tb-header > span.tb-draft-badge {
+    display: inline-block;
+    font-size: 10px;
+    padding: 5px 8px;
+  }
+  .tb-steps {
+    gap: 3px;
+  }
+  .tb-filters {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    padding: 12px 14px;
+    gap: 5px;
+  }
+  .tb-filters > span:first-child {
+    width: 100%;
+    margin-bottom: 3px;
+  }
+  .tb-filters label {
+    width: 100%;
+    min-height: 30px;
+  }
+  .tb-filters label small {
+    margin-left: auto;
+  }
+  .territory-builder .tb-blank-select {
+    width: 100%;
+    height: 34px;
+    margin: 4px 0;
+  }
+  .tb-filters .tb-filter-summary {
+    text-align: right;
+    margin: 2px 0 0;
+    min-height: 12px;
+  }
+  .tb-map-wrap {
+    min-height: 360px;
+  }
+  .tb-map-tools {
+    left: 14px;
+    right: 14px;
+    top: 66px;
+    flex-direction: row;
+    justify-content: center;
+  }
+  .tb-map-tools button {
+    width: 38px;
+    min-height: 38px;
+  }
+  .tb-panel {
+    padding: 20px 18px;
+  }
+  .tb-panel .tb-territories {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .tb-footer {
+    padding: 12px;
+  }
+  .tb-dialog-actions {
+    flex-wrap: wrap;
+  }
+}
+
+.territory-builder .tb-header h2 {
+  font-size: 21px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+.territory-builder .tb-panel h3,
+.territory-builder .tb-dialog h3 {
+  font-size: 21px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+.territory-builder .tb-map-label {
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 65px;
+  max-width: 150px;
+  background: var(--polis-surface);
+  color: var(--polis-primary);
+  border: 1px solid var(--polis-primary);
+  border-radius: 12px;
+  padding: 9px 12px;
+  text-align: center;
+  font-size: 12px;
+  box-shadow: 0 2px 6px #123b7408;
+}
+.territory-builder .tb-map-label strong {
+  font-size: 14px;
+  font-weight: 500;
+}
+.territory-builder .tb-map-label span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 600px) {
+  .territory-builder .tb-header h2 {
+    font-size: 19px;
+  }
+}

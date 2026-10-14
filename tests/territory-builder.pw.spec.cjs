@@ -108,6 +108,17 @@ async function fixture(
     },
     { token, base: BASE },
   );
+  await page.route("**/*", (route) => {
+    const url = new URL(route.request().url());
+    return url.origin === BASE ||
+      (url.hostname === "unpkg.com" &&
+        /^\/maplibre-gl@4\.7\.1\/dist\/maplibre-gl\.(js|css)$/.test(
+          url.pathname,
+        )) ||
+      !url.protocol.startsWith("http")
+      ? route.continue()
+      : route.abort();
+  });
   await page.route(`${BASE}/territory-test-style.json`, (route) =>
     route.fulfill({
       contentType: "application/json",
@@ -384,23 +395,39 @@ const open = async (page) => {
     `${BASE}/coalitions/territory-fixture/voter-map/territories/admin`,
   );
   await expect(
-    page.getByRole("heading", { name: "Choose an area" }),
+    page.getByRole("heading", { name: "Where are we working?" }),
   ).toBeVisible();
 };
 const chooseArea = async (page) => {
   await page
-    .getByRole("button", { name: "Test operational area", exact: true })
+    .getByRole("button", {
+      name: "Saved area Test operational area",
+      exact: true,
+    })
     .click();
   await page.getByRole("button", { name: "Use this area" }).click();
 };
 const autoCuts = async (page) => {
   await chooseArea(page);
-  await page.locator("[data-tb-count]").fill("2");
+  await page.locator("[data-tb-count]").evaluate((node) => {
+    node.value = "2";
+    node.dispatchEvent(new Event("change", { bubbles: true }));
+  });
   await page.locator("[data-tb-count]").blur();
   await page
-    .getByRole("button", { name: "Create territories", exact: true })
+    .getByRole("button", { name: "Preview 2 territories", exact: true })
     .click();
   await expect(page.locator(".tb-territory-row")).toHaveCount(2);
+};
+
+const assign = async (page, name) => {
+  await page
+    .getByRole("button", { name: `Assign ${name}`, exact: true })
+    .click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: /Sam Example/ })
+    .click();
 };
 
 test("existing coalition flow: optional filters, server cuts, named staff, review and one publish", async ({
@@ -418,7 +445,7 @@ test("existing coalition flow: optional filters, server cuts, named staff, revie
   await danger.uncheck();
   await expect(
     page.getByLabel("Blank filter dropdown placeholder"),
-  ).toBeDisabled();
+  ).toBeEnabled();
   await expect(
     page.getByLabel("Blank filter dropdown placeholder").locator("option"),
   ).toHaveCount(1);
@@ -426,19 +453,15 @@ test("existing coalition flow: optional filters, server cuts, named staff, revie
     page.getByLabel("Blank filter dropdown placeholder"),
   ).toHaveValue("");
   await autoCuts(page);
-  await page.getByRole("button", { name: "Assign staff" }).click();
+  await page.getByRole("button", { name: "Assign people" }).click();
   await expect(
-    page.getByRole("heading", { name: "Assign your team" }),
+    page.getByRole("heading", { name: "Who’s taking each area?" }),
   ).toBeVisible();
-  await page
-    .getByLabel("Assign West")
-    .selectOption({ label: "Sam Example (@sam)" });
-  await expect(
-    page.getByRole("button", { name: "Review & publish" }),
-  ).toBeDisabled();
-  await page.getByLabel("Assign West").selectOption("eligible-staff");
-  await page.getByLabel("Assign East").selectOption("eligible-staff");
-  await page.getByRole("button", { name: "Review & publish" }).click();
+  await assign(page, "West");
+  await expect(page.getByRole("button", { name: "Review" })).toBeDisabled();
+  await assign(page, "West");
+  await assign(page, "East");
+  await page.getByRole("button", { name: "Review" }).click();
   await expect(
     page.getByRole("dialog", { name: "Review territories" }),
   ).toBeVisible();
@@ -487,7 +510,7 @@ test("real MapLibre supports boundary corner edits, drawing, undo, trim and save
   await page.getByRole("button", { name: "Check coverage" }).click();
   const moved = capture.writes.findLast((r) => r.pathname.endsWith("/preview"))
     .body.territories[0].geojson;
-  await page.getByRole("button", { name: "Undo last change" }).click();
+  await page.getByRole("button", { name: "Undo last edit" }).click();
   await page.getByRole("button", { name: "Check coverage" }).click();
   expect(
     capture.writes.findLast((r) => r.pathname.endsWith("/preview")).body
@@ -506,7 +529,9 @@ test("real MapLibre supports boundary corner edits, drawing, undo, trim and save
   );
   await page.mouse.up();
   await page.getByRole("button", { name: "Check coverage" }).click();
-  await page.getByRole("button", { name: "Trim", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Trim territory", exact: true })
+    .click();
   for (const [x, y] of [
     [0.32, 0.34],
     [0.4, 0.34],
@@ -515,6 +540,7 @@ test("real MapLibre supports boundary corner edits, drawing, undo, trim and save
   ])
     await canvas.click({ position: { x: box.width * x, y: box.height * y } });
   await page.getByRole("button", { name: "Finish shape" }).click();
+  await page.locator(".tb-extra-tools summary").click();
   await expect(
     page.getByRole("button", { name: "Restore trim" }),
   ).toBeVisible();
@@ -524,7 +550,7 @@ test("real MapLibre supports boundary corner edits, drawing, undo, trim and save
   expect(save.body.territories[0].trimGeometry.type).toBe("MultiPolygon");
   await page.reload();
   await expect(
-    page.getByRole("heading", { name: "Choose an area" }),
+    page.getByRole("heading", { name: "Where are we working?" }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Use this area" }).click();
   await expect(page.locator(".tb-territory-row")).toHaveCount(1);
@@ -540,12 +566,19 @@ test("desktop and phone layouts keep real map editing and assignment controls ac
   await autoCuts(page);
   await expect(page.locator(".tb-map canvas")).toBeVisible({ timeout: 25000 });
   fs.mkdirSync(ARTIFACTS, { recursive: true });
+  await expect.poll(() => capture.viewports.length).toBeGreaterThan(0);
   await page
     .locator(".territory-builder")
     .screenshot({ path: path.join(ARTIFACTS, "desktop-cut.png") });
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.getByRole("button", { name: "Assign staff" }).click();
-  await expect(page.getByLabel("Assign West")).toBeVisible();
+  await page
+    .locator(".territory-builder")
+    .screenshot({ path: path.join(ARTIFACTS, "phone-cut.png") });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: "Assign people" }).click();
+  await expect(
+    page.getByRole("button", { name: "Assign West", exact: true }),
+  ).toBeVisible();
   await page
     .locator(".territory-builder")
     .screenshot({ path: path.join(ARTIFACTS, "phone-assign.png") });
@@ -563,13 +596,11 @@ test("publish conflict preserves the draft and explains reload; no automatic sec
   const capture = await fixture(page, { conflict: true });
   await open(page);
   await autoCuts(page);
-  await page.getByRole("button", { name: "Assign staff" }).click();
-  await expect(
-    page.getByRole("button", { name: "Review & publish" }),
-  ).toBeDisabled();
-  await page.getByLabel("Assign West").selectOption("eligible-staff");
-  await page.getByLabel("Assign East").selectOption("eligible-staff");
-  await page.getByRole("button", { name: "Review & publish" }).click();
+  await page.getByRole("button", { name: "Assign people" }).click();
+  await expect(page.getByRole("button", { name: "Review" })).toBeDisabled();
+  await assign(page, "West");
+  await assign(page, "East");
+  await page.getByRole("button", { name: "Review" }).click();
   await page
     .getByRole("button", { name: "Publish territories", exact: true })
     .click();
@@ -605,9 +636,14 @@ test("preparing addresses leaves geometry editing and draft save usable without 
   const capture = await fixture(page, { preparing: true });
   await open(page);
   await page
-    .getByRole("button", { name: "Test operational area", exact: true })
+    .getByRole("button", {
+      name: "Saved area Test operational area",
+      exact: true,
+    })
     .click();
-  await expect(page.locator(".tb-stat strong")).toHaveText("—");
+  await expect(page.locator("[data-tb-status]")).toContainText(
+    "Preparing addresses",
+  );
   await expect(
     page.getByText("Preparing addresses…", { exact: true }),
   ).toBeVisible();
@@ -623,6 +659,13 @@ test("preparing addresses leaves geometry editing and draft save usable without 
   ).toBeVisible();
   capture.ready();
   await page
+    .getByRole("button", { name: "Area", exact: false })
+    .first()
+    .click();
+  await page
+    .getByRole("button", { name: "Review address issues", exact: true })
+    .click();
+  await page
     .getByRole("button", { name: "Refresh addresses", exact: true })
     .click();
   await expect(page.getByText("Draft saved", { exact: true })).toBeVisible();
@@ -636,16 +679,17 @@ test("500,000-address cluster remains map-only; preview provides authoritative t
   const capture = await fixture(page, { clustered: true });
   await open(page);
   await page
-    .getByRole("button", { name: "Test operational area", exact: true })
+    .getByRole("button", {
+      name: "Saved area Test operational area",
+      exact: true,
+    })
     .click();
   await expect.poll(() => capture.viewports.length).toBeGreaterThan(0);
-  await expect(page.locator(".tb-stat strong")).toHaveText("—");
-  await page
-    .getByRole("button", { name: "Check coverage", exact: true })
-    .click();
-  await expect(page.locator(".tb-stat strong")).toHaveText("6");
+  await expect(page.locator(".tb-filter-summary")).toHaveText(
+    "6 included · 0 excluded",
+  );
   await page.getByLabel("Do not knock requests", { exact: true }).check();
-  await expect(page.locator(".tb-stat strong")).toHaveText("—");
+  await expect(page.locator(".tb-filter-summary")).toHaveText("");
   await expect
     .poll(() => capture.viewports.at(-1)?.contactExclusions.excludeDoNotKnock)
     .toBe(true);
@@ -662,7 +706,7 @@ test("500,000-address cluster remains map-only; preview provides authoritative t
     .toEqual({ excludeDoNotKnock: false, excludeReportedDanger: false });
   await expect(
     page.getByLabel("Blank filter dropdown placeholder"),
-  ).toBeDisabled();
+  ).toBeEnabled();
   expect(capture.errors).toEqual([]);
 });
 
@@ -672,10 +716,11 @@ test("existing territory tools and named person selection remain available; back
   const capture = await fixture(page);
   await open(page);
   await autoCuts(page);
+  await page.getByRole("button", { name: "Rename", exact: true }).click();
   await page
     .getByLabel("Territory name", { exact: true })
     .fill("My saved outline");
-  await page.getByLabel("Territory name", { exact: true }).blur();
+  await page.getByRole("button", { name: "Save name", exact: true }).click();
   await page
     .getByRole("button", { name: "Existing territories", exact: true })
     .click();
@@ -705,7 +750,7 @@ test("existing territory tools and named person selection remain available; back
   await page
     .getByRole("button", { name: "Back to builder", exact: true })
     .click();
-  await expect(page.getByLabel("Territory name", { exact: true })).toHaveValue(
+  await expect(page.locator(".tb-territories")).toContainText(
     "My saved outline",
   );
   await expect(
@@ -722,7 +767,7 @@ test("candidate route uses the same builder with explicit scope and no new navig
     `${BASE}/candidate/voter-map/territories/admin?candidateId=candidate-fixture`,
   );
   await expect(
-    page.getByRole("heading", { name: "Choose an area" }),
+    page.getByRole("heading", { name: "Where are we working?" }),
   ).toBeVisible();
   await autoCuts(page);
   await page.getByRole("button", { name: "Save draft", exact: true }).click();
@@ -733,5 +778,131 @@ test("candidate route uses the same builder with explicit scope and no new navig
   expect(capture.writes.at(-1).pathname).toBe(
     "/api/candidate-dashboard/voter-map/territory-builder/draft",
   );
+  expect(capture.errors).toEqual([]);
+});
+
+test("Pan moves the real map with mouse and touch and survives filter redraws", async ({
+  page,
+}) => {
+  const capture = await fixture(page);
+  await open(page);
+  await autoCuts(page);
+  await expect.poll(() => capture.viewports.length).toBeGreaterThan(0);
+  await page.getByRole("button", { name: "Pan map", exact: true }).click();
+  const canvas = page.locator(".tb-map canvas");
+  await canvas.scrollIntoViewIfNeeded();
+  let box = await canvas.boundingBox();
+  const before = capture.viewports.at(-1).bbox;
+  await page.mouse.move(box.x + box.width * 0.6, box.y + box.height * 0.6);
+  await page.mouse.down();
+  await page.mouse.move(
+    box.x + box.width * 0.6 + 80,
+    box.y + box.height * 0.6 + 35,
+    { steps: 8 },
+  );
+  await page.mouse.up();
+  await expect.poll(() => capture.viewports.at(-1).bbox).not.toEqual(before);
+  // Wait for inertial motion to finish via a stable request count.
+  await expect
+    .poll(() => capture.viewports.at(-1).contactExclusions.excludeDoNotKnock)
+    .toBe(false);
+  await page.getByLabel("Do not knock requests", { exact: true }).check();
+  await expect
+    .poll(() => capture.viewports.at(-1).contactExclusions.excludeDoNotKnock)
+    .toBe(true);
+  const afterRedraw = capture.viewports.at(-1).bbox;
+  expect(Math.abs(afterRedraw[0] - before[0])).toBeGreaterThan(0.0001);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await canvas.scrollIntoViewIfNeeded();
+  await page.getByRole("button", { name: "Pan map", exact: true }).click();
+  await canvas.scrollIntoViewIfNeeded();
+  box = await canvas.boundingBox();
+  await expect
+    .poll(
+      () => capture.viewports.at(-1).bbox[2] - capture.viewports.at(-1).bbox[0],
+    )
+    .toBeLessThan(before[2] - before[0]);
+  const touchBefore = [...capture.viewports.at(-1).bbox];
+  const session = await page.context().newCDPSession(page);
+  await session.send("Emulation.setTouchEmulationEnabled", {
+    enabled: true,
+    maxTouchPoints: 1,
+  });
+  const point = {
+    x: Math.round(box.x + box.width * 0.55),
+    y: Math.round(Math.max(120, Math.min(600, box.y + box.height * 0.55))),
+  };
+  await session.send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [{ ...point, id: 1 }],
+  });
+  for (let i = 1; i <= 6; i++)
+    await session.send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: [{ x: point.x - 10 * i, y: point.y + 3 * i, id: 1 }],
+    });
+  await session.send("Input.dispatchTouchEvent", {
+    type: "touchEnd",
+    touchPoints: [],
+  });
+  await expect
+    .poll(() => capture.viewports.at(-1).bbox)
+    .not.toEqual(touchBefore);
+  expect(capture.errors).toEqual([]);
+});
+
+test("approved rename, guided draw, Keep shape, schedule, clearance and draft-review controls work", async ({
+  page,
+}) => {
+  const capture = await fixture(page);
+  await open(page);
+  await chooseArea(page);
+  await page.getByRole("button", { name: "Guided", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Draw first territory", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Auto", exact: true }).click();
+  await page.locator("[data-tb-count]").evaluate((node) => {
+    node.value = "2";
+    node.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await page
+    .getByRole("button", { name: "Preview 2 territories", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Rename", exact: true }).click();
+  await page.getByLabel("Territory name", { exact: true }).fill("River walk");
+  await page.getByRole("button", { name: "Save name", exact: true }).click();
+  await page.getByRole("button", { name: "Keep shape", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Unlock", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "Assign people" }).click();
+  await page
+    .getByRole("button", { name: "Assign available people", exact: true })
+    .click();
+  await expect(page.locator(".tb-territories")).toContainText("Sam Example");
+  await page
+    .getByRole("button", { name: "When published", exact: false })
+    .click();
+  await page.getByLabel("Start time", { exact: true }).fill("2026-10-20T10:00");
+  await page
+    .getByRole("button", { name: "Use this time", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "View team clearance", exact: false })
+    .click();
+  await expect(page.getByRole("dialog")).toContainText("Sam Example");
+  await page.getByRole("button", { name: "Close dialog", exact: true }).click();
+  await page.getByRole("button", { name: "Review", exact: false }).click();
+  await page
+    .getByRole("button", { name: "Keep as draft", exact: true })
+    .click();
+  expect(
+    capture.writes.filter((item) => item.pathname.endsWith("/publish")),
+  ).toHaveLength(0);
+  expect(
+    capture.writes.findLast((item) => item.pathname.endsWith("/draft")).body
+      .startsAt,
+  ).toContain("2026-10-20");
   expect(capture.errors).toEqual([]);
 });

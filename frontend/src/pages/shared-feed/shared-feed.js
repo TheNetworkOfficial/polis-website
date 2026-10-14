@@ -46,6 +46,7 @@ import { createTextingBalancePage } from "./scripts/textingBalance.js";
 import { createTextingIntakePage } from "./scripts/textingIntake.js";
 import { createTextingWorkspacePage } from "./scripts/textingWorkspace.js";
 import { createOrganizationPeoplePage } from "./scripts/organizationPeople.js";
+import { createOrganizationDashboard } from "./scripts/organizationDashboard.js";
 import { createBallotChaser } from "./scripts/ballotChaser.js";
 import { createTerritoryBuilder } from "./scripts/territoryBuilder.js";
 import {
@@ -142,6 +143,15 @@ const territoryBuilder = createTerritoryBuilder({
     admin.activeTab = "editor";
     scheduleRender();
   },
+  openContacts: () => {
+    const candidate = isCandidateVoterMapRoute();
+    const scopeId = candidate
+      ? currentCandidateDashboardId()
+      : decodeRouteSegment(getCurrentRoute().routeParams.coalitionId);
+    navigateTo(
+      `/workspace/${candidate ? "candidate" : "coalition"}/${encodeURIComponent(scopeId)}/people/contacts`,
+    );
+  },
 });
 const textingBalancePage = createTextingBalancePage({
   request: textingRequest,
@@ -185,6 +195,12 @@ const textingWorkspacePage = createTextingWorkspacePage({
     ),
 });
 let stripeJsLoadPromise = null;
+const organizationDashboardPage = createOrganizationDashboard({
+  request: fetchJson,
+  context: currentOrganizationDashboardContext,
+  changed: scheduleRender,
+  navigate: navigateTo,
+});
 const organizationPeoplePage = createOrganizationPeoplePage({
   request: fetchJson,
   context: () => {
@@ -267,6 +283,75 @@ function currentOrganizationWorkspaceContext() {
       ? getAuthenticatedUser(state.auth.session)?.userId || ""
       : "",
     section: route.routeParams.organizationSection || "publishing",
+  };
+}
+
+function currentOrganizationDashboardContext() {
+  const route = getCurrentRoute();
+  const user = state.auth.session
+    ? getAuthenticatedUser(state.auth.session)
+    : null;
+  if (!user?.userId) return null;
+  const coalitionId = decodeRouteSegment(route.routeParams?.coalitionId);
+  const candidateId = decodeRouteSegment(route.routeParams?.candidateId);
+  let scopeType, scopeId;
+  if (
+    coalitionId &&
+    [ROUTE_KEY_COALITION_DETAIL, ROUTE_KEY_COALITION_SECTION].includes(
+      route.routeKey,
+    ) &&
+    coalitionSectionForRoute(route) === COALITION_DEFAULT_SECTION
+  ) {
+    const detail = state.pages.coalitions.detail;
+    const membership =
+      detail.membership || findCoalitionListItem(coalitionId)?.membership;
+    if (!membership?.isActive || membership.isPending) return null;
+    scopeType = "coalition";
+    scopeId = coalitionId;
+  } else if (
+    candidateId &&
+    [
+      ROUTE_KEY_CANDIDATE_DASHBOARD_DETAIL,
+      ROUTE_KEY_CANDIDATE_DASHBOARD_SECTION,
+    ].includes(route.routeKey) &&
+    candidateDashboardSectionForRoute(route) ===
+      CANDIDATE_DASHBOARD_DEFAULT_SECTION
+  ) {
+    scopeType = "candidate";
+    scopeId = candidateId;
+  } else return null;
+  const encodedId = encodeURIComponent(scopeId),
+    base = `/workspace/${scopeType}/${encodedId}`,
+    coalition = scopeType === "coalition";
+  return {
+    scopeType,
+    scopeId,
+    userId: user.userId,
+    actorName: user.displayName || user.name || user.username || "",
+    routes: {
+      field: coalition
+        ? coalitionSectionPath(scopeId, "voter-map")
+        : `/candidate/voter-map?candidateId=${encodedId}`,
+      missions: coalition
+        ? coalitionSectionPath(scopeId, "missions")
+        : candidateDashboardSectionPath(scopeId, "missions"),
+      calendar: coalition
+        ? coalitionSectionPath(scopeId, "calendar")
+        : candidateDashboardSectionPath(scopeId, "calendar"),
+      calendarApi: coalition
+        ? `/api/coalitions/${encodedId}/calendar/items`
+        : `/api/candidateDashboard/${encodedId}/calendar/items`,
+      texting: coalition
+        ? textingRoute(scopeId, "campaigns")
+        : candidateDashboardSectionPath(scopeId, "voter-contact-prompt"),
+      replies: coalition
+        ? textingRoute(scopeId, "inbox", "folder:replies")
+        : candidateDashboardSectionPath(scopeId, "voter-contact-prompt"),
+      publishing: `${base}/work/publishing`,
+      work: `${base}/work/publishing`,
+      files: "/files",
+      updates: "/profile/notifications",
+    },
   };
 }
 
@@ -34160,49 +34245,8 @@ async function loadCandidateDashboardPage({ refresh = false } = {}) {
   }
   if (candidateId) {
     await loadCandidateDashboardDetail(candidateId, { refresh });
-    const overviewAccess =
-      state.pages.candidateDashboard.detail.access ||
-      findCandidateDashboardAccess(candidateId);
-    if (activeSection === "overview") {
-      const overviewLoads = [];
-      if (candidateDashboardCanOpenSectionKey("engagement", overviewAccess)) {
-        overviewLoads.push(
-          loadCandidateDashboardEngagement(candidateId, { refresh }),
-        );
-      }
-      if (
-        candidateDashboardCanOpenSectionKey(
-          "voter-contact-prompt",
-          overviewAccess,
-        )
-      ) {
-        overviewLoads.push(
-          loadCandidateDashboardContactPrompt(candidateId, { refresh }),
-        );
-      }
-      if (
-        candidateDashboardCanOpenSectionKey("voter-registry", overviewAccess)
-      ) {
-        overviewLoads.push(
-          loadCandidateDashboardVoterRegistry(candidateId, { refresh }),
-        );
-      }
-      if (candidateDashboardCanOpenSectionKey("messaging", overviewAccess)) {
-        overviewLoads.push(
-          loadCandidateDashboardMessaging(candidateId, { refresh }),
-        );
-      }
-      if (
-        candidateDashboardCanOpenSectionKey("campaign-quest", overviewAccess)
-      ) {
-        overviewLoads.push(
-          loadCandidateDashboardVoterMapAccess(candidateId, { refresh }),
-        );
-      }
-      if (overviewLoads.length) {
-        await Promise.allSettled(overviewLoads);
-      }
-    }
+    if (activeSection === "overview")
+      await organizationDashboardPage.load({ force: refresh });
     if (activeSection === "analytics") {
       await loadCandidateDashboardAnalytics(candidateId, { refresh });
     }
@@ -36447,6 +36491,8 @@ async function loadCoalitionsPage({ refresh = false } = {}) {
   const coalitionId = decodeRouteSegment(route.routeParams.coalitionId);
   if (coalitionId) {
     await loadCoalitionDetail(coalitionId, { refresh });
+    if (currentOrganizationDashboardContext())
+      await organizationDashboardPage.load({ force: refresh });
     const activeSection = coalitionSectionForRoute(route);
     if (activeSection === "missions") {
       await loadCoalitionMissions(coalitionId, { refresh });
@@ -63069,6 +63115,7 @@ async function registerSettingsGovernancePasskey() {
 
 async function loadCurrentRoute({ refresh = false } = {}) {
   const route = getCurrentRoute();
+  if (!currentOrganizationDashboardContext()) organizationDashboardPage.reset();
   if (route.routeKey !== "organization-ballot-chaser") ballotChaserPage.reset();
   state.renderError = "";
   const texting = currentTextingContext();
@@ -75491,60 +75538,6 @@ function renderCandidateDashboardFeaturePill(section, candidateId) {
   </button>`;
 }
 
-function renderCandidateDashboardFeatureCard(section, candidateId, access) {
-  const copy = candidateDashboardFeatureCopy(section);
-  const enabled = canOpenCandidateDashboardSection(section, access);
-  const status = candidateDashboardFeatureStatus(section, access);
-  const route = candidateDashboardSectionPath(candidateId, section.key);
-  const tag = `<span class="shared-campaign-feature-card__status${enabled ? " is-enabled" : " is-locked"}">${escapeHtml(status.label)}</span>`;
-  const body = `
-    <span class="shared-campaign-feature-card__icon">${renderIcon(enabled ? section.icon : "lock")}</span>
-    <span class="shared-campaign-feature-card__body">
-      <span class="shared-card__meta"><span>${escapeHtml(copy.eyebrow)}</span>${tag}</span>
-      <strong>${escapeHtml(section.label)}</strong>
-      <small>${escapeHtml(copy.description)}</small>
-      <em>${escapeHtml(status.cta)}</em>
-    </span>`;
-  if (!enabled) {
-    return `<article class="shared-campaign-feature-card is-locked" aria-disabled="true">${body}</article>`;
-  }
-  return `<button class="shared-campaign-feature-card" type="button" data-action="navigate" data-route="${escapeHtml(route)}">${body}</button>`;
-}
-
-function renderCandidateVoterMapFeatureCard(
-  candidateId,
-  access,
-  candidate = null,
-) {
-  const enabled = canOpenCandidateVoterMap(access, candidate);
-  const disabledBecauseOff =
-    hasCandidateVoterMapAccess(access) && candidate?.voterMapEnabled === false;
-  const statusLabel = enabled
-    ? access?.isOwner
-      ? "Owner access"
-      : "Included in your role"
-    : disabledBecauseOff
-      ? "Not enabled"
-      : "Permission required";
-  const cta = enabled
-    ? "Open Voter Map"
-    : disabledBecauseOff
-      ? "Voter map disabled"
-      : "Ask owner for map access";
-  const body = `
-    <span class="shared-campaign-feature-card__icon">${renderIcon(enabled ? "map" : "lock")}</span>
-    <span class="shared-campaign-feature-card__body">
-      <span class="shared-card__meta"><span>Map tools</span><span class="shared-campaign-feature-card__status${enabled ? " is-enabled" : " is-locked"}">${escapeHtml(statusLabel)}</span></span>
-      <strong>Voter Map</strong>
-      <small>Open mapping, territory access, connected voter records, add/import tools, outreach scripts, and field notes.</small>
-      <em>${escapeHtml(cta)}</em>
-    </span>`;
-  if (!enabled) {
-    return `<article class="shared-campaign-feature-card is-locked" aria-disabled="true">${body}</article>`;
-  }
-  return `<button class="shared-campaign-feature-card" type="button" data-action="navigate" data-route="${escapeHtml(candidateVoterMapPath("", candidateId))}">${body}</button>`;
-}
-
 function candidateDashboardAccessRootStats(campaigns = []) {
   const sections = candidateDashboardRootFeatureSections();
   const enabledSections = sections.filter((section) =>
@@ -76207,13 +76200,6 @@ function renderCandidateDashboardMetric(label, value, tone = "") {
   </div>`;
 }
 
-function renderCandidateDashboardMiniList(items, renderItem, emptyText) {
-  if (!items.length) {
-    return `<div class="shared-page__empty">${escapeHtml(emptyText)}</div>`;
-  }
-  return `<div class="shared-stack">${items.map(renderItem).join("")}</div>`;
-}
-
 function candidateDashboardSectionConfig(key) {
   return CANDIDATE_DASHBOARD_SECTION_CONFIG.find(
     (section) => section.key === key,
@@ -76227,272 +76213,8 @@ function candidateDashboardCanOpenSectionKey(key, access) {
   );
 }
 
-function candidateDashboardContactOpsCards(detail, candidateId, access) {
-  const engagement =
-    detail.engagement || createCandidateDashboardEngagementState();
-  const engagementItems = Array.isArray(engagement.items)
-    ? engagement.items
-    : [];
-  const needsAttention = engagementItems.filter((item) => !item.handled).length;
-  const contactSettings =
-    detail.contactPrompt?.settings ||
-    normalizeCandidateDashboardContactPromptSettings({}, candidateId);
-  const contactChannels = candidateContactPromptEnabledCount(contactSettings);
-  const registry =
-    detail.voterRegistry || createCandidateDashboardVoterRegistryState();
-  const voterRecords = Array.isArray(registry.items) ? registry.items : [];
-  const preferredCount = voterRecords.filter(
-    (item) => candidateVoterPreferredContactTypes(item).length > 0,
-  ).length;
-  const voterMap = detail.voterMap || createCandidateDashboardVoterMapState();
-  const territoryCount = voterMap.access?.territories?.length || 0;
-  const messaging =
-    detail.messagingWorkspace || createCandidateDashboardMessagingState();
-  const channels = Array.isArray(messaging.item?.channels)
-    ? messaging.item.channels
-    : [];
-  const unreadCount = channels.reduce(
-    (total, channel) => total + (Number(channel.unreadCount) || 0),
-    0,
-  );
-  const canOpen = (key) => candidateDashboardCanOpenSectionKey(key, access);
-  return [
-    {
-      key: "engagement",
-      label: "Engagement queue",
-      metric: needsAttention
-        ? `${formatCount(needsAttention)} needs response`
-        : engagement.loaded
-          ? "Queue clear"
-          : "Load queue",
-      copy: "Reply as candidate or staff, then clear handled activity.",
-      icon: "comment",
-      route: candidateDashboardSectionPath(candidateId, "engagement"),
-      enabled: canOpen("engagement"),
-      urgent: needsAttention > 0,
-    },
-    {
-      key: "voter-contact-prompt",
-      label: "Voter contact prompt",
-      metric: contactSettings.feedPromptEnabled
-        ? `${formatCount(contactChannels)} live channels`
-        : "Hidden from voters",
-      copy: "Choose which voter outreach requests are shown in feeds and profiles.",
-      icon: "candidate",
-      route: candidateDashboardSectionPath(candidateId, "voter-contact-prompt"),
-      enabled: canOpen("voter-contact-prompt"),
-      urgent: !contactSettings.feedPromptEnabled,
-    },
-    {
-      key: "voter-registry",
-      label: "Voter registry",
-      metric: voterRecords.length
-        ? `${formatCount(voterRecords.length)} loaded voters`
-        : "No voters loaded",
-      copy: preferredCount
-        ? `${formatCount(preferredCount)} voters have preferred contact channels.`
-        : "Search, import, and capture contact preferences before outreach.",
-      icon: "registry",
-      route: candidateDashboardSectionPath(candidateId, "voter-registry"),
-      enabled: canOpen("voter-registry"),
-    },
-    {
-      key: "voter-map",
-      label: "Voter Map",
-      metric: territoryCount
-        ? `${formatCount(territoryCount)} territories`
-        : voterMap.loaded
-          ? "Map tools ready"
-          : "Open map tools",
-      copy: "Use mapping, territory scope, connected voter records, add/import, outreach scripts, and field notes.",
-      icon: "map",
-      route: candidateVoterMapPath("", candidateId),
-      enabled: canOpenCandidateVoterMap(access, detail.candidate),
-    },
-    {
-      key: "messaging",
-      label: "Campaign rooms",
-      metric: channels.length
-        ? `${formatCount(channels.length)} rooms${unreadCount ? `, ${formatCount(unreadCount)} unread` : ""}`
-        : "Open room workspace",
-      copy: "Coordinate staff, volunteers, announcements, and voter follow-up.",
-      icon: "messages",
-      route: candidateDashboardSectionPath(candidateId, "messaging"),
-      enabled: canOpen("messaging"),
-      urgent: unreadCount > 0,
-    },
-    {
-      key: "campaign-quest",
-      label: "Field map",
-      metric: detail.voterMap?.loaded
-        ? "Map access loaded"
-        : "Check field access",
-      copy: "Move voter records into territories, scripts, quests, and sign-drop work.",
-      icon: "map",
-      route: candidateDashboardSectionPath(candidateId, "campaign-quest"),
-      enabled: canOpen("campaign-quest"),
-    },
-    {
-      key: "staff",
-      label: "Staff permissions",
-      metric: `${formatCount(detail.staff.length)} staff loaded`,
-      copy: "Grant engagement, messaging, voter registry, and map access deliberately.",
-      icon: "team",
-      route: candidateDashboardSectionPath(candidateId, "staff"),
-      enabled: canOpen("staff"),
-    },
-  ];
-}
-
-function renderCandidateDashboardContactOpsCard(item) {
-  const className = [
-    "shared-campaign-contact-ops-card",
-    item.urgent ? "is-urgent" : "",
-    item.enabled ? "" : "is-locked",
-  ]
-    .filter(Boolean)
-    .join(" ");
-  const body = `
-    <span class="shared-campaign-contact-ops-card__icon">${renderIcon(item.enabled ? item.icon : "lock")}</span>
-    <span class="shared-campaign-contact-ops-card__body">
-      <small>${escapeHtml(item.metric)}</small>
-      <strong>${escapeHtml(item.label)}</strong>
-      <em>${escapeHtml(item.enabled ? item.copy : "Ask the campaign owner for this permission.")}</em>
-    </span>`;
-  if (!item.enabled) {
-    return `<article class="${className}" aria-disabled="true">${body}</article>`;
-  }
-  return `<button class="${className}" type="button" data-action="navigate" data-route="${escapeHtml(item.route)}">${body}</button>`;
-}
-
-function renderCandidateDashboardContactOps(detail, candidateId, access) {
-  const cards = candidateDashboardContactOpsCards(detail, candidateId, access);
-  const activeCards = cards.filter((item) => item.enabled);
-  const urgentCards = cards.filter((item) => item.enabled && item.urgent);
-  const engagement =
-    detail.engagement || createCandidateDashboardEngagementState();
-  const registry =
-    detail.voterRegistry || createCandidateDashboardVoterRegistryState();
-  const contactSettings =
-    detail.contactPrompt?.settings ||
-    normalizeCandidateDashboardContactPromptSettings({}, candidateId);
-  return `<article class="shared-campaign-panel shared-campaign-panel--wide shared-campaign-contact-ops">
-    <div class="shared-campaign-panel__header">
-      <div>
-        <span class="shared-card__meta"><span>Voter contact operations</span><span>${escapeHtml(`${formatCount(activeCards.length)} available lanes`)}</span></span>
-        <h2>Move from voter signal to campaign response.</h2>
-        <p>Use the same app-backed areas from the browser: prompt settings create consent, engagement handles public activity, the registry stores voter preferences, messaging coordinates follow-up, and staff permissions control who can act.</p>
-      </div>
-      <div class="shared-card__actions">
-        <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="${escapeHtml(candidateDashboardSectionPath(candidateId, "engagement"))}"${disabledAttr(!candidateDashboardCanOpenSectionKey("engagement", access))}>Engagement</button>
-        <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(candidateDashboardSectionPath(candidateId, "voter-registry"))}"${disabledAttr(!candidateDashboardCanOpenSectionKey("voter-registry", access))}>Voter registry</button>
-      </div>
-    </div>
-    <div class="shared-campaign-contact-ops__summary">
-      <span><strong>${escapeHtml(formatCount(urgentCards.length))}</strong><small>attention lanes</small></span>
-      <span><strong>${escapeHtml(contactSettings.feedPromptEnabled ? "Live" : "Hidden")}</strong><small>contact prompt</small></span>
-      <span><strong>${escapeHtml(formatCount(registry.items?.length || 0))}</strong><small>voters loaded</small></span>
-      <span><strong>${escapeHtml(formatCount((engagement.items || []).filter((item) => !item.handled).length))}</strong><small>engagement tasks</small></span>
-    </div>
-    <div class="shared-campaign-contact-ops__grid">
-      ${cards.map(renderCandidateDashboardContactOpsCard).join("")}
-    </div>
-  </article>`;
-}
-
-function renderCandidateDashboardOverview(detail, candidateId, access) {
-  const analytics = detail.analytics || {};
-  const metrics = [
-    renderCandidateDashboardMetric(
-      "Reach",
-      formatCount(analytics.reach || 0),
-      "cyan",
-    ),
-    renderCandidateDashboardMetric(
-      "Impressions",
-      formatCount(analytics.impressions || 0),
-    ),
-    renderCandidateDashboardMetric("Staff", formatCount(detail.staff.length)),
-    renderCandidateDashboardMetric(
-      "Missions",
-      formatCount(detail.missions.length),
-    ),
-    renderCandidateDashboardMetric("Events", formatCount(detail.events.length)),
-    renderCandidateDashboardMetric(
-      "Calendar",
-      formatCount(detail.calendar.length),
-    ),
-  ].join("");
-  const featureSections = candidateDashboardFeatureSections({
-    includeOverview: true,
-  });
-  return `<div class="shared-campaign-section">
-    <div class="shared-campaign-metrics">${metrics}</div>
-    <div class="shared-campaign-overview-grid">
-      <article class="shared-campaign-panel">
-        <div class="shared-campaign-panel__header">
-          <h2>Operations</h2>
-          <button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(candidateDashboardSectionPath(candidateId, "missions"))}">Missions</button>
-        </div>
-        ${renderCandidateDashboardMiniList(
-          detail.missions.slice(0, 3),
-          (
-            mission,
-          ) => `<button class="shared-list-item" data-action="navigate" data-route="/missions/${escapeHtml(encodeURIComponent(mission.missionId))}">
-            <strong>${escapeHtml(mission.title)}</strong>
-            <span>${escapeHtml(humanizeLabel(mission.status))}${mission.assignedCount ? ` - ${formatCount(mission.assignedCount)} assigned` : ""}</span>
-          </button>`,
-          "No active missions in this campaign view.",
-        )}
-      </article>
-      <article class="shared-campaign-panel">
-        <div class="shared-campaign-panel__header">
-          <h2>Calendar</h2>
-          <button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(candidateDashboardSectionPath(candidateId, "calendar"))}">Open</button>
-        </div>
-        ${renderCandidateDashboardMiniList(
-          detail.calendar.slice(0, 3),
-          (item) => `<div class="shared-list-item">
-            <strong>${escapeHtml(item.title)}</strong>
-            <span>${escapeHtml(item.startAt ? formatAbsoluteDateTime(item.startAt) : humanizeLabel(item.status))}</span>
-          </div>`,
-          "No upcoming calendar items.",
-        )}
-      </article>
-      <article class="shared-campaign-panel">
-        <div class="shared-campaign-panel__header">
-          <h2>Access</h2>
-          <button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(candidateDashboardSectionPath(candidateId, "staff"))}">Staff</button>
-        </div>
-        ${renderCandidateDashboardMiniList(
-          detail.staff.slice(0, 4),
-          (member) => `<div class="shared-list-item">
-            <strong>${escapeHtml(member.displayName)}</strong>
-            <span>${escapeHtml(member.role)} - ${escapeHtml(formatCount(member.permissions.length))} permissions</span>
-          </div>`,
-          "No staff members loaded.",
-        )}
-      </article>
-      ${renderCandidateDashboardContactOps(detail, candidateId, access)}
-      <article class="shared-campaign-panel shared-campaign-panel--wide">
-        <div class="shared-campaign-panel__header">
-          <div>
-            <span class="shared-card__meta"><span>Feature map</span><span>${escapeHtml(access?.isOwner ? "Owner workspace" : "Staff workspace")}</span></span>
-            <h2>Campaign command center</h2>
-            <p>Open the browser surfaces that match the Polis app dashboard. Locked cards show what exists but needs owner access or a staff permission.</p>
-          </div>
-        </div>
-        <div class="shared-campaign-feature-grid">
-          ${featureSections
-            .map((section) =>
-              renderCandidateDashboardFeatureCard(section, candidateId, access),
-            )
-            .join("")}
-          ${renderCandidateVoterMapFeatureCard(candidateId, access, detail.candidate)}
-        </div>
-      </article>
-    </div>
-  </div>`;
+function renderCandidateDashboardOverview() {
+  return organizationDashboardPage.render();
 }
 
 function formatAnalyticsPercent(value) {
@@ -86887,8 +86609,8 @@ function renderCandidateDashboardPage() {
       <div class="shared-page__back-row">
         <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/candidate-dashboard">All campaigns</button>
       </div>
-      ${renderCandidateDashboardHero(candidate, access)}
-      ${renderCandidateDashboardCommandStrip(candidateId, access, candidate)}
+      ${isOverviewSection ? "" : renderCandidateDashboardHero(candidate, access)}
+      ${isOverviewSection ? "" : renderCandidateDashboardCommandStrip(candidateId, access, candidate)}
       ${detail.error ? `<div class="shared-page__error">${escapeHtml(detail.error)}</div>` : ""}
       ${renderCandidateDashboardTabs(candidateId, activeSection, access)}
       ${renderCandidateDashboardSection(detail, candidateId, access, activeSection)}
@@ -87329,120 +87051,6 @@ function coalitionMembersCommandPath(coalitionId, membership) {
     : coalitionSectionPath(coalitionId, "members");
 }
 
-function coalitionCommandItems(coalition, membership) {
-  const coalitionId = normalizeString(coalition?.coalitionId);
-  const sectionByKey = new Map(
-    COALITION_SECTION_CONFIG.map((section) => [section.key, section]),
-  );
-  const makeSectionItem = (key, label, copy, tone = "", routeOverride = "") => {
-    const section = sectionByKey.get(key);
-    if (!canOpenCoalitionSection(section, coalition, membership)) {
-      return null;
-    }
-    return {
-      key,
-      label,
-      copy,
-      icon: section.icon,
-      route: routeOverride || coalitionSectionPath(coalitionId, key),
-      tone,
-    };
-  };
-  const items = [
-    makeSectionItem(
-      "members",
-      "Members & Access",
-      "Invite, approve, assign team access, and tune workspace access.",
-      "primary",
-      coalitionMembersCommandPath(coalitionId, membership),
-    ),
-    makeSectionItem(
-      "rooms",
-      "Rooms",
-      "Open coalition rooms and coordinate workstreams.",
-      "primary",
-    ),
-    makeSectionItem(
-      "missions",
-      "Missions",
-      "Create, claim, approve, and track coalition work.",
-      "primary",
-    ),
-    makeSectionItem(
-      "petitions",
-      "Petitions",
-      "Create shareable forms, review responses, and publish result links.",
-    ),
-    makeSectionItem(
-      "voter-map",
-      "Voter map",
-      "District search, territories, voter records, CTA, and notes.",
-    ),
-    makeSectionItem(
-      "calendar",
-      "Calendar",
-      "Events, shifts, availability, promotion, and booking work.",
-    ),
-    makeSectionItem(
-      "governance",
-      "Governance",
-      "Constitution, proposals, votes, results, and speaker tools.",
-    ),
-    makeSectionItem(
-      "amplify",
-      "Amplify",
-      "Create requests and collect platform-response links.",
-    ),
-  ].filter(Boolean);
-  if (membership?.isActive) {
-    items.splice(2, 0, {
-      key: "room-workspace",
-      label: "Room workspace",
-      copy: "Open the full Polis messaging workspace for this coalition.",
-      icon: "messages",
-      route: `/messages/servers/coalition/${encodeURIComponent(coalitionId)}`,
-    });
-  }
-  if (
-    canOpenCoalitionSection(
-      sectionByKey.get("governance"),
-      coalition,
-      membership,
-    ) &&
-    (coalition?.coalitionType === "constitutional" ||
-      coalition?.hasConstitution)
-  ) {
-    items.push({
-      key: "voting",
-      label: "Voting",
-      copy: "Open ballots, proposal detail, and result routes.",
-      icon: "election",
-      route: coalitionSectionPath(coalitionId, "voting"),
-    });
-  }
-  return items;
-}
-
-function renderCoalitionCommandStrip(coalition, membership) {
-  const items = coalitionCommandItems(coalition, membership);
-  if (!items.length) {
-    return "";
-  }
-  return `<section class="shared-coalition-command-strip" aria-label="Coalition work areas">
-    ${items
-      .map(
-        (
-          item,
-        ) => `<button class="shared-coalition-command${item.tone ? ` shared-coalition-command--${escapeHtml(item.tone)}` : ""}" type="button" data-action="navigate" data-route="${escapeHtml(item.route)}">
-          <span>${renderIcon(item.icon)}</span>
-          <strong>${escapeHtml(item.label)}</strong>
-          <small>${escapeHtml(item.copy)}</small>
-        </button>`,
-      )
-      .join("")}
-  </section>`;
-}
-
 function coalitionFeatureHighlights(coalition, membership, limit = 5) {
   const sections = coalitionFeatureSections().filter((section) =>
     canOpenCoalitionSection(section, coalition, membership),
@@ -87460,26 +87068,6 @@ function renderCoalitionFeaturePill(section, coalitionId) {
     <span>${renderIcon(section.icon)}</span>
     <strong>${escapeHtml(section.label)}</strong>
   </button>`;
-}
-
-function renderCoalitionFeatureCard(section, coalition, membership) {
-  const copy = coalitionFeatureCopy(section);
-  const enabled = canOpenCoalitionSection(section, coalition, membership);
-  const status = coalitionFeatureStatus(section, coalition, membership);
-  const route = coalitionSectionPath(coalition.coalitionId, section.key);
-  const tag = `<span class="shared-coalition-feature-card__status${enabled ? " is-enabled" : " is-locked"}">${escapeHtml(status.label)}</span>`;
-  const body = `
-    <span class="shared-coalition-feature-card__icon">${renderIcon(enabled ? section.icon : "lock")}</span>
-    <span class="shared-coalition-feature-card__body">
-      <span class="shared-card__meta"><span>${escapeHtml(copy.eyebrow)}</span>${tag}</span>
-      <strong>${escapeHtml(section.label)}</strong>
-      <small>${escapeHtml(copy.description)}</small>
-      <em>${escapeHtml(status.cta)}</em>
-    </span>`;
-  if (!enabled) {
-    return `<article class="shared-coalition-feature-card is-locked" aria-disabled="true">${body}</article>`;
-  }
-  return `<button class="shared-coalition-feature-card" type="button" data-action="navigate" data-route="${escapeHtml(route)}">${body}</button>`;
 }
 
 function renderCoalitionAvatar(coalition, sizeClass = "") {
@@ -88577,153 +88165,11 @@ function renderCoalitionMetric(label, value, tone = "") {
   </div>`;
 }
 
-function renderCoalitionMiniList(items, renderItem, emptyText) {
-  if (!items.length) {
-    return `<div class="shared-page__empty">${escapeHtml(emptyText)}</div>`;
-  }
-  return `<div class="shared-stack">${items.map(renderItem).join("")}</div>`;
-}
-
-function renderCoalitionContactPanel(coalition) {
-  const contactRows = [
-    ["Primary contact", coalition.primaryContactName || "Not set"],
-    ["Email", coalition.email || "Not set"],
-    ["Phone", coalition.phone || "Not set"],
-    ["Website", coalition.website || "Not set"],
-    [
-      "PAC status",
-      coalition.pacAssociated
-        ? `PAC associated${coalition.fecNumber ? ` - FEC ${coalition.fecNumber}` : ""}`
-        : "Not a PAC",
-    ],
-  ];
-  return `<article class="shared-coalition-panel">
-    <div class="shared-coalition-panel__header"><h2>Contact</h2></div>
-    <div class="shared-coalition-contact-list">
-      ${contactRows
-        .map(
-          ([label, value]) =>
-            `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`,
-        )
-        .join("")}
-    </div>
-  </article>`;
-}
-
 function renderCoalitionOverview(detail, coalition, membership) {
-  const featureSections = coalitionFeatureSections();
-  const missionSection = COALITION_SECTION_CONFIG.find(
-    (section) => section.key === "missions",
-  );
-  const governanceSection = COALITION_SECTION_CONFIG.find(
-    (section) => section.key === "governance",
-  );
-  const canOpenMissions = canOpenCoalitionSection(
-    missionSection,
-    coalition,
-    membership,
-  );
-  const canOpenGovernance = canOpenCoalitionSection(
-    governanceSection,
-    coalition,
-    membership,
-  );
-  const metrics = [
-    renderCoalitionMetric(
-      "Members",
-      formatCount(detail.members.length),
-      "cyan",
-    ),
-    renderCoalitionMetric("Missions", formatCount(detail.missions.length)),
-    renderCoalitionMetric("Calendar", formatCount(detail.calendar.length)),
-  ].join("");
-  return `<div class="shared-coalition-section">
-    <div class="shared-coalition-metrics">${metrics}</div>
-    ${
-      membership.isPending
-        ? '<div class="shared-page__hint shared-page__banner">Pending approval. Coalition tools unlock once an admin approves the membership.</div>'
-        : ""
-    }
-    <div class="shared-coalition-overview-grid">
-      ${membership.isActive && !membership.isPending && coalitionHasAnyPermission(membership, ["contact_book_view"]) ? `<article class="shared-coalition-panel pt-org-entry"><span class="pt-eyebrow">WORK · GET OUT THE VOTE</span><h2>Ballot Chaser</h2><p>Upload county ballot reports, see what changed, and build the next texting or DoorKnocker list.</p><button class="pt-btn" data-action="navigate" data-route="/workspace/coalition/${encodeURIComponent(coalition.coalitionId)}/work/ballot-chaser">Open Ballot Chaser</button></article>` : ""}
-      ${
-        membership.isActive && !membership.isPending
-          ? `<article class="shared-coalition-panel pt-org-entry">
-        <span class="pt-eyebrow">KEEP THE CONVERSATION GOING</span>
-        <h2>Every message matters.</h2><p>Texting, contacts, and conversations for your team.</p>
-        <button class="pt-btn" data-action="navigate" data-route="${escapeHtml(textingRoute(coalition.coalitionId))}">Open texting</button>
-        ${membership.isAdmin ? `<button class="pt-btn pt-btn--secondary" data-action="navigate" data-route="${escapeHtml(textingRoute(coalition.coalitionId, "balance"))}">Texting balance</button>` : ""}
-      </article>`
-          : ""
-      }
-      ${
-        canOpenMissions
-          ? `<article class="shared-coalition-panel">
-              <div class="shared-coalition-panel__header">
-                <h2>Operations</h2>
-                <button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, "missions"))}">Missions</button>
-              </div>
-              ${renderCoalitionMiniList(
-                detail.missions.slice(0, 3),
-                (
-                  mission,
-                ) => `<button class="shared-list-item" data-action="navigate" data-route="/missions/${escapeHtml(encodeURIComponent(mission.missionId))}">
-                  <strong>${escapeHtml(mission.title)}</strong>
-                  <span>${escapeHtml(humanizeLabel(mission.status))}${mission.assignedCount ? ` - ${formatCount(mission.assignedCount)} assigned` : ""}</span>
-                </button>`,
-                "No coalition missions loaded.",
-              )}
-            </article>`
-          : ""
-      }
-      ${
-        canOpenGovernance
-          ? `<article class="shared-coalition-panel">
-              <div class="shared-coalition-panel__header">
-                <h2>Governance</h2>
-                <button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, "governance"))}">Open</button>
-              </div>
-              ${renderCoalitionMiniList(
-                detail.proposals.slice(0, 3),
-                (proposal) => `<div class="shared-list-item">
-                  <strong>${escapeHtml(proposal.title)}</strong>
-                  <span>${escapeHtml(humanizeLabel(proposal.status))} - ${escapeHtml(formatCount(proposal.signerCount))} signatures</span>
-                </div>`,
-                detail.constitution
-                  ? "No active proposals loaded."
-                  : "No constitution or proposals loaded.",
-              )}
-            </article>`
-          : ""
-      }
-      <article class="shared-coalition-panel">
-        <div class="shared-coalition-panel__header">
-          <h2>Access</h2>
-          <button class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, "members"))}">Members</button>
-        </div>
-        ${renderCoalitionMiniList(
-          detail.members.slice(0, 4),
-          (member) => `<div class="shared-list-item">
-            <strong>${escapeHtml(member.displayName)}</strong>
-            <span>${escapeHtml(member.roleLabel)}</span>
-          </div>`,
-          "No members loaded.",
-        )}
-      </article>
-      <details class="coalition-ui-disclosure shared-coalition-panel--wide">
-        <summary>All tools & access</summary>
-        ${renderCoalitionCommandStrip(coalition, membership)}
-        <div class="shared-coalition-feature-grid">
-          ${featureSections
-            .map((section) =>
-              renderCoalitionFeatureCard(section, coalition, membership),
-            )
-            .join("")}
-        </div>
-      </details>
-      <details class="coalition-ui-disclosure shared-coalition-panel--wide"><summary>Contact details</summary>${renderCoalitionContactPanel(coalition)}</details>
-    </div>
-  </div>`;
+  if (!membership.isActive || membership.isPending) {
+    return '<div class="shared-page__hint shared-page__banner">Your dashboard will be ready after your membership is approved.</div>';
+  }
+  return organizationDashboardPage.render();
 }
 
 function canManageCoalitionMembers(membership) {
@@ -96090,7 +95536,7 @@ function renderCoalitionDetailPage() {
       </aside>
       <div class="shared-page__content coalition-ui-content">
         <details class="coalition-ui-mobile-nav"><summary>Coalition menu</summary>${renderCoalitionTabs(coalition, membership, activeSection)}<button class="coalition-ui-all" data-action="open-app-shell">Open app</button></details>
-        ${renderCoalitionHero(coalition, membership)}
+        ${isOverviewSection && membership.isActive && !membership.isPending ? "" : renderCoalitionHero(coalition, membership)}
         ${detail.error ? `<div class="shared-page__error">${escapeHtml(detail.error)}</div>` : ""}
         ${renderCoalitionSection(detail, coalition, membership, activeSection)}
       </div>
@@ -128395,6 +127841,7 @@ function renderApp() {
       ${renderToast()}`;
   root.innerHTML = shell;
   territoryBuilder.mount(root);
+  organizationDashboardPage.mount(root);
   restoreFeedScrollState(scrollSnapshot);
   restorePetitionAddressFocusState(petitionAddressFocusSnapshot);
   restoreTextingFocus(root, textingFocus, textingIdentity);
