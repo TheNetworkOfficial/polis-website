@@ -65,7 +65,10 @@ installOrganizationPersonFields({
   identity: () =>
     `${state.auth.user?.userId || ""}:${getCurrentPathWithQuery()}`,
 });
-import { createTextingSessionRequest } from "./scripts/textingSession.js";
+import {
+  createTextingSessionRequest,
+  createTextingExitRequest,
+} from "./scripts/textingSession.js";
 import {
   parseTextingRoute,
   textingRoute,
@@ -180,6 +183,11 @@ const textingIntakePage = createTextingIntakePage({
 });
 const textingWorkspacePage = createTextingWorkspacePage({
   request: textingRequest,
+  requestExit: createTextingExitRequest({
+    request: fetchJsonRaw,
+    getSession: () => state.auth.session,
+    userId: (session) => getAuthenticatedUser(session)?.userId || "",
+  }),
   context: () => {
     const current = currentTextingContext();
     return current &&
@@ -9653,6 +9661,7 @@ async function fetchJsonRaw(
     headers = {},
     includeAccessToken = false,
     signal,
+    keepalive = false,
   } = {},
 ) {
   const baseUrl = getApiBaseUrl();
@@ -9686,6 +9695,7 @@ async function fetchJsonRaw(
   const response = await fetch(`${baseUrl}${path}`, {
     method,
     signal,
+    ...(keepalive ? { keepalive: true } : {}),
     headers: nextHeaders,
     body:
       body === undefined || body === null
@@ -63142,10 +63152,10 @@ async function loadCurrentRoute({ refresh = false } = {}) {
     textingWorkspacePage.reset();
   } else if (texting.section === "balance") {
     textingIntakePage.reset();
-    textingWorkspacePage.reset();
+    textingWorkspacePage.reset({ releaseUnused: false });
   } else if (["registration", "settings"].includes(texting.section)) {
     textingBalancePage.reset();
-    textingWorkspacePage.reset();
+    textingWorkspacePage.reset({ releaseUnused: false });
   } else {
     textingBalancePage.reset();
     textingIntakePage.reset();
@@ -136869,6 +136879,10 @@ function refreshTextingOnResume() {
 }
 
 function attachGlobalListeners() {
+  window.addEventListener("pagehide", () => textingWorkspacePage.exit());
+  window.addEventListener("pageshow", (event) => {
+    if (event.persisted) refreshTextingOnResume();
+  });
   window.addEventListener("focus", refreshTextingOnResume);
   window.addEventListener("focus", () =>
     organizationDashboardPage.resume().catch(() => {}),
@@ -136886,6 +136900,7 @@ function attachGlobalListeners() {
   });
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
+      textingWorkspacePage.exit();
       clearElectionPolling();
       if (syncMessagingAppLockState().enabled) {
         clearMessagingAppLockSessionForUser();

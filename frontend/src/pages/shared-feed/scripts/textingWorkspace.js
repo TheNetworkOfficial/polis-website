@@ -25,10 +25,12 @@ import { textingReadRequest } from "./textingReadRequest";
 import { createTextingRecovery } from "./textingRecovery";
 import { renderTextingRenewals, renderTextingSetup } from "./textingRenewals";
 import { readTextingReports, renderTextingReport } from "./textingReporting";
+import { createTextingQueueSession } from "./textingQueueSession";
 
 /** Authenticated customer workspace. Every async result is fenced to both user and route. Texting access setup runs only in send and reply flows. */
 export function createTextingWorkspacePage({
   request,
+  requestExit,
   context,
   changed,
   navigate,
@@ -45,6 +47,7 @@ export function createTextingWorkspacePage({
   const sendHolds = new Set();
   const sendActions = new Map();
   const resolvedHolds = new Map();
+  const queueSession = createTextingQueueSession({ requestExit });
   const holdStorage = (key) => `polis.texting.uncertain.${key}`;
   function hasHold(key) {
     try {
@@ -143,7 +146,17 @@ export function createTextingWorkspacePage({
     view = {};
     modules = {};
   }
-  function reset() {
+  function exit() {
+    if (queueSession.release()) {
+      view.allocationExited = true;
+      if (view.key) changed();
+    }
+  }
+  function reset({ releaseUnused = true } = {}) {
+    if (releaseUnused) {
+      exit();
+      queueSession.forget();
+    }
     clearView();
     entryActor = "";
     fundsDismissed = false;
@@ -182,13 +195,22 @@ export function createTextingWorkspacePage({
   }
   function runtime(key, version) {
     const organizationId = context().organizationId,
-      actor = actorIdentity();
+      actor = actorIdentity(),
+      userId = context().userId;
     const guard = () => {
-      if (!current(key, version))
+      if (!current(key, version) || view.allocationExited)
         throw new Error("Workspace changed; previous operation stopped.");
     };
     const api = async (suffix, body, method, { signal } = {}) => {
       guard();
+      const allocationTicket =
+        body !== undefined && /\/campaigns\/[^/]+\/queue$/.test(suffix)
+          ? queueSession.beginAllocation({
+              userId,
+              organizationId,
+              neutralApi: view.neutralApi,
+            })
+          : null;
       const perform = (requestSignal) =>
         request(
           `/api/text-banking/${view.neutralApi ? "workspaces" : "prompt/scopes"}/${id(`coalition:${organizationId}`)}${suffix}`,
@@ -199,13 +221,35 @@ export function createTextingWorkspacePage({
             ...(body === undefined ? {} : { method: method || "POST", body }),
           },
         );
-      const result =
-        body === undefined
-          ? await textingReadRequest(perform, { signal })
-          : await perform(signal);
+      let result;
+      try {
+        result =
+          body === undefined
+            ? await textingReadRequest(perform, { signal })
+            : await perform(signal);
+      } catch (error) {
+        if (allocationTicket) queueSession.cancelAllocation(allocationTicket);
+        throw error;
+      }
+      if (allocationTicket)
+        queueSession.completeAllocation(
+          allocationTicket,
+          result?.ok === true ? result.queueSession : null,
+        );
       guard();
       if (result?.ok !== true)
         throw new Error("The workspace response could not be verified.");
+      queueSession.observe(
+        result.queueSession || result.workspace?.queueSession,
+        {
+          userId,
+          organizationId,
+          neutralApi:
+            view.neutralApi ||
+            result.workspace?.capabilities?.neutralWorkspaceApi === true ||
+            result.workspace?.contractVersion === 2,
+        },
+      );
       return result;
     };
     const refreshBilling = async () => {
@@ -231,6 +275,7 @@ export function createTextingWorkspacePage({
     };
     return {
       api,
+      queueSessionId: queueSession.sessionId,
       cities: async (state, options) => {
         guard();
         const result = await loadContactCities(state, request, options);
@@ -251,7 +296,7 @@ export function createTextingWorkspacePage({
       view: () => view,
       workspace: () => view.workspace,
       billing: () => view.billing,
-      busy: () => view.busy === true,
+      busy: () => view.busy === true || view.allocationExited === true,
       changed: () => {
         guard();
         changed();
@@ -324,6 +369,10 @@ export function createTextingWorkspacePage({
     )
       return;
     if (entryActor !== actorIdentity()) {
+      if (entryActor) {
+        exit();
+        queueSession.forget();
+      }
       pendingContactCampaign = null;
       entryActor = actorIdentity();
       fundsDismissed = false;
@@ -404,6 +453,10 @@ export function createTextingWorkspacePage({
       !view.workspace
     )
       return;
+    if (view.allocationExited) {
+      await load({ force: true });
+      return;
+    }
     const key = view.key,
       version = sequence,
       r = runtime(key, version);
@@ -422,6 +475,7 @@ export function createTextingWorkspacePage({
   async function run(operation) {
     if (
       view.busy ||
+      view.allocationExited ||
       view.loading ||
       view.campaigns?.pendingItemId ||
       identity() !== view.key
@@ -445,7 +499,13 @@ export function createTextingWorkspacePage({
     }
   }
   async function runRecipientAction(action, itemId) {
-    if (view.busy || view.loading || identity() !== view.key) return;
+    if (
+      view.busy ||
+      view.loading ||
+      view.allocationExited ||
+      identity() !== view.key
+    )
+      return;
     const key = view.key,
       version = sequence;
     view.error = "";
@@ -754,6 +814,7 @@ export function createTextingWorkspacePage({
           if (b.dataset.value !== key || !owned(target)) continue;
           b.disabled =
             view.busy ||
+            view.allocationExited ||
             Boolean(
               view.campaigns.pendingItems?.has(key) ||
                 view.campaigns.pendingItemId === key,
@@ -803,6 +864,7 @@ export function createTextingWorkspacePage({
   );
   return {
     load,
+    exit,
     render,
     reset,
     refresh,
