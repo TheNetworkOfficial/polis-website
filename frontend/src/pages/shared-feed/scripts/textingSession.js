@@ -4,6 +4,30 @@ const undispatched = new WeakSet();
 export const textingRequestWasNotDispatched = (error) =>
   error instanceof Error && undispatched.has(error);
 
+/** Exit uses an existing valid session synchronously, without token refresh,
+ * route fencing, mutation replay, or persisting credentials in an exit payload. */
+export function createTextingExitRequest({ request, getSession, userId }) {
+  return (path, { expectedUserId, body } = {}) => {
+    const session = getSession();
+    if (
+      !expectedUserId ||
+      userId(session) !== expectedUserId ||
+      !Number.isFinite(session?.expiresAt) ||
+      session.expiresAt <= Date.now() ||
+      !/^\/api\/text-banking\/(?:workspaces|prompt\/scopes)\/[^/]+\/campaigns\/[^/]+\/queue\/release$/.test(
+        path,
+      )
+    )
+      throw new Error("Texting exit session is unavailable.");
+    return request(path, {
+      auth: true,
+      method: "POST",
+      keepalive: true,
+      body,
+    });
+  };
+}
+
 /** Refresh text-banking authentication before a request; never replay a mutation. */
 export function createTextingSessionRequest({
   request,

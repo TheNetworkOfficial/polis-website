@@ -756,10 +756,10 @@ export function createCampaigns(r) {
         await prepareTextingAccess(r, s, c.campaignId);
       let allocationId = materializationId(s.queue);
       for (let attempt = 0; attempt < 8; attempt++) {
-        const next = await r.api(
-          `/campaigns/${id(c.campaignId)}/queue`,
-          allocationId ? { allocationId } : {},
-        );
+        const next = await r.api(`/campaigns/${id(c.campaignId)}/queue`, {
+          ...(allocationId ? { allocationId } : {}),
+          ...(r.queueSessionId ? { sessionId: r.queueSessionId } : {}),
+        });
         const nextId = materializationId(next);
         if (
           allocationId &&
