@@ -153,7 +153,7 @@ export function createTextingWorkspacePage({
     }
   }
   function reset({ releaseUnused = true } = {}) {
-    if (releaseUnused) {
+    if (releaseUnused || view.sendCampaignId) {
       exit();
       queueSession.forget();
     }
@@ -377,8 +377,21 @@ export function createTextingWorkspacePage({
       entryActor = actorIdentity();
       fundsDismissed = false;
     }
+    // Leaving the sender ends its assignment even within Text Banking. Keep
+    // ordinary Home/Inbox navigation and read-only refreshes independent.
+    if (
+      view.sendCampaignId &&
+      (context().section !== "send" ||
+        context().resourceId !== view.sendCampaignId)
+    )
+      exit();
     clearView();
-    view = { key, loading: true };
+    view = {
+      key,
+      loading: true,
+      sendCampaignId:
+        context().section === "send" ? context().resourceId : null,
+    };
     const version = sequence,
       r = runtime(key, version);
     modules = {
@@ -660,6 +673,11 @@ export function createTextingWorkspacePage({
     if (action === "navigate") {
       const [section, resource] = JSON.parse(target.dataset.value);
       navigate(section, resource);
+      return;
+    }
+    if (action === "queue-leave") {
+      exit();
+      navigate("campaigns", target.dataset.value);
       return;
     }
     if (action === "reload") {

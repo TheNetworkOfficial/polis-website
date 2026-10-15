@@ -297,10 +297,11 @@ function workspaceFixture({ delayAllocation = false } = {}) {
     setContext: (next) => {
       context = next;
     },
-    click: (action) => {
+    saved,
+    click: (action, value = "") => {
       const target = {
         disabled: false,
-        dataset: { workspaceAction: action },
+        dataset: { workspaceAction: action, value },
         closest: () => ({
           dataset: {
             workspaceKey: `${context.userId}:${context.organizationId}:${context.section}:${context.resourceId}`,
@@ -313,7 +314,7 @@ function workspaceFixture({ delayAllocation = false } = {}) {
 }
 const drain = () => new Promise((resolve) => setImmediate(resolve));
 
-test("internal campaign navigation retains the owner and workspace exit releases its exact batch", async () => {
+test("leaving a sender campaign releases its exact batch before the next campaign loads", async () => {
   const f = workspaceFixture();
   await f.page.load();
   f.click("queue-load");
@@ -322,7 +323,7 @@ test("internal campaign navigation retains the owner and workspace exit releases
   assert.match(allocation.options.body.sessionId, /^[0-9a-f-]{36}$/i);
   f.setContext({ ...actor, section: "send", resourceId: "different-campaign" });
   await f.page.load();
-  assert.equal(f.exits.length, 0);
+  assert.equal(f.exits.length, 1);
   f.setContext(null);
   f.page.reset();
   assert.equal(f.exits.length, 1);
@@ -338,6 +339,66 @@ test("internal campaign navigation retains the owner and workspace exit releases
     f.calls.filter((c) => c.options.method).length,
     1,
     "Only the explicit queue request was dispatched through normal workspace transport",
+  );
+});
+
+test("the explicit Leave session action returns its batch without clearing uncertain send holds", async () => {
+  const f = workspaceFixture();
+  await f.page.load();
+  f.click("queue-load");
+  await drain();
+  const allocation = f.calls.find((c) => c.path.endsWith("/queue"));
+  const holdKey =
+    "polis.texting.uncertain.volunteer:org-one:queue:previous-campaign:item-one";
+  f.saved.set(holdKey, "uncertain-attempt-remains-held");
+  f.click("queue-leave", "previous-campaign");
+  assert.equal(f.exits.length, 1);
+  assert.match(f.exits[0].path, /\/previous-campaign\/queue\/release$/);
+  assert.equal(
+    f.exits[0].options.body.sessionId,
+    allocation.options.body.sessionId,
+  );
+  assert.equal(f.saved.get(holdKey), "uncertain-attempt-remains-held");
+  f.setContext({
+    ...actor,
+    section: "campaigns",
+    resourceId: "previous-campaign",
+  });
+  await f.page.load();
+  assert.equal(
+    f.exits.length,
+    1,
+    "Route loading must not dispatch the exit twice",
+  );
+});
+
+test("same-sender refresh retains ownership; moving to Home releases once and Home to Inbox does not release again", async () => {
+  const f = workspaceFixture();
+  await f.page.load();
+  f.click("queue-load");
+  await drain();
+  await f.page.refresh();
+  assert.equal(f.exits.length, 0);
+  f.setContext({ ...actor, section: "home", resourceId: "" });
+  await f.page.load();
+  assert.equal(f.exits.length, 1);
+  f.setContext({ ...actor, section: "inbox", resourceId: "" });
+  await f.page.load();
+  assert.equal(f.exits.length, 1);
+});
+
+test("an internal auxiliary-page reset releases the sender while preserving send holds", async () => {
+  const f = workspaceFixture();
+  await f.page.load();
+  f.click("queue-load");
+  await drain();
+  f.saved.set("polis.texting.uncertain.pending", "pending-result");
+  f.setContext({ ...actor, section: "balance", resourceId: "" });
+  f.page.reset({ releaseUnused: false });
+  assert.equal(f.exits.length, 1);
+  assert.equal(
+    f.saved.get("polis.texting.uncertain.pending"),
+    "pending-result",
   );
 });
 
@@ -396,4 +457,29 @@ test("a queue POST completing after SPA exit releases its late token before the 
   assert.match(f.exits[0].path, /\/previous-campaign\/queue\/release$/);
   assert.equal(f.calls.filter((c) => c.path.endsWith("/queue")).length, 1);
   assert.doesNotMatch(f.page.render(), /Example campaign|Send to/);
+});
+
+test("Leave session while allocation is pending returns only its late exact token", async () => {
+  const f = workspaceFixture({ delayAllocation: true });
+  await f.page.load();
+  f.click("queue-load");
+  await drain();
+  const allocation = f.calls.find((c) => c.path.endsWith("/queue"));
+  f.click("queue-leave", "previous-campaign");
+  f.setContext({
+    ...actor,
+    section: "campaigns",
+    resourceId: "previous-campaign",
+  });
+  await f.page.load();
+  assert.equal(f.exits.length, 0);
+  f.finishAllocation();
+  await drain();
+  assert.equal(f.exits.length, 1);
+  assert.equal(
+    f.exits[0].options.body.sessionId,
+    allocation.options.body.sessionId,
+  );
+  assert.equal(f.exits[0].options.body.allocationId, "exact-allocation-token");
+  assert.equal(f.calls.filter((c) => c.path.endsWith("/queue")).length, 1);
 });

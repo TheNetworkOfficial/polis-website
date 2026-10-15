@@ -2,7 +2,16 @@ const { test, expect } = require("@playwright/test");
 const BASE = process.env.POLIS_TEST_BASE_URL || "http://127.0.0.1:9093";
 const PREFIX = "/api/text-banking/prompt/scopes/coalition%3Aorg-1";
 
-for (const exitEvent of ["pagehide", "hidden", "navigation"])
+for (const exitEvent of [
+  "pagehide",
+  "hidden",
+  "navigation",
+  "leave",
+  "sent-leave",
+  "sender-navigation",
+  "campaign-switch",
+  "leave-pending",
+])
   test(`unused assignment exit is authenticated and session-bound: ${exitEvent}`, async ({
     page,
   }) => {
@@ -16,6 +25,10 @@ for (const exitEvent of ["pagehide", "hidden", "navigation"])
             idToken: token,
             expiresAt: Date.now() + 3600000,
           }),
+        );
+        sessionStorage.setItem(
+          "polis.texting.uncertain.exit-regression",
+          "uncertain-attempt-remains-held",
         );
         let config;
         Object.defineProperty(window, "__POLIS_WEB_APP__", {
@@ -39,7 +52,7 @@ for (const exitEvent of ["pagehide", "hidden", "navigation"])
     );
     const writes = [],
       errors = [];
-    let queueSession;
+    let queueSession, finishAllocation;
     page.on("pageerror", (error) => errors.push(error.message));
     await page.route("**/*", (route) => {
       if (route.request().url().startsWith(BASE)) return route.continue();
@@ -95,12 +108,12 @@ for (const exitEvent of ["pagehide", "hidden", "navigation"])
       if (suffix === "/campaigns/campaign-one/queue") {
         queueSession = {
           campaignId: "campaign-one",
-          allocationId: "allocated-token",
+          allocationId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
           sessionId: body.sessionId,
           assignmentExpiresAtMs: Date.now() + 3600000,
           canReleaseUnused: true,
         };
-        return respond({
+        const allocation = {
           ok: true,
           campaignId: "campaign-one",
           state: "held",
@@ -118,7 +131,15 @@ for (const exitEvent of ["pagehide", "hidden", "navigation"])
               },
             },
           ],
-        });
+        };
+        if (exitEvent === "leave-pending")
+          return new Promise((resolve) => {
+            finishAllocation = async () => {
+              await respond(allocation);
+              resolve();
+            };
+          });
+        return respond(allocation);
       }
       if (suffix === "/campaigns/campaign-one/queue/release") {
         queueSession = { ...queueSession, canReleaseUnused: false };
@@ -140,29 +161,53 @@ for (const exitEvent of ["pagehide", "hidden", "navigation"])
     await page
       .getByRole("button", { name: "Get next recipients", exact: true })
       .click();
-    await expect(
-      page.getByRole("button", {
-        name: "Send to Example recipient",
-        exact: true,
-      }),
-    ).toBeEnabled();
+    if (exitEvent !== "leave-pending")
+      await expect(
+        page.getByRole("button", {
+          name: "Send to Example recipient",
+          exact: true,
+        }),
+      ).toBeEnabled();
+    await expect
+      .poll(() => writes.some((write) => write.path.endsWith("/queue")))
+      .toBe(true);
     const initial = writes.find((write) => write.path.endsWith("/queue"));
     expect(initial.body.sessionId).toMatch(/^[0-9a-f-]{36}$/i);
-    await page.evaluate((event) => {
-      if (event === "pagehide") {
-        window.dispatchEvent(new PageTransitionEvent("pagehide"));
-        window.dispatchEvent(new PageTransitionEvent("pagehide"));
-      } else if (event === "hidden") {
-        Object.defineProperty(document, "hidden", {
-          configurable: true,
-          get: () => true,
-        });
-        document.dispatchEvent(new Event("visibilitychange"));
-      } else {
-        history.pushState({}, "", "/feed");
-        window.dispatchEvent(new PopStateEvent("popstate"));
+    if (["leave", "sent-leave", "leave-pending"].includes(exitEvent)) {
+      if (exitEvent === "sent-leave")
+        await page.getByRole("button", { name: "Sent", exact: true }).click();
+      await page
+        .getByRole("button", { name: "Leave session", exact: true })
+        .click();
+      await expect(page).toHaveURL(/\/texting\/campaigns\/campaign-one$/);
+      if (exitEvent === "leave-pending") {
+        expect(
+          writes.filter((write) => write.path.endsWith("/release")),
+        ).toHaveLength(0);
+        await finishAllocation();
       }
-    }, exitEvent);
+    } else
+      await page.evaluate((event) => {
+        if (event === "pagehide") {
+          window.dispatchEvent(new PageTransitionEvent("pagehide"));
+          window.dispatchEvent(new PageTransitionEvent("pagehide"));
+        } else if (event === "hidden") {
+          Object.defineProperty(document, "hidden", {
+            configurable: true,
+            get: () => true,
+          });
+          document.dispatchEvent(new Event("visibilitychange"));
+        } else {
+          const path =
+            event === "sender-navigation"
+              ? "/organizations/org-1/texting"
+              : event === "campaign-switch"
+                ? "/organizations/org-1/texting/send/campaign-two"
+                : "/feed";
+          history.pushState({}, "", path);
+          window.dispatchEvent(new PopStateEvent("popstate"));
+        }
+      }, exitEvent);
     await expect
       .poll(
         () => writes.filter((write) => write.path.endsWith("/release")).length,
@@ -171,7 +216,7 @@ for (const exitEvent of ["pagehide", "hidden", "navigation"])
     const release = writes.find((write) => write.path.endsWith("/release"));
     expect(release.authorization).toBe(true);
     expect(release.body).toEqual({
-      allocationId: "allocated-token",
+      allocationId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       sessionId: initial.body.sessionId,
       requestId: expect.stringMatching(/^[0-9a-f-]{36}$/i),
       reason: "exit",
@@ -179,7 +224,12 @@ for (const exitEvent of ["pagehide", "hidden", "navigation"])
     expect(
       writes.filter((write) => /\/confirm$|\/skip$/.test(write.path)),
     ).toHaveLength(0);
-    if (exitEvent !== "navigation") {
+    expect(
+      await page.evaluate(() =>
+        sessionStorage.getItem("polis.texting.uncertain.exit-regression"),
+      ),
+    ).toBe("uncertain-attempt-remains-held");
+    if (["pagehide", "hidden"].includes(exitEvent)) {
       await expect(
         page.getByRole("button", {
           name: "Send to Example recipient",
