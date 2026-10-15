@@ -48,7 +48,21 @@ import { createTextingWorkspacePage } from "./scripts/textingWorkspace.js";
 import { createOrganizationPeoplePage } from "./scripts/organizationPeople.js";
 import { createOrganizationDashboard } from "./scripts/organizationDashboard.js";
 import { createBallotChaser } from "./scripts/ballotChaser.js";
+import {
+  createOrganizationSignup,
+  renderOrganizationSignup,
+} from "./scripts/organizationCreationSignup.js";
 import { createTerritoryBuilder } from "./scripts/territoryBuilder.js";
+import {
+  montanaStateOffices,
+  isMontanaCandidateState,
+  canonicalMontanaCandidateOffice,
+  montanaCandidateOfficeSpec,
+  montanaCandidateOfficeLabel,
+  validateMontanaCandidateScope,
+  montanaCandidateDistrictLabel,
+  candidateBoundarySvgPath,
+} from "./scripts/montanaCandidateOffices.js";
 import {
   createOrganizationPublishingPage,
   organizationApiBase,
@@ -203,6 +217,29 @@ const textingWorkspacePage = createTextingWorkspacePage({
     ),
 });
 let stripeJsLoadPromise = null;
+const organizationSignup = createOrganizationSignup({
+  request: textingRequest,
+  context: () =>
+    getCurrentRoute().routeKey === ROUTE_KEY_COALITION_START &&
+    state.auth.session
+      ? {
+          actorId: getAuthenticatedUser(state.auth.session)?.userId || "",
+          path: window.location.pathname,
+        }
+      : null,
+  changed: scheduleRender,
+  navigate: navigateTo,
+  clearDraft: () => {
+    resetCoalitionStartDraft();
+    state.pages.coalitions.onboarding.imageUpload =
+      createCoalitionImageUploadState();
+  },
+  storage: {
+    getItem: (key) => window.sessionStorage.getItem(key),
+    setItem: (key, value) => window.sessionStorage.setItem(key, value),
+    removeItem: (key) => window.sessionStorage.removeItem(key),
+  },
+});
 const organizationDashboardPage = createOrganizationDashboard({
   request: fetchJson,
   context: currentOrganizationDashboardContext,
@@ -831,7 +868,13 @@ const ELECTION_AUTH_SCOPES = new Set([
   ELECTION_SCOPE_MY_DISTRICT,
   ELECTION_SCOPE_CUSTOM,
 ]);
-const ELECTION_STATE_RACE_TYPES = ["statewide", "house", "senate"];
+const ELECTION_STATE_RACE_TYPES = [
+  "statewide",
+  "house",
+  "senate",
+  "public_service_commission",
+  "judicial",
+];
 const ELECTION_STATE_MAP_CHAMBERS = ["house", "senate"];
 const ELECTION_CUSTOM_VIEW_MAX_COUNT = 3;
 const ELECTION_MAP_SVG_MIN_SCALE = 1;
@@ -3466,6 +3509,7 @@ function parseRouteFromLocation(pathname = window.location.pathname) {
       ["organizationId", "governancePath"],
     ],
     [ROUTE_KEY_COALITION_START, /^\/coalitions\/start$/u, []],
+    [ROUTE_KEY_COALITION_START, /^\/organizations\/signup$/u, []],
     [ROUTE_KEY_COALITION_JOIN, /^\/coalitions\/join$/u, []],
     [
       ROUTE_KEY_COALITION_SECTION,
@@ -6440,7 +6484,7 @@ function getCandidateVoterMapDocumentTitle(route = state.route) {
 function getCoalitionDocumentTitle(route = state.route) {
   const routeKey = normalizeString(route?.routeKey);
   if (routeKey === ROUTE_KEY_COALITION_START) {
-    return "Start Coalition";
+    return "Organization signup";
   }
   if (routeKey === ROUTE_KEY_COALITION_JOIN) {
     return "Join Coalition";
@@ -11720,6 +11764,9 @@ function electionRaceTypeLabel(raceType) {
   const normalized = normalizeElectionRaceType(raceType);
   if (normalized === "house") return "House";
   if (normalized === "senate") return "Senate";
+  if (normalized === "public_service_commission")
+    return "Public Service Commission";
+  if (normalized === "judicial") return "District Court";
   return "Statewide";
 }
 
@@ -12088,11 +12135,20 @@ function normalizeElectionLegislativeDistrictId(
   chamber = "house",
 ) {
   const stateCode = normalizeString(stateId || "MT").toUpperCase();
-  const chamberCode = chamber === "senate" ? "SD" : "HD";
+  const chamberCode =
+    {
+      senate: "SD",
+      house: "HD",
+      public_service_commission: "PSC",
+      judicial: "JD",
+    }[chamber] || "HD";
   const text = normalizeString(value).toUpperCase();
   if (!text) return "";
-  const explicit = text.match(/^([A-Z]{2})-(HD|SD)-(\d{1,3})$/u);
-  if (explicit) return `${explicit[1]}-${explicit[2]}-${Number(explicit[3])}`;
+  const explicit = text.match(/^([A-Z]{2})-(HD|SD|PSC|JD)-(\d{1,3})$/u);
+  if (explicit)
+    return explicit[1] === stateCode && explicit[2] === chamberCode
+      ? `${explicit[1]}-${explicit[2]}-${Number(explicit[3])}`
+      : "";
   const number = Number(text.match(/(\d+)$/u)?.[1]);
   if (Number.isFinite(number) && number > 0) {
     return `${stateCode}-${chamberCode}-${number}`;
@@ -12117,14 +12173,18 @@ function electionCustomItemKey(item = {}) {
   }
   if (scope === ELECTION_SCOPE_STATE) {
     const raceType = normalizeElectionRaceType(item.raceType);
-    const district =
-      raceType === "house" || raceType === "senate"
-        ? normalizeElectionLegislativeDistrictId(
-            item.districtId,
-            item.stateId,
-            raceType,
-          )
-        : "statewide";
+    const district = [
+      "house",
+      "senate",
+      "public_service_commission",
+      "judicial",
+    ].includes(raceType)
+      ? normalizeElectionLegislativeDistrictId(
+          item.districtId,
+          item.stateId,
+          raceType,
+        )
+      : "statewide";
     return [stateId || "unknown", electionId, scope, raceType, district].join(
       ":",
     );
@@ -12149,15 +12209,24 @@ function normalizeElectionCustomViewItem(raw = {}, fallbackState = "MT") {
       return null;
     }
     const raceType = normalizeElectionRaceType(raw.raceType);
-    const districtId =
-      raceType === "house" || raceType === "senate"
-        ? normalizeElectionLegislativeDistrictId(
-            raw.districtId || raw.district,
-            stateId,
-            raceType,
-          )
-        : "";
-    if ((raceType === "house" || raceType === "senate") && !districtId) {
+    const districtId = [
+      "house",
+      "senate",
+      "public_service_commission",
+      "judicial",
+    ].includes(raceType)
+      ? normalizeElectionLegislativeDistrictId(
+          raw.districtId || raw.district,
+          stateId,
+          raceType,
+        )
+      : "";
+    if (
+      ["house", "senate", "public_service_commission", "judicial"].includes(
+        raceType,
+      ) &&
+      !districtId
+    ) {
       return null;
     }
     return {
@@ -12242,6 +12311,8 @@ function electionCustomItemLabel(item = {}) {
     if (raceType === "senate") {
       return `${stateName} - State Senate ${item.districtId || ""}`.trim();
     }
+    if (raceType === "public_service_commission" || raceType === "judicial")
+      return `${stateName} - ${electionRaceTypeLabel(raceType)} ${item.districtId || ""}`.trim();
     return `${stateName} - Statewide state races`;
   }
   const office = normalizeElectionFederalOffice(item.office);
@@ -12427,7 +12498,9 @@ function createElectionCustomItemFromSelection(
     raceType,
     stateId,
     ...(electionId ? { electionId } : {}),
-    ...(raceType === "house" || raceType === "senate"
+    ...(["house", "senate", "public_service_commission", "judicial"].includes(
+      raceType,
+    )
       ? {
           districtId: normalizeElectionLegislativeDistrictId(
             district,
@@ -12488,6 +12561,8 @@ function normalizeCandidate(raw = {}) {
     avatarUploadId: normalizeString(raw.avatarUploadId || raw.avatar_upload_id),
     bio: normalizeString(raw.bio || raw.description),
     district: normalizeString(raw.district),
+    seat: normalizeString(raw.seat),
+    districtType: normalizeString(raw.districtType),
     levelOfOffice: normalizeString(raw.levelOfOffice || raw.level),
     state: normalizeString(raw.state),
     officeTitle: normalizeString(raw.officeTitle || raw.office),
@@ -12561,6 +12636,8 @@ function normalizeAutoCandidateProfile(raw = {}) {
     levelOfOffice: normalizeString(raw.levelOfOffice || raw.level),
     state: normalizeString(raw.state),
     district: normalizeString(raw.district),
+    seat: normalizeString(raw.seat),
+    districtType: normalizeString(raw.districtType),
     avatarUrl: normalizeUrl(raw.avatarUrl || raw.photoUrl || raw.imageUrl),
     autoGenerated: raw.autoGenerated === true,
     autoGeneratedMessage: normalizeString(raw.autoGeneratedMessage),
@@ -12651,6 +12728,8 @@ function autoCandidateFederalDistrictLabel(candidate = {}) {
 }
 
 function autoCandidateDistrictLabel(candidate = {}) {
+  if (isMontanaCandidateState(candidate))
+    return montanaCandidateDistrictLabel(candidate);
   if (normalizeString(candidate.levelOfOffice).toLowerCase() !== "federal") {
     return normalizeString(candidate.district);
   }
@@ -12667,6 +12746,8 @@ function officialDistrictLabel(official = {}) {
 }
 
 function candidateDisplayDistrictLabel(candidate = {}) {
+  if (isMontanaCandidateState(candidate))
+    return montanaCandidateDistrictLabel(candidate);
   if (normalizeString(candidate.levelOfOffice).toLowerCase() !== "federal") {
     return normalizeString(candidate.district);
   }
@@ -24178,6 +24259,9 @@ function updateCoalitionStartDraftField(
   field,
   { preserveExistingBlank = false } = {},
 ) {
+  const form = field?.closest?.('[data-route-form="coalition-start-create"]');
+  if (!organizationSignup.ownsForm(form?.dataset.organizationSignupForm))
+    return;
   const fieldName = normalizeString(field?.name);
   if (!fieldName) {
     return;
@@ -24208,6 +24292,8 @@ function syncCoalitionStartDraftFromDom() {
   const form = root?.querySelector(
     '[data-route-form="coalition-start-create"]',
   );
+  if (!organizationSignup.ownsForm(form?.dataset.organizationSignupForm))
+    return;
   if (!form) {
     return;
   }
@@ -24362,87 +24448,9 @@ async function updateCoalitionProfile(formData) {
   }
 }
 
-function validateCoalitionProfilePayload(
-  body,
-  { requirePacSelection = false, hasPacSelection = true } = {},
-) {
-  if (
-    !body.name ||
-    !body.description ||
-    !body.imageUrl ||
-    !body.primaryContactName ||
-    !body.phone ||
-    !body.email
-  ) {
-    return "Complete the required coalition fields.";
-  }
-  if (!body.email.includes("@")) {
-    return "Enter a valid coalition contact email.";
-  }
-  if (!["simple", "constitutional"].includes(body.coalitionType)) {
-    return "Choose a coalition type.";
-  }
-  if (requirePacSelection && !hasPacSelection) {
-    return "Choose whether the coalition is PAC-associated.";
-  }
-  if (body.pacAssociated && !body.fecNumber) {
-    return "Add the FEC number for PAC-associated coalitions.";
-  }
-  return "";
-}
-
 async function createCoalitionFromForm(formData) {
-  const onboarding = state.pages.coalitions.onboarding;
-  if (onboarding.actionPendingKey) {
-    return false;
-  }
-  const body = coalitionProfilePayloadFromForm(formData, {
-    draft: coalitionStartDraft(),
-  });
-  const validationError = validateCoalitionProfilePayload(body, {
-    requirePacSelection: true,
-    hasPacSelection:
-      formData.has("pacAssociated") ||
-      Boolean(coalitionStartDraft().dirtyFields?.pacAssociated),
-  });
-  if (validationError) {
-    onboarding.error = validationError;
-    showToast(validationError);
-    return false;
-  }
-
-  onboarding.actionPendingKey = "create";
-  onboarding.error = "";
-  onboarding.createdCoalitionId = "";
-  scheduleRender();
-  try {
-    const payload = await fetchJson("/api/coalitions", {
-      auth: true,
-      method: "POST",
-      body,
-    });
-    const normalized = upsertCoalitionListItem(payload);
-    const coalitionId = normalized.coalition.coalitionId;
-    onboarding.createdCoalitionId = coalitionId;
-    onboarding.imageUpload = createCoalitionImageUploadState();
-    resetCoalitionStartDraft();
-    state.pages.coalitions.selectedCoalitionId = coalitionId;
-    showToast("Coalition created.");
-    navigateTo(coalitionSectionPath(coalitionId));
-    return true;
-  } catch (error) {
-    onboarding.error = settingsErrorMessage(
-      error,
-      "Coalition could not be created.",
-    );
-    showToast(onboarding.error);
-    return false;
-  } finally {
-    if (onboarding.actionPendingKey === "create") {
-      onboarding.actionPendingKey = "";
-    }
-    scheduleRender();
-  }
+  if (state.pages.coalitions.onboarding.imageUpload?.uploading) return false;
+  return organizationSignup.submit(formData);
 }
 
 async function requestJoinCoalitionFromForm(formData) {
@@ -35745,6 +35753,11 @@ function normalizeCoalitionVoterMapAccess(raw = {}) {
       false,
     ),
     canManageCta: parseBoolean(payload.canManageCta ?? raw.canManageCta, false),
+    candidateGeography: readObjectPayload(
+      payload.candidateGeography || raw.candidateGeography,
+    ),
+    candidateBoundaryGeojson:
+      payload.candidateBoundaryGeojson || raw.candidateBoundaryGeojson || null,
     raw: payload,
   };
 }
@@ -36332,22 +36345,6 @@ function findCoalitionListItem(coalitionId) {
       (item) => item.coalition.coalitionId === normalizedId,
     ) || null
   );
-}
-
-function upsertCoalitionListItem(value) {
-  const normalized = normalizeCoalitionDetail(value);
-  const coalitionId = normalized.coalition.coalitionId;
-  const list = state.pages.coalitions.list;
-  const existingIndex = list.items.findIndex(
-    (item) => item.coalition.coalitionId === coalitionId,
-  );
-  if (existingIndex >= 0) {
-    list.items[existingIndex] = normalized;
-  } else {
-    list.items = [normalized, ...list.items];
-  }
-  list.loaded = true;
-  return normalized;
 }
 
 async function loadCoalitionDetail(coalitionId, { refresh = false } = {}) {
@@ -48627,12 +48624,16 @@ function createCandidateAccessDraft(seed = {}) {
     fecCandidateId: normalizeString(seed.fecCandidateId),
     fecCommitteeId: normalizeString(seed.fecCommitteeId),
     electionCycle:
-      normalizeString(seed.electionCycle || seed.cycle || seed.electionYear) ||
-      String(new Date().getFullYear()),
+      isMontanaCandidateState(seed) && Object.hasOwn(seed, "electionCycle")
+        ? normalizeString(seed.electionCycle)
+        : normalizeString(
+            seed.electionCycle || seed.cycle || seed.electionYear,
+          ) || String(new Date().getUTCFullYear()),
     state: normalizeString(seed.state).toUpperCase(),
     county: normalizeString(seed.county),
     city: normalizeString(seed.city),
     district: normalizeString(seed.district),
+    seat: normalizeString(seed.seat),
     campaignAddress: normalizeString(seed.campaignAddress),
     filingAuthority: normalizeString(seed.filingAuthority),
     jurisdictionCandidateId: normalizeString(seed.jurisdictionCandidateId),
@@ -49972,6 +49973,10 @@ function normalizeStateJurisdiction(raw = {}) {
     senateDistrictName: normalizeString(raw.senateDistrictName),
     houseDistrictId: normalizeString(raw.houseDistrictId),
     houseDistrictName: normalizeString(raw.houseDistrictName),
+    pscDistrictId: normalizeString(raw.pscDistrictId),
+    pscDistrictName: normalizeString(raw.pscDistrictName),
+    judicialDistrictId: normalizeString(raw.judicialDistrictId),
+    judicialDistrictName: normalizeString(raw.judicialDistrictName),
   };
 }
 
@@ -50602,6 +50607,9 @@ function normalizeCandidateAccessApplication(raw = {}) {
     office: normalizeString(source.office),
     state: normalizeString(source.state),
     district: normalizeString(source.district),
+    electionCycle: normalizeString(source.electionCycle),
+    seat: normalizeString(source.seat),
+    districtType: normalizeString(source.districtType),
     createdAt: normalizeString(source.createdAt || source.created_at),
     updatedAt: normalizeString(source.updatedAt || source.updated_at),
     reason: normalizeString(source.reason),
@@ -50632,6 +50640,8 @@ function candidateAccessApplicationSummaryFromSubmission(
     office: body.office,
     state: body.state,
     district: body.district,
+    electionCycle: body.electionCycle,
+    seat: body.seat,
     createdAt: response.createdAt || response.created_at,
     updatedAt: response.updatedAt || response.updated_at,
     reason: response.reason,
@@ -50649,7 +50659,8 @@ function normalizeCandidateAccessEin(value) {
   return normalizeString(value).replace(/\D/gu, "").slice(0, 9);
 }
 
-function candidateAccessOfficeOptions(level) {
+function candidateAccessOfficeOptions(level, draft = {}) {
+  if (isMontanaCandidateState({ ...draft, level })) return montanaStateOffices;
   return CANDIDATE_ACCESS_OFFICES_BY_LEVEL[normalizeString(level)] || [];
 }
 
@@ -50691,6 +50702,8 @@ function candidateAccessNeedsDistrict(draft = {}) {
     return CANDIDATE_ACCESS_FEDERAL_DISTRICT_OFFICES.has(draft.office);
   }
   if (isCandidateAccessState(draft)) {
+    if (isMontanaCandidateState(draft))
+      return Boolean(montanaCandidateOfficeSpec(draft)?.maxDistrict);
     return CANDIDATE_ACCESS_STATE_DISTRICT_OFFICES.has(draft.office);
   }
   return isCandidateAccessCounty(draft) || isCandidateAccessCity(draft);
@@ -50736,6 +50749,7 @@ function candidateAccessDistrictLabelForOption(option = {}) {
 function candidateAccessResetFederalDistricts() {
   const resource = state.pages.settings.candidateAccess;
   const districts = resource.federalDistricts;
+  districts.requestVersion = (Number(districts.requestVersion) || 0) + 1;
   districts.stateId = "";
   districts.loadedStateId = "";
   districts.items = [];
@@ -50762,6 +50776,17 @@ async function loadCandidateAccessFederalDistrictOptions(
   ) {
     return;
   }
+  const requestVersion = (Number(districts.requestVersion) || 0) + 1;
+  districts.requestVersion = requestVersion;
+  const office = resource.draft.office;
+  const actor = state.auth.user?.userId;
+  const current = () =>
+    state.pages.settings.candidateAccess === resource &&
+    districts.requestVersion === requestVersion &&
+    actor === state.auth.user?.userId &&
+    candidateAccessUsesFederalDistrictOptions(resource.draft) &&
+    resource.draft.office === office &&
+    normalizeString(resource.draft.state).toUpperCase() === normalizedStateId;
   districts.stateId = normalizedStateId;
   districts.loading = true;
   districts.error = "";
@@ -50772,6 +50797,7 @@ async function loadCandidateAccessFederalDistrictOptions(
       `/api/geo/congressional-districts?${query.toString()}`,
       { auth: Boolean(state.auth.session) },
     );
+    if (!current()) return;
     const items = readArrayPayload(payload, ["districts", "items"])
       .map(normalizeSettingsCongressionalDistrictOption)
       .filter((item) => item.stateId && item.congressionalDistrictId);
@@ -50795,6 +50821,7 @@ async function loadCandidateAccessFederalDistrictOptions(
       resource.draft = { ...resource.draft, district: "at-large" };
     }
   } catch (error) {
+    if (!current()) return;
     districts.items = [];
     districts.loadedStateId = "";
     districts.error = settingsHomeLocationErrorMessage(
@@ -50805,8 +50832,10 @@ async function loadCandidateAccessFederalDistrictOptions(
       resource.draft = { ...resource.draft, district: "at-large" };
     }
   } finally {
-    districts.loading = false;
-    scheduleRender();
+    if (current()) {
+      districts.loading = false;
+      scheduleRender();
+    }
   }
 }
 
@@ -50831,7 +50860,11 @@ function refreshCandidateAccessFederalDistrictOptions({
 
 function candidateAccessApplyOfficeDefaults(draft) {
   const next = { ...draft };
-  const offices = candidateAccessOfficeOptions(next.level);
+  if (isMontanaCandidateState(next)) {
+    next.state = "MT";
+    next.office = canonicalMontanaCandidateOffice(next.office);
+  }
+  const offices = candidateAccessOfficeOptions(next.level, next);
   if (next.office && !offices.includes(next.office)) {
     next.office = "";
   }
@@ -50850,7 +50883,7 @@ function candidateAccessApplyOfficeDefaults(draft) {
     next.fecCandidateId = "";
     next.fecCommitteeId = "";
   }
-  if (!candidateAccessNeedsState(next)) {
+  if (!candidateAccessNeedsState(next) && !isCandidateAccessState(next)) {
     next.state = "";
   }
   if (!isCandidateAccessCounty(next)) {
@@ -50867,6 +50900,14 @@ function candidateAccessApplyOfficeDefaults(draft) {
   }
   if (next.office !== CANDIDATE_ACCESS_OFFICE_OTHER) {
     next.officeOtherText = "";
+  }
+  const montana = montanaCandidateOfficeSpec(next);
+  if (!montana?.requiresSeat) next.seat = "";
+  if (isMontanaCandidateState(next)) {
+    for (const field of ["district", "seat"]) {
+      if (/^\d+$/u.test(normalizeString(next[field])))
+        next[field] = String(Number(next[field]));
+    }
   }
   return next;
 }
@@ -50887,6 +50928,7 @@ function candidateAccessDraftFromForm(formData, fallback = {}) {
     "county",
     "city",
     "district",
+    "seat",
     "campaignAddress",
     "filingAuthority",
     "jurisdictionCandidateId",
@@ -50917,6 +50959,7 @@ function candidateAccessDraftFromForm(formData, fallback = {}) {
 function updateCandidateAccessDraftField(fieldName, value) {
   const resource = state.pages.settings.candidateAccess;
   const field = normalizeString(fieldName);
+  if (resource.actionPendingKey) return;
   if (!field || !(field in resource.draft)) {
     return;
   }
@@ -50926,8 +50969,31 @@ function updateCandidateAccessDraftField(fieldName, value) {
       : field === "state" || field === "legalEntityRegion"
         ? normalizeString(value).toUpperCase()
         : normalizeString(value);
+  const scopeChanged =
+    ["level", "office", "state"].includes(field) &&
+    resource.draft[field] !== nextValue;
+  if (
+    scopeChanged ||
+    (field === "district" && resource.draft.district !== nextValue)
+  ) {
+    const form = root?.querySelector(
+      '[data-route-form="candidate-access-submit"]',
+    );
+    for (const dependent of scopeChanged ? ["district", "seat"] : ["seat"]) {
+      const control = form?.querySelector(
+        `[data-candidate-access-field="${dependent}"]`,
+      );
+      if (control) control.value = "";
+    }
+  }
   resource.draft = candidateAccessApplyOfficeDefaults({
     ...resource.draft,
+    ...(["level", "office", "state"].includes(field) &&
+    resource.draft[field] !== nextValue
+      ? { district: "", seat: "" }
+      : field === "district" && resource.draft.district !== nextValue
+        ? { seat: "" }
+        : {}),
     [field]: nextValue,
   });
   if (["level", "office", "state"].includes(field)) {
@@ -51089,16 +51155,24 @@ function candidateAccessPayloadFromDraft(draft) {
             (draft.office === CANDIDATE_ACCESS_FEDERAL_DELEGATE
               ? "at-large"
               : undefined)
-      : needsDistrict
-        ? normalizeString(draft.district)
-        : undefined,
+      : isMontanaCandidateState(draft) && !needsDistrict
+        ? "statewide"
+        : needsDistrict
+          ? normalizeString(draft.district)
+          : undefined,
+    seat: montanaCandidateOfficeSpec(draft)?.requiresSeat
+      ? normalizeString(draft.seat)
+      : undefined,
     fecCandidateId: isFederal
       ? normalizeString(draft.fecCandidateId).toUpperCase()
       : undefined,
     fecCommitteeId: isFederal
       ? normalizeString(draft.fecCommitteeId).toUpperCase()
       : undefined,
-    electionCycle: isFederal ? normalizeString(draft.electionCycle) : undefined,
+    electionCycle:
+      isFederal || isMontanaCandidateState(draft)
+        ? normalizeString(draft.electionCycle)
+        : undefined,
     filingAuthority: !isFederal
       ? normalizeString(draft.filingAuthority) || undefined
       : undefined,
@@ -51249,6 +51323,22 @@ function validateCandidateAccessDraft(draft) {
     if (!normalizeString(draft.state)) {
       return "State is required for state-level offices.";
     }
+    if (isMontanaCandidateState(draft)) {
+      const yearText = normalizeString(draft.electionCycle);
+      const currentYear = new Date().getUTCFullYear();
+      const year = Number(yearText);
+      if (
+        yearText &&
+        (!/^[0-9]{4}$/u.test(yearText) ||
+          !Number.isInteger(year) ||
+          year < currentYear - 2 ||
+          year > currentYear + 8)
+      ) {
+        return `Enter an election cycle year from ${currentYear - 2} to ${currentYear + 8}, or leave it blank.`;
+      }
+      const error = validateMontanaCandidateScope(draft);
+      if (error) return error;
+    }
     if (
       candidateAccessNeedsDistrict(draft) &&
       !normalizeString(draft.district)
@@ -51357,7 +51447,14 @@ async function submitCandidateAccessApplication(formData) {
     scheduleRender();
     return false;
   }
-  const body = candidateAccessPayloadFromDraft(resource.draft);
+  const submittedDraft = resource.draft;
+  const submittedSignature = JSON.stringify(submittedDraft);
+  const actor = state.auth.user?.userId;
+  const current = () =>
+    state.pages.settings.candidateAccess === resource &&
+    actor === state.auth.user?.userId &&
+    JSON.stringify(resource.draft) === submittedSignature;
+  const body = candidateAccessPayloadFromDraft(submittedDraft);
   resource.actionPendingKey = "submit";
   resource.error = "";
   resource.notice = "";
@@ -51368,6 +51465,7 @@ async function submitCandidateAccessApplication(formData) {
       method: "POST",
       body,
     });
+    if (!current()) return false;
     resource.draft = {
       ...resource.draft,
       legalEntityEin: "",
@@ -51381,6 +51479,7 @@ async function submitCandidateAccessApplication(formData) {
     showToast(resource.notice);
     return true;
   } catch (error) {
+    if (!current()) return false;
     resource.error = settingsErrorMessage(
       error,
       "Candidate access application could not be submitted.",
@@ -59417,6 +59516,22 @@ function clearCoalitionImageUpload(target = "start", { abort = true } = {}) {
 
 async function uploadCoalitionImageFile(target = "start", file) {
   const normalizedTarget = normalizeString(target).toLowerCase() || "start";
+  let guard = () => {};
+  if (normalizedTarget === "start") {
+    try {
+      guard = organizationSignup.operationGuard();
+    } catch {
+      return;
+    }
+  }
+  const current = () => {
+    try {
+      guard();
+      return true;
+    } catch {
+      return false;
+    }
+  };
   if (!file) {
     return;
   }
@@ -59447,9 +59562,12 @@ async function uploadCoalitionImageFile(target = "start", file) {
   try {
     const contentType = normalizeString(file.type) || "image/jpeg";
     const fileName = normalizeString(file.name) || "coalition-image.jpg";
-    const uploadPayload = await fetchJson("/api/uploads/create", {
+    const signupRequest =
+      normalizedTarget === "start" ? textingRequest : fetchJson;
+    const uploadPayload = await signupRequest("/api/uploads/create", {
       auth: true,
       method: "POST",
+      beforeRequest: guard,
       body: {
         type: "image",
         fileName,
@@ -59458,10 +59576,12 @@ async function uploadCoalitionImageFile(target = "start", file) {
       },
     });
     const upload = normalizeCreateUploadPayload(uploadPayload);
+    guard();
     if (!upload.uid || !upload.uploadUrl) {
       throw new Error("Upload session was incomplete.");
     }
     await uploadPostComposerFile(upload, file);
+    guard();
     const remoteUrl = upload.deliveryUrl || upload.publicUrl;
     if (!remoteUrl) {
       throw new Error("Upload finished without a coalition image URL.");
@@ -59473,11 +59593,12 @@ async function uploadCoalitionImageFile(target = "start", file) {
       fileName,
     });
   } catch (error) {
+    if (!current()) return;
     setCoalitionImageUploadState(normalizedTarget, {
       error: coalitionImageUploadErrorMessage(error),
     });
   } finally {
-    scheduleRender();
+    if (current()) scheduleRender();
   }
 }
 
@@ -63141,6 +63262,11 @@ async function registerSettingsGovernancePasskey() {
 
 async function loadCurrentRoute({ refresh = false } = {}) {
   const route = getCurrentRoute();
+  organizationSignup.captureLocation(window.location.href, (path) =>
+    window.history.replaceState({}, document.title, path),
+  );
+  if (route.routeKey !== ROUTE_KEY_COALITION_START || !state.auth.session)
+    organizationSignup.reset();
   if (!currentOrganizationDashboardContext()) organizationDashboardPage.reset();
   if (route.routeKey !== "organization-ballot-chaser") ballotChaserPage.reset();
   state.renderError = "";
@@ -63360,6 +63486,10 @@ async function loadCurrentRoute({ refresh = false } = {}) {
     routeKey === ROUTE_KEY_CANDIDATE_VOTER_MAP_SECTION
   ) {
     await loadCandidateVoterMapPage({ refresh });
+    return;
+  }
+  if (routeKey === ROUTE_KEY_COALITION_START) {
+    await organizationSignup.load({ force: refresh });
     return;
   }
   if (
@@ -74360,6 +74490,9 @@ function renderCandidateEditForm(candidate, detail, socials = {}) {
   const identityReadOnlyAttr = identityLocked
     ? ' readonly aria-readonly="true"'
     : "";
+  const scopeReadOnlyAttr = isMontanaCandidateState(candidate)
+    ? ' readonly aria-readonly="true"'
+    : identityReadOnlyAttr;
   const levelLabel = autoCandidateLevelLabel(candidate.levelOfOffice);
   const districtLabel = candidateDisplayDistrictLabel(candidate);
   const candidateId = normalizeString(candidate.candidateId);
@@ -74482,8 +74615,9 @@ function renderCandidateEditForm(candidate, detail, socials = {}) {
             : ""
         }
         <label class="${identityLocked ? "is-identity-locked" : ""}"><span>Display name</span><input name="displayName" value="${escapeHtml(candidate.displayName)}" autocomplete="name" required${identityReadOnlyAttr}${disabledAttr(saving)} /></label>
-        <label class="${identityLocked ? "is-identity-locked" : ""}"><span>Office level</span><input name="levelOfOffice" value="${escapeHtml(candidate.levelOfOffice)}"${identityReadOnlyAttr}${disabledAttr(saving)} /></label>
-        <label class="${identityLocked ? "is-identity-locked" : ""}"><span>District</span><input name="district" value="${escapeHtml(candidate.district)}"${identityReadOnlyAttr}${disabledAttr(saving)} /></label>
+        <label class="${identityLocked ? "is-identity-locked" : ""}"><span>Office level</span><input name="levelOfOffice" value="${escapeHtml(candidate.levelOfOffice)}"${scopeReadOnlyAttr}${disabledAttr(saving)} /></label>
+        <label class="${identityLocked ? "is-identity-locked" : ""}"><span>District</span><input name="district" value="${escapeHtml(candidate.district)}"${scopeReadOnlyAttr}${disabledAttr(saving)} /></label>
+        ${candidate.seat ? `<label class="is-identity-locked"><span>${candidate.officeTitle === "District Court Judge" ? "Department" : "Judicial seat"}</span><input value="${escapeHtml(candidate.seat)}" readonly /></label>` : ""}
         <label><span>Avatar URL</span><input name="avatarUrl" value="${escapeHtml(avatarUrl)}" inputmode="url"${disabledAttr(saving)} /></label>
         ${renderCandidateEditorTagPicker(candidate, detail, saving)}
       </div>
@@ -83939,14 +84073,29 @@ function renderCandidateVoterMapBrowserCanvas(detail, candidateId) {
   const quest =
     detail.campaignQuest || createCandidateDashboardCampaignQuestState();
   const points = candidateVoterMapPoints(detail);
-  const bounds = campaignQuestCoordinateBounds(points);
+  const access = detail.voterMap?.access || {};
+  const geographicBbox = normalizeCoalitionVoterMapBbox(
+    access.candidateGeography?.bbox,
+  );
+  const bounds = geographicBbox
+    ? {
+        minLat: geographicBbox.south,
+        maxLat: geographicBbox.north,
+        minLng: geographicBbox.west,
+        maxLng: geographicBbox.east,
+      }
+    : campaignQuestCoordinateBounds(points);
+  const boundaryPath = candidateBoundarySvgPath(
+    access.candidateBoundaryGeojson,
+    geographicBbox,
+  );
   const selectedTarget = campaignQuestSelectedTarget(quest);
   const selectedId = normalizeString(selectedTarget?.recordId);
   const clusters = quest.clusters || [];
   return `<article class="shared-candidate-voter-map-live">
     <div class="shared-candidate-voter-map-live__map" aria-label="Campaign voter map preview">
       <div class="shared-candidate-voter-map-live__grid" aria-hidden="true"></div>
-      <div class="shared-candidate-voter-map-live__scope" aria-hidden="true"></div>
+      ${boundaryPath ? `<svg class="shared-candidate-voter-map-live__boundary" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Official campaign office boundary"><path d="${escapeHtml(boundaryPath)}" fill-rule="evenodd" vector-effect="non-scaling-stroke" /></svg>` : access.candidateGeography?.identity ? "" : '<div class="shared-candidate-voter-map-live__scope" aria-hidden="true"></div>'}
       ${clusters
         .slice(0, 8)
         .map((cluster, index) => {
@@ -84103,7 +84252,7 @@ function renderCandidateVoterMapScopePanel(
       </div>
     </div>
     <div class="shared-candidate-voter-map-scope__stats">
-      <span><strong>${escapeHtml(humanizeLabel(access.scope || "campaign"))}</strong><small>Scope</small></span>
+      <span><strong>${escapeHtml(access.candidateGeography?.identity ? montanaCandidateDistrictLabel({ ...access.candidateGeography, level: "state" }) : humanizeLabel(access.scope || "campaign"))}</strong><small>Scope</small></span>
       <span><strong>${escapeHtml(formatCount(territories.length))}</strong><small>Territories</small></span>
       <span><strong>${escapeHtml(formatCount(access.assignmentTokenVersion || 0))}</strong><small>Access token</small></span>
       <span><strong>${escapeHtml(canManage ? "Manager" : "Field")}</strong><small>Controls</small></span>
@@ -86711,7 +86860,7 @@ function renderCoalitionsAuthGate() {
       label: "Start or join",
       kicker: "Access",
       detail:
-        "Create coalitions, request access, and route into the right workspace.",
+        "Open your existing organizations and request access to a workspace.",
     },
     {
       icon: "messages",
@@ -87153,6 +87302,7 @@ function renderCoalitionImageUploadField(
   upload = createCoalitionImageUploadState(),
   currentUrl = "",
   pending = false,
+  imageLabel = "coalition",
 ) {
   const normalizedTarget = normalizeString(target) || "start";
   const imageUrl = normalizeUrl(upload.remoteUrl) || normalizeUrl(currentUrl);
@@ -87163,8 +87313,8 @@ function renderCoalitionImageUploadField(
     <div class="shared-coalition-image-picker__preview${imageUrl ? " has-image" : ""}">
       ${
         imageUrl
-          ? `<img src="${escapeHtml(imageUrl)}" alt="Coalition image preview" />`
-          : `<div>${renderIcon("upload")}<strong>Add coalition image</strong><span>Upload a logo, banner, or organizing image.</span></div>`
+          ? `<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(imageLabel)} image preview" />`
+          : `<div>${renderIcon("upload")}<strong>Add ${escapeHtml(imageLabel)} image</strong><span>Upload a logo, banner, or organizing image.</span></div>`
       }
       <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="coalition-image-pick" data-upload-target="${escapeHtml(normalizedTarget)}"${disabledAttr(uploadDisabled)}>${isUploading ? "Uploading..." : imageUrl ? "Change image" : "Upload image"}</button>
     </div>
@@ -87290,151 +87440,33 @@ function renderCoalitionOnboardingSide(mode) {
         ${
           mode === "start"
             ? `<button class="shared-feed-chip" type="button" data-action="navigate" data-route="/coalitions/join">Join one</button>`
-            : `<button class="shared-feed-chip" type="button" data-action="navigate" data-route="/coalitions/start">Start one</button>`
+            : ``
         }
       </div>
     </section>
   </aside>`;
 }
 
-function renderCoalitionTypeChoices(pending, selectedType = "simple") {
-  const selected = normalizeString(selectedType).toLowerCase() || "simple";
-  return `<fieldset class="shared-coalition-choice-grid is-full">
-    <legend>Coalition type</legend>
-    <label class="shared-coalition-choice">
-      <input type="radio" name="coalitionType" value="simple"${checkedAttr(selected !== "constitutional")}${disabledAttr(pending)} />
-      <span>${renderIcon("team")}</span>
-      <strong>Simple</strong>
-      <em>Member workspace with roles, rooms, missions, and operations tools.</em>
-    </label>
-    <label class="shared-coalition-choice">
-      <input type="radio" name="coalitionType" value="constitutional"${checkedAttr(selected === "constitutional")}${disabledAttr(pending)} />
-      <span>${renderIcon("election")}</span>
-      <strong>Constitutional</strong>
-      <em>Add constitution setup, proposals, voting, and governance records.</em>
-    </label>
-  </fieldset>`;
-}
-
-function renderCoalitionPacChoices(
-  pending,
-  selectedValue = "",
-  fecNumber = "",
-) {
-  const selected = normalizeString(selectedValue).toLowerCase();
-  return `<div class="shared-coalition-pac-block is-full">
-    <fieldset class="shared-coalition-choice-grid shared-coalition-pac-choice-grid">
-      <legend>PAC association</legend>
-      <label class="shared-coalition-choice">
-        <input type="radio" name="pacAssociated" value="false" required${checkedAttr(selected === "false")}${disabledAttr(pending)} />
-        <span>${renderIcon("check")}</span>
-        <strong>Not PAC-associated</strong>
-        <em>Use this for community, campaign-support, or issue coalitions without a connected PAC.</em>
-      </label>
-      <label class="shared-coalition-choice">
-        <input type="radio" name="pacAssociated" value="true" required${checkedAttr(selected === "true")}${disabledAttr(pending)} />
-        <span>${renderIcon("election")}</span>
-        <strong>PAC-associated</strong>
-        <em>Add the FEC number so compliance fields move with the coalition profile.</em>
-      </label>
-    </fieldset>
-    <label class="shared-coalition-fec-field">
-      <span>FEC number</span>
-      <input name="fecNumber" autocomplete="off" placeholder="C00..." value="${escapeHtml(fecNumber)}"${disabledAttr(pending)} />
-      <em>Required only when the coalition is PAC-associated.</em>
-    </label>
-  </div>`;
-}
-
-function renderCoalitionSocialFields(pending, valueFor = () => "") {
-  return `<fieldset class="shared-coalition-social-grid is-full">
-    <legend>Social links</legend>
-    ${["facebook", "threads", "bluesky", "instagram", "tiktok"]
-      .map(
-        (key) => `<label>
-          <span>${escapeHtml(humanizeLabel(key))}</span>
-          <input name="social:${escapeHtml(key)}" placeholder="https://" autocomplete="url" value="${escapeHtml(valueFor(`social:${key}`))}"${disabledAttr(pending)} />
-        </label>`,
-      )
-      .join("")}
-  </fieldset>`;
-}
-
 function renderCoalitionStartPage() {
+  const view = organizationSignup.state();
   const onboarding = state.pages.coalitions.onboarding;
-  const pending = onboarding.actionPendingKey === "create";
-  const imageUploading = onboarding.imageUpload?.uploading === true;
-  syncCoalitionStartDraftFromDom();
-  const draft = coalitionStartDraft();
-  const draftValue = (field, fallback = "") =>
-    coalitionProfileDraftValue(draft, field, fallback);
-  const imageUpload = draft.dirtyFields?.imageUrl
-    ? { ...onboarding.imageUpload, remoteUrl: "" }
-    : onboarding.imageUpload;
-  return `<section class="shared-page shared-coalition-workspace">
-    ${renderTopChrome()}
-    <div class="shared-page__content">
-      <div class="shared-page__back-row">
-        <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/coalitions">All coalitions</button>
-      </div>
-      <div class="shared-page__header shared-coalition-onboarding-header">
-        <div>
-          <h1>Start a coalition</h1>
-          <p>Create the web workspace, contact profile, access model, rooms, missions, voter map, and governance foundation from one place.</p>
-        </div>
-        <div class="shared-card__actions">
-          <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/coalitions/join">Join coalition</button>
-          <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/messages">Messages</button>
-        </div>
-      </div>
-      ${onboarding.error ? `<div class="shared-page__error">${escapeHtml(onboarding.error)}</div>` : ""}
-      <div class="shared-coalition-onboarding">
-        <form class="shared-coalition-onboarding-form shared-coalition-profile-form" data-route-form="coalition-start-create">
-          ${renderCoalitionImageUploadField(
+  const values = coalitionStartDraft().values || {};
+  return `<section class="shared-page shared-coalition-workspace">${renderTopChrome()}<div class="shared-page__content">${renderOrganizationSignup(
+    view,
+    {
+      values,
+      states: SETTINGS_US_STATES,
+      imageField: ["form", "creating"].includes(view.phase)
+        ? renderCoalitionImageUploadField(
             "start",
-            imageUpload,
-            draftValue("imageUrl", ""),
-            pending,
-          )}
-          ${renderCoalitionTypeChoices(pending, draftValue("coalitionType", "simple"))}
-          <label class="is-wide">
-            <span>Name</span>
-            <input name="name" autocomplete="organization" value="${escapeHtml(draftValue("name", ""))}" required${disabledAttr(pending)} />
-          </label>
-          <label class="is-full">
-            <span>Description</span>
-            <textarea name="description" rows="4" required${disabledAttr(pending)}>${escapeHtml(draftValue("description", ""))}</textarea>
-          </label>
-          <label>
-            <span>Primary contact</span>
-            <input name="primaryContactName" autocomplete="name" value="${escapeHtml(draftValue("primaryContactName", ""))}" required${disabledAttr(pending)} />
-          </label>
-          <label>
-            <span>Phone</span>
-            <input name="phone" type="tel" autocomplete="tel" value="${escapeHtml(draftValue("phone", ""))}" required${disabledAttr(pending)} />
-          </label>
-          <label>
-            <span>Email</span>
-            <input name="email" type="email" autocomplete="email" value="${escapeHtml(draftValue("email", ""))}" required${disabledAttr(pending)} />
-          </label>
-          <label>
-            <span>Website</span>
-            <input name="website" type="url" inputmode="url" placeholder="https://" autocomplete="url" value="${escapeHtml(draftValue("website", ""))}"${disabledAttr(pending)} />
-          </label>
-          ${renderCoalitionPacChoices(
-            pending,
-            draftValue("pacAssociated", ""),
-            draftValue("fecNumber", ""),
-          )}
-          ${renderCoalitionSocialFields(pending, (field) => draftValue(field, ""))}
-          <div class="shared-coalition-profile-form__actions">
-            <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(pending || imageUploading)}>${pending ? "Creating..." : imageUploading ? "Uploading image..." : "Create coalition"}</button>
-          </div>
-        </form>
-        ${renderCoalitionOnboardingSide("start")}
-      </div>
-    </div>
-  </section>`;
+            onboarding.imageUpload,
+            values.imageUrl || "",
+            view.phase === "creating",
+            "organization",
+          )
+        : "",
+    },
+  )}</div></section>`;
 }
 
 function renderCoalitionJoinPage() {
@@ -87453,7 +87485,7 @@ function renderCoalitionJoinPage() {
           <p>Request access with a coalition ID and return to the full coalition workspace after approval.</p>
         </div>
         <div class="shared-card__actions">
-          <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/coalitions/start">Start coalition</button>
+
           <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/messages">Messages</button>
         </div>
       </div>
@@ -88009,7 +88041,7 @@ function renderCoalitionsRootFallback() {
   return renderWorkspaceFallbackMap({
     eyebrow: "Coalition command",
     title: "Coalition workspaces stay mapped while access sync is offline.",
-    copy: "Start or join a coalition now. Once membership loads, these same areas become direct workspace routes.",
+    copy: "Open an existing organization or request access. New organization signup requires an invitation.",
     metrics: [
       {
         value: formatCount(featureSections.length),
@@ -88019,7 +88051,6 @@ function renderCoalitionsRootFallback() {
       { value: "Rooms + votes", label: "web surface" },
     ],
     actions: [
-      { label: "Start coalition", route: "/coalitions/start", primary: true },
       { label: "Join coalition", route: "/coalitions/join" },
       { label: "Messages", route: "/messages" },
     ],
@@ -88027,9 +88058,8 @@ function renderCoalitionsRootFallback() {
       {
         label: "Membership and access",
         icon: "team",
-        copy: "Start, join, approve, invite, and tune member roles.",
+        copy: "Join, approve, invite, and manage member roles.",
         items: [
-          { icon: "candidate", label: "Start Coalition", caption: "Access" },
           { icon: "team", label: "Join Requests", caption: "Access" },
           coalitionFallbackItem("members"),
         ],
@@ -88075,10 +88105,10 @@ function renderCoalitionsRootEmpty() {
     <span>${renderIcon("team")}</span>
     <div>
       <h2>No coalition workspace yet</h2>
-      <p>Start a new coalition from the browser, or request access to an existing one with its coalition ID.</p>
+      <p>Request access to an existing organization. To create one, open your organization invitation.</p>
     </div>
     <div class="shared-card__actions">
-      <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="/coalitions/start">Start coalition</button>
+
       <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/coalitions/join">Join coalition</button>
       <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/messages">Open messages</button>
     </div>
@@ -88096,7 +88126,7 @@ function renderCoalitionsRootPage() {
           <p>Choose your team. Get to work.</p>
         </div>
         <div class="shared-card__actions">
-          <button class="shared-feed-chip shared-feed-chip--primary" data-action="navigate" data-route="/coalitions/start">Start coalition</button>
+
           <button class="shared-feed-chip" data-action="navigate" data-route="/coalitions/join">Join coalition</button>
           <button class="shared-feed-chip" data-action="navigate" data-route="/messages">Messages</button>
         </div>
@@ -117135,8 +117165,8 @@ function renderSettingsOverview() {
           },
           {
             icon: "team",
-            title: "Coalitions",
-            copy: "Coalition profile, rooms, missions, voter map, governance, calendar, members, and promotion work.",
+            title: "Organizations",
+            copy: "Open your existing organizations and their workspaces.",
             route: "/coalitions",
             meta: coalitionMeta,
           },
@@ -118385,7 +118415,7 @@ function renderVoterProfileDistricts(profile, resource) {
       hasAddress || districtId
         ? `<div class="shared-voter-profile-district-grid">
             ${renderVoterProfileMetric("Federal", districtId || "Pending", federal.congressionalDistrictName || "Congressional district")}
-            ${renderVoterProfileMetric("State", state.stateId || profile?.locationStateId || "Missing", [state.senateDistrictName, state.houseDistrictName].filter(Boolean).join(" / ") || "State legislative context")}
+            ${renderVoterProfileMetric("State", state.stateId || profile?.locationStateId || "Missing", [state.senateDistrictName, state.houseDistrictName, state.pscDistrictName, state.judicialDistrictName].filter(Boolean).join(" / ") || "State legislative context")}
             ${renderVoterProfileMetric("County", county.countyName || profile?.locationCounty || "Pending", city.cityName || "County and city context")}
           </div>`
         : `<div class="shared-settings-empty">Add a home location to resolve district context for Polis web.</div>`
@@ -118875,7 +118905,7 @@ function renderSettingsDistrictJurisdictions(districts, profile) {
   const city = districts?.jurisdictions?.city || {};
   return `<div class="shared-settings-district-jurisdictions">
     ${renderVoterProfileMetric("Federal", settingsDistrictFederalId(districts, profile) || "Pending", federal.congressionalDistrictName || "Congressional district")}
-    ${renderVoterProfileMetric("State", state.stateId || profile?.locationStateId || "Pending", [state.senateDistrictName, state.houseDistrictName].filter(Boolean).join(" / ") || "State legislative districts")}
+    ${renderVoterProfileMetric("State", state.stateId || profile?.locationStateId || "Pending", [state.senateDistrictName, state.houseDistrictName, state.pscDistrictName, state.judicialDistrictName].filter(Boolean).join(" / ") || "State legislative districts")}
     ${renderVoterProfileMetric("County", county.countyName || profile?.locationCounty || "Pending", city.cityName || "County and city context")}
   </div>`;
 }
@@ -122429,7 +122459,7 @@ function renderCandidateAccessStatusPanel() {
         ? `<div class="shared-candidate-access-summary">
             <div><span>Name</span><strong>${escapeHtml(application.fullName || "Candidate")}</strong></div>
             <div><span>Office</span><strong>${escapeHtml([humanizeLabel(application.level), application.office].filter(Boolean).join(" - ") || "Application")}</strong></div>
-            <div><span>Scope</span><strong>${escapeHtml([application.state, application.district].filter(Boolean).join(" / ") || "Review")}</strong></div>
+            <div><span>Scope</span><strong>${escapeHtml([application.state, application.district, application.seat ? `Seat ${application.seat}` : ""].filter(Boolean).join(" / ") || "Review")}</strong></div>
             <div><span>ID</span><strong>${escapeHtml(application.applicationId || "Pending")}</strong></div>
           </div>`
         : `<div class="shared-settings-empty">No candidate access application has been submitted from this account yet.</div>`
@@ -122643,7 +122673,7 @@ function renderSettingsCandidateAccessLegalEntity() {
 }
 
 function renderCandidateAccessOfficeSelect(draft, pending) {
-  const offices = candidateAccessOfficeOptions(draft.level);
+  const offices = candidateAccessOfficeOptions(draft.level, draft);
   return `<label class="is-full">
     <span>Office</span>
     <select name="office" data-candidate-access-field="office" required${disabledAttr(pending || !draft.level)}>
@@ -122651,11 +122681,39 @@ function renderCandidateAccessOfficeSelect(draft, pending) {
       ${offices
         .map(
           (office) =>
-            `<option value="${escapeHtml(office)}"${selectedAttr(draft.office === office)}>${escapeHtml(office)}</option>`,
+            `<option value="${escapeHtml(office)}"${selectedAttr(draft.office === office)}>${escapeHtml(isMontanaCandidateState(draft) ? montanaCandidateOfficeLabel(office) : office)}</option>`,
         )
         .join("")}
     </select>
   </label>`;
+}
+
+function renderCandidateAccessStateSelect(draft, pending) {
+  return `<label><span>State</span><select name="state" data-candidate-access-field="state" required${disabledAttr(pending)}>
+    <option value="">Select state</option>
+    ${SETTINGS_US_STATES.map(([code, name]) => `<option value="${escapeHtml(code)}"${selectedAttr(draft.state === code)}>${escapeHtml(`${name} (${code})`)}</option>`).join("")}
+    </select></label>`;
+}
+
+function renderMontanaCandidateScopeFields(draft, pending) {
+  const spec = montanaCandidateOfficeSpec(draft);
+  if (!spec) return "";
+  const select = (
+    field,
+    label,
+    maximum,
+    choice,
+  ) => `<label><span>${escapeHtml(label)}</span>
+    <select name="${field}" data-candidate-access-field="${field}" required${disabledAttr(pending || !maximum)}>
+      <option value="">${maximum ? "Select " + escapeHtml(label.toLowerCase()) : "Select judicial district first"}</option>
+      ${Array.from({ length: maximum }, (_, i) => {
+        const value = String(i + 1);
+        return `<option value="${value}"${selectedAttr(draft[field] === value)}>${choice} ${value}</option>`;
+      }).join("")}
+    </select></label>`;
+  return `${spec.maxDistrict ? select("district", spec.districtLabel, spec.maxDistrict, "District") : ""}
+    ${spec.requiresSeat ? select("seat", spec.seatLabel, spec.maxSeat, spec.office === "District Court Judge" ? "Department" : "Justice seat") : ""}
+    ${["Governor", "Lieutenant Governor"].includes(spec.office) ? '<p class="is-full">Governor and Lieutenant Governor are elected together on a joint ticket in Montana.</p>' : ""}`;
 }
 
 function renderCandidateAccessConditionalFields(draft, pending) {
@@ -122686,10 +122744,15 @@ function renderCandidateAccessConditionalFields(draft, pending) {
             <span>Election cycle year</span>
             <input ${candidateAccessFieldAttrs("electionCycle", draft, `${disabledAttr(pending)} required`)} inputmode="numeric" />
           </label>`
-        : ""
+        : isMontanaCandidateState(draft)
+          ? `<label><span>Election cycle year (optional)</span>
+              <input ${candidateAccessFieldAttrs("electionCycle", draft, disabledAttr(pending))} inputmode="numeric" pattern="[0-9]{4}" />
+              <small>Year of the election this campaign is seeking. Leave blank if not specified.</small>
+            </label>`
+          : ""
     }
     ${
-      needsState
+      needsState && !isCandidateAccessState(draft)
         ? isFederal
           ? `<label>
             <span>State</span>
@@ -122718,9 +122781,11 @@ function renderCandidateAccessConditionalFields(draft, pending) {
         : ""
     }
     ${
-      showsDistrict
-        ? usesFederalDistrictOptions
-          ? `<label>
+      isMontanaCandidateState(draft)
+        ? renderMontanaCandidateScopeFields(draft, pending)
+        : showsDistrict
+          ? usesFederalDistrictOptions
+            ? `<label>
             <span>${draft.office === CANDIDATE_ACCESS_FEDERAL_DELEGATE ? "District (if applicable)" : "District"}</span>
             <select name="district" data-candidate-access-field="district"${disabledAttr(pending || !federalDistrictState || federalDistricts.loading)}${needsDistrict ? " required" : ""}>
               <option value="">${escapeHtml(
@@ -122743,11 +122808,11 @@ function renderCandidateAccessConditionalFields(draft, pending) {
             </select>
             ${federalDistricts.error ? `<small>${escapeHtml(federalDistricts.error)}</small>` : ""}
           </label>`
-          : `<label>
+            : `<label>
             <span>${escapeHtml(isCandidateAccessCounty(draft) || isCandidateAccessCity(draft) ? "District/Ward/Seat" : "District")}</span>
             <input ${candidateAccessFieldAttrs("district", draft, `${disabledAttr(pending)} required`)} />
           </label>`
-        : ""
+          : ""
     }
     ${
       !isFederal
@@ -122800,6 +122865,7 @@ function renderSettingsCandidateAccessOffice() {
                 ).join("")}
               </select>
             </label>
+            ${isCandidateAccessState(draft) ? renderCandidateAccessStateSelect(draft, pending) : ""}
             ${renderCandidateAccessOfficeSelect(draft, pending)}
             ${renderCandidateAccessConditionalFields(draft, pending)}
           </div>
@@ -128810,6 +128876,11 @@ async function handleRootClick(event) {
     return;
   }
   const action = target.getAttribute("data-action");
+  if (action?.startsWith("organization-signup-")) {
+    event.preventDefault();
+    await organizationSignup.action(action);
+    return;
+  }
   if (
     target.classList.contains("shared-feed-post__frame") &&
     event.target.closest("[data-playback-control='1']")
@@ -134872,11 +134943,17 @@ function handleRootChange(event) {
   );
   if (
     coalitionStartForm &&
-    ["coalitionType", "pacAssociated"].includes(
-      normalizeString(event.target.name),
-    )
+    [
+      "coalitionType",
+      "pacAssociated",
+      "orgKind",
+      "committeeClassification",
+      "registrationStatus",
+    ].includes(normalizeString(event.target.name))
   ) {
     updateCoalitionStartDraftField(event.target);
+    syncCoalitionStartDraftFromDom();
+    scheduleRender();
     return;
   }
 
@@ -135400,7 +135477,9 @@ function handleRootChange(event) {
     updateCandidateAccessDraftField(fieldName, candidateAccessField.value);
     if (
       candidateAccessField.tagName === "SELECT" &&
-      ["level", "office", "state"].includes(normalizeString(fieldName))
+      ["level", "office", "state", "district"].includes(
+        normalizeString(fieldName),
+      )
     ) {
       scheduleRender();
     }
@@ -135922,6 +136001,10 @@ function handleCommentSubmit(event) {
       return;
     }
     if (formKind === "coalition-start-create") {
+      if (
+        !organizationSignup.ownsForm(routeForm.dataset.organizationSignupForm)
+      )
+        return;
       createCoalitionFromForm(formData).catch(() => {});
       return;
     }

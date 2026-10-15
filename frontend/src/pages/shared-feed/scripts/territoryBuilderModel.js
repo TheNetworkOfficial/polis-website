@@ -1,4 +1,78 @@
 const copy = (value) => JSON.parse(JSON.stringify(value));
+
+/** Expand authenticated server geometry references before any builder parsing. */
+export function decodeTerritoryBuilderGeometry(payload) {
+  if (!payload) return payload;
+  if (!Object.hasOwn(payload, "geometryRefs")) {
+    const hasReference = (value) =>
+      value &&
+      typeof value === "object" &&
+      (Object.hasOwn(value, "geometryRef") ||
+        Object.values(value).some(hasReference));
+    if (hasReference(payload))
+      throw new Error("territory_builder_geometry_unavailable");
+    return payload;
+  }
+  const refs = payload.geometryRefs;
+  if (!refs || typeof refs !== "object" || Array.isArray(refs))
+    throw new Error("territory_builder_geometry_unavailable");
+  const validGeometry = (geometry) => {
+    const polygons =
+      geometry?.type === "Polygon"
+        ? [geometry.coordinates]
+        : geometry?.type === "MultiPolygon"
+          ? geometry.coordinates
+          : null;
+    return (
+      Array.isArray(polygons) &&
+      polygons.length > 0 &&
+      polygons.every(
+        (polygon) =>
+          Array.isArray(polygon) &&
+          polygon.length > 0 &&
+          polygon.every(
+            (ring) =>
+              Array.isArray(ring) &&
+              ring.length >= 4 &&
+              ring.every(
+                (coordinate) =>
+                  Array.isArray(coordinate) &&
+                  coordinate.length >= 2 &&
+                  coordinate.every(Number.isFinite) &&
+                  Math.abs(coordinate[0]) <= 180 &&
+                  Math.abs(coordinate[1]) <= 90,
+              ) &&
+              ring[0][0] === ring.at(-1)[0] &&
+              ring[0][1] === ring.at(-1)[1],
+          ),
+      )
+    );
+  };
+  const expand = (value, depth = 0) => {
+    if (depth > 32) throw new Error("territory_builder_geometry_unavailable");
+    if (Array.isArray(value))
+      return value.map((item) => expand(item, depth + 1));
+    if (!value || typeof value !== "object") return value;
+    if (Object.hasOwn(value, "geometryRef")) {
+      const reference = value.geometryRef;
+      if (
+        Object.keys(value).length !== 1 ||
+        typeof reference !== "string" ||
+        !/^[a-f0-9]{64}$/u.test(reference) ||
+        !Object.hasOwn(refs, reference) ||
+        !validGeometry(refs[reference])
+      )
+        throw new Error("territory_builder_geometry_unavailable");
+      return copy(refs[reference]);
+    }
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([key]) => key !== "geometryRefs")
+        .map(([key, item]) => [key, expand(item, depth + 1)]),
+    );
+  };
+  return expand(payload);
+}
 const filters = (value = {}) => ({
   excludeDoNotKnock: value.excludeDoNotKnock === true,
   excludeReportedDanger: value.excludeReportedDanger === true,
@@ -346,7 +420,7 @@ export function createTerritoryBuilderModel({
       },
     );
     guard(key, version);
-    return result;
+    return decodeTerritoryBuilderGeometry(result);
   }
   function clearViewport() {
     discardPendingViewport();

@@ -190,7 +190,11 @@ for (const serverName of ["server.js", "publicServer.js"]) {
         const listener = listen(0, "127.0.0.1", () => resolve(listener));
       });
       const base = `http://127.0.0.1:${server.address().port}`;
-      for (const route of ["/organizations", "/organizations/tester-org"]) {
+      for (const route of [
+        "/organizations",
+        "/organizations/tester-org",
+        "/organizations/signup",
+      ]) {
         const response = await fetch(`${base}${route}`);
         assert.equal(response.status, 200, route);
         assert.equal(response.headers.get("cache-control"), "no-store", route);
