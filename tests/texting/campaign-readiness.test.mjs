@@ -120,7 +120,7 @@ for (const refresh of ["focus", "button"])
       else await h.click("queue-refresh-status");
       assert.match(
         h.page.render(),
-        /data-workspace-action="queue-load"[^>]*>Get my next messages/,
+        /data-workspace-action="queue-load"[^>]*>Get next recipients/,
       );
       assert.doesNotMatch(h.page.render(), /Refresh sending status/);
       assert.equal(
@@ -150,7 +150,7 @@ test("funding refresh keeps the exact held recipient and receipt until deliberat
     await h.click("queue-refresh-status");
     assert.match(
       h.page.render(),
-      /data-workspace-action="queue-confirm"[^>]*>Send to Example Recipient/,
+      /aria-label="Send to Example Recipient"[^>]*data-workspace-action="queue-confirm"[^>]*>Send</,
     );
     assert.equal(
       h.calls.filter((call) => call.url.endsWith("/queue")).length,

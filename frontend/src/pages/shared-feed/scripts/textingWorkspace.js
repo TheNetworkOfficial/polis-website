@@ -316,7 +316,12 @@ export function createTextingWorkspacePage({
       reset();
       return;
     }
-    if (view.key === key && (view.loading || (!force && view.workspace)))
+    if (
+      view.key === key &&
+      (view.loading ||
+        view.campaigns?.pendingItemId ||
+        (!force && view.workspace))
+    )
       return;
     if (entryActor !== actorIdentity()) {
       pendingContactCampaign = null;
@@ -391,7 +396,14 @@ export function createTextingWorkspacePage({
     }
   }
   async function refresh() {
-    if (!view.key || view.loading || view.busy || !view.workspace) return;
+    if (
+      !view.key ||
+      view.loading ||
+      view.busy ||
+      view.campaigns?.pendingItemId ||
+      !view.workspace
+    )
+      return;
     const key = view.key,
       version = sequence,
       r = runtime(key, version);
@@ -408,7 +420,13 @@ export function createTextingWorkspacePage({
     }
   }
   async function run(operation) {
-    if (view.busy || view.loading || identity() !== view.key) return;
+    if (
+      view.busy ||
+      view.loading ||
+      view.campaigns?.pendingItemId ||
+      identity() !== view.key
+    )
+      return;
     const key = view.key,
       version = sequence;
     view.busy = true;
@@ -424,6 +442,26 @@ export function createTextingWorkspacePage({
         view.busy = false;
         changed();
       }
+    }
+  }
+  async function runRecipientAction(action, itemId) {
+    if (view.busy || view.loading || identity() !== view.key) return;
+    const key = view.key,
+      version = sequence;
+    view.error = "";
+    view.message = "";
+    try {
+      await modules.campaigns.action(action, itemId);
+    } catch (error) {
+      if (current(key, version)) {
+        const item = view.campaigns?.queue?.items?.find(
+          (row) => row.itemId === itemId,
+        );
+        if ([401, 403].includes(error?.status) || !item?.sendError) fail(error);
+        else view.message = "";
+      }
+    } finally {
+      if (current(key, version)) changed();
     }
   }
   function financialNotice() {
@@ -566,6 +604,10 @@ export function createTextingWorkspacePage({
     }
     if (action === "reload") {
       void load({ force: true });
+      return;
+    }
+    if (action === "queue-confirm") {
+      void runRecipientAction(action, target.dataset.value);
       return;
     }
     void run(async () => {
@@ -712,7 +754,10 @@ export function createTextingWorkspacePage({
           if (b.dataset.value !== key || !owned(target)) continue;
           b.disabled =
             view.busy ||
-            Boolean(view.campaigns.pendingItemId) ||
+            Boolean(
+              view.campaigns.pendingItems?.has(key) ||
+                view.campaigns.pendingItemId === key,
+            ) ||
             view.campaigns.campaign.queueRecoveryRequired === true ||
             hasHold(
               `${actorIdentity()}:queue:${view.campaigns.campaign.campaignId}:${key}`,

@@ -1221,7 +1221,10 @@ test("sending feedback remains pending until confirmation, then refreshes pilot 
   const click = (action) => {
     const target = {
       disabled: false,
-      dataset: { workspaceAction: action },
+      dataset: {
+        workspaceAction: action,
+        value: action === "queue-confirm" ? "item-one" : undefined,
+      },
       closest: () => ({
         dataset: { workspaceKey: "admin:org-one:send:campaign-one" },
       }),

@@ -28,7 +28,11 @@ import {
   scheduleSummary,
   readSchedule,
 } from "./textingSchedule";
-import { renderTextingQueue, queueMediaReady } from "./textingQueueView";
+import {
+  renderTextingQueue,
+  queueMediaReady,
+  queuePendingAction,
+} from "./textingQueueView";
 import { prepareTextingAccess, saveAssignmentChanges } from "./textingAccess";
 import { textingRequestWasNotDispatched } from "./textingSession";
 import { createOrganizationContactBook } from "./organizationContactBook";
@@ -54,6 +58,25 @@ import {
   personalizationPreview,
 } from "./textingPersonalization";
 
+const sendErrorCode = (value, fallback) => {
+  const raw =
+    value?.errorCode ||
+    value?.error ||
+    value?.reasonCode ||
+    value?.reason ||
+    value?.blockedReasons?.[0] ||
+    value?.code ||
+    value?.payload?.error ||
+    value?.payload?.code;
+  return typeof raw === "string" && /^[A-Za-z0-9_.:-]{1,120}$/.test(raw)
+    ? raw
+    : fallback;
+};
+const recordAccepted = (s, item, state) => {
+  const accepted = (s.sentItems ||= new Map());
+  if (!accepted.has(item.itemId)) s.sent = (s.sent || 0) + 1;
+  accepted.set(item.itemId, { ...item, state, preview: { ...item.preview } });
+};
 const localInput = (ms) => {
   if (!Number.isSafeInteger(ms)) return "";
   const d = new Date(ms);
@@ -710,6 +733,10 @@ export function createCampaigns(r) {
     if (
       ["queue-load", "queue-recheck", "queue-refresh-preview"].includes(name)
     ) {
+      if (name === "queue-load" && s.pendingItemId)
+        throw new Error(
+          "Wait for the active sends before changing this assignment.",
+        );
       if (name === "queue-recheck" || name === "queue-refresh-preview") {
         const current = queueItem(s, value);
         if (
@@ -747,7 +774,17 @@ export function createCampaigns(r) {
             queueNeedsReview(s, item) || item.state === "rejected_not_accepted",
         );
         const merged = new Map(retained.map((item) => [item.itemId, item]));
-        for (const item of list(next.items)) merged.set(item.itemId, item);
+        for (const item of list(next.items)) {
+          const retained = merged.get(item.itemId);
+          // A fresh queue DTO does not prove an earlier send's outcome.
+          // Keep its diagnostic until explicit recovery or terminal readback.
+          merged.set(
+            item.itemId,
+            retained?.sendError
+              ? { ...item, sendError: retained.sendError }
+              : item,
+          );
+        }
         s.queue = { ...next, items: [...merged.values()] };
         // Continue only a saved materialization checkpoint, never an unknown
         // allocation or a generic preparation response. Errors stop this loop.
@@ -846,9 +883,15 @@ export function createCampaigns(r) {
         if (!outcome) continue;
         r.releaseSend(`queue:${c.campaignId}:${item.itemId}`);
         s.queueReviewItems?.delete(item.itemId);
+        if (outcome.state === "confirmed")
+          recordAccepted(s, item, outcome.state);
         if (outcome.state === "rejected_not_accepted") {
           item.state = outcome.state;
           item.nonAcceptanceVerified = true;
+          item.sendError = {
+            message: "The message was not accepted. No resend was authorized.",
+            code: sendErrorCode(outcome, outcome.state),
+          };
           item.stream = outcome.stream || item.stream;
         }
       }
@@ -922,8 +965,10 @@ export function createCampaigns(r) {
         key = `queue:${c.campaignId}:${item?.itemId}`;
       if (
         !item ||
+        (name === "queue-skip" && s.pendingItemId) ||
+        [...(s.pendingItems?.values() || [])].includes("skipping") ||
         r.sendHeld(key) ||
-        Boolean(s.pendingItemId) ||
+        Boolean(queuePendingAction(s, item.itemId)) ||
         (name === "queue-confirm"
           ? c.queueRecoveryRequired ||
             !queueCanConfirm(
@@ -941,8 +986,11 @@ export function createCampaigns(r) {
       // unknown/failed request should be presented as an uncertain outcome.
       const confirming = name === "queue-confirm";
       r.holdSend(key);
-      s.pendingItemId = item.itemId;
-      s.pendingAction = confirming ? "sending" : "skipping";
+      const pending = (s.pendingItems ||= new Map());
+      pending.set(item.itemId, confirming ? "sending" : "skipping");
+      s.pendingItemId = pending.keys().next().value;
+      s.pendingAction = pending.get(s.pendingItemId);
+      delete item.sendError;
       r.changed();
       try {
         const result = (
@@ -967,42 +1015,72 @@ export function createCampaigns(r) {
           s.queue.items = s.queue.items.filter(
             (row) => row.itemId !== item.itemId,
           );
-          if (confirming) s.sent = (s.sent || 0) + 1;
+          if (confirming) {
+            recordAccepted(s, item, result.state);
+          }
           r.toast(confirming ? "Message accepted" : "Recipient skipped");
         } else if (
-          ["rejected_not_accepted", "rejected_not_attempted"].includes(
-            result.state,
-          ) &&
-          result.needsReview === false &&
-          result.resendPermitted === false &&
-          typeof result.actionId === "string" &&
-          result.actionId
+          confirming &&
+          item.stream === "opt_in" &&
+          result.state === "rejected_not_accepted" &&
+          result.nonAcceptanceVerified === true &&
+          result.resendPermitted === false
         ) {
           r.releaseSend(key);
           item.state = "rejected_not_accepted";
           item.nonAcceptanceVerified = true;
+          item.sendError = {
+            message: "The message was not accepted. No resend was authorized.",
+            code: sendErrorCode(result, result.state),
+          };
           r.toast("Message was not accepted. No resend was authorized.");
         } else if (
           result.state === "route_refresh_required" &&
           result.resendPermitted === false
         ) {
           item.state = result.state;
+          item.sendError = {
+            message:
+              "Contact permission changed. Refresh this preview before another attempt.",
+            code: sendErrorCode(result, result.state),
+          };
           r.toast(
             "Contact permission changed. Refresh your queue for a new preview.",
           );
         } else {
           item.state = result.state || "provider_outcome_unknown";
+          item.sendError = {
+            message:
+              "Check the saved outcome before trying this recipient again.",
+            code: sendErrorCode(result, item.state),
+          };
           r.toast("Message outcome needs review");
         }
       } catch (error) {
-        if (textingRequestWasNotDispatched(error)) r.releaseSend(key);
+        const notDispatched = textingRequestWasNotDispatched(error);
+        if (notDispatched) r.releaseSend(key);
+        item.sendError = {
+          message: notDispatched
+            ? "The request was not sent. Review the error before another attempt."
+            : "The outcome is unconfirmed. Check its saved status before another attempt.",
+          code: sendErrorCode(
+            error,
+            notDispatched
+              ? "REQUEST_NOT_SENT"
+              : error?.status
+                ? `HTTP_${error.status}`
+                : "OUTCOME_UNKNOWN",
+          ),
+        };
         throw error;
       } finally {
-        s.pendingItemId = null;
-        s.pendingAction = null;
+        pending.delete(item.itemId);
+        s.pendingItemId = pending.keys().next().value || null;
+        s.pendingAction = s.pendingItemId ? pending.get(s.pendingItemId) : null;
+        r.changed();
       }
       s.imageLoaded = null;
-      await r.refreshSendStatus();
+      if (!s.pendingItemId) await r.refreshSendStatus();
       r.armExpiry(queueItem(s)?.expiresAtMs);
       return true;
     }
@@ -1140,7 +1218,17 @@ export function createCampaigns(r) {
     mediaFile,
     clearStoredDraft: () => draftStore.clear(),
     avatarError: volunteerPicker.avatarError,
-    localAction: recipients.localAction,
+    localAction(name, value, target) {
+      if (name === "queue-folder" && ["sent", "to-send"].includes(value)) {
+        state().queueFolder = value;
+        return true;
+      }
+      if (name === "queue-sent-more") {
+        state().sentVisible = (state().sentVisible || 20) + 20;
+        return true;
+      }
+      return recipients.localAction?.(name, value, target) || false;
+    },
     dispose() {
       reporting.dispose();
       preparation.dispose();

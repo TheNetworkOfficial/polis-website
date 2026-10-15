@@ -97,11 +97,11 @@ test("accepted recipients retain an exact outcome shortcut below the remaining q
 });
 
 test("batch exposes every explicit recipient Send and moves pending and unknown rows below ready rows", async () => {
-  let resolve;
+  const pendingResults = new Map();
   const h = queueHarness(
-    () =>
+    (path) =>
       new Promise((done) => {
-        resolve = done;
+        pendingResults.set(path, done);
       }),
   );
   assert.equal(
@@ -115,12 +115,17 @@ test("batch exposes every explicit recipient Send and moves pending and unknown 
     html.indexOf('data-texting-recipient="recipient-2"') <
       html.indexOf('data-texting-recipient="recipient-1"'),
   );
-  await assert.rejects(h.page.action("queue-confirm", "recipient-2"));
-  resolve({
-    result: { itemId: "recipient-1", state: "provider_outcome_unknown" },
-  });
-  await pending;
-  assert.ok(h.holds.has("queue:campaign:recipient-1"));
+  assert.match(
+    html,
+    /data-workspace-action="queue-confirm" data-value="recipient-2">Send/,
+  );
+  assert.match(
+    html,
+    /data-workspace-action="queue-skip" data-value="recipient-2" disabled/,
+  );
+  await assert.rejects(h.page.action("queue-confirm", "recipient-1"));
+  await assert.rejects(h.page.action("queue-skip", "recipient-2"));
+  await assert.rejects(h.page.action("queue-load"));
   const next = h.page.action("queue-confirm", "recipient-2");
   await new Promise(setImmediate);
   assert.equal(
@@ -130,8 +135,22 @@ test("batch exposes every explicit recipient Send and moves pending and unknown 
   assert.deepEqual(h.calls.at(-1)[1], {
     humanConfirmation: { recordId: "proof-2" },
   });
-  resolve({ result: { itemId: "recipient-2", state: "confirmed" } });
+  pendingResults.get("/campaigns/campaign/queue/recipient-2/confirm")({
+    result: { itemId: "recipient-2", state: "confirmed" },
+  });
   await next;
+  assert.equal(h.view.campaigns.pendingItemId, "recipient-1");
+  assert.equal(h.view.campaigns.pendingItems.size, 1);
+  assert.match(
+    h.page.render("send"),
+    /data-workspace-action="queue-confirm" data-value="recipient-3">Send/,
+  );
+  pendingResults.get("/campaigns/campaign/queue/recipient-1/confirm")({
+    result: { itemId: "recipient-1", state: "provider_outcome_unknown" },
+  });
+  await pending;
+  assert.ok(h.holds.has("queue:campaign:recipient-1"));
+  assert.equal(h.view.campaigns.pendingItems.size, 0);
   await assert.rejects(h.page.action("queue-confirm", "recipient-1"));
   assert.match(h.page.render("send"), /recipient-1/);
   assert.doesNotMatch(
@@ -139,7 +158,89 @@ test("batch exposes every explicit recipient Send and moves pending and unknown 
     /data-texting-recipient="recipient-2"/,
   );
   assert.equal(h.calls.length, 2);
+  h.page.localAction("queue-folder", "sent");
+  const sent = h.page.render("send");
+  assert.match(sent, /data-texting-sent="recipient-2"/);
+  assert.doesNotMatch(sent, /data-texting-sent="recipient-1"/);
+  assert.match(
+    sent,
+    /Accepted in this session. Delivery is tracked separately/,
+  );
 });
+
+test("definite rejection stays in To send with its actual error code; HTTP uncertainty remains held", async () => {
+  const h = queueHarness(async (path) => {
+    if (path.includes("recipient-1"))
+      return {
+        result: {
+          itemId: "recipient-1",
+          state: "rejected_not_accepted",
+          nonAcceptanceVerified: true,
+          resendPermitted: false,
+          errorCode: "RECIPIENT_BLOCKED",
+        },
+      };
+    throw Object.assign(new Error("Provider timeout"), {
+      status: 504,
+      payload: { error: "prompt_send_outcome_unknown" },
+    });
+  });
+  h.view.campaigns.queue.items[0].stream = "opt_in";
+  await h.page.action("queue-confirm", "recipient-1");
+  await assert.rejects(h.page.action("queue-confirm", "recipient-2"));
+  const html = h.page.render("send");
+  assert.match(html, /Error code: RECIPIENT_BLOCKED/);
+  assert.match(html, /Error code: texting_send_outcome_unknown/);
+  assert.doesNotMatch(html, /prompt_send_outcome_unknown/);
+  assert.match(
+    html,
+    /data-workspace-action="queue-confirm" data-value="recipient-3">Send/,
+  );
+  assert.match(
+    html,
+    /data-workspace-action="queue-confirm" data-value="recipient-1" disabled/,
+  );
+  assert.match(
+    html,
+    /data-workspace-action="queue-confirm" data-value="recipient-2" disabled/,
+  );
+  assert.equal(h.holds.has("queue:campaign:recipient-1"), false);
+  assert.equal(h.holds.has("queue:campaign:recipient-2"), true);
+  h.page.localAction("queue-folder", "sent");
+  assert.doesNotMatch(h.page.render("send"), /data-texting-sent=/);
+  assert.equal(h.calls.length, 2);
+});
+
+for (const result of [
+  {
+    state: "rejected_not_accepted",
+    nonAcceptanceVerified: false,
+    resendPermitted: false,
+  },
+  {
+    state: "rejected_not_accepted",
+    nonAcceptanceVerified: true,
+    resendPermitted: true,
+  },
+  {
+    state: "rejected_not_attempted",
+    needsReview: false,
+    resendPermitted: false,
+    actionId: "reply-style-proof",
+  },
+])
+  test(`unproven queue rejection remains held: ${JSON.stringify(result)}`, async () => {
+    const h = queueHarness(async () => ({
+      result: { itemId: "recipient-1", ...result },
+    }));
+    h.view.campaigns.queue.items[0].stream = "opt_in";
+    await h.page.action("queue-confirm", "recipient-1");
+    assert.equal(h.holds.has("queue:campaign:recipient-1"), true);
+    await assert.rejects(h.page.action("queue-confirm", "recipient-1"));
+    h.page.localAction("queue-folder", "sent");
+    assert.doesNotMatch(h.page.render("send"), /data-texting-sent=/);
+    assert.equal(h.calls.length, 1);
+  });
 
 test("personalized final text stays visible and each MMS Send needs its displayed image", async () => {
   const h = queueHarness(async () => {
@@ -190,6 +291,51 @@ test("loading another batch retains uncertain rows and never repeats their confi
       h.page.render("send").indexOf('data-texting-recipient="recipient-1"'),
   );
   assert.equal(h.calls.filter(([path]) => path.endsWith("/confirm")).length, 0);
+});
+
+test("same-recipient queue readback retains its error until verified terminal status moves it to Sent", async () => {
+  const h = queueHarness(async (path, body) => {
+    if (path.endsWith("/confirm"))
+      return {
+        result: {
+          itemId: "recipient-1",
+          state: "provider_outcome_unknown",
+          errorCode: "prompt_send_outcome_unknown",
+        },
+      };
+    if (path.endsWith("/queue"))
+      return body
+        ? { items: [item(1, { state: "provider_outcome_unknown" }), item(3)] }
+        : {
+            campaignId: "campaign",
+            readOnly: true,
+            items: [
+              {
+                itemId: "recipient-1",
+                state: "confirmed",
+                resendPermitted: false,
+              },
+            ],
+          };
+    return { texter: { state: "ready" } };
+  });
+  await h.page.action("queue-confirm", "recipient-1");
+  await h.page.action("queue-load");
+  assert.match(
+    h.page.render("send"),
+    /Error code: texting_send_outcome_unknown/,
+  );
+  assert.equal(h.holds.has("queue:campaign:recipient-1"), true);
+  await assert.rejects(h.page.action("queue-confirm", "recipient-1"));
+  await h.page.action("queue-status");
+  assert.equal(h.holds.has("queue:campaign:recipient-1"), false);
+  assert.doesNotMatch(
+    h.page.render("send"),
+    /data-texting-recipient="recipient-1"/,
+  );
+  h.page.localAction("queue-folder", "sent");
+  assert.match(h.page.render("send"), /data-texting-sent="recipient-1"/);
+  assert.equal(h.calls.filter(([path]) => path.endsWith("/confirm")).length, 1);
 });
 
 for (const folder of ["replies", "opt_outs"])
