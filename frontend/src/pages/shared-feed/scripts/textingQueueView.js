@@ -106,7 +106,10 @@ export function renderTextingQueue(s, r, needsReview, outcomes) {
         c.name,
         "Messages",
         "One press sends to one person.",
-        go("campaigns", "Leave session", c.campaignId, true),
+        button("queue-leave", "Leave session", {
+          value: c.campaignId,
+          secondary: true,
+        }),
       ) +
       tabs +
       `<section class="pt-card"><h2>Sent</h2><p class="pt-muted">Accepted in this session. Delivery is tracked separately.</p>${
@@ -128,7 +131,10 @@ export function renderTextingQueue(s, r, needsReview, outcomes) {
       c.name,
       "Messages",
       "One press sends to one person.",
-      go("campaigns", "Leave session", c.campaignId, true),
+      button("queue-leave", "Leave session", {
+        value: c.campaignId,
+        secondary: true,
+      }),
     ) +
     tabs +
     `<div class="pt-texting-session-status" role="status">${e(queueHasPending(s) ? `${s.pendingItems?.size || 1} sending…` : r.view().message || `${s.sent || 0} accepted this session`)}${r.can("manageBilling") ? `<span>Available funds: ${money(r.billing()?.availableMicros)}</span>` : ""}</div>` +
