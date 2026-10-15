@@ -14,8 +14,11 @@ async function mockBook(
     configureFixture,
     queryResponse,
     personalization = null,
+    scopeType = "coalition",
+    scopeId = "org-1",
   } = {},
 ) {
+  const BOOK = `/api/contact-book/scopes/${encodeURIComponent(`${scopeType}:${scopeId}`)}`;
   const token = `e30.${Buffer.from(JSON.stringify({ sub: "contact-admin", email: "admin@example.test" })).toString("base64url")}.test`;
   await page.addInitScript(
     ({ baseUrl, token }) => {
@@ -78,7 +81,7 @@ async function mockBook(
   const rows = ["Alex Example", "Blair Example", "Casey Example"].map(
     (name, index) => ({
       contactId: `contact-${index + 1}`,
-      scopeKey: "coalition:org-1",
+      scopeKey: `${scopeType}:${scopeId}`,
       revision: 1,
       fields: {
         displayName: name,

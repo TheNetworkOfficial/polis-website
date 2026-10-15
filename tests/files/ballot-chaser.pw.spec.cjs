@@ -1,6 +1,5 @@
 const { test, expect } = require("@playwright/test");
 const { mockBook, BASE, BOOK, PROMPT } = require("./contact-book-fixture.cjs");
-const BALLOT = `${BOOK}/ballot-chaser`;
 const ELECTION = {
   electionId: "az-general",
   name: "Arizona general",
@@ -10,6 +9,12 @@ const ELECTION = {
   revision: 1,
 };
 
+async function openContactMapping(page) {
+  const panel = page.locator("[data-ballot-mapping-details]");
+  if ((await panel.getAttribute("open")) === null)
+    await panel.getByText("Map contact information", { exact: true }).click();
+}
+
 async function mockBallots(
   page,
   {
@@ -18,12 +23,61 @@ async function mockBallots(
     activeTargetCount,
     baseline = true,
     pending = false,
+    multipart = false,
+    scopeType = "coalition",
+    queryDelay = 0,
+    mappingHeaders = ["Voter ID", "Ballot", "Name"],
+    mappingProfile,
+    mappedStatus = "review_ready",
   } = {},
 ) {
-  const fixture = await mockBook(page, { capabilities });
+  const BOOK = `/api/contact-book/scopes/${encodeURIComponent(`${scopeType}:org-1`)}`;
+  const BALLOT = `${BOOK}/ballot-chaser`;
+  const fixture = await mockBook(page, {
+    scopeType,
+    capabilities: { ballotChaser: true, ...capabilities },
+    queryResponse: async (body, book) => {
+      if (queryDelay)
+        await new Promise((resolve) => setTimeout(resolve, queryDelay));
+      const view = body.ballotChase?.view || "outstanding";
+      const statuses = {
+        outstanding: ["requested", "issued", "issued"],
+        newly_returned: ["returned", "accepted", "returned"],
+        returned: ["returned", "accepted", "cure_required"],
+        needs_followup: ["cure_required", "rejected", "unknown"],
+        all: ["issued", "accepted", "cure_required"],
+      }[view];
+      const rows = book.rows.map((row, i) => ({
+        ...row,
+        ballotChase: {
+          electionId: "az-general",
+          snapshotId: "snapshot-one",
+          status: statuses[i],
+          sourceAsOf: "2026-10-14T16:00:00Z",
+          returnedAt: [
+            "returned",
+            "accepted",
+            "cure_required",
+            "rejected",
+          ].includes(statuses[i])
+            ? "2026-10-14T15:00:00Z"
+            : null,
+        },
+      }));
+      return {
+        items: body.cursor ? rows.slice(2) : rows.slice(0, 2),
+        nextCursor: body.cursor ? null : "page-2",
+        complete: !!body.cursor,
+        total: 3,
+        bookRevision: 7,
+      };
+    },
+  });
   const calls = [],
     configurationCalls = [],
     visits = [];
+  const exportState = { stale: false, bookChanged: false };
+  const importControl = { holdNextRead: false, release: null };
   let job,
     election = {
       ...ELECTION,
@@ -73,6 +127,19 @@ async function mockBallots(
     total: 500,
     outstanding: 300,
     returned: 200,
+    accepted: 170,
+    needsFollowup: 10,
+    statusCounts: {
+      requested: 100,
+      issued: 200,
+      returned: 20,
+      accepted: 170,
+      cure_required: 5,
+      rejected: 5,
+      unknown: 0,
+      not_requested: 0,
+      cancelled: 0,
+    },
     newlyReturned: 25,
     newlyDiscoveredReturned: 3,
     outreachThenReturned: 15,
@@ -104,6 +171,41 @@ async function mockBallots(
       suffix = url.pathname.slice(BALLOT.length),
       body = request.postData() ? request.postDataJSON() : undefined;
     calls.push({ suffix, method: request.method(), body });
+    if (
+      suffix === "/elections/az-general/exports" ||
+      suffix === "/exports/export-one"
+    ) {
+      if (exportState.stale || exportState.bookChanged)
+        return route.fulfill({
+          status: 409,
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: exportState.bookChanged
+              ? "contact_book_changed"
+              : "ballot_snapshot_changed",
+          }),
+        });
+      return respond(route, {
+        export: {
+          exportId: "export-one",
+          status: request.method() === "POST" ? "building" : "ready",
+          rows: request.method() === "POST" ? 0 : 3,
+          snapshotId: "snapshot-one",
+          view: body?.view || "outstanding",
+          sourceAsOf: dashboard.sourceAsOf,
+          previousSourceAsOf: dashboard.previousSourceAsOf,
+        },
+        ...(request.method() === "GET"
+          ? {
+              download: {
+                method: "GET",
+                url: "https://fictional-private.s3.us-west-2.amazonaws.com/export.csv",
+                expiresAt: new Date(Date.now() + 60000).toISOString(),
+              },
+            }
+          : {}),
+      });
+    }
     if (suffix === "/elections")
       return respond(
         route,
@@ -131,13 +233,35 @@ async function mockBallots(
         },
       });
     }
+    if (suffix === "/imports/ballot-import-one/upload-start" && multipart)
+      return respond(route, {
+        import: job,
+        upload: {
+          method: "MULTIPART",
+          uploadId: "upload-one",
+          partSizeBytes: 8388608,
+          completedParts: [],
+          parts: Array.from(
+            { length: Math.ceil(job.sizeBytes / 8388608) },
+            (_, index) => ({
+              partNumber: index + 1,
+              sizeBytes: Math.min(8388608, job.sizeBytes - index * 8388608),
+              url: `https://fictional-private.s3.us-west-2.amazonaws.com/part-${index + 1}`,
+              headers: {},
+            }),
+          ),
+        },
+      });
+    if (suffix === "/imports/ballot-import-one/upload-complete" && multipart)
+      return respond(route, { import: job });
     if (suffix === "/imports/ballot-import-one/inspect") {
       job = {
         ...job,
         status: "awaiting_mapping",
         sheetName: "County report",
         sheets: [{ name: "County report" }, { name: "Readme" }],
-        columns: ["Voter ID", "Ballot", "Name"],
+        columns: mappingHeaders,
+        ...(mappingProfile ? { profile: structuredClone(mappingProfile) } : {}),
         sampleRows: [["00017", "R", "Fictional voter"]],
       };
       return respond(route, { import: job });
@@ -145,8 +269,30 @@ async function mockBallots(
     if (suffix === "/imports/ballot-import-one/mapping") {
       job = {
         ...job,
-        profile: body.profile,
-        status: "review_ready",
+        profile: {
+          ...body.profile,
+          fieldMapping: {
+            ...body.profile.fieldMapping,
+            ...Object.fromEntries(
+              job.columns
+                .filter(
+                  (header) =>
+                    !body.profile.sourceOnlyColumns?.includes(header) &&
+                    !Object.hasOwn(body.profile.fieldMapping, header) &&
+                    ![
+                      body.profile.voterIdColumn,
+                      body.profile.statusColumn,
+                      body.profile.returnedDateColumn,
+                      body.profile.requestedColumn,
+                      body.profile.issuedColumn,
+                    ].includes(header),
+                )
+                .map((header) => [header, `custom-${header}`]),
+            ),
+          },
+        },
+        mappingRevision: (job.mappingRevision || 0) + 1,
+        status: mappedStatus,
         counts: {
           rows: 1,
           newContacts: 0,
@@ -203,6 +349,16 @@ async function mockBallots(
           },
         ],
       });
+    if (suffix === "/imports/ballot-import-one" && importControl.holdNextRead) {
+      importControl.holdNextRead = false;
+      const captured = structuredClone(job);
+      await new Promise((resolve) => {
+        importControl.release = () => {
+          resolve();
+        };
+      });
+      return respond(route, { import: captured });
+    }
     if (suffix === "/imports/ballot-import-one")
       return respond(route, { import: job });
     return route.fulfill({
@@ -218,7 +374,25 @@ async function mockBallots(
         method: route.request().method(),
         headers: route.request().headers(),
       });
-      return route.fulfill({ status: 200, body: "" });
+      return route.fulfill({
+        status: 200,
+        headers: {
+          "Access-Control-Allow-Origin": BASE,
+          "Access-Control-Expose-Headers": "ETag",
+          ETag: `"${new URL(route.request().url()).pathname}"`,
+          ...(route.request().method() === "GET"
+            ? {
+                "Content-Disposition":
+                  'attachment; filename="ballot-contacts.csv"',
+                "Content-Type": "text/csv",
+              }
+            : {}),
+        },
+        body:
+          route.request().method() === "GET"
+            ? "Name,Ballot status\nAlex,issued\n"
+            : "",
+      });
     },
   );
   await page.route("**/api/voter-map/canvassing/**", async (route) => {
@@ -294,8 +468,248 @@ async function mockBallots(
     }
     return route.fulfill({ status: 404 });
   });
-  return { ...fixture, ballotCalls: calls, configurationCalls, visits };
+  return {
+    ...fixture,
+    ballotCalls: calls,
+    configurationCalls,
+    visits,
+    exportState,
+    importControl,
+  };
 }
+
+for (const [view, label] of Object.entries({
+  outstanding: "Outstanding",
+  newly_returned: "Newly returned",
+  returned: "Returned",
+  needs_followup: "Needs follow-up",
+  all: "All voters",
+})) {
+  test(`${label} list uses the pinned view and keeps non-outstanding work read/export only`, async ({
+    page,
+  }, info) => {
+    const f = await mockBallots(page);
+    await page.goto(`${BASE}/workspace/coalition/org-1/work/ballot-chaser`);
+    await page.getByLabel("Ballot list", { exact: true }).selectOption(view);
+    await page.getByRole("button", { name: "Open list", exact: true }).click();
+    await expect(page.getByText("Alex Example", { exact: true })).toBeVisible();
+    const query = f.calls.find((c) => c.path === `${BOOK}/query`).body;
+    expect(query.ballotChase.view).toBe(view);
+    expect(query.ballotChase.snapshotId).toBe("snapshot-one");
+    await page
+      .getByRole("button", { name: "Select this page", exact: true })
+      .click();
+    await expect(
+      page.getByRole("button", { name: "Create campaign", exact: true }),
+    ).toHaveCount(view === "outstanding" ? 1 : 0);
+    expect(f.calls.filter((c) => c.path.endsWith("/selections"))).toHaveLength(
+      0,
+    );
+    expect(f.ballotCalls.filter((c) => c.method !== "GET")).toHaveLength(0);
+    if (view === "newly_returned" || view === "needs_followup") {
+      await page.screenshot({
+        path: info.outputPath(`ballot-${view}-wide.png`),
+        fullPage: true,
+      });
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.screenshot({
+        path: info.outputPath(`ballot-${view}-phone.png`),
+        fullPage: true,
+      });
+    }
+  });
+}
+
+test("selected ballot CSV uses a private server job and clears stale downloads", async ({
+  page,
+}, info) => {
+  const f = await mockBallots(page);
+  await page.goto(`${BASE}/workspace/coalition/org-1/work/ballot-chaser`);
+  await page
+    .getByRole("button", { name: "Show ballots not returned", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Select this page", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Actions", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Export selected contacts", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Preparing your CSV", exact: true }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: info.outputPath("ballot-export-progress-wide.png"),
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({
+    path: info.outputPath("ballot-export-progress-phone.png"),
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await expect(
+    page.getByRole("button", { name: "Download CSV", exact: true }),
+  ).toBeVisible();
+  const created = f.ballotCalls.find(
+    (c) => c.suffix === "/elections/az-general/exports",
+  );
+  expect(created.body.selection.mode).toBe("explicit");
+  expect(created.body.selection.includeIds).toHaveLength(3);
+  expect(created.body.columns).toEqual(
+    expect.arrayContaining([
+      "displayName",
+      "ballotVoterId",
+      "ballotStatus",
+      "ballotReturnedAt",
+      "ballotSourceAsOf",
+      "ballotComparisonFrom",
+      "ballotComparisonTo",
+    ]),
+  );
+  expect(
+    f.calls.some(
+      (c) => c.path.endsWith("/selections") || c.path.includes("/exports/"),
+    ),
+  ).toBe(false);
+  await page.screenshot({
+    path: info.outputPath("ballot-server-export-wide.png"),
+    fullPage: true,
+  });
+  f.exportState.stale = true;
+  await page.getByRole("button", { name: "Download CSV", exact: true }).click();
+  await expect(
+    page.getByText(
+      "A new county update is available. Refresh Ballot Chaser and choose your list again.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Download CSV", exact: true }),
+  ).toHaveCount(0);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({
+    path: info.outputPath("ballot-stale-export-phone.png"),
+    fullPage: true,
+  });
+});
+
+test("large ballot upload sends bounded signed parts and every receipt before inspection", async ({
+  page,
+}) => {
+  const f = await mockBallots(page, { multipart: true });
+  await page.goto(`${BASE}/workspace/coalition/org-1/work/ballot-chaser`);
+  await page
+    .getByRole("button", { name: "Upload next county report", exact: true })
+    .click();
+  await page.getByLabel("County spreadsheet").setInputFiles({
+    name: "large-daily.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.alloc(17 * 1048576, 65),
+  });
+  await page.getByLabel("Report date and time").fill("2026-10-15T10:00");
+  await page
+    .getByRole("button", { name: "Upload and review columns", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", {
+      name: "Review columns and ballot status",
+      exact: true,
+    }),
+  ).toBeVisible();
+  const completion = f.ballotCalls.find((c) =>
+    c.suffix.endsWith("/upload-complete"),
+  );
+  expect(
+    f.ballotCalls.find((c) => c.suffix.endsWith("/upload-start")).body
+      .sourceSha256,
+  ).toMatch(/^[A-Za-z0-9+/]{43}=$/);
+  expect(completion.body.parts.map((p) => p.partNumber)).toEqual([1, 2, 3]);
+  expect(completion.body.parts.every((p) => p.etag)).toBe(true);
+  expect(
+    f.ballotCalls.filter((c) => c.suffix === "protected-file"),
+  ).toHaveLength(3);
+  expect(
+    f.ballotCalls
+      .filter((c) => c.suffix === "protected-file")
+      .every((c) => !c.headers.authorization && !c.headers.cookie),
+  ).toBe(true);
+  expect(
+    f.ballotCalls.some((c) => c.suffix.endsWith("/rows") && c.method !== "GET"),
+  ).toBe(false);
+});
+
+test("candidate Ballot Chaser opens every view and uses its own private export scope", async ({
+  page,
+}) => {
+  const f = await mockBallots(page, {
+    scopeType: "candidate",
+    queryDelay: 100,
+  });
+  await page.goto(`${BASE}/workspace/candidate/org-1/work/ballot-chaser`);
+  await expect(
+    page.getByRole("heading", { name: "Ballot Chaser", exact: true }),
+  ).toBeVisible();
+  for (const view of [
+    "outstanding",
+    "newly_returned",
+    "returned",
+    "needs_followup",
+    "all",
+  ]) {
+    await page.getByLabel("Ballot list", { exact: true }).selectOption(view);
+    await page.getByRole("button", { name: "Open list", exact: true }).click();
+    await expect(page.getByText("Alex Example", { exact: true })).toBeVisible();
+    await expect
+      .poll(
+        () =>
+          f.calls.filter((c) => c.path.endsWith("/query")).at(-1)?.body
+            .ballotChase.view,
+      )
+      .toBe(view);
+  }
+  await page
+    .getByRole("button", { name: "Select this page", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Create campaign", exact: true }),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: "Actions", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Export selected contacts", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Download CSV", exact: true }),
+  ).toBeVisible();
+  expect(
+    f.ballotCalls.find((c) => c.suffix.endsWith("/exports")).body.view,
+  ).toBe("all");
+  expect(
+    f.calls
+      .filter((c) => c.path.includes("/contact-book/scopes/"))
+      .every((c) => c.path.includes("candidate%3Aorg-1")),
+  ).toBe(true);
+});
+
+test("candidate without Ballot Chaser capability makes no election or export request", async ({
+  page,
+}) => {
+  const f = await mockBallots(page, {
+    scopeType: "candidate",
+    capabilities: { ballotChaser: false },
+  });
+  await page.goto(`${BASE}/workspace/candidate/org-1/work/ballot-chaser`);
+  await expect(
+    page.getByText(
+      "Ballot Chaser is not available for this organization yet.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  expect(f.ballotCalls).toEqual([]);
+  await expect(
+    page.getByRole("button", { name: "Open list", exact: true }),
+  ).toHaveCount(0);
+});
 
 test("ballot dashboard uses the shared book and freezes election context through normal filters and campaign handoff", async ({
   page,
@@ -314,6 +728,7 @@ test("ballot dashboard uses the shared book and freezes election context through
       exact: true,
     }),
   ).toBeVisible();
+  await page.getByText("About these results", { exact: true }).click();
   await expect(
     page.getByText(
       "A confirmed conversation or literature drop credits all selected voters at the exact household or unit; it does not confirm an individual conversation with each voter.",
@@ -327,6 +742,7 @@ test("ballot dashboard uses the shared book and freezes election context through
       "When no exact return time is supplied, outreach is compared with the first report showing a return.",
     ),
   ).toBeVisible();
+  await page.getByText("About these results", { exact: true }).click();
   await page.screenshot({
     path: testInfo.outputPath("ballot-chaser-desktop.png"),
     fullPage: true,
@@ -351,6 +767,9 @@ test("ballot dashboard uses the shared book and freezes election context through
   expect(query.ballotChase).toEqual({
     electionId: "az-general",
     snapshotId: "snapshot-one",
+    view: "outstanding",
+    sourceAsOf: "2026-10-14T16:00:00Z",
+    previousSourceAsOf: "2026-10-13T16:00:00Z",
     outstandingOnly: true,
   });
   await page.getByRole("button", { name: "Filters", exact: true }).click();
@@ -633,7 +1052,8 @@ test("Excel upload reviews worksheet, mapping and whole-report outcomes before e
   await page
     .getByLabel("Status meanings (one original value = ballot state per line)")
     .fill("R = returned");
-  await page.getByText("Map contact information", { exact: true }).click();
+  await openContactMapping(page);
+  await page.getByLabel("Name", { exact: true }).selectOption("displayName");
   await expect(
     page.getByLabel("Clear imported values when this column is blank"),
   ).toHaveValues([]);
@@ -674,6 +1094,163 @@ test("Excel upload reviews worksheet, mapping and whole-report outcomes before e
     .poll(() => ballotCalls.some((call) => call.suffix.endsWith("/apply")))
     .toBe(true);
   expect(errors).toEqual([]);
+});
+
+test("report-only mapping preserves saved fields, explicit county choices and cancel without contact-field churn", async ({
+  page,
+}, info) => {
+  const f = await mockBallots(page, {
+    mappingHeaders: [
+      "Voter ID",
+      "Ballot",
+      "Name",
+      "DailyExportTimestamp",
+      "Precinct",
+    ],
+    mappingProfile: {
+      voterIdColumn: "Voter ID",
+      statusColumn: "Ballot",
+      statusMap: { R: "returned" },
+      fieldMapping: { Name: "saved-hidden-field" },
+      sourceOnlyColumns: ["DailyExportTimestamp"],
+    },
+  });
+  await page.goto(`${BASE}/workspace/coalition/org-1/work/ballot-chaser`);
+  await page
+    .getByRole("button", { name: "Upload next county report", exact: true })
+    .click();
+  await page.getByLabel("County spreadsheet").setInputFiles({
+    name: "daily.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from(
+      "Voter ID,Ballot,Name,DailyExportTimestamp,Precinct\n00017,R,Example,2026-10-15,P1",
+    ),
+  });
+  await page.getByLabel("Report date and time").fill("2026-10-15T10:00");
+  await page
+    .getByRole("button", { name: "Upload and review columns", exact: true })
+    .click();
+  const importCard = page.locator("section.pt-card").filter({
+    has: page.getByRole("heading", { name: "daily.csv", exact: true }),
+  });
+  await expect(importCard.getByRole("status")).toContainText("Review columns");
+  await expect(importCard.getByRole("status")).toContainText("2026");
+  await expect(importCard.getByRole("status")).not.toContainText(
+    "awaiting_mapping",
+  );
+  await expect(importCard.getByRole("status")).not.toContainText(
+    "2026-10-15T16:00:00.000Z",
+  );
+  await importCard.screenshot({
+    path: info.outputPath("ballot-import-status-card.png"),
+  });
+  await openContactMapping(page);
+  await expect(page.getByLabel("Name", { exact: true })).toHaveValue(
+    "saved-hidden-field",
+  );
+  await expect(
+    page.getByLabel("DailyExportTimestamp", { exact: true }),
+  ).toHaveValue("");
+  await page
+    .getByLabel("Precinct", { exact: true })
+    .selectOption("__ballot_add_county_field__");
+  await page.getByLabel("County-confirmed voter ID width (optional)").fill("8");
+  await expect(page.getByLabel("Name", { exact: true })).toHaveValue(
+    "saved-hidden-field",
+  );
+  await page.screenshot({
+    path: info.outputPath("ballot-report-only-mapping-wide.png"),
+    fullPage: true,
+  });
+  await page
+    .getByRole("button", { name: "Review full update", exact: true })
+    .click();
+  const profile = f.ballotCalls
+    .filter((call) => call.suffix.endsWith("/mapping"))
+    .at(-1).body.profile;
+  expect(profile.fieldMapping).toEqual({ Name: "saved-hidden-field" });
+  expect(profile.sourceOnlyColumns).toEqual([
+    "Voter ID",
+    "Ballot",
+    "DailyExportTimestamp",
+  ]);
+  expect(JSON.stringify(profile)).not.toContain("__ballot_add_county_field__");
+  await page.getByRole("button", { name: "Edit mapping", exact: true }).click();
+  await openContactMapping(page);
+  await expect(page.getByLabel("Precinct", { exact: true })).toHaveValue(
+    "custom-Precinct",
+  );
+  await page.getByLabel("Name", { exact: true }).selectOption("");
+  await page
+    .getByRole("button", { name: "Cancel mapping changes", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Edit mapping", exact: true }).click();
+  await openContactMapping(page);
+  await expect(page.getByLabel("Name", { exact: true })).toHaveValue(
+    "saved-hidden-field",
+  );
+  await expect(
+    page.getByLabel("DailyExportTimestamp", { exact: true }),
+  ).toHaveValue("");
+  expect(
+    f.ballotCalls.filter((call) => call.suffix.endsWith("/mapping")),
+  ).toHaveLength(1);
+  expect(f.ballotCalls.some((call) => call.suffix.endsWith("/apply"))).toBe(
+    false,
+  );
+});
+
+test("a late import poll cannot replace a newly reviewed mapping", async ({
+  page,
+}) => {
+  const f = await mockBallots(page, {
+    mappedStatus: "reviewing",
+    mappingProfile: {
+      voterIdColumn: "Voter ID",
+      statusColumn: "Ballot",
+      statusMap: { R: "returned" },
+      fieldMapping: { Name: "displayName" },
+    },
+  });
+  await page.goto(`${BASE}/workspace/coalition/org-1/work/ballot-chaser`);
+  await page
+    .getByRole("button", { name: "Upload next county report", exact: true })
+    .click();
+  await page.getByLabel("County spreadsheet").setInputFiles({
+    name: "daily.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from("Voter ID,Ballot,Name\n00017,R,Example"),
+  });
+  await page.getByLabel("Report date and time").fill("2026-10-15T10:00");
+  await page
+    .getByRole("button", { name: "Upload and review columns", exact: true })
+    .click();
+  await page.clock.install();
+  await page
+    .getByRole("button", { name: "Review full update", exact: true })
+    .click();
+  f.importControl.holdNextRead = true;
+  await page.clock.runFor(5100);
+  await expect.poll(() => typeof f.importControl.release).toBe("function");
+  await page.getByRole("button", { name: "Edit mapping", exact: true }).click();
+  await openContactMapping(page);
+  await page.getByLabel("Name", { exact: true }).selectOption("");
+  await page
+    .getByRole("button", { name: "Review full update", exact: true })
+    .click();
+  f.importControl.release();
+  await page.getByRole("button", { name: "Edit mapping", exact: true }).click();
+  await openContactMapping(page);
+  await expect(page.getByLabel("Name", { exact: true })).toHaveValue("");
+  expect(
+    f.ballotCalls.filter((call) => call.suffix.endsWith("/mapping")),
+  ).toHaveLength(2);
+  await expect(
+    page.getByRole("button", {
+      name: "Apply reviewed county update",
+      exact: true,
+    }),
+  ).toHaveCount(0);
 });
 
 for (const rowMeaning of ["requested", "returned"]) {

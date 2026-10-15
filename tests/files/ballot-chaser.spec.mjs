@@ -45,6 +45,7 @@ test("ballot context requires a finished snapshot and fixes the election outstan
   assert.deepEqual(model.ballotChaseContext("az-general", "published"), {
     electionId: "az-general",
     snapshotId: "published",
+    view: "outstanding",
     outstandingOnly: true,
   });
   assert.equal(model.ballotFileFormat("Pinal daily.XLSX"), "xlsx");

@@ -10,6 +10,72 @@ export const ballotStatuses = [
   "unknown",
 ];
 
+export const ballotViews = Object.freeze({
+  outstanding: "Outstanding",
+  newly_returned: "Newly returned",
+  returned: "Returned",
+  needs_followup: "Needs follow-up",
+  all: "All voters",
+});
+
+export const ballotAddCountyField = "__ballot_add_county_field__";
+
+export function ballotImportStatus(status) {
+  const captions = {
+    uploading: "Upload file",
+    inspecting: "Reading file",
+    awaiting_mapping: "Review columns",
+    reviewing: "Checking county update",
+    review_ready: "Ready to apply",
+    needs_review: "Needs review",
+    applying: "Publishing update",
+    complete: "Update complete",
+    failed: "Update paused",
+    cancelled: "Update cancelled",
+  };
+  return Object.hasOwn(captions, status) ? captions[status] : "Check progress";
+}
+
+/** Empty choices retain raw evidence without creating volatile contact fields. */
+export function ballotContactColumns(headers, choices = {}) {
+  return {
+    fieldMapping: Object.fromEntries(
+      headers
+        .filter(
+          (header) =>
+            choices[header] && choices[header] !== ballotAddCountyField,
+        )
+        .map((header) => [header, choices[header]]),
+    ),
+    sourceOnlyColumns: headers.filter((header) => !choices[header]),
+  };
+}
+
+export function ballotReportDate(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? "No published update"
+    : date.toLocaleString(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        timeZoneName: "short",
+      });
+}
+export const ballotStatusLabels = Object.freeze({
+  not_requested: "Not requested",
+  requested: "Requested",
+  issued: "Issued / not returned",
+  returned: "Returned",
+  accepted: "Accepted",
+  cure_required: "Needs cure",
+  rejected: "Rejected",
+  cancelled: "Cancelled",
+  unknown: "Unknown",
+});
+
 /** A manager explicitly reviews source use; permission never implies consent. */
 export function ballotSourceUsePolicy(purpose = "unreviewed") {
   if (
@@ -27,7 +93,12 @@ export function ballotSourceUsePolicy(purpose = "unreviewed") {
 }
 
 /** Election targeting stays fixed while ordinary Contact Book filters narrow it. */
-export function ballotChaseContext(electionId, snapshotId) {
+export function ballotChaseContext(
+  electionId,
+  snapshotId,
+  view = "outstanding",
+  dates = {},
+) {
   if (
     typeof electionId !== "string" ||
     !electionId.trim() ||
@@ -37,7 +108,18 @@ export function ballotChaseContext(electionId, snapshotId) {
     throw new Error(
       "Finish a ballot update before selecting an outreach list.",
     );
-  return { electionId, snapshotId, outstandingOnly: true };
+  if (!Object.hasOwn(ballotViews, view))
+    throw new Error("Choose a ballot list.");
+  return {
+    electionId,
+    snapshotId,
+    view,
+    ...(view === "outstanding" ? { outstandingOnly: true } : {}),
+    ...(dates.sourceAsOf ? { sourceAsOf: dates.sourceAsOf } : {}),
+    ...(dates.previousSourceAsOf
+      ? { previousSourceAsOf: dates.previousSourceAsOf }
+      : {}),
+  };
 }
 
 export function ballotFileFormat(name) {
@@ -54,7 +136,7 @@ export function ballotFileFormat(name) {
 export async function uploadBallotFile(
   file,
   upload,
-  { guard, transport = fetch },
+  { guard, transport = fetch, progress = () => {} },
 ) {
   guard();
   const url = new URL(upload?.url || "");
@@ -73,6 +155,7 @@ export async function uploadBallotFile(
     )
   )
     throw new Error("The protected upload destination could not be verified.");
+  progress({ loaded: 0, total: file.size });
   const response = await transport(url.href, {
     method: "PUT",
     headers,
@@ -83,6 +166,94 @@ export async function uploadBallotFile(
   guard();
   if (!response.ok)
     throw new Error("Upload paused. Reselect the original file and resume.");
+  progress({ loaded: file.size, total: file.size });
+  return response;
+}
+
+/** Resume from storage-confirmed parts; at most two file ranges are in flight. */
+export async function uploadBallotParts(
+  file,
+  upload,
+  { guard, transport = fetch, progress = () => {} },
+) {
+  guard();
+  if (upload?.method === "COMPLETE" && upload.completed === true) return null;
+  const size = upload?.partSizeBytes;
+  if (
+    upload?.method !== "MULTIPART" ||
+    !upload.uploadId ||
+    !Number.isSafeInteger(size) ||
+    size < 5 * 1024 * 1024 ||
+    !Array.isArray(upload.parts) ||
+    !Array.isArray(upload.completedParts)
+  )
+    throw new Error("The resumable upload could not be verified.");
+  const expected = Math.ceil(file.size / size),
+    receipts = new Map(),
+    pending = new Map();
+  const partSize = (number) => Math.min(size, file.size - (number - 1) * size);
+  for (const part of [...upload.completedParts, ...upload.parts]) {
+    if (
+      !Number.isSafeInteger(part.partNumber) ||
+      part.partNumber < 1 ||
+      part.partNumber > expected ||
+      part.sizeBytes !== partSize(part.partNumber) ||
+      receipts.has(part.partNumber) ||
+      pending.has(part.partNumber)
+    )
+      throw new Error("The upload parts do not match the original file.");
+    if (upload.completedParts.includes(part)) {
+      if (typeof part.etag !== "string" || !part.etag)
+        throw new Error("An uploaded part could not be confirmed.");
+      receipts.set(part.partNumber, {
+        partNumber: part.partNumber,
+        etag: part.etag,
+      });
+    } else pending.set(part.partNumber, part);
+  }
+  if (receipts.size + pending.size !== expected)
+    throw new Error("Some file parts are missing. Resume the original upload.");
+  let loaded = [...receipts.keys()].reduce(
+      (sum, number) => sum + partSize(number),
+      0,
+    ),
+    next = 0,
+    stopped = false;
+  progress({ loaded, total: file.size });
+  const parts = [...pending.values()];
+  async function worker() {
+    try {
+      while (!stopped && next < parts.length) {
+        const part = parts[next++];
+        guard();
+        const response = await uploadBallotFile(
+          file.slice((part.partNumber - 1) * size, part.partNumber * size),
+          { url: part.url, method: "PUT", headers: part.headers || {} },
+          { guard, transport },
+        );
+        guard();
+        const etag = response.headers?.get?.("etag");
+        if (!etag)
+          throw new Error(
+            "The uploaded part receipt was not returned. Resume to verify saved parts.",
+          );
+        receipts.set(part.partNumber, { partNumber: part.partNumber, etag });
+        loaded += part.sizeBytes;
+        progress({ loaded, total: file.size });
+      }
+    } catch (error) {
+      stopped = true;
+      throw error;
+    }
+  }
+  const results = await Promise.allSettled([worker(), worker()]);
+  const failure = results.find((result) => result.status === "rejected");
+  if (failure) throw failure.reason;
+  guard();
+  return {
+    uploadId: upload.uploadId,
+    parts: [...receipts.values()].sort((a, b) => a.partNumber - b.partNumber),
+  };
 }
 
 export const ballotChasingPreset = Object.freeze({

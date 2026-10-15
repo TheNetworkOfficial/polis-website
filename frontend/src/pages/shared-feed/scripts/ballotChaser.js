@@ -3,6 +3,9 @@ import { createOrganizationContactsApi } from "./organizationContactsApi";
 import { createOrganizationContactBook } from "./organizationContactBook";
 import { loadContactCities } from "./organizationContactCities";
 import { createBallotChaserCanvassing } from "./ballotChaserCanvassing";
+import { createBallotExport } from "./ballotExport";
+import { contactStateOptions } from "./organizationContactPresentation";
+import { checksumBlob } from "../../files/scripts/sha256";
 import {
   escapeText as e,
   button,
@@ -19,11 +22,17 @@ import {
 } from "./textingWorkspaceUi";
 import {
   ballotStatuses,
+  ballotImportStatus,
+  ballotAddCountyField,
+  ballotContactColumns,
   ballotChaseContext,
+  ballotReportDate as reportDate,
   ballotFileFormat,
   uploadBallotFile,
+  uploadBallotParts,
   addBallotChasingPreset,
   ballotSourceUsePolicy,
+  ballotViews,
 } from "./ballotChaserModel";
 
 const columns = (job) =>
@@ -39,19 +48,6 @@ const sourceUseOptions = [
 const stages = new Set(["reviewing", "applying", "inspecting"]);
 const closed = (job) =>
   ["complete", "cancelled", "failed"].includes(job?.status);
-const reportDate = (value) => {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? String(value || "")
-    : date.toLocaleString(undefined, {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-        hour: "numeric",
-        minute: "2-digit",
-        timeZoneName: "short",
-      });
-};
 
 /** Organization-owned uploads and frozen outreach lists share the Contact Book. */
 export function createBallotChaser({
@@ -60,15 +56,17 @@ export function createBallotChaser({
   changed,
   beginContactCampaign,
   beginTerritories,
+  canBuildTerritories = () => false,
 }) {
   let view = {},
     sequence = 0,
+    jobGeneration = 0,
     contacts = null,
     timer;
   const identity = () => {
     const c = context();
     return c?.userId &&
-      c.scopeType === "coalition" &&
+      ["coalition", "candidate"].includes(c.scopeType) &&
       c.section === "ballot-chaser"
       ? `${c.userId}:${c.scopeType}:${c.scopeId}`
       : "";
@@ -81,7 +79,7 @@ export function createBallotChaser({
       );
   };
   const base = () =>
-    `/api/contact-book/scopes/${id(`coalition:${context().scopeId}`)}`;
+    `/api/contact-book/scopes/${id(`${context().scopeType}:${context().scopeId}`)}`;
   const path = (suffix) => `${base()}/ballot-chaser${suffix}`;
   const b = (action, text, value = "", secondary = false, disabled = false) =>
     button(`ballot-${action}`, text, {
@@ -90,6 +88,7 @@ export function createBallotChaser({
       disabled: view.busy || disabled,
     });
   const can = (name) => view.schema?.capabilities?.[name] === true;
+  const exports = createBallotExport({ request, guard, changed });
   const door = createBallotChaserCanvassing({
     request,
     context,
@@ -100,10 +99,12 @@ export function createBallotChaser({
   });
   function reset() {
     sequence++;
+    jobGeneration++;
     clearTimeout(timer);
     contacts?.dispose?.();
     contacts = null;
     door.reset();
+    exports.reset();
     view = {};
   }
   async function call(suffix, body, method) {
@@ -164,6 +165,8 @@ export function createBallotChaser({
       uploadDraft: {},
       mappingDraft: {},
       questionDraft: [],
+      chaseView: "outstanding",
+      chaseViewDraft: "outstanding",
     };
     const version = sequence;
     changed();
@@ -177,6 +180,10 @@ export function createBallotChaser({
       if (!can("read"))
         throw new Error(
           "Your role cannot view this organization’s contact data.",
+        );
+      if (!can("ballotChaser"))
+        throw new Error(
+          "Ballot Chaser is not available for this organization yet.",
         );
       const result = await call("/elections");
       view.elections = list(result.items);
@@ -198,6 +205,7 @@ export function createBallotChaser({
     }
   }
   async function selectElection(electionId) {
+    exports.reset();
     clearTimeout(timer);
     contacts?.dispose?.();
     contacts = null;
@@ -216,6 +224,8 @@ export function createBallotChaser({
         ? call(`/imports?electionId=${id(electionId)}`)
         : Promise.resolve({ items: [] }),
     ]);
+    if (view.dashboard?.snapshotId !== results[0].dashboard?.snapshotId)
+      exports.reset();
     view.dashboard = results[0].dashboard;
     view.imports = list(results[1].items);
     view.importCursor = results[1].nextCursor;
@@ -232,7 +242,12 @@ export function createBallotChaser({
       await action();
     } catch (error) {
       if (current() && version === sequence)
-        view.error = error.message || "This update paused. Refresh and resume.";
+        view.error = [
+          "ballot_upload_file_changed",
+          "ballot_upload_checksum_required",
+        ].includes(error?.payload?.error || error?.code)
+          ? "Reselect the original unchanged file, or start a new import for a different file."
+          : error.message || "This update paused. Refresh and resume.";
     } finally {
       if (current() && version === sequence && key === view.key) {
         view.busy = false;
@@ -242,6 +257,7 @@ export function createBallotChaser({
   }
   function trackJob(job) {
     view.job = job;
+    const generation = ++jobGeneration;
     clearTimeout(timer);
     if (stages.has(job?.status)) {
       const key = view.key,
@@ -252,12 +268,24 @@ export function createBallotChaser({
             trackJob(view.job);
             return;
           }
-          void run(async () => {
-            trackJob((await call(`/imports/${id(job.importId)}`)).import);
+          void (async () => {
+            const result = await call(`/imports/${id(job.importId)}`);
+            if (generation !== jobGeneration || view.editingMapping) return;
+            trackJob(result.import);
             if (view.job.status === "complete") {
               await refreshElection();
               view.message =
                 "Ballot update complete. Your new results are ready.";
+            }
+            changed();
+          })().catch((error) => {
+            if (
+              current() &&
+              generation === jobGeneration &&
+              !view.editingMapping
+            ) {
+              view.error = error.message;
+              changed();
             }
           });
         }
@@ -268,6 +296,8 @@ export function createBallotChaser({
     const chase = ballotChaseContext(
       view.electionId,
       view.dashboard?.snapshotId,
+      view.chaseView || "outstanding",
+      view.dashboard,
     );
     const key = view.key,
       version = sequence;
@@ -276,12 +306,19 @@ export function createBallotChaser({
       {
         contactApi: createOrganizationContactsApi({
           request,
-          scopeKey: `coalition:${context().scopeId}`,
+          scopeKey: `${context().scopeType}:${context().scopeId}`,
           guard: () => guard(key, version),
         }),
         guard: () => guard(key, version),
         view: () => view,
         context,
+        beginBallotExport: (spec) => {
+          guard(key, version);
+          return exports.start(`${base()}/ballot-chaser`, {
+            ...spec,
+            operationId: uuid(),
+          });
+        },
         busy: () => view.busy,
         changed: () => {
           guard(key, version);
@@ -299,19 +336,29 @@ export function createBallotChaser({
         beginContactCampaign: (selection) => {
           guard(key, version);
           beginContactCampaign({
-            scopeKey: `coalition:${context().scopeId}`,
+            scopeKey: `${context().scopeType}:${context().scopeId}`,
             actorUserId: context().userId,
             selection,
           });
         },
-        beginBallotTerritories: async (selection) => {
-          guard(key, version);
-          beginTerritories({
-            scopeKey: `coalition:${context().scopeId}`,
-            actorUserId: context().userId,
-            contactSelectionId: selection.selectionId,
-            ballotChase: chase,
-          });
+        get beginBallotTerritories() {
+          if (
+            !canBuildTerritories() ||
+            context().scopeType !== "coalition" ||
+            chase.view !== "outstanding"
+          )
+            return undefined;
+          return async (selection) => {
+            guard(key, version);
+            if (!canBuildTerritories() || chase.view !== "outstanding")
+              throw new Error("This tool is unavailable.");
+            beginTerritories({
+              scopeKey: `${context().scopeType}:${context().scopeId}`,
+              actorUserId: context().userId,
+              contactSelectionId: selection.selectionId,
+              ballotChase: chase,
+            });
+          };
         },
         openBallotChaser: () => {
           view.showContacts = false;
@@ -325,7 +372,7 @@ export function createBallotChaser({
     await contacts.load();
   }
   function electionForm() {
-    return `<form class="pt-card" data-ballot-form="election"><h2>Add an election</h2><div class="pt-fields">${field("name", "Election name", "", { required: true, extra: 'placeholder="Arizona general election"' })}${field("electionDate", "Election date", "", { type: "date", required: true })}${field("county", "County", "Pinal", { required: true })}${field("state", "State", "AZ", { required: true, max: 2 })}${field("sourceNamespace", "County voter file source", "", { extra: 'placeholder="Pinal County voter records"' })}${select(
+    return `<form class="pt-card" data-ballot-form="election"><h2>Add an election</h2><div class="pt-fields">${field("name", "Election name", "", { required: true, extra: 'placeholder="Arizona general election"' })}${field("electionDate", "Election date", "", { type: "date", required: true })}${field("county", "County", "Pinal", { required: true })}${select("state", "State", contactStateOptions, "AZ", true)}${field("sourceNamespace", "County voter file source", "", { extra: 'placeholder="Pinal County voter records"' })}${select(
       "sourceUse",
       "Permitted use of this voter file",
       sourceUseOptions,
@@ -360,7 +407,15 @@ export function createBallotChaser({
       Number.isSafeInteger(d.returned)
         ? Math.max(0, Math.min(100, Math.round((d.returned / d.total) * 100)))
         : null;
-    return `<section class="bc-dashboard" aria-label="Ballot progress"><div class="bc-progress-card pt-card"><div><span class="pt-eyebrow">EVERY BALLOT COUNTS</span><h2>${ratio == null ? "Your first update starts here" : `${ratio}% returned`}</h2><p>${d.sourceAsOf ? `County report as of ${e(reportDate(d.sourceAsOf))}` : "Upload the original base file, then add each new county report."}</p>${d.previousSourceAsOf ? `<small>Compared with ${e(reportDate(d.previousSourceAsOf))}</small>` : ""}</div>${ratio == null ? "" : `<progress aria-label="Ballots returned" value="${ratio}" max="100">${ratio}%</progress>`}</div><div class="bc-stats">${stat("Still to return", d.outstanding)}${stat("Returned since last update", d.newlyReturned)}${stat("Returned after org outreach", d.outreachThenReturned, "Associated with recorded outreach; this does not prove outreach caused the return.")}${stat("Total ballots returned", d.returned)}</div>${d.snapshotId ? `<p class="bc-impact-note"><strong>Newly found already returned:</strong> ${count(d.newlyDiscoveredReturned)}. These people were not previously recorded as awaiting a return.</p><p class="bc-impact-note">${count(d.textOutreachThenReturned)} after a sent text · ${count(d.doorOutreachThenReturned)} after a conversation or literature drop. People reached in both channels count once in the combined total.</p><p class="bc-impact-note">A confirmed conversation or literature drop credits all selected voters at the exact household or unit; it does not confirm an individual conversation with each voter.</p><p class="bc-impact-note">When no exact return time is supplied, outreach is compared with the first report showing a return.</p>` : ""}<div class="pt-actions">${b("contacts", "Show ballots not returned", "", false, !d.snapshotId)}${can("import") ? b("upload-open", d.snapshotId ? "Upload next county report" : "Upload base file", "", true) : ""}${can("manage") ? b("questions", "Ballot chasing questions", "", true) : ""}${b("refresh", "Refresh results", "", true)}</div></section>`;
+    return `<section class="bc-dashboard" aria-label="Ballot progress"><div class="bc-progress-card pt-card"><div><span class="pt-eyebrow">EVERY BALLOT COUNTS</span><h2>${ratio == null ? "Your first update starts here" : `${ratio}% returned`}</h2><p>${d.sourceAsOf ? `County report as of ${e(reportDate(d.sourceAsOf))}` : "Upload the original base file, then add each new county report."}</p>${d.previousSourceAsOf ? `<small>Compared with ${e(reportDate(d.previousSourceAsOf))}</small>` : ""}</div>${ratio == null ? "" : `<progress aria-label="Ballots returned" value="${ratio}" max="100">${ratio}%</progress>`}</div><div class="bc-stats">${stat("Still to return", d.outstanding)}${stat("Accepted", d.accepted ?? d.statusCounts?.accepted)}${stat("Needs follow-up", d.needsFollowup ?? (["unknown", "cure_required", "rejected"].every((key) => Number.isSafeInteger(d.statusCounts?.[key])) ? ["unknown", "cure_required", "rejected"].reduce((sum, key) => sum + d.statusCounts[key], 0) : undefined))}${stat("Returned since last update", d.newlyReturned)}${stat("Returned after org outreach", d.outreachThenReturned, "Associated with recorded outreach; this does not prove outreach caused the return.")}${stat("Total ballots returned", d.returned)}</div>${d.snapshotId ? `<details class="pt-workspace-details"><summary>About these results</summary><p class="bc-impact-note"><strong>Newly found already returned:</strong> ${count(d.newlyDiscoveredReturned)}. These people were not previously recorded as awaiting a return.</p><p class="bc-impact-note">${count(d.textOutreachThenReturned)} after a sent text · ${count(d.doorOutreachThenReturned)} after a conversation or literature drop. People reached in both channels count once in the combined total.</p><p class="bc-impact-note">A confirmed conversation or literature drop credits all selected voters at the exact household or unit; it does not confirm an individual conversation with each voter.</p><p class="bc-impact-note">When no exact return time is supplied, outreach is compared with the first report showing a return.</p><p class="bc-impact-note">Returned means physically reported returned. Accepted is a separate county decision; cure, rejected and unknown cases need follow-up.</p></details>` : ""}<div class="pt-actions">${b("contacts", (view.chaseView || "outstanding") === "outstanding" ? "Show ballots not returned" : "Open ballot list", "", false, !d.snapshotId)}${can("import") ? b("upload-open", d.snapshotId ? "Upload next county report" : "Upload base file", "", true) : ""}${can("manage") ? b("questions", "Ballot chasing questions", "", true) : ""}${b("refresh", "Refresh results", "", true)}</div>${listPicker()}</section>`;
+  }
+  function listPicker() {
+    return `<form class="bc-election-picker" data-ballot-form="contacts-view">${select("chaseView", "Ballot list", Object.entries(ballotViews), view.chaseViewDraft || view.chaseView || "outstanding")}<button type="submit" class="pt-btn"${view.busy ? " disabled" : ""}>Open list</button></form>`;
+  }
+  function exportPanel() {
+    const s = exports.view();
+    if (!s.job && !s.error) return "";
+    return `<section class="pt-card" aria-label="Ballot export"><h3>${s.stale ? "Refresh this list" : s.job?.status === "ready" ? "CSV ready" : s.job?.status === "needs_review" ? "Export needs review" : "Preparing your CSV"}</h3>${s.job ? `<p>${count(s.job.rows)} rows</p>` : ""}${s.job?.status === "building" ? `<progress aria-label="Preparing CSV"></progress>` : ""}${s.error ? `<p role="status">${e(s.error)}</p>` : ""}${s.job?.status === "ready" ? b("export-download", "Download CSV") : ""}${s.job ? b("export-refresh", "Check progress", "", true) : ""}${s.stale ? b("refresh-list", "Refresh ballot list") : ""}</section>`;
   }
   function uploadForm() {
     const draft = view.uploadDraft;
@@ -388,6 +443,28 @@ export function createBallotChaser({
       draft = view.mappingDraft;
     const profile =
       draft.profile || job.profile || view.election?.profile || {};
+    const mappingChoices = (header) => {
+      const fields = list(view.schema?.fields).filter(
+          (f) => !f.readOnly && !f.archived,
+        ),
+        saved = profile.fieldMapping?.[header];
+      return [
+        ["", "Keep in report only"],
+        [ballotAddCountyField, "Add county field"],
+        ...fields.map((f) => [f.fieldId, f.label]),
+        ...(saved &&
+        saved !== ballotAddCountyField &&
+        !fields.some((f) => f.fieldId === saved)
+          ? [
+              [
+                saved,
+                list(view.schema?.fields).find((f) => f.fieldId === saved)
+                  ?.label || "Saved contact field",
+              ],
+            ]
+          : []),
+      ];
+    };
     const choices = [
       ["", "Not included"],
       ...headers.map((header) => [header, header]),
@@ -434,23 +511,26 @@ export function createBallotChaser({
           .join("\n"),
       false,
       16000,
-    )}<p class="pt-muted">Ballot states: ${ballotStatuses.map(e).join(", ")}.${rawStatuses.length ? ` Sample values: ${rawStatuses.map(e).join(", ")}` : ""}</p><details class="pt-workspace-details"><summary>Map contact information</summary><div class="pt-fields">${headers
+    )}<p class="pt-muted">Ballot states: ${ballotStatuses.map(e).join(", ")}.${rawStatuses.length ? ` Sample values: ${rawStatuses.map(e).join(", ")}` : ""}</p><details class="pt-workspace-details" data-ballot-mapping-details${view.mappingDetailsOpen ? " open" : ""}><summary>Map contact information</summary><p>Match contact information, add a county field, or keep a column in the report only. Original data is always retained.</p><div class="pt-fields">${headers
       .map((header, index) =>
         select(
           `field_${index}`,
           header,
-          [
-            ["", "Retain as county source / custom field"],
-            ...list(view.schema?.fields)
-              .filter((f) => !f.readOnly && !f.archived)
-              .map((f) => [f.fieldId, f.label]),
-          ],
+          mappingChoices(header),
           profile.fieldMapping?.[header] || "",
         ),
       )
       .join(
         "",
-      )}</div><label class="pt-field"><span>Clear imported values when this column is blank</span><select name="clearBlankColumns" multiple size="${Math.min(6, Math.max(2, headers.length))}">${headers.map((header) => `<option value="${e(header)}"${list(profile.clearBlankColumns).includes(header) ? " selected" : ""}>${e(header)}</option>`).join("")}</select></label><p>Leave this selection empty to preserve existing values. Select a column only when a blank should clear that source’s imported value. Volunteer corrections, manual edits, and opt-outs remain protected.</p></details><details class="pt-workspace-details"><summary>Sample values</summary><div class="pt-workspace-table-wrap"><table class="pt-workspace-table"><thead><tr>${headers.map((header) => `<th>${e(header)}</th>`).join("")}</tr></thead><tbody>${sampleRows.map((row) => `<tr>${headers.map((header, index) => `<td>${e(Array.isArray(row) ? row[index] : row[header])}</td>`).join("")}</tr>`).join("")}</tbody></table></div></details><p>Blank contact cells preserve the existing value unless explicitly selected above. A county report never resets an opt-out or volunteer notes.</p><button type="submit" class="pt-btn"${view.busy ? " disabled" : ""}>Review full update</button></form>`;
+      )}</div><label class="pt-field"><span>Clear imported values when this column is blank</span><select name="clearBlankColumns" multiple size="${Math.min(6, Math.max(2, headers.length))}">${headers
+      .filter((header) => profile.fieldMapping?.[header])
+      .map(
+        (header) =>
+          `<option value="${e(header)}"${list(profile.clearBlankColumns).includes(header) ? " selected" : ""}>${e(header)}</option>`,
+      )
+      .join(
+        "",
+      )}</select></label><p>Leave this selection empty to preserve existing values. Select a column only when a blank should clear that source’s imported value. Volunteer corrections, manual edits, and opt-outs remain protected.</p></details><details class="pt-workspace-details"><summary>Sample values</summary><div class="pt-workspace-table-wrap"><table class="pt-workspace-table"><thead><tr>${headers.map((header) => `<th>${e(header)}</th>`).join("")}</tr></thead><tbody>${sampleRows.map((row) => `<tr>${headers.map((header, index) => `<td>${e(Array.isArray(row) ? row[index] : row[header])}</td>`).join("")}</tr>`).join("")}</tbody></table></div></details><p>Blank contact cells preserve the existing value unless explicitly selected above. A county report never resets an opt-out or volunteer notes.</p><button type="submit" class="pt-btn"${view.busy ? " disabled" : ""}>Review full update</button></form>`;
   }
   function identityReview(row) {
     if (row.error !== "ballot_legacy_identity_review") return "";
@@ -469,10 +549,10 @@ export function createBallotChaser({
     const job = view.job;
     if (!job) return view.showUpload ? uploadForm() : "";
     const c = job.counts || {};
-    return `<section class="pt-card"><h2>${e(job.fileName || "County report")}</h2><p role="status">${e(label(job.status))}${job.sourceAsOf ? ` · ${e(job.sourceAsOf)}` : ""}</p><p>${count(c.rows)} records · ${count(c.newContacts)} new people · ${count(c.updatedContacts)} updated · ${count(c.unchanged)} unchanged · ${count(c.duplicateRows)} repeated records · ${count(c.conflicts)} need review</p>${job.error ? notice("Update needs attention", job.error) : ""}<div class="pt-actions">${!closed(job) && job.status !== "awaiting_mapping" ? b("advance", "Continue / retry update", "", true, !can("import")) : ""}${b("job-refresh", "Check progress", "", true)}${b("rows", "Review record outcomes", "", true)}${job.status === "review_ready" ? b("apply", "Apply reviewed county update", "", false, !can("import") || Number(c.conflicts) > 0) : ""}${b("job-close", "Back to dashboard", "", true)}</div>${job.status === "uploading" ? `<form data-ballot-form="resume"><label class="pt-field"><span>Original spreadsheet</span><input name="file" type="file" accept=".csv,.tsv,.xlsx" required></label><button class="pt-btn" type="submit"${view.busy ? " disabled" : ""}>Resume upload</button></form>` : ""}${job.status === "review_ready" ? "<p>The full report has been staged. Review its outcomes before applying. The previous completed report stays active until publication finishes.</p>" : ""}</section>${job.status === "awaiting_mapping" ? mappingForm() : ""}${view.rows ? `<section class="pt-card"><h3>Record outcomes</h3>${view.rows.map(recordOutcome).join("")}${view.rowCursor ? b("rows-more", "More record outcomes", "", true) : ""}</section>` : ""}`;
+    return `<section class="pt-card"><h2>${e(job.fileName || "County report")}</h2><p role="status">${e(ballotImportStatus(job.status))}${job.sourceAsOf ? ` · ${e(reportDate(job.sourceAsOf))}` : ""}</p><p>${count(c.rows)} records · ${count(c.newContacts)} new people · ${count(c.updatedContacts)} updated · ${count(c.unchanged)} unchanged · ${count(c.duplicateRows)} repeated records · ${count(c.conflicts)} need review</p>${job.processingPhase ? `<p role="status">${e({ preparing_previous: "Preparing your previous list", partitioning: "Reading your file", comparing: "Comparing county updates", applying: "Publishing results" }[job.processingPhase] || "Processing your file")}${Number.isSafeInteger(job.totalRows) ? ` · ${count(job[{ partitioning: "partitionedRows", comparing: "stagedRows", applying: "appliedRows", preparing_previous: "preparedPreviousRows" }[job.processingPhase]])} of ${count(job.totalRows)} rows` : ""}</p>` : ""}${job.error ? notice("Update needs attention", job.error) : ""}<div class="pt-actions">${!closed(job) && job.status !== "awaiting_mapping" && !view.editingMapping ? b("advance", "Continue / retry update", "", true, !can("import")) : ""}${b("job-refresh", "Check progress", "", true, view.editingMapping)}${b("rows", "Review record outcomes", "", true)}${!view.editingMapping && job.status === "review_ready" ? b("apply", "Apply reviewed county update", "", false, !can("import") || Number(c.conflicts) > 0) : ""}${!view.editingMapping && ["reviewing", "review_ready", "needs_review"].includes(job.status) && can("import") ? b("mapping-edit", "Edit mapping", "", true) : ""}${view.editingMapping ? b("mapping-cancel", "Cancel mapping changes", "", true) : ""}${b("job-close", "Back to dashboard", "", true)}</div>${job.status === "uploading" ? `<form data-ballot-form="resume"><label class="pt-field"><span>Original spreadsheet</span><input name="file" type="file" accept=".csv,.tsv,.xlsx" required></label><button class="pt-btn" type="submit"${view.busy ? " disabled" : ""}>Resume upload</button></form>` : ""}${job.status === "review_ready" ? "<p>The full report has been staged. Review its outcomes before applying. The previous completed report stays active until publication finishes.</p>" : ""}</section>${job.status === "awaiting_mapping" || view.editingMapping ? mappingForm() : ""}${view.rows ? `<section class="pt-card"><h3>Record outcomes</h3>${view.rows.map(recordOutcome).join("")}${view.rowCursor ? b("rows-more", "More record outcomes", "", true) : ""}</section>` : ""}`;
   }
   function history() {
-    return `<section class="pt-card"><h2>Update history</h2>${view.imports.length ? view.imports.map((job) => `<article class="bc-history"><div><strong>${e(job.fileName || "County report")}</strong><p>${e(reportDate(job.sourceAsOf || ""))} · ${e(label(job.status))}</p></div>${b("job", closed(job) ? "View outcomes" : "Review / resume", job.importId, true)}</article>`).join("") : "<p>Your reports will appear here.</p>"}${view.importCursor ? b("imports-more", "More updates", "", true) : ""}</section>`;
+    return `<section class="pt-card"><h2>Update history</h2>${view.imports.length ? view.imports.map((job) => `<article class="bc-history"><div><strong>${e(job.fileName || "County report")}</strong><p>${e(reportDate(job.sourceAsOf || ""))} · ${e(ballotImportStatus(job.status))}</p></div>${b("job", closed(job) ? "View outcomes" : "Review / resume", job.importId, true)}</article>`).join("") : "<p>Your reports will appear here.</p>"}${view.importCursor ? b("imports-more", "More updates", "", true) : ""}</section>`;
   }
   async function loadConfiguration(roundId = "") {
     const key = view.key,
@@ -515,12 +595,12 @@ export function createBallotChaser({
   }
   function render() {
     if (!current()) return "";
-    const navigation = `<nav class="bc-nav" aria-label="Organization work"><a href="/workspace/coalition/${id(context().scopeId)}/people/contacts">Contact book</a><span aria-current="page">Ballot Chaser</span></nav>`;
+    const navigation = `<nav class="bc-nav" aria-label="Organization work"><a href="/workspace/${id(context().scopeType)}/${id(context().scopeId)}/people/contacts">Contact book</a><span aria-current="page">Ballot Chaser</span></nav>`;
     const body = view.loading
       ? notice("Loading Ballot Chaser")
       : view.showContacts
-        ? `${b("contacts-close", "Back to ballot progress", "", true)}${contacts?.render() || ""}`
-        : `${head("ORGANIZATION · WORK", "Ballot Chaser", "Turn each county update into the next conversation.")}${
+        ? `${b("contacts-close", "Back to ballot progress", "", true)}${listPicker()}${exportPanel()}${contacts?.render() || ""}`
+        : `${head("ORGANIZATION · WORK", "Ballot Chaser", "Track county ballot returns.")}${
             view.elections.length
               ? `<form class="bc-election-picker" data-ballot-form="choose-election">${select(
                   "electionId",
@@ -532,8 +612,8 @@ export function createBallotChaser({
                   view.electionId,
                 )}<button class="pt-btn pt-btn--secondary" type="submit"${view.busy ? " disabled" : ""}>Open election</button>${view.electionCursor ? b("elections-more", "More elections", "", true) : ""}${can("import") ? b("election-new", "Add election", "", true) : ""}</form>`
               : ""
-          }${view.showElection || !view.elections.length ? (can("import") ? electionForm() : notice("No ballot elections yet", "An organization contact manager can add the county file.")) : ""}${view.electionId ? dashboard() + sourcePolicyPanel() + b("door", "Record DoorKnocker outreach", "", true) + (view.showDoor ? door.render() : view.configuration ? questionsPanel() : importPanel()) + (can("import") ? history() : "") : ""}`;
-    return `<section class="texting-workspace pt-workspace ballot-chaser" data-ballot-key="${e(view.key)}" aria-busy="${view.busy ? "true" : "false"}">${navigation}${view.error ? notice("Needs attention", view.error) : ""}${view.message ? notice(view.message) : ""}${body}</section>`;
+          }${view.showElection || !view.elections.length ? (can("import") ? electionForm() : notice("No ballot elections yet", "An organization contact manager can add the county file.")) : ""}${view.electionId ? dashboard() + sourcePolicyPanel() + ((view.chaseView || "outstanding") === "outstanding" ? b("door", "Record DoorKnocker outreach", "", true) : "") + (view.showDoor ? door.render() : view.configuration ? questionsPanel() : importPanel()) + (can("import") ? history() : "") : ""}`;
+    return `<section class="texting-workspace pt-workspace ballot-chaser" data-ballot-key="${e(view.key)}" aria-busy="${view.busy ? "true" : "false"}">${navigation}${view.error ? notice("Needs attention", view.error) : ""}${view.message ? notice(view.message) : ""}${view.uploadProgress ? `<section class="pt-card" aria-label="File upload"><progress aria-label="Upload progress" ${view.checkingFile ? "" : `value="${view.uploadProgress.loaded}" max="${view.uploadProgress.total}"`}></progress><p>${view.checkingFile ? "Checking file" : `${(view.uploadProgress.loaded / 1048576).toFixed(1)} of ${(view.uploadProgress.total / 1048576).toFixed(1)} MB uploaded`}</p></section>` : ""}${body}</section>`;
   }
   async function action(name, value) {
     if (!name.startsWith("ballot-")) {
@@ -541,7 +621,20 @@ export function createBallotChaser({
       return;
     }
     const operation = name.slice(7);
-    if (operation === "refresh") await refreshElection();
+    if (operation === "export-refresh") await exports.refresh();
+    else if (operation === "export-download") {
+      const url = await exports.download();
+      if (url) {
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = "ballot-contacts.csv";
+        link.rel = "noreferrer";
+        link.click();
+      }
+    } else if (operation === "refresh-list") {
+      await refreshElection();
+      await showContacts();
+    } else if (operation === "refresh") await refreshElection();
     else if (operation === "contacts") await showContacts();
     else if (operation === "contacts-close") {
       view.showContacts = false;
@@ -554,11 +647,34 @@ export function createBallotChaser({
       view.job = null;
       view.rows = null;
     } else if (operation === "job-close") {
+      jobGeneration++;
       clearTimeout(timer);
       view.job = null;
       view.rows = null;
       view.showUpload = false;
+      view.editingMapping = false;
+    } else if (operation === "mapping-edit") {
+      if (
+        !can("import") ||
+        !["reviewing", "review_ready", "needs_review"].includes(
+          view.job?.status,
+        )
+      )
+        throw new Error("This report cannot be remapped now.");
+      jobGeneration++;
+      clearTimeout(timer);
+      view.editingMapping = true;
+      view.mappingDraft = {
+        profile: structuredClone(
+          view.job.profile || view.election?.profile || {},
+        ),
+      };
+    } else if (operation === "mapping-cancel") {
+      view.editingMapping = false;
+      view.mappingDraft = {};
+      trackJob(view.job);
     } else if (operation === "job" || operation === "job-refresh") {
+      if (view.editingMapping) return;
       trackJob(
         (await call(`/imports/${id(value || view.job.importId)}`)).import,
       );
@@ -566,6 +682,9 @@ export function createBallotChaser({
       view.rows = null;
       view.mappingDraft = {};
     } else if (["advance", "apply"].includes(operation)) {
+      if (view.editingMapping)
+        throw new Error("Finish or cancel the mapping changes first.");
+      jobGeneration++;
       if (!can("import"))
         throw new Error("Your role cannot change county reports.");
       trackJob(
@@ -652,6 +771,16 @@ export function createBallotChaser({
     }
   }
   async function submit(type, data, file) {
+    if (type === "contacts-view") {
+      if (!Object.hasOwn(ballotViews, data.get("chaseView")))
+        throw new Error("Choose a ballot list.");
+      view.chaseView = data.get("chaseView");
+      view.chaseViewDraft = view.chaseView;
+      view.showDoor = false;
+      exports.reset();
+      await showContacts();
+      return;
+    }
     if (type === "source-policy") {
       if (!can("import"))
         throw new Error("Your role cannot review this source’s permitted use.");
@@ -763,7 +892,48 @@ export function createBallotChaser({
               fileMode: data.get("fileMode"),
             });
       trackJob(job.import);
-      await uploadBallotFile(file, job.upload || job.import.upload, { guard });
+      const key = view.key,
+        version = sequence;
+      const progress = (value) => {
+        guard(key, version);
+        view.uploadProgress = value;
+        changed();
+      };
+      view.uploadProgress = { loaded: 0, total: file.size };
+      if (file.size > 16 * 1024 * 1024) {
+        view.checkingFile = true;
+        changed();
+        let sourceSha256;
+        try {
+          sourceSha256 = await checksumBlob(file, {
+            onProgress: () => guard(key, version),
+          });
+        } finally {
+          if (sequence === version && view.key === key) {
+            view.checkingFile = false;
+            changed();
+          }
+        }
+        guard(key, version);
+        const upload = await call(
+          `/imports/${id(job.import.importId)}/upload-start`,
+          { operationId: uuid(), sourceSha256 },
+        );
+        const completion = await uploadBallotParts(file, upload.upload, {
+          guard: () => guard(key, version),
+          progress,
+        });
+        if (completion)
+          await call(
+            `/imports/${id(job.import.importId)}/upload-complete`,
+            completion,
+          );
+      } else
+        await uploadBallotFile(file, job.upload || job.import.upload, {
+          guard: () => guard(key, version),
+          progress,
+        });
+      view.uploadProgress = null;
       trackJob(
         (
           await call(`/imports/${id(job.import.importId)}/inspect`, {
@@ -776,6 +946,17 @@ export function createBallotChaser({
       return;
     }
     if (type === "mapping") {
+      if (
+        ![
+          "awaiting_mapping",
+          "reviewing",
+          "review_ready",
+          "needs_review",
+        ].includes(view.job?.status)
+      )
+        throw new Error("This report cannot be remapped now.");
+      jobGeneration++;
+      clearTimeout(timer);
       if (!can("import"))
         throw new Error("Your role cannot map county columns.");
       const statusMap = {};
@@ -799,6 +980,7 @@ export function createBallotChaser({
         voterIdColumn: data.get("voterIdColumn"),
         statusMap,
         fieldMapping: {},
+        sourceOnlyColumns: [],
         blankPolicy: "preserve",
         clearBlankColumns: data.getAll("clearBlankColumns"),
       };
@@ -813,10 +995,18 @@ export function createBallotChaser({
         "rowStatusMeans",
       ])
         if (data.get(key)) profile[key] = data.get(key);
-      columns(view.job).forEach((header, index) => {
-        if (data.get(`field_${index}`))
-          profile.fieldMapping[header] = data.get(`field_${index}`);
-      });
+      Object.assign(
+        profile,
+        ballotContactColumns(
+          columns(view.job),
+          Object.fromEntries(
+            columns(view.job).map((header, index) => [
+              header,
+              data.get(`field_${index}`),
+            ]),
+          ),
+        ),
+      );
       trackJob(
         (
           await call(`/imports/${id(view.job.importId)}/mapping`, {
@@ -826,6 +1016,8 @@ export function createBallotChaser({
           })
         ).import,
       );
+      view.editingMapping = false;
+      view.mappingDraft = {};
       return;
     }
     if (type === "questions") {
@@ -916,6 +1108,12 @@ export function createBallotChaser({
     if (!owned(target)) return;
     if (target.name === "roundId") view.selectedRoundId = target.value;
     const form = target.closest("[data-ballot-form]");
+    if (
+      form?.dataset.ballotForm === "contacts-view" &&
+      target.name === "chaseView" &&
+      Object.hasOwn(ballotViews, target.value)
+    )
+      view.chaseViewDraft = target.value;
     if (form?.dataset.ballotForm === "upload")
       view.uploadDraft[target.name] = target.value;
     if (form?.dataset.ballotForm === "mapping") {
@@ -948,6 +1146,17 @@ export function createBallotChaser({
         if (data.get(`field_${index}`))
           profile.fieldMapping[header] = data.get(`field_${index}`);
       });
+      if (target.name.startsWith("field_")) {
+        const blanks = form.elements.namedItem("clearBlankColumns");
+        if (blanks)
+          blanks.innerHTML = columns(view.job)
+            .filter((header) => profile.fieldMapping[header])
+            .map(
+              (header) =>
+                `<option value="${e(header)}"${list(profile.clearBlankColumns).includes(header) ? " selected" : ""}>${e(header)}</option>`,
+            )
+            .join("");
+      }
       if (data.get("voterIdPaddingWidth"))
         profile.voterIdPaddingWidth = Number(data.get("voterIdPaddingWidth"));
     }
@@ -975,6 +1184,19 @@ export function createBallotChaser({
     )
       void run(() => contacts.action(target.dataset.contactChange));
   };
+  document.addEventListener(
+    "toggle",
+    (event) => {
+      const target = event.target;
+      if (
+        target?.isConnected &&
+        target.matches?.("[data-ballot-mapping-details]") &&
+        owned(target)
+      )
+        view.mappingDetailsOpen = target.open;
+    },
+    true,
+  );
   document.addEventListener("input", change);
   document.addEventListener("change", change);
   return {

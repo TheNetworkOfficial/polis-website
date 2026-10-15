@@ -1,5 +1,52 @@
 # Organization Ballot Chaser: local implementation
 
+## October 15 client update (local source only)
+
+Ballot Chaser supports coalition and candidate workspaces when the current
+Contact Book schema grants both `read` and `ballotChaser`. Five pinned views
+reuse normal filters and selection: Outstanding, Newly returned, Returned,
+Needs follow-up and All voters. The current and previous county report dates
+stay visible. Returned counts physical returns; Accepted is separate.
+Needs follow-up includes unknown, cure-required and rejected ballots. Newly
+returned means the first confirmed outstanding-to-returned transition in the
+current update, rather than voters discovered already returned in a baseline.
+
+Ballot CSV exports use a background server job, preserving explicit selected
+IDs or all-matching filters and exclusions. The browser does not fetch thousands
+of CSV pages or assemble the file in a Blob. Each Download CSV click checks the
+job again for a fresh authorized private URL. A newer county publication or
+changed Contact Book clears the old download and asks the user to refresh.
+Explicit selections retain selected order; all-matching exports retain sorting.
+Generic Contact Book exports are unchanged.
+
+Files above 16 MiB use two signed S3 part uploads at a time. A streaming SHA-256
+pins the original file before resuming saved parts; progress counts confirmed
+bytes. The upload completion includes every saved/new part ETag. Smaller files
+keep a single protected PUT. Comparison/publication progress uses actual phase
+counters without a completion-time promise. State selection replaces the fixed
+Arizona election field.
+
+Contact mapping now separates Keep in report only from Add county field and
+existing contact fields. Empty choices are sent in `sourceOnlyColumns`; they
+retain the original county data without making volatile report metadata into a
+contact field. The Add county field marker is local UI state and never appears
+in `fieldMapping` or `sourceOnlyColumns`. Existing nonempty field mappings stay
+visible and preserved even when their schema choice is temporarily unavailable.
+Before applying, Edit mapping can replace a reviewed mapping; Cancel restores
+the saved choices. Late progress reads cannot restore an older mapping.
+
+Text Banking handoff remains Outstanding-only and coalition-only on the website.
+The territory wizard is hidden in ordinary builds, including for administrators;
+development builds additionally require a fresh server-issued tester capability.
+Existing assigned field coverage remains available. No geocoding runs from
+Ballot Chaser import, filtering or export.
+
+The validation receipt for this source update is external to the repository at
+`D:/CodexHome/artifacts/polis-ballot-fast-20261015/`. No deployment, live import,
+provider request, packaging or store release is authorized by these local checks.
+
+## Original implementation record
+
 October 14, 2026. Source and fictional fixture validation only. No deployment,
 real-contact import, provider transfer, messages, turf publication, commit, or
 store release was performed.

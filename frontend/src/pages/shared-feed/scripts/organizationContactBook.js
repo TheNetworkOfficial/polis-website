@@ -1,4 +1,9 @@
 import "../css/organization-contacts.css";
+import {
+  ballotViews,
+  ballotStatusLabels,
+  ballotReportDate,
+} from "./ballotChaserModel";
 import { createContactProgress } from "./organizationContactProgress";
 import {
   contactPageWindow,
@@ -146,7 +151,13 @@ export function createOrganizationContactBook(
         : body,
       ...args,
     );
-  const can = (name) => state().schema?.capabilities?.[name] === true;
+  const can = (name) =>
+    !(
+      name === "campaign" &&
+      state().query.ballotChase &&
+      ((state().query.ballotChase.view || "outstanding") !== "outstanding" ||
+        r.context?.().scopeType !== "coalition")
+    ) && state().schema?.capabilities?.[name] === true;
   const b = (action, text, options = {}) =>
     button(`${prefix}-${action}`, text, { disabled: r.busy(), ...options });
   const formName = (suffix) => `${prefix}-${suffix}`;
@@ -841,6 +852,8 @@ export function createOrganizationContactBook(
     return selectionProgress.refresh({ manual: true });
   }
   function startPreparation() {
+    // Ballot export freezes its own server selection; avoid a second large job.
+    if (state().query.ballotChase) return;
     void prepareSelection().catch((error) => {
       if (!disposed) {
         state().selectionError = error.message;
@@ -1271,8 +1284,10 @@ export function createOrganizationContactBook(
         .slice(0, 2)
         .map((part) => part[0])
         .join("");
-      return `<button type="button" class="pt-cb-person" data-workspace-action="${prefix}-detail" data-value="${e(contact.contactId)}"><span class="pt-cb-avatar" aria-hidden="true">${e(initials)}</span><span><strong>${e(name)}</strong>${locality ? `<small>${e(locality)}</small>` : ""}</span></button>`;
+      return `<button type="button" class="pt-cb-person" data-workspace-action="${prefix}-detail" data-value="${e(contact.contactId)}"><span class="pt-cb-avatar" aria-hidden="true">${e(initials)}</span><span><strong>${e(name)}</strong>${locality ? `<small>${e(locality)}</small>` : ""}${state().query.ballotChase && !state().columns.includes("eligibility") ? `<small>${e(ballotStatusLabels[contact.ballotChase?.status] || "Unknown")}</small>` : ""}</span></button>`;
     }
+    if (key === "eligibility" && state().query.ballotChase)
+      return e(ballotStatusLabels[contact.ballotChase?.status] || "Unknown");
     if (key === "tags") {
       const assigned = contactTags(contact);
       return `<div class="pt-cb-tags">${assigned
@@ -1321,7 +1336,7 @@ export function createOrganizationContactBook(
         ? ""
         : ` pt-contact-pinned pt-contact-pin-${Math.min(index, 9)}`;
     };
-    return `<div class="pt-workspace-table-wrap pt-cb-table-wrap"><table class="pt-workspace-table pt-contact-table"><thead><tr>${can("select") ? '<th scope="col" class="pt-cb-select-heading"><span class="pt-cb-visually-hidden">Select</span></th>' : ""}${columns.map((item) => `<th scope="col" class="${pin(item.fieldId)}">${e(item.fieldId === "eligibility" ? "Texting status" : item.label)}</th>`).join("")}<th scope="col" class="pt-cb-open-heading"><span class="pt-cb-visually-hidden">Details</span></th></tr></thead><tbody>${rows.map((contact) => `<tr class="${selected(contact) ? "is-selected" : ""}">${can("select") ? `<td class="pt-contact-select"><label class="pt-cb-check-hit"><input type="checkbox" aria-label="Select ${e(contactDisplayName(contact, "contact"))}" data-contact-change="${prefix}-row" data-contact-id="${e(contact.contactId)}"${addition ? ' data-addition="true"' : ""}${(addition ? s.includeIds.has(contact.contactId) : review || selected(contact)) ? " checked" : ""}${r.busy() ? " disabled" : ""}></label></td>` : ""}${columns.map((item) => `<td data-label="${e(item.label)}" class="pt-cb-cell pt-cb-cell-${e(item.fieldId.replace(/[^a-zA-Z]/g, ""))}${pin(item.fieldId)}">${item.fieldId.startsWith("tag:") && can("tag") && mode === "book" ? `<label class="pt-cb-check-hit"><input type="checkbox" aria-label="${e(item.label)} for ${e(contactDisplayName(contact, "contact"))}" data-contact-change="${prefix}-tag-cell" data-contact-id="${e(contact.contactId)}" data-tag-id="${e(item.fieldId.slice(4))}"${contactValue(contact, item) ? " checked" : ""}${r.busy() ? " disabled" : ""}></label>` : rowValue(contact, item)}</td>`).join("")}<td class="pt-contact-open">${tool("detail", "Open", "right", { value: contact.contactId })}</td></tr>`).join("")}</tbody></table></div>`;
+    return `<div class="pt-workspace-table-wrap pt-cb-table-wrap"><table class="pt-workspace-table pt-contact-table"><thead><tr>${can("select") ? '<th scope="col" class="pt-cb-select-heading"><span class="pt-cb-visually-hidden">Select</span></th>' : ""}${columns.map((item) => `<th scope="col" class="${pin(item.fieldId)}">${e(item.fieldId === "eligibility" ? (s.query.ballotChase ? "Ballot status" : "Texting status") : item.label)}</th>`).join("")}<th scope="col" class="pt-cb-open-heading"><span class="pt-cb-visually-hidden">Details</span></th></tr></thead><tbody>${rows.map((contact) => `<tr class="${selected(contact) ? "is-selected" : ""}">${can("select") ? `<td class="pt-contact-select"><label class="pt-cb-check-hit"><input type="checkbox" aria-label="Select ${e(contactDisplayName(contact, "contact"))}" data-contact-change="${prefix}-row" data-contact-id="${e(contact.contactId)}"${addition ? ' data-addition="true"' : ""}${(addition ? s.includeIds.has(contact.contactId) : review || selected(contact)) ? " checked" : ""}${r.busy() ? " disabled" : ""}></label></td>` : ""}${columns.map((item) => `<td data-label="${e(item.fieldId === "eligibility" && s.query.ballotChase ? "Ballot status" : item.label)}" class="pt-cb-cell pt-cb-cell-${e(item.fieldId.replace(/[^a-zA-Z]/g, ""))}${pin(item.fieldId)}">${item.fieldId.startsWith("tag:") && can("tag") && mode === "book" ? `<label class="pt-cb-check-hit"><input type="checkbox" aria-label="${e(item.label)} for ${e(contactDisplayName(contact, "contact"))}" data-contact-change="${prefix}-tag-cell" data-contact-id="${e(contact.contactId)}" data-tag-id="${e(item.fieldId.slice(4))}"${contactValue(contact, item) ? " checked" : ""}${r.busy() ? " disabled" : ""}></label>` : rowValue(contact, item)}</td>`).join("")}<td class="pt-contact-open">${tool("detail", "Open", "right", { value: contact.contactId })}</td></tr>`).join("")}</tbody></table></div>`;
   }
   function columnOrderControls() {
     const s = state();
@@ -2311,7 +2326,7 @@ export function createOrganizationContactBook(
     if (mode === "book" && s.panel === "imports")
       return `<div class="pt-contact-book">${importPanel()}</div>`;
     const showingDetail = s.detail || s.detailNew;
-    const main = `${mode === "book" ? `<div class="pt-cb-breadcrumb">Organization ${icon("right")} <span>Contact book</span></div><header class="pt-cb-heading"><div><h1>Contact book</h1><p>${s.query.ballotChase ? "Ballots not returned for this election. Your usual filters narrow this list." : "Your people, together in one place."}</p></div><div class="pt-actions">${typeof r.openBallotChaser === "function" ? b("ballot-chaser", s.query.ballotChase ? "Ballot progress" : "GOTV / Ballot Chaser", { secondary: true }) : ""}${can("import") || can("edit") ? tool("overlay", "Add contacts", "plus", { value: "add", primary: true }) : ""}${tool("overlay", "More contact tools", "more", { value: "more", extra: 'aria-label="More contact tools"' })}</div></header>` : '<header class="pt-cb-heading"><div><h2>Choose campaign recipients</h2><p>Filter across your contact book, then select matching contacts or individual people.</p></div></header>'}${renderRows()}`;
+    const main = `${mode === "book" ? `<div class="pt-cb-breadcrumb">Organization ${icon("right")} <span>Contact book</span></div><header class="pt-cb-heading"><div><h1>Contact book</h1><p>${s.query.ballotChase ? `${ballotViews[s.query.ballotChase.view] || "Outstanding"} · County report ${e(s.query.ballotChase.sourceAsOf ? ballotReportDate(s.query.ballotChase.sourceAsOf) : "published")}. Filters narrow this list.` : "Your people, together in one place."}</p></div><div class="pt-actions">${typeof r.openBallotChaser === "function" && can("ballotChaser") ? b("ballot-chaser", s.query.ballotChase ? "Ballot progress" : "GOTV / Ballot Chaser", { secondary: true }) : ""}${can("import") || can("edit") ? tool("overlay", "Add contacts", "plus", { value: "add", primary: true }) : ""}${tool("overlay", "More contact tools", "more", { value: "more", extra: 'aria-label="More contact tools"' })}</div></header>` : '<header class="pt-cb-heading"><div><h2>Choose campaign recipients</h2><p>Filter across your contact book, then select matching contacts or individual people.</p></div></header>'}${renderRows()}`;
     return `<div class="pt-contact-book"><div${s.overlay || showingDetail ? ' inert aria-hidden="true"' : ""}>${main}</div>${showingDetail ? dialog(s.detailNew ? "Add a contact" : "Contact details", detail()) : overlayPanel()}</div>`;
   }
   function normalizedSimpleFilters() {
@@ -2897,6 +2912,23 @@ export function createOrganizationContactBook(
   async function downloadSelection() {
     const s = state();
     if (!can("export")) throw new Error("Contact export is restricted.");
+    if (s.query.ballotChase && typeof r.beginBallotExport === "function") {
+      const spec = selectionSpec();
+      s.overlay = null;
+      await r.beginBallotExport({
+        ...s.query.ballotChase,
+        filter: spec.query.filter,
+        search: spec.query.search,
+        ...(spec.mode === "all_matching" ? { sort: spec.query.sort } : {}),
+        columns: s.columns,
+        selection: {
+          mode: spec.mode,
+          includeIds: spec.includeIds,
+          excludeIds: spec.excludeIds,
+        },
+      });
+      return;
+    }
     if (s.selection?.status !== "ready") await prepareSelection();
     if (s.selection?.status !== "ready")
       throw new Error("Finish building the selection before downloading it.");
@@ -3015,6 +3047,7 @@ export function createOrganizationContactBook(
     } else if (op === "campaign-start") {
       if (!can("campaign") || (!s.allMatching && !s.includeIds.size))
         throw new Error("Campaign selection is restricted or empty.");
+      if (s.query.ballotChase) await prepareSelection();
       r.beginContactCampaign?.(selectionSpec());
     } else if (op === "index-prepare")
       await prepareIndex({ resume: s.indexJob?.status === "paused" });

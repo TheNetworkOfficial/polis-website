@@ -32,11 +32,11 @@
 .bc-progress-card progress {
   width: min(380px, 100%);
   height: 24px;
-  accent-color: #5ce1c1;
+  accent-color: var(--polis-primary);
 }
 .bc-stats {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
   margin: 16px 0;
 }
@@ -90,4 +90,8 @@
   .bc-election-picker .pt-field {
     width: 100%;
   }
+}
+
+.ballot-chaser progress {
+  accent-color: var(--polis-primary);
 }

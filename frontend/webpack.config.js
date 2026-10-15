@@ -1031,6 +1031,9 @@ const publicPageRouteRewrites = [
 ].map(([from, to]) => ({ from, to }));
 
 const deleteAccountDefineEnv = {
+  "process.env.POLIS_TERRITORY_DEVELOPMENT_ENABLED": JSON.stringify(
+    process.env.POLIS_TERRITORY_DEVELOPMENT_ENABLED || "false",
+  ),
   __DELETE_ACCOUNT_API_BASE_URL__: JSON.stringify(
     process.env.DELETE_ACCOUNT_API_BASE_URL || "",
   ),

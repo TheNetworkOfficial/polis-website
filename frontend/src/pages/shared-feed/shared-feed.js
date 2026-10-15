@@ -54,6 +54,11 @@ import {
 } from "./scripts/organizationCreationSignup.js";
 import { createTerritoryBuilder } from "./scripts/territoryBuilder.js";
 import {
+  createTerritoryDevelopmentAccess,
+  territoryDevelopmentBuildEnabled,
+  visibleTerritorySections,
+} from "./scripts/territoryDevelopmentAccess.js";
+import {
   montanaStateOffices,
   isMontanaCandidateState,
   canonicalMontanaCandidateOffice,
@@ -115,6 +120,34 @@ const textingRequest = createTextingSessionRequest({
   contextKey: getCurrentPathWithQuery,
 });
 let pendingBallotTerritories = null;
+const territoryDevelopment = createTerritoryDevelopmentAccess({
+  context: () => ({
+    userId: state.auth.session
+      ? getAuthenticatedUser(state.auth.session)?.userId || ""
+      : "",
+    // Auth restoration may recreate the same session object before dispatch.
+    // A different credential still invalidates this in-memory grant.
+    session:
+      state.auth.session?.idToken || state.auth.session?.accessToken || "",
+    location: getCurrentPathWithQuery(),
+  }),
+});
+function territoryDevelopmentAllowed(scopeType, scopeId) {
+  return territoryDevelopment.allowed({ scopeType, scopeId });
+}
+function currentTerritoryDevelopmentAllowed() {
+  if (candidateVoterMapSectionForRoute() === "territories/admin")
+    return territoryDevelopmentAllowed(
+      "candidate",
+      currentCandidateDashboardId(),
+    );
+  if (coalitionVoterMapSectionForRoute() === "territories/admin")
+    return territoryDevelopmentAllowed("coalition", currentCoalitionDetailId());
+  return false;
+}
+function territoryDevelopmentUnavailable(backPath) {
+  return `<div class="shared-page__empty">This tool is unavailable.</div><button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(backPath)}">Open field map</button>`;
+}
 const territoryBuilder = createTerritoryBuilder({
   request: textingRequest,
   context: () => {
@@ -123,6 +156,7 @@ const territoryBuilder = createTerritoryBuilder({
       : "";
     if (candidateVoterMapSectionForRoute() === "territories/admin") {
       const scopeId = currentCandidateDashboardId();
+      if (!territoryDevelopmentAllowed("candidate", scopeId)) return null;
       return {
         userId,
         scopeId,
@@ -132,6 +166,7 @@ const territoryBuilder = createTerritoryBuilder({
     }
     if (coalitionVoterMapSectionForRoute() === "territories/admin") {
       const scopeId = currentCoalitionDetailId();
+      if (!territoryDevelopmentAllowed("coalition", scopeId)) return null;
       return {
         userId,
         scopeId,
@@ -303,9 +338,17 @@ const ballotChaserPage = createBallotChaser({
       throw new Error(
         "Review your organization’s ballot contact selection first.",
       );
+    if (!territoryDevelopmentAllowed(scope.scopeType, scope.scopeId))
+      throw new Error("This tool is unavailable.");
     pendingBallotTerritories = structuredClone(selection);
     navigateTo(
       coalitionSectionPath(scope.scopeId, "voter-map/territories/admin"),
+    );
+  },
+  canBuildTerritories: () => {
+    const scope = currentOrganizationWorkspaceContext();
+    return Boolean(
+      scope && territoryDevelopmentAllowed(scope.scopeType, scope.scopeId),
     );
   },
 });
@@ -388,8 +431,8 @@ function currentOrganizationDashboardContext() {
         ? `/coalitions/${encodedId}/field-overview`
         : `/candidate-dashboard/${encodedId}/field-overview`,
       territory: coalition
-        ? `/coalitions/${encodedId}/voter-map/territories/admin`
-        : `/candidate/voter-map/territories/admin?candidateId=${encodedId}`,
+        ? `/coalitions/${encodedId}/voter-map/${territoryDevelopmentAllowed(scopeType, scopeId) ? "territories/admin" : "map"}`
+        : `/candidate/voter-map/${territoryDevelopmentAllowed(scopeType, scopeId) ? "territories/admin" : "map"}?candidateId=${encodedId}`,
       field: coalition
         ? `/coalitions/${encodedId}/voter-map/map`
         : `/candidate/voter-map/map?candidateId=${encodedId}`,
@@ -3354,7 +3397,7 @@ function parseRouteFromLocation(pathname = window.location.pathname) {
     }[section];
     return {
       routeKey:
-        section === "work/ballot-chaser" && organizationRoute[1] === "coalition"
+        section === "work/ballot-chaser"
           ? "organization-ballot-chaser"
           : composer
             ? ROUTE_KEY_CREATE
@@ -25072,9 +25115,13 @@ async function refreshCoalitionVoterMapAccess() {
   workspace.error = "";
   scheduleRender();
   try {
-    const payload = await fetchJson(
-      `/api/coalitions/${encodeURIComponent(coalitionId)}/voter-map/access`,
-      { auth: true },
+    const payload = await territoryDevelopment.read(
+      { scopeType: "coalition", scopeId: coalitionId },
+      () =>
+        fetchJson(
+          `/api/coalitions/${encodeURIComponent(coalitionId)}/voter-map/access`,
+          { auth: true },
+        ),
     );
     const access = normalizeCoalitionVoterMapAccess(payload);
     workspace.access = access;
@@ -31576,9 +31623,13 @@ async function loadCandidateDashboardVoterMapAccess(
   scheduleRender();
   try {
     const query = new URLSearchParams({ candidateId: normalizedCandidateId });
-    const payload = await fetchJson(
-      `/api/candidate-dashboard/voter-map/access?${query.toString()}`,
-      { auth: true },
+    const payload = await territoryDevelopment.read(
+      { scopeType: "candidate", scopeId: normalizedCandidateId },
+      () =>
+        fetchJson(
+          `/api/candidate-dashboard/voter-map/access?${query.toString()}`,
+          { auth: true },
+        ),
     );
     voterMap.access = normalizeCandidateVoterMapAccess(payload);
     voterMap.loaded = true;
@@ -34329,13 +34380,22 @@ async function loadCandidateDashboardPage({ refresh = false } = {}) {
 async function loadCandidateVoterMapPage({ refresh = false } = {}) {
   const route = getCurrentRoute();
   const activeSection = candidateVoterMapSectionForRoute(route);
+  if (
+    activeSection === "territories/admin" &&
+    !territoryDevelopmentBuildEnabled
+  ) {
+    scheduleRender();
+    return;
+  }
   await loadCandidateDashboardCampaigns({ refresh });
   const candidateId = candidateVoterMapRouteCandidateId();
   if (!candidateId) {
     return;
   }
   await loadCandidateDashboardDetail(candidateId, { refresh });
-  await loadCandidateDashboardVoterMapAccess(candidateId, { refresh });
+  await loadCandidateDashboardVoterMapAccess(candidateId, {
+    refresh: refresh || activeSection === "territories/admin",
+  });
   if (
     activeSection === "menu" ||
     activeSection === "map" ||
@@ -35752,6 +35812,10 @@ function normalizeCoalitionVoterMapAccess(raw = {}) {
       payload.canManageTerritories ?? raw.canManageTerritories,
       false,
     ),
+    capabilities: {
+      territoryDevelopmentAccess:
+        payload.capabilities?.territoryDevelopmentAccess === true,
+    },
     canManageCta: parseBoolean(payload.canManageCta ?? raw.canManageCta, false),
     candidateGeography: readObjectPayload(
       payload.candidateGeography || raw.candidateGeography,
@@ -36410,9 +36474,13 @@ async function loadCoalitionDetail(coalitionId, { refresh = false } = {}) {
       `/api/coalitions/${encodedId}/amplify_requests`,
       { auth: true },
     ),
-    voterMapAccess: fetchJson(`/api/coalitions/${encodedId}/voter-map/access`, {
-      auth: true,
-    }),
+    voterMapAccess: territoryDevelopment.read(
+      { scopeType: "coalition", scopeId: normalizedCoalitionId },
+      () =>
+        fetchJson(`/api/coalitions/${encodedId}/voter-map/access`, {
+          auth: true,
+        }),
+    ),
   };
 
   const keys = Object.keys(requests);
@@ -36510,6 +36578,13 @@ async function loadCoalitionDetail(coalitionId, { refresh = false } = {}) {
 
 async function loadCoalitionsPage({ refresh = false } = {}) {
   const route = getCurrentRoute();
+  if (
+    coalitionVoterMapSectionForRoute(route) === "territories/admin" &&
+    !territoryDevelopmentBuildEnabled
+  ) {
+    scheduleRender();
+    return;
+  }
   await loadCoalitionsList({ refresh });
   const coalitionId = decodeRouteSegment(route.routeParams.coalitionId);
   if (coalitionId) {
@@ -36541,13 +36616,19 @@ async function loadCoalitionsPage({ refresh = false } = {}) {
         await loadCoalitionDirectory(coalitionId, { refresh });
       }
       if (voterMapSection === "territories/admin") {
+        if (
+          territoryDevelopmentBuildEnabled &&
+          !territoryDevelopmentAllowed("coalition", coalitionId)
+        )
+          await refreshCoalitionVoterMapAccess();
         const voterMapAccess =
           state.pages.coalitions.detail.voterMapWorkspace?.access ||
           state.pages.coalitions.detail.voterMapAccess ||
           normalizeCoalitionVoterMapAccess({});
         const canManageTerritories =
-          voterMapAccess.canManageTerritories === true ||
-          state.pages.coalitions.detail.membership?.isAdmin;
+          territoryDevelopmentAllowed("coalition", coalitionId) &&
+          (voterMapAccess.canManageTerritories === true ||
+            state.pages.coalitions.detail.membership?.isAdmin);
         if (canManageTerritories) {
           await loadCoalitionTerritoryAssignments(coalitionId, { refresh });
         }
@@ -63353,7 +63434,20 @@ async function loadCurrentRoute({ refresh = false } = {}) {
     return;
   }
   if (routeKey === "organization-ballot-chaser") {
-    await ballotChaserPage.load({ force: refresh });
+    const reads = [ballotChaserPage.load({ force: refresh })];
+    const scope = currentOrganizationWorkspaceContext();
+    if (territoryDevelopmentBuildEnabled && scope?.scopeType === "coalition") {
+      reads.push(
+        territoryDevelopment.read(scope, () =>
+          fetchJson(
+            `/api/coalitions/${encodeURIComponent(scope.scopeId)}/voter-map/access`,
+            { auth: true },
+          ),
+        ),
+      );
+    }
+    await Promise.allSettled(reads);
+    scheduleRender();
     return;
   }
   if (routeKey === "organization-publishing") {
@@ -75810,8 +75904,8 @@ function candidateDashboardRootActionItems(campaigns = []) {
     const voterMapPermissions = candidateDashboardPermissionSet(voterMapAccess);
     const voterMapShortcuts = [];
     if (
-      voterMapAccess.isOwner ||
-      voterMapPermissions.has("voter_map_manager")
+      territoryDevelopmentAllowed("candidate", voterMapAccess.candidateId) &&
+      (voterMapAccess.isOwner || voterMapPermissions.has("voter_map_manager"))
     ) {
       voterMapShortcuts.push({
         label: "Territory wizard",
@@ -83875,7 +83969,11 @@ function renderCandidateVoterMapNav(candidateId, activeSection) {
       <span>${renderIcon("dashboard")}</span>
       <strong>Menu</strong>
     </button>
-    ${CANDIDATE_VOTER_MAP_SECTION_CONFIG.filter((section) => !section.hidden)
+    ${visibleTerritorySections(
+      CANDIDATE_VOTER_MAP_SECTION_CONFIG,
+      territoryDevelopmentAllowed("candidate", candidateId),
+    )
+      .filter((section) => !section.hidden)
       .map((section) => {
         const active = section.key === activeSection;
         return `<button class="shared-campaign-tab${active ? " is-active" : ""}" data-action="navigate" data-route="${escapeHtml(candidateVoterMapPath(section.key, candidateId))}">
@@ -83940,7 +84038,11 @@ function renderCandidateVoterMapMenu(detail, candidateId, access) {
     </div>
     ${voterMap.error ? `<div class="shared-page__error">${escapeHtml(voterMap.error)}</div>` : ""}
     <div class="shared-candidate-voter-map-menu-grid">
-      ${CANDIDATE_VOTER_MAP_SECTION_CONFIG.filter((section) => !section.hidden)
+      ${visibleTerritorySections(
+        CANDIDATE_VOTER_MAP_SECTION_CONFIG,
+        territoryDevelopmentAllowed("candidate", candidateId),
+      )
+        .filter((section) => !section.hidden)
         .map((section) => renderCandidateVoterMapMenuCard(section, candidateId))
         .join("")}
     </div>
@@ -84274,7 +84376,7 @@ function renderCandidateVoterMapScopePanel(
     }
     ${renderCandidateVoterMapSettingsForm(voterMap)}
     <div class="shared-candidate-voter-map-scope__actions">
-      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(candidateVoterMapPath("territories/admin", candidateId))}">Territories</button>
+      ${territoryDevelopmentAllowed("candidate", candidateId) ? `<button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(candidateVoterMapPath("territories/admin", candidateId))}">Territories</button>` : ""}
       <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(candidateVoterMapPath("add", candidateId))}">Add voters</button>
     </div>
   </article>`;
@@ -84372,6 +84474,10 @@ function renderCandidateVoterMapTerritoryCoverage(voterMap, access) {
 }
 
 function renderCandidateVoterMapTerritoryAdmin(detail, access, candidateId) {
+  if (!territoryDevelopmentAllowed("candidate", candidateId))
+    return territoryDevelopmentUnavailable(
+      candidateVoterMapPath("map", candidateId),
+    );
   const voterMap = detail.voterMap || createCandidateDashboardVoterMapState();
   const voterMapAccess =
     voterMap.access || normalizeCandidateVoterMapAccess({});
@@ -84842,6 +84948,11 @@ function renderCandidateVoterMapPage() {
   if (!candidateId) {
     return renderCandidateVoterMapCampaignPicker();
   }
+  if (
+    candidateVoterMapSectionForRoute() === "territories/admin" &&
+    !territoryDevelopmentBuildEnabled
+  )
+    return `<section class="shared-page shared-candidate-voter-map">${renderTopChrome()}<div class="shared-page__content">${territoryDevelopmentUnavailable(candidateVoterMapPath("map", candidateId))}</div></section>`;
   const detail = state.pages.candidateDashboard.detail;
   if (detail.loading && !detail.loaded) {
     return `<section class="shared-page shared-campaign-dashboard shared-candidate-voter-map">${renderTopChrome()}<div class="shared-page__content"><div class="shared-page__loading">Loading voter map...</div></div></section>`;
@@ -87629,24 +87740,23 @@ function coalitionsRootActionItems(items = []) {
           },
         ];
         if (item.membership.isAdmin) {
-          shortcuts.push(
-            {
+          if (territoryDevelopmentAllowed("coalition", coalitionId))
+            shortcuts.push({
               label: "Territory wizard",
               icon: "team",
               route: coalitionSectionPath(
                 coalitionId,
                 "voter-map/territories/admin",
               ),
-            },
-            {
-              label: "Outreach scripts",
-              icon: "edit",
-              route: coalitionSectionPath(
-                coalitionId,
-                "voter-map/outreach-scripts",
-              ),
-            },
-          );
+            });
+          shortcuts.push({
+            label: "Outreach scripts",
+            icon: "edit",
+            route: coalitionSectionPath(
+              coalitionId,
+              "voter-map/outreach-scripts",
+            ),
+          });
         }
         return shortcuts;
       },
@@ -87838,7 +87948,12 @@ function coalitionsRootCoverageGroups() {
           label: "Territories",
           icon: "mission",
           sectionKey: "voter-map",
-          predicate: (item) => item.membership.isAdmin,
+          predicate: (item) =>
+            item.membership.isAdmin &&
+            territoryDevelopmentAllowed(
+              "coalition",
+              item.coalition.coalitionId,
+            ),
           route: (item) =>
             coalitionSectionPath(
               item.coalition.coalitionId,
@@ -90024,7 +90139,10 @@ function renderCoalitionVoterMapTerritories(access, ownerKind = "coalition") {
 
 function renderCoalitionSubrouteNav(coalition, items, activeKey, label) {
   return `<nav class="shared-coalition-subnav" aria-label="${escapeHtml(label)}">
-    ${items
+    ${visibleTerritorySections(
+      items,
+      territoryDevelopmentAllowed("coalition", coalition.coalitionId),
+    )
       .map((item) => {
         const active = item.key === activeKey;
         return `<button class="shared-coalition-tab${active ? " is-active" : ""}" type="button" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, item.path))}">
@@ -90560,6 +90678,10 @@ function renderCoalitionVoterMapTerritoryAdminPanel(
   access,
   workspace,
 ) {
+  if (!territoryDevelopmentAllowed("coalition", coalition.coalitionId))
+    return territoryDevelopmentUnavailable(
+      coalitionSectionPath(coalition.coalitionId, "voter-map/map"),
+    );
   const assignments =
     workspace?.assignments || createCoalitionTerritoryAssignmentsState();
   const admin =
@@ -90793,9 +90915,11 @@ function renderCoalitionVoterMapMenu(coalition, membership, access, workspace) {
   const resultCount = workspace.result?.districts.length || 0;
   return `<div class="shared-coalition-voter-map-menu">
     <div class="shared-coalition-route-grid">
-      ${COALITION_VOTER_MAP_SECTION_CONFIG.filter(
-        (item) => item.key !== "menu" && !item.hidden,
+      ${visibleTerritorySections(
+        COALITION_VOTER_MAP_SECTION_CONFIG,
+        territoryDevelopmentAllowed("coalition", coalition.coalitionId),
       )
+        .filter((item) => item.key !== "menu" && !item.hidden)
         .map((item) => renderCoalitionRouteCard(coalition, item))
         .join("")}
     </div>
@@ -91222,7 +91346,7 @@ function renderCoalitionVoterMapConnectedPanel(coalition, detail, access) {
           <div class="shared-card__actions">
             <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, "voter-map/add"))}">Add voters</button>
             <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, "voter-map/cta"))}">CTA events</button>
-            <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, "voter-map/territories/admin"))}">Territories</button>
+            ${territoryDevelopmentAllowed("coalition", coalition.coalitionId) ? `<button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, "voter-map/territories/admin"))}">Territories</button>` : ""}
           </div>
         </article>
         ${renderCoalitionVoterImportPanel(resource)}
@@ -95556,6 +95680,11 @@ function renderCoalitionDetailPage() {
   if (!coalitionId) {
     return renderCoalitionsRootPage();
   }
+  if (
+    coalitionVoterMapSectionForRoute(route) === "territories/admin" &&
+    !territoryDevelopmentBuildEnabled
+  )
+    return `<section class="shared-page shared-coalition-workspace">${renderTopChrome()}<div class="shared-page__content">${territoryDevelopmentUnavailable(coalitionSectionPath(coalitionId, "voter-map/map"))}</div></section>`;
   const detail = state.pages.coalitions.detail;
   const listItem = findCoalitionListItem(coalitionId);
   const matchingDetail = detail.coalition?.coalitionId === coalitionId;
@@ -128876,6 +129005,14 @@ async function handleRootClick(event) {
     return;
   }
   const action = target.getAttribute("data-action");
+  if (
+    (action === "territory-builder-return" ||
+      /^(coalition|candidate)-territory-/.test(action || "")) &&
+    !currentTerritoryDevelopmentAllowed()
+  ) {
+    event.preventDefault();
+    return;
+  }
   if (action?.startsWith("organization-signup-")) {
     event.preventDefault();
     await organizationSignup.action(action);
@@ -135640,6 +135777,11 @@ function handleCommentSubmit(event) {
       formData.set(event.submitter.name, event.submitter.value || "");
     }
     const formKind = normalizeString(routeForm.getAttribute("data-route-form"));
+    if (
+      /^(coalition|candidate)-territory-/.test(formKind) &&
+      !currentTerritoryDevelopmentAllowed()
+    )
+      return;
     if (formKind === "auth-login") {
       submitAuthLoginForm(formData).catch(() => {});
       return;
