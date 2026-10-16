@@ -43,6 +43,8 @@ import {
 } from "./textingCampaignPreparation";
 import { renderCampaignPreparation } from "./textingCampaignPreparationView";
 import { createCampaignDraftStore } from "./textingCampaignDraft";
+import { createTextingBallotRecipients } from "./textingBallotRecipients";
+import { createTextingCompletion } from "./textingCompletion";
 import { createVolunteerPicker } from "./textingVolunteerPicker";
 import { createRecipientOutcomes } from "./textingRecipientOutcomes";
 import { createRecipientBatches } from "./textingRecipientBatches";
@@ -121,7 +123,7 @@ export function createCampaigns(r) {
       r.changed();
     },
   };
-  const recipients = createOrganizationContactBook(recipientRuntime, {
+  const contactRecipients = createOrganizationContactBook(recipientRuntime, {
     mode: "selector",
     continueAction: () =>
       r.view().campaigns?.addingRecipients
@@ -134,13 +136,16 @@ export function createCampaigns(r) {
         ? "Review additions"
         : "Continue to write message",
   });
+  const registerRecipients = createTextingBallotRecipients(recipientRuntime);
+  let recipients = contactRecipients;
   const state = () => (r.view().campaigns ||= {});
   const preparation = createCampaignPreparation(r, state);
   const volunteerPicker = createVolunteerPicker(r, state);
   const outcomes = createRecipientOutcomes(r, "queue-outcome");
-  const additions = createRecipientBatches(r, state, recipients);
+  const additions = createRecipientBatches(r, state, contactRecipients);
   const management = createCampaignManagement(r, state);
   const reporting = createTextingHistory(r, state);
+  const completion = createTextingCompletion(r, state);
   function persistDraft() {
     const s = state();
     if (
@@ -153,6 +158,7 @@ export function createCampaigns(r) {
   async function load(resource, section) {
     const s = state();
     if (resource && resource !== "new") {
+      recipients = contactRecipients;
       s.campaign = (await r.api(`/campaigns/${id(resource)}`)).campaign;
       if (section === "campaigns") preparation.observe(s.campaign);
       s.draft = { ...s.campaign };
@@ -169,6 +175,10 @@ export function createCampaigns(r) {
         if (saved) {
           s.draft = saved.draft;
           s.composeStep = saved.composeStep;
+          recipients =
+            saved.recipients?.sourceType === "ballot_register"
+              ? registerRecipients
+              : contactRecipients;
           recipients.restore(saved.recipients);
         }
       }
@@ -198,6 +208,13 @@ export function createCampaigns(r) {
       r.can("createCampaigns")
     ) {
       const pendingSelection = r.takeContactCampaign?.();
+      if (pendingSelection) {
+        recipients =
+          pendingSelection.sourceType === "ballot_register"
+            ? registerRecipients
+            : contactRecipients;
+        if (recipients === registerRecipients) s.draft.audienceId = "";
+      }
       await recipients.load({ selection: pendingSelection });
       if (pendingSelection) s.composeStep = "message";
       else s.composeStep ||= "recipients";
@@ -216,6 +233,25 @@ export function createCampaigns(r) {
         s.campaign ? [s.campaign] : list(s.items),
       );
       if (section === "results" && s.campaign) await reporting.load();
+    }
+    if (s.campaign && ["send", "results"].includes(section)) {
+      s.completionScope =
+        r.can("createCampaigns") && section === "results"
+          ? "campaign"
+          : "personal";
+      // Keep the sender and Exit usable while this read-only summary loads.
+      void completion
+        .load({ finish: section === "send" })
+        .then(() => r.changed())
+        .catch((error) => {
+          try {
+            r.guard();
+            r.fail?.(error);
+            r.changed();
+          } catch {
+            /* The previous route no longer owns this read. */
+          }
+        });
     }
   }
   /** Update sending eligibility without replacing drafts, held recipients or send fences. */
@@ -267,6 +303,8 @@ export function createCampaigns(r) {
   }
   function draftForm(s) {
     const d = s.draft,
+      selection = recipients.selection(),
+      registerSelection = selection?.sourceType === "ballot_register",
       preview = personalizationPreview(
         d.templateText || "",
         r.workspace?.()?.personalization,
@@ -280,13 +318,15 @@ export function createCampaigns(r) {
       image = mediaData(s.media),
       estimate = estimateContactCampaign(
         r.billing(),
-        recipients.selection(),
+        registerSelection
+          ? { ...selection, eligibleCount: selection.recipientCount }
+          : selection,
         recipients.reviewed(),
         d.templateText || "",
         !!d.mediaId,
       ),
       newCampaign = r.context().resourceId === "new";
-    return `${newCampaign ? `<div class="pt-campaign-step-nav"><div><span class="pt-eyebrow">STEP 2 OF 2</span><p>Write your message</p></div>${button("campaign-back", "Back to recipients", { secondary: true })}</div>${recipients.renderPreparation()}` : recipients.render()}<div class="pt-grid pt-grid--two"><form class="pt-card" data-workspace-form="campaign"><div class="pt-fields">${field("name", "Campaign name", d.name, { required: true })}${d.audienceId ? `<p class="pt-muted">This campaign keeps its saved recipient selection until you review a replacement below.</p>` : ""}${messageField(s, preview)}${r.can("manageBilling") ? field("budget", "Spending limit ($)", d.budgetMicros ? (d.budgetMicros / 1000000).toFixed(2) : "", { type: "number", required: true, extra: 'min="0.01" step="0.01"' }) : ""}</div>${r.can("manageBilling") ? `<section class="pt-campaign-estimate" aria-label="Campaign estimate"><div class="pt-row"><span>Reviewed eligible contacts</span><strong>${estimate.count === null ? "Review recipients first" : count(estimate.count)}</strong></div><div class="pt-row"><span>${preview.personalized && !d.mediaId ? "Example rate" : "Per message"}</span><strong>${price === null ? "Rate awaiting verification" : rateMoney(price)}</strong></div><div class="pt-row"><span>Estimated campaign total</span><strong>${estimate.personalized && !d.mediaId ? "Varies by recipient" : estimate.total === null ? "Awaiting review or verified rates" : money(estimate.total)}</strong></div><p class="pt-muted">${preview.personalized && !d.mediaId ? "Personalized messages vary in length. Final cost is checked for each recipient." : `Based on ${d.mediaId ? "one MMS" : `${estimate.segments} SMS segment(s)`} per eligible contact. Final totals may change after recipient checks.`}</p></section>` : ""}${details("When can volunteers send?", `<div class="pt-fields">${field("deliveryStart", "From", localInput(d.deliveryNotBeforeMs), { type: "datetime-local", required: true })}${field("deliveryEnd", "Until", localInput(d.deliveryBeforeMs), { type: "datetime-local", required: true })}</div><p class="pt-muted">Your local time. This sets the allowed window; it does not schedule automatic sends.</p>`)}${s.scheduleUnsupported ? "" : scheduleFields(s.schedule, d.deliverySchedule, true)}<div class="pt-field"><label for="workspace-media">GIF or image (optional)</label><input id="workspace-media" type="file" accept="image/png,image/gif,.png,.gif" data-workspace-change="campaign-media"><p class="pt-muted">PNG or GIF · up to 512 KB</p></div>${d.mediaId ? `<div class="pt-row"><span>${e(s.media?.providerReady === true ? "Image verified" : label(s.media?.state || "Saved attachment"))}</span>${button("media-remove", "Remove", { secondary: true })}</div>${r.can("canPrepareProviderMedia") && s.media?.providerReady !== true ? button("media-prepare", "Prepare attachment", { secondary: true, disabled: s.mediaNeedsRead || r.busy() || !["local_ready", "provider_uploaded_pending_verification"].includes(s.media?.state) }) : ""}${s.mediaNeedsRead ? button("media-refresh", "Refresh attachment", { secondary: true }) : ""}` : ""}<div class="pt-actions"><button class="pt-btn" type="submit"${r.busy() || preview.error || s.personalizationInsertError || (newCampaign && !recipients.reviewed()) ? " disabled" : ""}>Save campaign</button></div>${s.audienceCursor ? button("audiences-more", "Load more lists", { secondary: true }) : ""}</form><aside class="pt-card pt-workspace-preview"><div class="pt-eyebrow">${preview.personalized ? "EXAMPLE PREVIEW" : "MESSAGE PREVIEW"}</div><div class="pt-workspace-phone"><div class="pt-workspace-bubble">${image ? `<img src="${e(image)}" alt="Campaign attachment">` : ""}<p>${e(preview.error ? "Finish your message to see the example." : preview.example || "Your message will appear here.")}</p></div></div><div class="pt-row"><span>${d.mediaId ? "MMS" : preview.error ? "SMS" : `${preview.personalized ? "Example · " : ""}SMS · ${smsSegments(preview.example)} segment(s)`}</span>${r.can("manageBilling") ? `<strong>${price === null ? "Rate awaiting verification" : `${rateMoney(price)}${preview.personalized && !d.mediaId ? " example rate" : optInPrice === null ? " per message" : " standard"}`}</strong>` : ""}</div>${r.can("manageBilling") && optInPrice !== null ? `<div class="pt-row"><span>${preview.personalized && !d.mediaId ? "Opt-in example rate" : "Opt-in message"}</span><strong>${rateMoney(optInPrice)}</strong></div>` : ""}<p class="pt-muted">${preview.personalized ? "Example details only. Each recipient’s final message is reviewed before sending." : "Each person gets an individual send confirmation."}</p>${preview.fields.length ? details("If a detail is missing", `<p class="pt-muted">${preview.fields.map((item) => `${e(item.label)}: “${e(item.fallback)}”`).join(" · ")}</p>`) : ""}</aside></div>${newCampaign ? recipients.renderReview() : ""}`;
+    return `${newCampaign ? `<div class="pt-campaign-step-nav"><div><span class="pt-eyebrow">STEP 2 OF 2</span><p>Write your message</p></div>${button("campaign-back", "Back to recipients", { secondary: true })}</div>${recipients.renderPreparation()}` : recipients.render()}<div class="pt-grid pt-grid--two"><form class="pt-card" data-workspace-form="campaign"><div class="pt-fields">${field("name", "Campaign name", d.name, { required: true })}${d.audienceId ? `<p class="pt-muted">This campaign keeps its saved recipient selection until you review a replacement below.</p>` : ""}${messageField(s, preview)}${r.can("manageBilling") ? field("budget", "Spending limit ($)", d.budgetMicros ? (d.budgetMicros / 1000000).toFixed(2) : "", { type: "number", required: true, extra: 'min="0.01" step="0.01"' }) : ""}</div>${r.can("manageBilling") ? `<section class="pt-campaign-estimate" aria-label="Campaign estimate"><div class="pt-row"><span>${registerSelection ? "Reviewed recipients" : "Reviewed eligible contacts"}</span><strong>${estimate.count === null ? "Review recipients first" : count(estimate.count)}</strong></div><div class="pt-row"><span>${preview.personalized && !d.mediaId ? "Example rate" : "Per message"}</span><strong>${price === null ? "Rate awaiting verification" : rateMoney(price)}</strong></div><div class="pt-row"><span>Estimated campaign total</span><strong>${estimate.personalized && !d.mediaId ? "Varies by recipient" : estimate.total === null ? "Awaiting review or verified rates" : money(estimate.total)}</strong></div><p class="pt-muted">${preview.personalized && !d.mediaId ? "Personalized messages vary in length. Final cost is checked for each recipient." : `Based on ${d.mediaId ? "one MMS" : `${estimate.segments} SMS segment(s)`} per ${registerSelection ? "recipient" : "eligible contact"}. Final totals may change after recipient checks.`}</p>${registerSelection && selection.consentReviewableCount > 0 ? '<p class="pt-muted">Includes recipients awaiting sender consent review.</p>' : ""}</section>` : ""}${details("When can volunteers send?", `<div class="pt-fields">${field("deliveryStart", "From", localInput(d.deliveryNotBeforeMs), { type: "datetime-local", required: true })}${field("deliveryEnd", "Until", localInput(d.deliveryBeforeMs), { type: "datetime-local", required: true })}</div><p class="pt-muted">Your local time. This sets the allowed window; it does not schedule automatic sends.</p>`)}${s.scheduleUnsupported ? "" : scheduleFields(s.schedule, d.deliverySchedule, true)}<div class="pt-field"><label for="workspace-media">GIF or image (optional)</label><input id="workspace-media" type="file" accept="image/png,image/gif,.png,.gif" data-workspace-change="campaign-media"><p class="pt-muted">PNG or GIF · up to 512 KB</p></div>${d.mediaId ? `<div class="pt-row"><span>${e(s.media?.providerReady === true ? "Image verified" : label(s.media?.state || "Saved attachment"))}</span>${button("media-remove", "Remove", { secondary: true })}</div>${r.can("canPrepareProviderMedia") && s.media?.providerReady !== true ? button("media-prepare", "Prepare attachment", { secondary: true, disabled: s.mediaNeedsRead || r.busy() || !["local_ready", "provider_uploaded_pending_verification"].includes(s.media?.state) }) : ""}${s.mediaNeedsRead ? button("media-refresh", "Refresh attachment", { secondary: true }) : ""}` : ""}<div class="pt-actions"><button class="pt-btn" type="submit"${r.busy() || preview.error || s.personalizationInsertError || (newCampaign && !recipients.reviewed()) ? " disabled" : ""}>Save campaign</button></div>${s.audienceCursor ? button("audiences-more", "Load more lists", { secondary: true }) : ""}</form><aside class="pt-card pt-workspace-preview"><div class="pt-eyebrow">${preview.personalized ? "EXAMPLE PREVIEW" : "MESSAGE PREVIEW"}</div><div class="pt-workspace-phone"><div class="pt-workspace-bubble">${image ? `<img src="${e(image)}" alt="Campaign attachment">` : ""}<p>${e(preview.error ? "Finish your message to see the example." : preview.example || "Your message will appear here.")}</p></div></div><div class="pt-row"><span>${d.mediaId ? "MMS" : preview.error ? "SMS" : `${preview.personalized ? "Example · " : ""}SMS · ${smsSegments(preview.example)} segment(s)`}</span>${r.can("manageBilling") ? `<strong>${price === null ? "Rate awaiting verification" : `${rateMoney(price)}${preview.personalized && !d.mediaId ? " example rate" : optInPrice === null ? " per message" : " standard"}`}</strong>` : ""}</div>${r.can("manageBilling") && optInPrice !== null ? `<div class="pt-row"><span>${preview.personalized && !d.mediaId ? "Opt-in example rate" : "Opt-in message"}</span><strong>${rateMoney(optInPrice)}</strong></div>` : ""}<p class="pt-muted">${preview.personalized ? "Example details only. Each recipient’s final message is reviewed before sending." : "Each person gets an individual send confirmation."}</p>${preview.fields.length ? details("If a detail is missing", `<p class="pt-muted">${preview.fields.map((item) => `${e(item.label)}: “${e(item.fallback)}”`).join(" · ")}</p>`) : ""}</aside></div>${newCampaign ? recipients.renderReview() : ""}`;
   }
   function preparationNotice(s) {
     return renderCampaignPreparation(s, {
@@ -359,6 +399,16 @@ export function createCampaigns(r) {
       return r.can("createCampaigns")
         ? team(s)
         : notice("Team access is restricted");
+    if (s.campaign && s.completionResults) return completion.results();
+    if (
+      section === "send" &&
+      s.campaign &&
+      s.completionFinish &&
+      !s.queue?.items?.length &&
+      !s.pendingItemId &&
+      (!s.queue || s.queue.state !== "preparing")
+    )
+      return completion.finish();
     if (section === "send")
       return (
         queue(s) +
@@ -377,23 +427,11 @@ export function createCampaigns(r) {
             "Choose a campaign to review its saved status.",
           ) + listCards(s)
         );
-      if (r.can("readReporting"))
-        return (
-          head(
-            c.name,
-            "Campaign activity",
-            "Messages and replies across sessions",
-            go("campaigns", "Back", c.campaignId, true),
-          ) + reporting.render()
-        );
       return (
-        head(
-          c.name,
-          "Every conversation counts",
-          "Saved campaign activity",
-          go("campaigns", "Back", c.campaignId, true),
-        ) +
-        `<div class="pt-grid pt-grid--three">${r.can("manageBilling") ? `${stat("Completed usage", money(c.settledMicros))}${stat("Pending charges", money(c.reservedMicros))}` : ""}${stat("Assigned volunteers", count(list(c.assignedUserIds).length))}</div><section class="pt-card"><div class="pt-row"><span>Campaign status</span><strong>${e(label(c.status))}</strong></div><p class="pt-muted">${r.can("manageBilling") ? "Pending charges stay reserved until vendor usage is verified. " : ""}Delivery and replies are shown in each conversation.</p>${go("inbox", "Open conversations", "", true)}${reasons(c.blockedReasons)}</section>`
+        completion.results() +
+        (r.can("readReporting")
+          ? `<details class="pt-completion-history"><summary>Message history</summary>${reporting.render()}</details>`
+          : "")
       );
     }
     if (!resource)
@@ -526,6 +564,18 @@ export function createCampaigns(r) {
     return false;
   }
   async function action(name, value) {
+    if (await completion.action(name, value)) return true;
+    if (name === "queue-load") {
+      state().completionFinish = false;
+      state().completionResults = false;
+    }
+    if (name === "transition-archive") {
+      await completion.load();
+      state().completionScope = "campaign";
+      state().completionResults = true;
+      completion.localAction("completion-archive");
+      return true;
+    }
     if (await management.action(name, value)) return true;
     if (await reporting.action(name)) return true;
     if (await outcomes.action(name, value)) return true;
@@ -815,6 +865,7 @@ export function createCampaigns(r) {
         }
       }
       r.armExpiry(queueItem(s)?.expiresAtMs);
+      if (!s.queue.items.length) await completion.load({ finish: true });
       return true;
     }
     if (name === "queue-review-kept") {
@@ -1082,6 +1133,11 @@ export function createCampaigns(r) {
       s.imageLoaded = null;
       if (!s.pendingItemId) await r.refreshSendStatus();
       r.armExpiry(queueItem(s)?.expiresAtMs);
+      if (!s.queue.items.length && !s.pendingItemId) {
+        s.completionFinish = true;
+        r.changed();
+        await completion.load({ finish: true });
+      }
       return true;
     }
     return false;
@@ -1219,6 +1275,7 @@ export function createCampaigns(r) {
     clearStoredDraft: () => draftStore.clear(),
     avatarError: volunteerPicker.avatarError,
     localAction(name, value, target) {
+      if (completion.localAction(name, value)) return true;
       if (name === "queue-folder" && ["sent", "to-send"].includes(value)) {
         state().queueFolder = value;
         return true;
@@ -1230,10 +1287,12 @@ export function createCampaigns(r) {
       return recipients.localAction?.(name, value, target) || false;
     },
     dispose() {
+      completion.dispose();
       reporting.dispose();
       preparation.dispose();
       volunteerPicker.dispose();
-      recipients.dispose();
+      contactRecipients.dispose();
+      registerRecipients.dispose();
       outcomes.dispose();
       additions.dispose();
     },

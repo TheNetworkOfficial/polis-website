@@ -9,6 +9,28 @@ const model = await load("ballotChaserModel"),
   { createBallotExport, checkedBallotDownload } = await load("ballotExport");
 const MiB = 1048576;
 
+test("register exports do not force a voter ID column hidden by the authorized schema", async () => {
+  let body;
+  const controller = createBallotExport({
+    guard: () => {},
+    changed: () => {},
+    schedule: () => 0,
+    cancel: () => {},
+    request: async (_, options) => {
+      body = options.body;
+      return { ok: true, export: { exportId: "private", status: "ready" } };
+    },
+  });
+  await controller.start("/ballot", {
+    electionId: "election",
+    registerSchema: ["displayName", "ballotStatus"],
+    columns: ["displayName"],
+  });
+  assert.ok(!body.columns.includes("ballotVoterId"));
+  assert.ok(body.columns.includes("ballotStatus"));
+  assert.equal(body.registerSchema, undefined);
+});
+
 test("import lifecycle captions are plain language and never expose new internal states", () => {
   const labels = {
     uploading: "Upload file",

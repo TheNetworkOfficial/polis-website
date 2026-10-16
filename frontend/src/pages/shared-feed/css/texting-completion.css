@@ -1,0 +1,379 @@
+.pt-completion {
+  --finish-mint: var(--polis-success);
+  --finish-blue: var(--polis-primary);
+  width: 100%;
+  max-width: 1000px;
+  margin: 0 auto;
+  color: var(--polis-text);
+}
+.pt-completion h1 {
+  font-size: clamp(1.9rem, 4vw, 2.65rem);
+  line-height: 1.12;
+  letter-spacing: -0.045em;
+  margin: 14px 0;
+}
+.pt-completion h2 {
+  font-size: 0.85rem;
+  margin: 0;
+}
+.pt-completion svg {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+}
+.pt-completion--finish {
+  text-align: center;
+  max-width: 520px;
+  padding: 12px 24px 24px;
+}
+.pt-completion-campaign {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+  color: var(--polis-primary);
+}
+.pt-completion .pt-finish-scene {
+  width: min(100%, 310px);
+  height: auto;
+  display: block;
+  margin: 15px auto;
+  color: var(--finish-blue);
+}
+.pt-finish-podium > path:first-child {
+  fill: var(--polis-surface-raised);
+  stroke: var(--polis-border);
+}
+.pt-finish-podium > path:last-child {
+  stroke: var(--polis-text-muted);
+  stroke-width: 3;
+  opacity: 0.4;
+  stroke-linecap: round;
+}
+.pt-finish-bubble {
+  transform-box: fill-box;
+  transform-origin: center bottom;
+}
+.pt-finish-bubble > path:first-child {
+  fill: var(--polis-surface);
+  stroke: var(--finish-blue);
+  stroke-opacity: 0.6;
+  stroke-width: 1.5;
+}
+.pt-finish-bubble > path + path {
+  stroke: var(--polis-text-muted);
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+.pt-finish-main > circle:not(.pt-finish-ring) {
+  fill: var(--polis-text-muted);
+}
+.pt-finish-main .pt-finish-ring,
+.pt-finish-main .pt-finish-check {
+  stroke: var(--finish-mint);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.pt-finish-ring {
+  stroke-dasharray: 94 6;
+  transform: rotate(-90deg);
+  transform-origin: 160px 77px;
+}
+.pt-finish-rays {
+  stroke: var(--finish-mint);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+}
+.pt-completion-badge {
+  display: inline-flex;
+  border: 1px solid color-mix(in srgb, var(--polis-success) 35%, transparent);
+  padding: 6px 12px;
+  border-radius: 999px;
+  color: var(--polis-success);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.pt-completion-badge--review {
+  color: var(--polis-warning);
+  border-color: var(--polis-warning);
+}
+.pt-completion-total {
+  font-size: clamp(3.8rem, 10vw, 5rem);
+  line-height: 1.1;
+  font-weight: 650;
+  letter-spacing: -0.06em;
+  color: var(--polis-primary);
+  margin-top: 24px;
+}
+.pt-completion-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  padding: 24px 0;
+  border-block: 1px solid var(--polis-border);
+  margin: 30px 0;
+}
+.pt-completion-stats > div + div {
+  border-left: 1px solid var(--polis-border);
+}
+.pt-completion-stats > div:only-child {
+  grid-column: 1 / -1;
+}
+.pt-completion-stats strong {
+  font-size: 1.6rem;
+}
+.pt-completion-stats span,
+.pt-completion-legend span {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--polis-text-muted);
+}
+.pt-completion-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 26px;
+}
+.pt-completion-actions > p {
+  flex-basis: 100%;
+}
+.pt-completion--finish .pt-completion-actions {
+  flex-direction: column;
+}
+.pt-completion-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+.pt-completion-tabs {
+  display: flex;
+  padding: 5px;
+  gap: 5px;
+  margin: 22px 0;
+  background: var(--polis-surface);
+  border: 1px solid var(--polis-border);
+  border-radius: 12px;
+}
+.pt-completion-tabs .pt-btn {
+  flex: 1;
+}
+.pt-completion-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.pt-completion-grid .pt-card {
+  margin: 0;
+  min-width: 0;
+}
+.pt-completion-sent,
+.pt-completion-replies,
+.pt-completion-team {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.pt-completion-sent > span,
+.pt-completion-replies > span,
+.pt-completion-team > span {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--polis-primary);
+  font-size: 0.8rem;
+}
+.pt-completion-sent > strong {
+  font-size: 3.8rem;
+  line-height: 1.1;
+  letter-spacing: -0.05em;
+  margin: 14px 0 0;
+}
+.pt-completion-replies > strong,
+.pt-completion-team > strong {
+  font-size: 2.3rem;
+  margin-top: 12px;
+}
+.pt-completion-delivery-body {
+  display: flex;
+  gap: 28px;
+  align-items: center;
+  margin-top: 20px;
+}
+.pt-completion .pt-completion-donut {
+  width: 130px;
+  height: 130px;
+  max-width: 50%;
+}
+.pt-completion-donut circle {
+  fill: none;
+  stroke-width: 9px;
+}
+.pt-completion-ring-track {
+  stroke: var(--polis-border);
+}
+.pt-completion-ring-value {
+  stroke: var(--polis-success);
+  stroke-linecap: round;
+  transform: rotate(-90deg);
+  transform-origin: center;
+}
+.pt-completion-donut text {
+  text-anchor: middle;
+  dominant-baseline: middle;
+  fill: var(--polis-text);
+  font: 600 24px var(--polis-font-body);
+}
+.pt-completion-donut .pt-completion-donut-label {
+  font-size: 10px;
+  font-weight: 400;
+  fill: var(--polis-text-muted);
+}
+.pt-completion-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.pt-completion-legend strong {
+  font-size: 1.1rem;
+}
+.pt-completion-activity {
+  grid-column: 1 / -1;
+}
+.pt-completion .pt-completion-activity svg {
+  width: 100%;
+  height: 150px;
+}
+.pt-completion-activity rect {
+  fill: var(--polis-primary);
+}
+.pt-completion-activity text {
+  text-anchor: middle;
+  fill: var(--polis-text-muted);
+  font: 9px var(--polis-font-body);
+}
+.pt-completion-share progress {
+  width: calc(100% - 52px);
+  height: 9px;
+  accent-color: var(--polis-primary);
+  margin-right: 12px;
+}
+.pt-completion-review {
+  grid-column: 1 / -1;
+}
+.pt-completion-updated {
+  text-align: right;
+  font-size: 0.7rem;
+  margin-top: 18px;
+}
+.pt-completion-confirm {
+  max-width: 500px;
+  margin: 24px auto 0;
+  border: 2px solid var(--polis-primary);
+  text-align: center;
+  background: var(--polis-surface);
+  width: min(500px, calc(100% - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+}
+.pt-completion-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--polis-background) 82%, transparent);
+  padding: 16px;
+}
+.pt-completion-confirm > div:first-child svg {
+  width: 44px;
+  height: 44px;
+  color: var(--polis-primary);
+}
+.pt-completion-confirm h2 {
+  font-size: 1.5rem;
+  margin-top: 16px;
+}
+.pt-completion-confirm ul {
+  list-style: none;
+  padding: 0;
+  line-height: 2.2;
+}
+.pt-completion-history {
+  margin-top: 24px;
+}
+.pt-completion-history > summary {
+  cursor: pointer;
+  color: var(--polis-primary);
+  padding: 16px 0;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .pt-completion--animate .pt-finish-main {
+    animation: pt-finish-rise 0.65s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  .pt-completion--animate .pt-finish-left {
+    animation: pt-finish-rise 0.65s 0.08s both;
+  }
+  .pt-completion--animate .pt-finish-right {
+    animation: pt-finish-rise 0.65s 0.14s both;
+  }
+  .pt-completion--animate .pt-finish-check {
+    animation: pt-finish-draw 0.5s 0.35s both;
+  }
+  .pt-completion--animate .pt-finish-rays {
+    animation: pt-finish-rays 0.85s 0.2s both;
+  }
+}
+@keyframes pt-finish-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes pt-finish-draw {
+  from {
+    stroke-dasharray: 100;
+    stroke-dashoffset: 100;
+  }
+  to {
+    stroke-dasharray: 100;
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes pt-finish-rays {
+  from {
+    opacity: 0;
+  }
+  60% {
+    opacity: 1;
+  }
+  to {
+    opacity: 0.75;
+  }
+}
+@media (max-width: 650px) {
+  .pt-completion-grid {
+    grid-template-columns: 1fr;
+  }
+  .pt-completion--finish {
+    padding: 8px 2px 18px;
+  }
+  .pt-completion-heading {
+    align-items: flex-start;
+  }
+  .pt-completion-actions {
+    flex-direction: column;
+  }
+  .pt-completion .pt-completion-activity svg {
+    height: 110px;
+  }
+}

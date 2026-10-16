@@ -1,5 +1,67 @@
 # Organization Ballot Chaser: local implementation
 
+## Compact county voter register (local source)
+
+New elections explicitly request `storageMode: "register"`. Their five ballot
+lists use the election's authorized `/voters` endpoint, pinned to the published
+snapshot, with server pagination, search, sorting and typed grouped filters.
+Only the returned register schema supplies filter and column choices, including
+declared county source fields. County details are readable without a contact
+lookup. Existing elections with no register mode retain the Contact Book path.
+
+Register selection uses opaque `voterRef` values, independently of nullable
+`contactId`. Selected and all-matching CSV exports preserve references,
+exclusions, filters, sorting and canonical ballot columns. Browsing, filtering
+and exports never create Contact Book records or start outreach. Each private
+download still obtains fresh server authorization through the existing export
+controller. Stale snapshots, cursor bindings or changed access clear the list
+and selection and require refresh.
+
+Only users with import permission see **Add selected to Contact Book**. This
+explicit operation submits up to 5,000 selected voter references and polls its
+returned job with GET. An interrupted POST retains its exact request ID and
+payload for an explicit check, locks selection changes, and never silently
+submits a new operation. Neither successful materialization nor exporting starts
+texting or exposes the territory wizard. Import summaries describe register
+records rather than claiming that every county voter became a CRM contact.
+
+Local fictional fixtures cover both scopes, all views, nullable contacts,
+source columns, grouped filters, all-matching exclusions, selection exports,
+contact-job progress, interrupted responses, actor changes and stale snapshots.
+Evidence is under
+`D:/CodexHome/artifacts/polis-ballot-register-20261015/website/`.
+These checks do not measure real 500k performance or authorize deployment.
+
+### Register voters to a texting draft
+
+The Outstanding list offers **Create texting campaign** only for a coalition
+with current book read/select/export/personal/campaign access and a configured
+Text Banking workspace with campaign and billing authority. The handoff freezes
+the snapshot, filters, search, sort and explicit voter references or all-matching
+exclusions. It opens the existing campaign composer without creating contacts.
+
+**Review recipients** starts the server's register selection job. Only schema
+fields advertised with `textingPhone: true` appear as phone choices; a declared
+`phone` field is the default, while other columns require an explicit choice.
+Polling reads the acknowledged selection. Interrupted creation or binding keeps
+the same operation and request for an explicit retry, including tab-draft
+restoration. Only query intent and job references are retained; recipient rows,
+phone values and grants are not stored in the browser draft.
+
+The review distinguishes eligible numbers, recipients awaiting sender-consent
+review and excluded/held numbers. Ready requires a positive, consistent
+`recipientCount = eligibleCount + consentReviewableCount`; consent-review numbers
+are never labeled eligible. The user must acknowledge the reviewed manifest
+before Save binds that audience. Cost estimates include the prospective consent
+review cohort with a visible note. Saving creates a draft; existing sender
+consent, provider preparation, activation and per-person confirmation remain
+separate requirements. A newer snapshot, changed access or mismatched manifest
+invalidates review. Returned and other ballot lists offer no campaign shortcut.
+
+Focused unit and compiled browser evidence for this handoff is under
+`D:/CodexHome/artifacts/polis-ballot-texting-handoff-20261015/website/`.
+It uses fictional local responses and performs no provider or production action.
+
 ## October 15 client update (local source only)
 
 Ballot Chaser supports coalition and candidate workspaces when the current
