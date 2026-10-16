@@ -289,19 +289,25 @@ test("contact import streams raw custom values into Polis without external trans
     ),
   });
   await page
-    .getByRole("button", { name: "Preview columns", exact: true })
+    .getByRole("button", { name: "Review contacts", exact: true })
+    .click();
+  await page
+    .locator("summary")
+    .filter({ hasText: /^Advanced$/ })
     .click();
   await page
     .getByLabel("Source namespace", { exact: true })
     .fill("example-arizona-2026");
+  await page.getByLabel("Source namespace", { exact: true }).press("Tab");
   await page
-    .getByRole("button", { name: "Review sample matches", exact: true })
+    .locator("summary")
+    .filter({ hasText: /^Additional checks$/ })
     .click();
   await expect(
     page.getByText(/This review covers only 1 sample records/),
   ).toBeVisible();
   await page
-    .getByLabel("I reviewed these columns and the source’s permitted use", {
+    .getByLabel("I reviewed this source’s permitted use.", {
       exact: true,
     })
     .check();
@@ -309,12 +315,9 @@ test("contact import streams raw custom values into Polis without external trans
     .getByRole("button", { name: "Import contacts", exact: true })
     .click();
   await expect(
-    page.getByText(
-      "File saved. Contact search and related views are updating.",
-      {
-        exact: true,
-      },
-    ),
+    page.getByText("Saved. Almost ready.", {
+      exact: true,
+    }),
   ).toBeVisible();
   const upload = calls.find((call) =>
     call.path.endsWith("/imports/import-1/rows"),
@@ -322,6 +325,10 @@ test("contact import streams raw custom values into Polis without external trans
   expect(upload.body.rows).toEqual([
     ["Example Person", "0007", "kept, exactly"],
   ]);
+  await page
+    .locator("summary")
+    .filter({ hasText: /^Source history$/ })
+    .click();
   await page
     .getByRole("button", { name: "Review records", exact: true })
     .click();
@@ -469,6 +476,10 @@ test("reload resume verifies original headers and replays saved rows into the sa
   await page.goto(`${BASE}/organizations/org-1/texting/contacts`);
   await page.reload();
   await openTool(page, "Imports");
+  await page
+    .locator("summary")
+    .filter({ hasText: /^Source history$/ })
+    .click();
   await page.getByRole("button", { name: "Resume", exact: true }).click();
   await expect(
     page.getByText("Resume interrupted.csv", { exact: true }),
@@ -483,7 +494,7 @@ test("reload resume verifies original headers and replays saved rows into the sa
     buffer: Buffer.from("Name,Wrong column\nExample One,0007\n"),
   });
   await page
-    .getByRole("button", { name: "Preview columns", exact: true })
+    .getByRole("button", { name: "Review contacts", exact: true })
     .click();
   await expect(page.getByRole("alert")).toContainText(
     "different columns or column order",
@@ -499,10 +510,10 @@ test("reload resume verifies original headers and replays saved rows into the sa
     ),
   });
   await page
-    .getByRole("button", { name: "Preview columns", exact: true })
+    .getByRole("button", { name: "Review contacts", exact: true })
     .click();
   await page
-    .getByLabel("I reviewed these columns and the source’s permitted use", {
+    .getByLabel("I reviewed this source’s permitted use.", {
       exact: true,
     })
     .check();
