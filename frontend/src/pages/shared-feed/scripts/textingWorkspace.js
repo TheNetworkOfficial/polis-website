@@ -46,6 +46,7 @@ export function createTextingWorkspacePage({
     pendingContactCampaign = null;
   const sendHolds = new Set();
   const sendActions = new Map();
+  const importFileBindings = new WeakSet();
   const resolvedHolds = new Map();
   const queueSession = createTextingQueueSession({ requestExit });
   const holdStorage = (key) => `polis.texting.uncertain.${key}`;
@@ -639,6 +640,7 @@ export function createTextingWorkspacePage({
             : section === "inbox"
               ? "Refreshing conversations…"
               : "Saving…";
+    queueMicrotask(bindImportFiles);
     const contactDialogOpen = [view.contactBook, view.recipientBook].some(
       (book) => book?.overlay || book?.detail || book?.detailNew,
     );
@@ -649,6 +651,29 @@ export function createTextingWorkspacePage({
       target?.closest?.("[data-workspace-key]")?.dataset.workspaceKey ===
         view.key && identity() === view.key
     );
+  }
+  function bindImportFiles() {
+    const key = view.key,
+      version = sequence;
+    for (const input of document.querySelectorAll(
+      'input[type="file"][data-contact-change]',
+    )) {
+      if (
+        !owned(input) ||
+        !input.dataset.contactChange.endsWith("-file") ||
+        importFileBindings.has(input)
+      )
+        continue;
+      importFileBindings.add(input);
+      // A direct listener also retains a File when a redraw detaches the input
+      // before its event reaches the document's delegated handler.
+      const capture = () => {
+        if (!current(key, version)) return;
+        for (const module of Object.values(modules)) module.change(input);
+      };
+      input.addEventListener("input", capture);
+      input.addEventListener("change", capture);
+    }
   }
   document.addEventListener("click", (event) => {
     const target = event.target.closest?.("[data-workspace-action]");
@@ -693,22 +718,26 @@ export function createTextingWorkspacePage({
         if (await module.action(action, target.dataset.value)) return;
     });
   });
-  document.addEventListener("submit", (event) => {
-    const form = event.target;
-    if (!form.matches?.("[data-workspace-form]") || !owned(form)) return;
-    event.preventDefault();
-    if (!form.reportValidity()) return;
-    // Capture the native File before the busy render replaces this form.
-    if (form.dataset.workspaceForm?.endsWith("-import-preview")) {
-      const input = form.querySelector('input[type="file"]');
-      if (input?.files?.length)
-        for (const module of Object.values(modules)) module.change(input);
-    }
-    void run(async () => {
-      for (const module of Object.values(modules))
-        if (await module.submit(form.dataset.workspaceForm, form)) return;
-    });
-  });
+  document.addEventListener(
+    "submit",
+    (event) => {
+      const form = event.target;
+      if (!form.matches?.("[data-workspace-form]") || !owned(form)) return;
+      event.preventDefault();
+      if (!form.reportValidity()) return;
+      // Capture the native File before the busy render replaces this form.
+      if (form.dataset.workspaceForm?.endsWith("-import-preview")) {
+        const input = form.querySelector('input[type="file"]');
+        if (input?.files?.length)
+          for (const module of Object.values(modules)) module.change(input);
+      }
+      void run(async () => {
+        for (const module of Object.values(modules))
+          if (await module.submit(form.dataset.workspaceForm, form)) return;
+      });
+    },
+    true,
+  );
   const onChange = (event) => {
     const target = event.target;
     if (!owned(target)) return;
@@ -720,6 +749,20 @@ export function createTextingWorkspacePage({
     let rerender = false;
     for (const module of Object.values(modules))
       rerender = module.change(target) || rerender;
+    const importForm = target.closest?.(
+      '[data-workspace-form$="-import-save"]',
+    );
+    if (importForm && target.name && !target.closest("fieldset[disabled]")) {
+      const prefix = importForm.dataset.workspaceForm.replace(
+        /-import-save$/,
+        "",
+      );
+      void run(async () => {
+        for (const module of Object.values(modules))
+          if (await module.action(`${prefix}-import-match-preview`)) return;
+      });
+      return;
+    }
     if (
       ["-tag-cell", "-page-size"].some((suffix) =>
         target.dataset.contactChange?.endsWith(suffix),
@@ -744,6 +787,22 @@ export function createTextingWorkspacePage({
       if (button) button.disabled = !target.files?.length;
     }
   };
+  // Capture the native File before another listener can replace the input.
+  // The ordinary bubbling handler still updates the rest of the form state.
+  document.addEventListener(
+    "input",
+    (event) => {
+      const input = event.target;
+      if (
+        input.type !== "file" ||
+        !input.dataset.contactChange?.endsWith("-file") ||
+        !owned(input)
+      )
+        return;
+      for (const module of Object.values(modules)) module.change(input);
+    },
+    true,
+  );
   document.addEventListener("change", onChange);
   document.addEventListener("keydown", (event) => {
     const dialog = document.querySelector("[data-contact-dialog]");
@@ -809,6 +868,21 @@ export function createTextingWorkspacePage({
     let update = false;
     for (const module of Object.values(modules))
       update = module.change(event.target) || update;
+    const importForm = event.target.closest?.(
+      '[data-workspace-form$="-import-save"]',
+    );
+    if (importForm && event.target.name) {
+      const reviewed = importForm.querySelector(
+        '[data-contact-change$="-import-reviewed"]',
+      );
+      if (reviewed) {
+        reviewed.checked = false;
+        reviewed.disabled = true;
+      }
+      const submit = importForm.querySelector('button[type="submit"]');
+      if (submit) submit.disabled = true;
+      return;
+    }
     if (update) changed();
   });
   document.addEventListener(

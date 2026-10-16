@@ -113,6 +113,57 @@ export async function previewContactFile(file, delimiter, encoding) {
   return { headers, rows };
 }
 
+/** Inspect every source row while retaining only a small, unchanged sample. */
+export async function inspectContactFile(
+  file,
+  delimiter,
+  encoding,
+  { visit = () => {}, guard = () => {}, progress = () => {} } = {},
+) {
+  let headers;
+  const rows = [];
+  let rowCount = 0;
+  for await (const row of contactFileRows(file, delimiter, encoding)) {
+    guard();
+    if (!headers) {
+      headers = row;
+      if (!headers.length || !headers.some((value) => value.trim()))
+        throw new Error("The file needs a header row.");
+      if (headers.length > 512 || headers.some((value) => value.length > 500))
+        throw new Error(
+          "Use at most 512 columns with headers no longer than 500 characters. No columns were dropped.",
+        );
+      continue;
+    }
+    if (!row.some((value) => value !== "")) continue;
+    if (row.length > headers.length)
+      throw new Error(
+        `Record ${rowCount + 2} has more cells than its header. No import has started.`,
+      );
+    if (++rowCount > CONTACT_IMPORT_MAX_ROWS)
+      throw new Error(
+        `This file exceeds the supported ${CONTACT_IMPORT_MAX_ROWS.toLocaleString()} contact records. No import has started.`,
+      );
+    if (
+      encodedBytes(JSON.stringify(row)) + 2000 >
+      CONTACT_IMPORT_MAX_REQUEST_BYTES
+    )
+      throw new Error(
+        `Record ${rowCount + 1} is too large for one import request. No value was truncated.`,
+      );
+    if (rows.length < 25) rows.push(row);
+    visit(row, headers, rowCount - 1);
+    if (rowCount % 2000 === 0) {
+      progress(rowCount);
+      // Give the browser a chance to paint and process cancellation.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+  }
+  if (!headers) throw new Error("The file needs a header row.");
+  if (!rowCount) throw new Error("The file has no contact records.");
+  return { headers, rows, rowCount };
+}
+
 /** Bound the read-only match sample to the same UTF-8 API budget as ingestion. */
 export function boundedContactImportPreview(payload) {
   const result = { ...payload, rows: [] },

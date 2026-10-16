@@ -35,11 +35,15 @@ import {
   householdAddressStatus,
 } from "./organizationContactsModel";
 import {
-  previewContactFile,
   uploadSharedContactRows,
   assertContactImportHeaders,
   boundedContactImportPreview,
 } from "./organizationContactImport";
+import {
+  reviewContactFile,
+  reviewedNamePolicy,
+} from "./organizationContactNameReview";
+import { renderContactImport } from "./organizationContactImportView";
 import {
   contactPageSizes,
   simpleContactFields,
@@ -107,9 +111,11 @@ export function createOrganizationContactBook(
     queryAbort = null,
     cityAbort = null,
     cityGeneration = 0,
-    disposed = false;
+    disposed = false,
+    importScanGeneration = 0;
   const dispose = () => {
     disposed = true;
+    importScanGeneration++;
     queryGeneration++;
     queryAbort?.abort();
     cityAbort?.abort();
@@ -363,6 +369,21 @@ export function createOrganizationContactBook(
     refresh = false,
   } = {}) {
     const s = state();
+    const requestedQueryKey = JSON.stringify([s.query, s.pageSize]);
+    const previousResults =
+      s.loadedQueryKey === requestedQueryKey
+        ? {
+            rows: s.rows,
+            total: s.total,
+            cursor: s.cursor,
+            complete: s.complete,
+            publication: s.publication,
+            effectiveSort: s.effectiveSort,
+            previousCursors: s.previousCursors,
+            currentCursor: s.currentCursor,
+            pageNumber: s.pageNumber,
+          }
+        : null;
     if (!more && !previous) {
       countProgress.reset();
       s.countJob = null;
@@ -409,6 +430,7 @@ export function createOrganizationContactBook(
         generation !== queryGeneration
       )
         return;
+      const denied = [401, 403].includes(error?.status || error?.statusCode);
       s.rows = [];
       s.cursor = null;
       s.total = null;
@@ -419,7 +441,13 @@ export function createOrganizationContactBook(
       s.previousCursors = [];
       s.currentCursor = null;
       s.pageNumber = 1;
-      if ([401, 403].includes(error?.status || error?.statusCode)) {
+      if (!denied && previousResults) {
+        Object.assign(s, previousResults);
+        s.recentResults = true;
+        s.pageError =
+          "Refresh unavailable. Showing the last confirmed contacts.";
+      }
+      if (denied) {
         s.schema = { capabilities: {} };
         s.selectedRows = [];
         s.addRows = [];
@@ -457,6 +485,7 @@ export function createOrganizationContactBook(
       s.pageNumber = 1;
     }
     s.currentCursor = requestedCursor;
+    s.loadedQueryKey = requestedQueryKey;
     s.rows = list(result.items);
     s.cursor = result.nextCursor;
     s.complete = result.complete;
@@ -622,7 +651,7 @@ export function createOrganizationContactBook(
         s.cursor = result.nextCursor;
         s.complete = result.complete;
         if (result.total != null) s.total = result.total;
-        r.changed();
+        if (s.panel === "contacts") r.changed();
       }
     } catch (error) {
       if (current()) {
@@ -634,7 +663,7 @@ export function createOrganizationContactBook(
     } finally {
       if (current()) {
         s.pageFilling = false;
-        r.changed();
+        if (s.panel === "contacts") r.changed();
       }
     }
   }
@@ -2178,9 +2207,40 @@ export function createOrganizationContactBook(
       columns: s.filePreview.headers,
       mapping,
       rows: s.filePreview.rows.slice(0, 25),
-      sourceNamespace: draft.sourceNamespace || "",
+      sourceNamespace: importNamespace(),
       sourcePolicy: { permittedPurpose: draft.sourcePolicy || "unreviewed" },
+      namePolicy: reviewedNamePolicy(s.filePreview, selectedNameFormat()),
     };
+  }
+  async function scanImportFile() {
+    const s = state(),
+      file = s.file,
+      generation = ++importScanGeneration;
+    return reviewContactFile(file, s.delimiter, s.encoding, {
+      mapping: s.importDraft?.mapping || s.importPayload?.mapping,
+      guessField,
+      guard() {
+        r.guard();
+        if (disposed || generation !== importScanGeneration || s.file !== file)
+          throw new Error(
+            "File review cancelled. Review the selected file again.",
+          );
+      },
+    });
+  }
+  async function refreshImportPreview({ rescan = false } = {}) {
+    const s = state();
+    if (rescan) s.filePreview = await scanImportFile();
+    const payload = boundedContactImportPreview(importPreviewPayload());
+    if (!payload.sourceNamespace.trim())
+      throw new Error("Enter a source namespace before reviewing matches.");
+    const preview = (await api("/import-preview", payload)).preview;
+    s.importMatchPreview = preview;
+    s.nameParsingUnavailable =
+      nameParsingAvailable() && preview?.nameAnalysis?.version !== 1;
+    if (s.nameParsingUnavailable)
+      s.importDraft = { ...s.importDraft, nameFormat: "keep" };
+    s.importReviewed = false;
   }
   function importMatches() {
     const preview = state().importMatchPreview;
@@ -2198,77 +2258,62 @@ export function createOrganizationContactBook(
       )
       .join("")}</section>`;
   }
+  const nameParsingAvailable = () =>
+    state().schema?.importFeatures?.nameParsing?.version === 1;
+  const selectedNameFormat = () =>
+    state().importDraft?.nameFormat ||
+    (state().resumeImport
+      ? state().resumeImport.namePolicy?.format || "keep"
+      : null) ||
+    "auto";
+  const importNamespace = () =>
+    state().importDraft?.sourceNamespace ??
+    state().importPayload?.sourceNamespace ??
+    (state().file?.name || "contact-source")
+      .replace(/\.[^.]+$/, "")
+      .replace(/[^\p{L}\p{N}_.-]+/gu, "-")
+      .slice(0, 160);
   function importPanel() {
-    const s = state(),
-      imports = list(s.imports);
-    return (
-      head(
-        "CONTACT BOOK",
-        "Imports",
-        "Uploads add to the organization’s shared contact and voter data.",
-        b("panel", "Back to contacts", { value: "contacts", secondary: true }),
-      ) +
-      (can("import")
-        ? `<section class="pt-card">${s.resumeImport ? notice(`Resume ${s.resumeImport.name}`, "Reselect the original file. Its exact columns and all previously saved records will be verified before completion.") + b("import-resume-cancel", "Start a different import", { secondary: true }) : ""}<form data-workspace-form="${formName("import-preview")}"><div class="pt-fields"><label class="pt-field"><span>Contact file</span><input type="file" accept=".csv,.tsv,.txt" data-contact-change="${prefix}-file"></label>${select(
-            "delimiter",
-            "File format",
-            [
-              [",", "CSV"],
-              ["\t", "TSV"],
-              ["|", "Pipe separated"],
-            ],
-            s.delimiter || ",",
-          )}${select(
-            "encoding",
-            "Encoding",
-            [
-              ["utf-8", "UTF-8"],
-              ["utf-16le", "UTF-16 LE"],
-              ["windows-1252", "Windows-1252"],
-            ],
-            s.encoding || "utf-8",
-          )}</div><button class="pt-btn pt-btn--secondary" type="submit">Preview columns</button></form>${
-            s.filePreview
-              ? `<form data-workspace-form="${formName("import-save")}">${s.resumeImport ? "<fieldset disabled>" : ""}<div class="pt-fields">${field("name", "Import name", s.importDraft?.name || s.importPayload?.name || s.file?.name || "", { required: true })}${field("sourceNamespace", "Source namespace", s.importDraft?.sourceNamespace || s.importPayload?.sourceNamespace || "", { required: true, extra: 'placeholder="Provider, state, and export year"' })}${select(
-                  "sourcePolicy",
-                  "Permitted texting use",
-                  [
-                    ["unreviewed", "Not reviewed"],
-                    ["manual_sms", "Manual texting permitted"],
-                    ["sms_with_opt_in", "Only with recorded opt-in"],
-                    ["not_for_sms", "Not permitted for texting"],
-                  ],
-                  s.importDraft?.sourcePolicy ||
-                    s.importPayload?.sourcePolicy?.permittedPurpose ||
-                    "unreviewed",
-                )}</div><p class="pt-muted">Up to 1,000,000 records per file. Every accepted column is retained. Unmapped columns become custom fields, including local districts. Missing phone numbers and addresses do not discard contacts.</p><div class="pt-contact-mapping">${s.filePreview.headers
-                  .map((header, index) =>
-                    select(
-                      `column_${index}`,
-                      `${index + 1}. ${header || "Unnamed column"}`,
-                      [
-                        ["__custom__", "Keep as custom field"],
-                        ...fields()
-                          .filter((item) => !item.readOnly)
-                          .map((item) => [item.fieldId, item.label]),
-                      ],
-                      s.importDraft?.mapping?.[String(index)] ??
-                        s.importPayload?.mapping?.[String(index)] ??
-                        guessField(header),
-                    ),
-                  )
-                  .join(
-                    "",
-                  )}</div>${s.resumeImport ? "</fieldset>" : ""}${details("Sample values", `<div class="pt-workspace-table-wrap"><table class="pt-workspace-table"><thead><tr>${s.filePreview.headers.map((header) => `<th>${e(header)}</th>`).join("")}</tr></thead><tbody>${s.filePreview.rows.map((row) => `<tr>${row.map((value) => `<td>${e(value)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`)}${!s.resumeImport ? b("import-match-preview", "Review sample matches", { secondary: true }) + importMatches() : ""}${checkbox(`${prefix}-import-reviewed`, "I reviewed these columns and the source’s permitted use", s.importReviewed, !s.resumeImport && !s.importMatchPreview ? "disabled" : "")}<button type="submit" class="pt-btn"${!s.importReviewed || r.busy() ? " disabled" : ""}>${s.importJob ? "Resume import" : "Import contacts"}</button></form>`
-              : ""
-          }${s.importProgress ? notice("Import progress", `${count(s.importProgress.processed)} source rows durably saved this pass${s.importProgress.publication?.status === "updating" ? " · contact search updating" : ""}`) : ""}</section>`
-        : "") +
-      `${details("Replace a source", "<ol><li>Add or update contacts by importing the replacement file and reviewing its source matches.</li><li>Return to contacts, filter by the old import source, and review a frozen selection of the affected contacts.</li><li>Under More selection actions, choose the old source and remove its memberships from that selection.</li></ol><p class='pt-muted'>This replaces the selected source memberships and assertions. Contacts known through other sources, volunteer history, and the rest of the contact book remain available.</p>")}<section class="pt-card"><h2>Source history</h2>${imports.length ? imports.map((job) => `<article class="pt-row"><div><strong>${e(job.name || job.importId)}</strong><p>${e(label(job.status))} · ${count(job.accepted || 0)} accepted · ${count(job.conflicts || 0)} need review</p></div><div class="pt-actions">${job.status === "open" ? b("import-resume", "Resume", { secondary: true, value: job.importId }) : ""}${b("import-report", "Review records", { secondary: true, value: job.importId })}</div></article>`).join("") : '<p class="pt-muted">Your imports will appear here.</p>'}${s.importCursor ? b("imports-more", "More imports", { secondary: true }) : ""}</section>${importReport()}`
-    );
+    return renderContactImport({
+      s: state(),
+      canImport: can("import"),
+      busy: r.busy(),
+      b,
+      details,
+      fields: fields(),
+      guessField,
+      prefix,
+      importMatches,
+      importReport,
+      sourceNamespace: importNamespace(),
+      supportsNames: nameParsingAvailable(),
+    });
   }
   function guessField(header) {
     const normalized = header.replace(/[\s_-]/g, "").toLowerCase();
+    const aliases = {
+      name: "displayName",
+      votername: "displayName",
+      cellphone: "phone",
+      mobilephone: "phone",
+      mobilenumber: "phone",
+      phonenumber: "phone",
+      address: "addressLine1",
+      zipcode: "postalCode",
+      zip: "postalCode",
+      housedistrict: "stateHouseDistrict",
+      senatedistrict: "stateSenateDistrict",
+      firstname: "firstName",
+      middlename: "middleName",
+      middleinitial: "middleName",
+      lastname: "lastName",
+    };
     return (
+      (fields().some(
+        (item) => item.fieldId === aliases[normalized] && !item.readOnly,
+      )
+        ? aliases[normalized]
+        : null) ||
       fields().find(
         (item) =>
           !item.readOnly &&
@@ -2276,7 +2321,8 @@ export function createOrganizationContactBook(
             (value) =>
               value.replace(/[\s_-]/g, "").toLowerCase() === normalized,
           ),
-      )?.fieldId || "__custom__"
+      )?.fieldId ||
+      "__custom__"
     );
   }
   function statusPanel() {
@@ -2788,12 +2834,17 @@ export function createOrganizationContactBook(
         throw new Error("Choose a nonempty contact file.");
       s.delimiter = data.get("delimiter");
       s.encoding = data.get("encoding");
-      const preview = await previewContactFile(s.file, s.delimiter, s.encoding);
+      const preview = await scanImportFile();
       if (s.resumeImport)
         assertContactImportHeaders(preview.headers, s.resumeImport.columns);
       s.filePreview = preview;
       s.importMatchPreview = null;
       s.importReviewed = false;
+      s.importCompleted = null;
+      s.nameParsingUnavailable = false;
+      if (!s.resumeImport && !nameParsingAvailable())
+        s.importDraft = { ...s.importDraft, nameFormat: "keep" };
+      if (!s.resumeImport) await refreshImportPreview();
     } else if (action === "import-save") {
       if (
         !can("import") ||
@@ -2802,6 +2853,10 @@ export function createOrganizationContactBook(
         (!s.resumeImport && !s.importMatchPreview)
       )
         throw new Error("Review the import columns and source first.");
+      if (s.nameParsingUnavailable && selectedNameFormat() !== "keep")
+        throw new Error(
+          "Choose Keep full name only, or update the server before splitting names.",
+        );
       const mapping = {};
       s.filePreview.headers.forEach((_, index) => {
         const mapped = data.get(`column_${index}`);
@@ -2813,8 +2868,12 @@ export function createOrganizationContactBook(
             name: data.get("name"),
             columns: s.filePreview.headers,
             mapping,
-            sourceNamespace: data.get("sourceNamespace"),
+            sourceNamespace: data.get("sourceNamespace") || importNamespace(),
             sourcePolicy: { permittedPurpose: data.get("sourcePolicy") },
+            namePolicy: reviewedNamePolicy(
+              s.filePreview,
+              data.get("nameFormat") || selectedNameFormat(),
+            ),
           };
       if (
         s.importJob &&
@@ -2836,18 +2895,30 @@ export function createOrganizationContactBook(
           operationId: s.importOperationId,
         };
       }
-      const completed = await uploadSharedContactRows({
-        file: s.file,
-        delimiter: s.delimiter,
-        encoding: s.encoding,
-        job: s.importJob,
-        api,
-        guard: r.guard,
-        progress: (result) => {
-          s.importProgress = result;
-          r.changed();
-        },
-      });
+      s.importSaving = true;
+      r.changed();
+      let completed;
+      try {
+        completed = await uploadSharedContactRows({
+          file: s.file,
+          delimiter: s.delimiter,
+          encoding: s.encoding,
+          job: s.importJob,
+          api,
+          guard: r.guard,
+          progress: (result) => {
+            s.importProgress = result;
+            r.changed();
+          },
+        });
+      } finally {
+        s.importSaving = false;
+        r.changed();
+      }
+      s.importCompleted = {
+        rows: s.filePreview.rowCount,
+        publication: completed.publication,
+      };
       s.importJob = null;
       s.resumeImport = null;
       s.importPayload = null;
@@ -2862,12 +2933,7 @@ export function createOrganizationContactBook(
         r.toast(
           `Import finished. ${completed.import.conflicts} records need review.`,
         );
-      } else
-        r.toast(
-          completed.publication?.status === "ready"
-            ? "File saved. Contact search is ready."
-            : "File saved. Contact search and related views are updating.",
-        );
+      }
     } else return false;
     return true;
   }
@@ -3233,6 +3299,40 @@ export function createOrganizationContactBook(
         })
       ).job;
       await advanceConversion();
+    } else if (op === "import-change-file") {
+      s.filePreview = null;
+      s.importMatchPreview = null;
+      s.importReviewed = false;
+    } else if (op === "import-finalize") {
+      if (!can("import")) throw new Error("Contact import is restricted.");
+      const job = (await api(`/imports/${id(value)}`)).import;
+      if (!["completing", "complete"].includes(job?.status))
+        throw new Error(
+          "Reselect the original file to resume saving its rows.",
+        );
+      if (
+        ![job.accepted, job.conflicts, job.maxRow].every(
+          Number.isSafeInteger,
+        ) ||
+        job.accepted < 0 ||
+        job.conflicts < 0 ||
+        job.accepted + job.conflicts !== job.maxRow + 1
+      )
+        throw new Error(
+          "The saved row count could not be confirmed. Refresh the import history.",
+        );
+      const rows = job.accepted + job.conflicts;
+      const completed = await api(`/imports/${id(job.importId)}/complete`, {
+        operationId: `finalize:${job.importId}`,
+        expectedRowCount: rows,
+      });
+      if (completed.import?.status !== "complete")
+        throw new Error(
+          "Your rows are saved. Finish this import again to check its final step.",
+        );
+      s.importCompleted = { rows, publication: completed.publication };
+      await schema();
+      await loadImports();
     } else if (op === "import-resume") {
       const job = (await api(`/imports/${id(value)}`)).import;
       if (job.status !== "open")
@@ -3247,12 +3347,14 @@ export function createOrganizationContactBook(
         mapping: job.fieldByIndex,
         sourceNamespace: job.sourceNamespace,
         sourcePolicy: job.sourcePolicy,
+        ...(job.namePolicy ? { namePolicy: job.namePolicy } : {}),
       };
       s.file = null;
       s.filePreview = null;
       s.importDraft = null;
       s.importReviewed = false;
       s.importProgress = null;
+      s.importCompleted = null;
     } else if (op === "import-resume-cancel") {
       s.resumeImport = null;
       s.importJob = null;
@@ -3262,14 +3364,19 @@ export function createOrganizationContactBook(
       s.filePreview = null;
       s.importDraft = null;
       s.importReviewed = false;
+      s.importCompleted = null;
+    } else if (op === "import-new") {
+      s.importCompleted = null;
+      s.importProgress = null;
+      s.importDraft = null;
+      s.file = null;
+      s.filePreview = null;
+      s.importMatchPreview = null;
     } else if (op === "import-match-preview") {
       if (!can("import") || !s.filePreview || s.resumeImport)
         throw new Error("Preview a new contact file first.");
-      const payload = boundedContactImportPreview(importPreviewPayload());
-      if (!payload.sourceNamespace.trim())
-        throw new Error("Enter a source namespace before reviewing matches.");
-      s.importMatchPreview = (await api("/import-preview", payload)).preview;
-      s.importReviewed = false;
+      await refreshImportPreview({ rescan: s.importMappingChanged === true });
+      s.importMappingChanged = false;
     } else if (op === "import-original") {
       if (!can("personal")) throw new Error("Source evidence is restricted.");
       const original = await api(
@@ -3710,11 +3817,14 @@ export function createOrganizationContactBook(
         name: data.get("name"),
         sourceNamespace: data.get("sourceNamespace"),
         sourcePolicy: data.get("sourcePolicy"),
+        nameFormat: data.get("nameFormat") || selectedNameFormat(),
         mapping,
       };
       if (target.name) {
+        if (target.name.startsWith("column_")) s.importMappingChanged = true;
         s.importReviewed = false;
         s.importMatchPreview = null;
+        return false;
       }
     }
     if (name === `${prefix}-row`) {
@@ -3774,6 +3884,7 @@ export function createOrganizationContactBook(
     if (name === `${prefix}-file`) {
       if (!target.files?.[0]) return false;
       s.file = target.files?.[0];
+      importScanGeneration++;
       s.filePreview = null;
       s.importMatchPreview = null;
       if (!s.resumeImport) {
@@ -3783,6 +3894,7 @@ export function createOrganizationContactBook(
       }
       s.importDraft = null;
       s.importReviewed = false;
+      s.importCompleted = null;
       return false;
     }
     if (name === `${prefix}-import-reviewed`) {

@@ -1,6 +1,9 @@
 const BASE = process.env.POLIS_TEST_BASE_URL || "http://127.0.0.1:9000";
 const BOOK = "/api/contact-book/scopes/coalition%3Aorg-1";
 const PROMPT = "/api/text-banking/prompt/scopes/coalition%3Aorg-1";
+const importNames = import(
+  `data:text/javascript;base64,${require("node:fs").readFileSync(require("node:path").join(__dirname, "../../frontend/src/pages/shared-feed/scripts/organizationContactImportNames.js")).toString("base64")}`
+);
 
 async function mockBook(
   page,
@@ -16,6 +19,9 @@ async function mockBook(
     personalization = null,
     scopeType = "coalition",
     scopeId = "org-1",
+    nameParsing = false,
+    previewNameAnalysis = true,
+    completing = false,
   } = {},
 ) {
   const BOOK = `/api/contact-book/scopes/${encodeURIComponent(`${scopeType}:${scopeId}`)}`;
@@ -78,6 +84,22 @@ async function mockBook(
     filterable: true,
     sortable: true,
   }));
+  if (nameParsing)
+    for (const [fieldId, label] of [
+      ["lastName", "Last name"],
+      ["middleName", "Middle name"],
+      ["fullName", "Full name"],
+      ["postalCode", "ZIP / postal code"],
+      ["addressLine1", "Address Line1"],
+    ])
+      fields.push({
+        fieldId,
+        label,
+        type: "text",
+        group: "Identity",
+        filterable: true,
+        sortable: true,
+      });
   const rows = ["Alex Example", "Blair Example", "Casey Example"].map(
     (name, index) => ({
       contactId: `contact-${index + 1}`,
@@ -159,6 +181,16 @@ async function mockBook(
       if (suffix === "/schema")
         return respond({
           fields,
+          ...(nameParsing
+            ? {
+                importFeatures: {
+                  nameParsing: {
+                    version: 1,
+                    formats: ["auto", "family_given", "given_family", "keep"],
+                  },
+                },
+              }
+            : {}),
           viewDefaults,
           tags,
           sources: rows.map((row, index) => ({
@@ -218,7 +250,18 @@ async function mockBook(
         });
         return respond({ viewDefaults });
       }
-      if (suffix === "/import-preview")
+      if (suffix === "/import-preview") {
+        const names = await importNames;
+        const analyses = body.rows.map((row, index) => {
+          const fields = {};
+          for (const [column, field] of Object.entries(body.mapping || {}))
+            if (field !== "__custom__" && Number(column) < row.length)
+              fields[field] = row[Number(column)];
+          return {
+            ...names.deriveImportNames(fields, body.namePolicy).analysis,
+            row: index,
+          };
+        });
         return respond({
           preview: {
             sampleOnly: true,
@@ -231,8 +274,17 @@ async function mockBook(
             customFields: [{ label: "Unfamiliar column" }],
             rows: [{ row: 0, status: "new", missingLocation: true }],
             bookRevision: 7,
+            ...(nameParsing && previewNameAnalysis
+              ? {
+                  nameAnalysis:
+                    typeof previewNameAnalysis === "object"
+                      ? previewNameAnalysis
+                      : names.analyzeImportNames(analyses, body.namePolicy),
+                }
+              : {}),
           },
         });
+      }
       if (suffix === "/imports/import-1/rows/0/original")
         return respond({
           row: 0,
@@ -274,7 +326,7 @@ async function mockBook(
                 {
                   importId: "import-1",
                   name: "interrupted.csv",
-                  status: "open",
+                  status: completing ? "completing" : "open",
                   accepted: 1,
                   conflicts: 0,
                 },
@@ -294,13 +346,14 @@ async function mockBook(
           import: {
             importId: "import-1",
             name: "interrupted.csv",
-            status: "open",
+            status: completing ? "completing" : "open",
             columns: ["Name", "Special tax district"],
             fieldByIndex: { 0: "displayName", 1: "taxDistrict" },
             sourceNamespace: "example-voter-2026",
             sourcePolicy: { permittedPurpose: "not_for_sms" },
             accepted: 1,
             conflicts: 0,
+            maxRow: 0,
           },
         });
       if (suffix === "/imports" && request.method() === "POST")

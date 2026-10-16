@@ -1228,3 +1228,235 @@ body:has(.pt-cb-dialog) {
 .pt-cb-tag-create > button {
   justify-self: start;
 }
+.pt-import-steps {
+  display: flex;
+  gap: 1rem;
+  padding: 0;
+  margin: 1rem 0 1.5rem;
+  list-style: none;
+  color: var(--color-text-secondary, #9aacc5);
+}
+.pt-import-steps [aria-current="step"] {
+  color: var(--color-primary, #6daaff);
+  font-weight: 700;
+}
+.pt-import-card {
+  max-width: 760px;
+  margin-inline: auto;
+}
+.pt-import-illustration {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 136px;
+  height: 128px;
+  margin: 1rem auto;
+  border-radius: 50%;
+  background: radial-gradient(ellipse, #27538366, transparent 70%);
+}
+.pt-import-sheet {
+  display: grid;
+  gap: 8px;
+  width: 78px;
+  padding: 18px 12px;
+  border: 1px solid #5d83ac;
+  border-radius: 14px;
+  background: #17304e;
+  transform: rotate(-7deg);
+}
+.pt-import-sheet svg {
+  width: 28px;
+  height: 28px;
+  color: #82b7fa;
+}
+.pt-import-sheet i {
+  height: 4px;
+  border-radius: 8px;
+  background: #42698f;
+}
+.pt-import-orbit {
+  position: absolute;
+  right: 12px;
+  bottom: 14px;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid #5d83ac;
+  border-radius: 50%;
+  background: #1b4659;
+  color: #83e1cf;
+}
+.pt-import-orbit svg {
+  width: 20px;
+  height: 20px;
+}
+.pt-import-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-block: 1rem;
+}
+.pt-import-stats > div,
+.pt-import-names {
+  padding: 1rem;
+  border: 1px solid #324d70;
+  border-radius: 14px;
+  background: #10233b;
+  color: #eaf2ff;
+}
+.pt-import-names h3,
+.pt-import-names .pt-field > span {
+  color: #eaf2ff;
+}
+.pt-import-names .pt-muted {
+  color: #c0cee0;
+}
+.pt-import-names select {
+  color: #172942;
+  background: #fff;
+}
+.pt-import-stats strong,
+.pt-import-stats span {
+  display: block;
+}
+.pt-import-stats strong {
+  font-size: 1.5rem;
+}
+.pt-import-stats span,
+.pt-import-names small {
+  color: #b1c0d5;
+  font-size: 0.85rem;
+}
+.pt-import-badge {
+  font-size: 0.8rem;
+  color: #80dccc;
+}
+.pt-import-name-example {
+  display: grid;
+  gap: 0.3rem;
+  padding-block: 0.7rem;
+  border-top: 1px solid #2b4260;
+  overflow-wrap: anywhere;
+}
+.pt-import-name-example > :last-child {
+  color: #91c2ff;
+}
+.pt-import-keep {
+  margin-block: 1rem;
+}
+.pt-import-reselect {
+  margin-bottom: 1.5rem;
+}
+.pt-import-status {
+  max-width: 760px;
+  margin: 1rem auto;
+}
+.pt-import-card > h2 {
+  margin-top: 0;
+}
+.pt-import-card .pt-workspace-details {
+  margin-block: 0;
+  padding-block: 0.5rem;
+}
+.pt-import-card fieldset {
+  min-width: 0;
+  padding: 0;
+  margin: 0;
+  border: 0;
+}
+.pt-import-file {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+}
+.pt-import-file .pt-btn {
+  min-height: 32px;
+  padding: 5px 8px;
+}
+.pt-import-file strong {
+  overflow-wrap: anywhere;
+  font-size: 0.9rem;
+}
+.pt-import-inline-stats {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+}
+.pt-import-names {
+  padding: 0.8rem;
+  margin-bottom: 0.8rem;
+}
+.pt-import-names h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+.pt-import-names .pt-field {
+  margin-top: 0.5rem;
+}
+.pt-import-names .pt-field > span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+.pt-import-names .pt-import-name-labels {
+  color: #b1c0d5;
+  font-size: 0.75rem;
+}
+.pt-import-name-example {
+  padding-block: 0.5rem;
+  font-size: 0.9rem;
+}
+.pt-import-footer {
+  display: grid;
+  gap: 0.6rem;
+  padding: 0.4rem 0;
+  border-top: 1px solid #a7bdd4;
+  background: var(--polis-surface-raised, #fff);
+  color: var(--polis-text, #17304e);
+}
+.pt-import-card.is-review {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  max-height: calc(100dvh - 320px);
+  padding: 12px;
+}
+.pt-import-review-form {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-height: 0;
+}
+.pt-import-review-body {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-color: #698db7 transparent;
+}
+.pt-import-review-body::-webkit-scrollbar {
+  display: block;
+  width: 8px;
+}
+.pt-import-review-body::-webkit-scrollbar-thumb {
+  border-radius: 8px;
+  background: #698db7;
+}
+.pt-import-names .pt-row {
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0;
+  border: 0;
+}
+@media (min-width: 768px) {
+  .pt-import-card.is-review {
+    max-height: calc(100dvh - 240px);
+  }
+}
+.pt-import-footer .pt-workspace-check {
+  font-size: 0.85rem;
+  margin: 0;
+}
