@@ -111,7 +111,15 @@ export function createBallotExport({
           Object.entries({
             ...body,
             columns: [
-              ...new Set([...(body.columns || []), ...ballotExportFields]),
+              ...new Set([
+                ...(body.columns || []),
+                ...ballotExportFields.filter(
+                  (key) =>
+                    key !== "ballotVoterId" ||
+                    !Array.isArray(body.registerSchema) ||
+                    body.registerSchema.includes(key),
+                ),
+              ]),
             ],
           }).filter(([key]) =>
             [

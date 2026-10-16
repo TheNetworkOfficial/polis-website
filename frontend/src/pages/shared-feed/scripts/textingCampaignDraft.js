@@ -29,9 +29,11 @@ export function createCampaignDraftStore(
   function read() {
     try {
       const raw = available()?.getItem(key);
-      if (!raw || raw.length > 350000) return null;
+      if (!raw || raw.length > 650000) return null;
       const saved = JSON.parse(raw);
       if (
+        (raw.length > 350000 &&
+          saved.recipients?.sourceType !== "ballot_register") ||
         saved.version !== version ||
         saved.userId !== userId ||
         saved.organizationId !== organizationId ||
@@ -65,7 +67,9 @@ export function createCampaignDraftStore(
     };
     try {
       const raw = JSON.stringify(value);
-      if (raw.length <= 350000) available()?.setItem(key, raw);
+      const limit =
+        recipients?.sourceType === "ballot_register" ? 650000 : 350000;
+      if (raw.length <= limit) available()?.setItem(key, raw);
     } catch {
       /* In-memory draft still works without browser storage. */
     }
