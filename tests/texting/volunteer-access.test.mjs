@@ -177,3 +177,50 @@ test("failed assignment write keeps removed rows and selections, then reconciles
   assert.equal(view.campaigns.campaign.revision, 11);
   assert.equal(view.campaigns.assignmentsNeedRead, false);
 });
+
+test("saved and unchanged teams confirm inline and continue only to campaign review", async () => {
+  const campaign = {
+    campaignId: "campaign",
+    name: "Example",
+    revision: 2,
+    assignedUserIds: ["member"],
+  };
+  const view = { campaigns: { campaign, selected: new Set(["member"]) } },
+    calls = [];
+  const page = createCampaigns({
+    view: () => view,
+    context: () => ({ resourceId: "campaign" }),
+    can: () => true,
+    busy: () => false,
+    changed() {},
+    toast() {},
+    api: async (path, body) => {
+      calls.push({ path, body });
+      return {
+        campaign: {
+          ...campaign,
+          revision: 3,
+          assignedUserIds: ["member", "new-member"],
+        },
+      };
+    },
+  });
+  await page.action("assignments-save");
+  assert.equal(calls.length, 0);
+  assert.match(
+    page.render("team"),
+    /Team already saved · 1 volunteer assigned/,
+  );
+  assert.match(page.render("team"), /Continue to campaign review/);
+  page.change({
+    closest: () => null,
+    dataset: { workspaceMember: "new-member" },
+    checked: true,
+  });
+  assert.doesNotMatch(page.render("team"), /Team already saved/);
+  await page.action("assignments-save");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].path, "/campaigns/campaign/assignments");
+  assert.match(page.render("team"), /Team saved · 2 volunteers assigned/);
+  assert.match(page.render("team"), /Saving the team sends no messages/);
+});

@@ -373,7 +373,7 @@ test("designated acceptance purchase shows its real amount and beta terms, then 
     "Fee $0.05 · Tax $0.00 · Total $1.05",
   );
   await expect(page.locator(".texting-balance")).toContainText(
-    "Purchases are unavailable",
+    "The one-time purchase is complete",
   );
   await expect(page.locator(".texting-balance__packs")).toHaveCount(0);
 

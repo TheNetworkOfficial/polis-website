@@ -16,6 +16,7 @@ const sections = new Set([
   "results",
   "balance",
   "recovery",
+  "setup",
 ]);
 
 export const escapeTextingHtml = (value) =>

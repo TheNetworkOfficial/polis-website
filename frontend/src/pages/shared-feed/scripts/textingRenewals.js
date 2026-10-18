@@ -10,7 +10,10 @@ export function renderTextingRenewals(
   return list(deadlines)
     .filter(
       (entry) =>
-        entry.status !== "current" && Number.isSafeInteger(entry.expiresAtMs),
+        entry.status !== "current" &&
+        Number.isSafeInteger(entry.expiresAtMs) &&
+        entry.expiresAtMs > 0 &&
+        entry.expiresAtMs <= 8640000000000000,
     )
     .map(
       (entry) =>

@@ -43,6 +43,8 @@ import {
   textingNotificationBody,
 } from "./scripts/textingNotifications.js";
 import { createTextingBalancePage } from "./scripts/textingBalance.js";
+import { createTextingSetupPage } from "./scripts/textingSetup.js";
+import { createTextingSetupTransport } from "./scripts/textingSetupTransport.js";
 import { createTextingIntakePage } from "./scripts/textingIntake.js";
 import { createTextingWorkspacePage } from "./scripts/textingWorkspace.js";
 import { createOrganizationPeoplePage } from "./scripts/organizationPeople.js";
@@ -109,6 +111,21 @@ const runtimeConfig =
 const root = document.getElementById("shared-feed-app");
 const textingRequest = createTextingSessionRequest({
   request: fetchJson,
+  getSession: () => state.auth.session,
+  restoreSession: () =>
+    restoreSharedFeedSession(state.auth.config, { clearOnFailure: false }),
+  saveSession: (session) => {
+    state.auth.session = session;
+    state.auth.user = getAuthenticatedUser(session);
+  },
+  userId: (session) => getAuthenticatedUser(session)?.userId || "",
+  contextKey: getCurrentPathWithQuery,
+});
+const textingSetupRequest = createTextingSessionRequest({
+  request: createTextingSetupTransport({
+    headers: (path) =>
+      buildAuthorizedHeaders(state.auth.session, {}, { requestPath: path }),
+  }),
   getSession: () => state.auth.session,
   restoreSession: () =>
     restoreSharedFeedSession(state.auth.config, { clearOnFailure: false }),
@@ -230,6 +247,16 @@ const textingIntakePage = createTextingIntakePage({
   changed: scheduleRender,
   navigate: navigateTexting,
 });
+const textingSetupPage = createTextingSetupPage({
+  request: textingSetupRequest,
+  legacyRequest: textingRequest,
+  context: () => {
+    const current = currentTextingContext();
+    return current?.section === "setup" ? current : null;
+  },
+  changed: scheduleRender,
+  navigate: navigateTexting,
+});
 const textingWorkspacePage = createTextingWorkspacePage({
   request: textingRequest,
   requestExit: createTextingExitRequest({
@@ -240,7 +267,9 @@ const textingWorkspacePage = createTextingWorkspacePage({
   context: () => {
     const current = currentTextingContext();
     return current &&
-      !["registration", "settings", "balance"].includes(current.section)
+      !["registration", "settings", "balance", "setup"].includes(
+        current.section,
+      )
       ? current
       : null;
   },
@@ -6916,9 +6945,11 @@ function renderCurrentTextingPage() {
   const controller =
     current.section === "balance"
       ? textingBalancePage
-      : ["registration", "settings"].includes(current.section)
-        ? textingIntakePage
-        : textingWorkspacePage;
+      : current.section === "setup"
+        ? textingSetupPage
+        : ["registration", "settings"].includes(current.section)
+          ? textingIntakePage
+          : textingWorkspacePage;
   const meta = controller.getMeta?.() || {};
   const shellAccess = textingShellAccess.read({ ...current, ...meta });
   const user = state.auth.session
@@ -63356,14 +63387,22 @@ async function loadCurrentRoute({ refresh = false } = {}) {
     textingShellAccess.reset();
     textingBalancePage.reset();
     textingIntakePage.reset();
+    textingSetupPage.reset();
     textingWorkspacePage.reset();
   } else if (texting.section === "balance") {
+    textingSetupPage.reset();
     textingIntakePage.reset();
     textingWorkspacePage.reset({ releaseUnused: false });
   } else if (["registration", "settings"].includes(texting.section)) {
+    textingSetupPage.reset();
     textingBalancePage.reset();
     textingWorkspacePage.reset({ releaseUnused: false });
+  } else if (texting.section === "setup") {
+    textingBalancePage.reset();
+    textingIntakePage.reset();
+    textingWorkspacePage.reset({ releaseUnused: false });
   } else {
+    textingSetupPage.reset();
     textingBalancePage.reset();
     textingIntakePage.reset();
   }
@@ -63598,9 +63637,13 @@ async function loadCurrentRoute({ refresh = false } = {}) {
   }
   if (routeKey === ROUTE_KEY_ORGANIZATION_TEXTING) {
     await (
-      ["registration", "settings"].includes(currentTextingContext()?.section)
-        ? textingIntakePage
-        : textingWorkspacePage
+      currentTextingContext()?.section === "setup"
+        ? textingSetupPage
+        : ["registration", "settings"].includes(
+              currentTextingContext()?.section,
+            )
+          ? textingIntakePage
+          : textingWorkspacePage
     ).load();
     return;
   }
@@ -137096,9 +137139,11 @@ function refreshTextingOnResume() {
   const controller =
     current.section === "balance"
       ? textingBalancePage
-      : ["registration", "settings"].includes(current.section)
-        ? null
-        : textingWorkspacePage;
+      : current.section === "setup"
+        ? textingSetupPage
+        : ["registration", "settings"].includes(current.section)
+          ? null
+          : textingWorkspacePage;
   // Resume only re-reads server state; it cannot allocate work, submit, or send.
   controller?.refresh?.().catch(() => {});
 }
