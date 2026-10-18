@@ -12,6 +12,7 @@ function fixture({ funded = false, uncertain = false } = {}) {
   const listeners = new Map(),
     calls = [];
   globalThis.document = {
+    querySelectorAll: () => [],
     addEventListener: (name, handler) => listeners.set(name, handler),
     removeEventListener() {},
   };

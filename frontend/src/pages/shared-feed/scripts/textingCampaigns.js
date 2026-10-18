@@ -368,7 +368,7 @@ export function createCampaigns(r) {
         "Choose people who already have texting access.",
         go("campaigns", "Back", c.campaignId, true),
       ) +
-      `<section class="pt-card">${volunteerPicker.render()}<div class="pt-actions">${button("assignments-save", "Save team", { disabled: r.busy() || s.assignmentsNeedRead || !r.can("createCampaigns") || c.status === "archived" })}${s.assignmentsNeedRead ? button("assignments-refresh", "Check saved assignments", { secondary: true, disabled: r.busy() }) + notice("Your selections are kept", "Check saved assignments before trying again.") : ""}</div><p class="pt-muted">Assignment does not grant organization permissions.</p></section>`
+      `<section class="pt-card">${volunteerPicker.render()}<div class="pt-actions">${button("assignments-save", "Save team", { disabled: r.busy() || s.assignmentsNeedRead || !r.can("createCampaigns") || c.status === "archived" })}${s.assignmentsNeedRead ? button("assignments-refresh", "Check saved assignments", { secondary: true, disabled: r.busy() }) + notice("Your selections are kept", "Check saved assignments before trying again.") : ""}</div>${s.teamSaved ? `<div data-testid="texting-team-saved" aria-live="polite">${notice(s.teamSaved, "Continue to review the campaign and its next step. Saving the team sends no messages.")}<div class="pt-actions">${go("campaigns", "Continue to campaign review", c.campaignId)}</div></div>` : ""}<p class="pt-muted">Assignment does not grant organization permissions.</p></section>`
     );
   }
   const queueItem = (s, itemId) =>
@@ -697,11 +697,17 @@ export function createCampaigns(r) {
       )
         return true;
       try {
+        const changed =
+          s.selected.size !== list(c.assignedUserIds).length ||
+          list(c.assignedUserIds).some((userId) => !s.selected.has(userId));
         await saveAssignmentChanges(r.api, c, s.selected, (saved) => {
           s.campaign = saved;
           volunteerPicker.invalidateAssigned();
         });
+        const volunteers = list(s.campaign.assignedUserIds).length;
+        s.teamSaved = `${changed ? "Team saved" : "Team already saved"} · ${count(volunteers)} ${volunteers === 1 ? "volunteer" : "volunteers"} assigned`;
       } catch (error) {
+        s.teamSaved = "";
         s.assignmentsNeedRead = true;
         throw error;
       }
@@ -1198,6 +1204,7 @@ export function createCampaigns(r) {
         return true;
       if (target.checked) s.selected.add(target.dataset.workspaceMember);
       else s.selected.delete(target.dataset.workspaceMember);
+      s.teamSaved = "";
       return true;
     }
     const form = target.closest('[data-workspace-form="campaign"]');

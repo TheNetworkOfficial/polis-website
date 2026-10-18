@@ -1,6 +1,10 @@
 import { rateMoney } from "./textingWorkspaceUi";
 import { renderTextingRenewals } from "./textingRenewals";
 import {
+  textingPurchaseBlockers,
+  textingPurchaseStatus,
+} from "./textingReadinessStatus";
+import {
   customFundingConfig,
   customFundingQuote,
   fundingRetryAmount,
@@ -513,6 +517,22 @@ export function createTextingBalancePage({ request, context, changed }) {
         view.billing.billingContactRevision = result.contact.revision;
         view.contactOperationId = "";
         view.acceptedTerms = false;
+        try {
+          const summary = await request(
+            path(context().organizationId, "summary"),
+            { auth: true },
+          );
+          if (!current(key, version)) return;
+          view.billing = requireBillingAdmin(summary.billing);
+        } catch (error) {
+          if (!current(key, version)) return;
+          if ([401, 403].includes(error.status)) {
+            view.billing = null;
+            view.billingContact = null;
+          }
+          view.contactError =
+            "Billing details are saved. Refresh the balance to check current purchasing access.";
+        }
       }
     } catch (error) {
       if (current(key, version)) view.contactError = billingContactError(error);
@@ -635,7 +655,8 @@ export function createTextingBalancePage({ request, context, changed }) {
     if (action === "refresh") {
       if (view.section === "billing-details") void loadBillingContact();
       else void refresh();
-    } else if (action === "more") void history({ append: true });
+    } else if (action === "purchase-status") void checkPurchase();
+    else if (action === "more") void history({ append: true });
     else if (action === "checkout") void checkout();
     else if (action === "add-funds") show("add-funds");
     else if (action === "balance") show("balance");
@@ -754,6 +775,9 @@ export function createTextingBalancePage({ request, context, changed }) {
   function renderPurchase() {
     if (!view.purchaseId) return "";
     const purchase = view.purchase;
+    const status = textingPurchaseStatus(purchase, {
+      delayed: view.pollCount >= 10,
+    });
     const funded = purchase?.status === "funded";
     const receipt = safeUrl(purchase?.receiptUrl, [
       "pay.stripe.com",
@@ -762,16 +786,14 @@ export function createTextingBalancePage({ request, context, changed }) {
     ]);
     return `<section class="texting-balance__card texting-balance__result ${funded ? "texting-balance__result--funded" : ""}" aria-live="polite" data-testid="texting-purchase-status">
       <span class="texting-balance__result-icon" aria-hidden="true">${funded ? "✓" : "↻"}</span>
-      <div><h2>${escape(view.purchaseError ? "Payment status unavailable" : purchaseLabel(purchase?.status))}</h2>
+      <div><h2>${escape(view.purchaseError ? "Payment status unavailable" : status.title)}</h2>
       <p>${escape(
         view.purchaseError ||
           (funded
             ? `${money(purchase.principalCents)} was added to this organization's texting balance.`
-            : TERMINAL.has(purchase?.status)
-              ? "Your balance reflects confirmed account activity."
-              : "We're confirming your payment. You can leave this page; don't pay again."),
+            : status.message),
       )}</p>
-      ${receipt ? `<a href="${escape(receipt)}" target="_blank" rel="noopener noreferrer">View receipt ↗</a>` : ""}</div>
+      ${!status.terminal || view.purchaseError ? `<button class="texting-balance__button" data-texting-action="purchase-status" ${view.checking ? "disabled" : ""}>Check payment status</button><p class="texting-balance__fine">This checks the same saved purchase. It does not start another payment.</p>` : ""}${receipt ? `<a href="${escape(receipt)}" target="_blank" rel="noopener noreferrer">View receipt ↗</a>` : ""}</div>
     </section>`;
   }
 
@@ -902,7 +924,20 @@ export function createTextingBalancePage({ request, context, changed }) {
         }
         ${billing.canManageBilling && billing.canPurchase ? '<button class="texting-balance__button texting-balance__button--primary" data-texting-action="add-funds">Add texting funds</button>' : ""}
         ${billing.canManageBillingContact ? '<button class="texting-balance__button" data-texting-action="billing-details">Billing details</button>' : ""}
-        ${!billing.canManageBilling ? '<p class="texting-balance__fine">An organization administrator can add funds.</p>' : !billing.canPurchase ? '<p class="texting-balance__fine">Purchases are unavailable until your organization is eligible.</p>' : ""}
+        ${
+          !billing.canManageBilling
+            ? '<p class="texting-balance__fine">An organization administrator can add funds.</p>'
+            : !billing.canPurchase
+              ? `<div data-testid="texting-purchase-readiness">${textingPurchaseBlockers(
+                  billing,
+                )
+                  .map(
+                    (issue) =>
+                      `<p class="texting-balance__fine">${escape(issue.message)}<br>${escape(issue.owner)} owns this step.</p>`,
+                  )
+                  .join("")}</div>`
+              : ""
+        }
       </section>
       <section class="texting-balance__card texting-balance__usage"><h2>Usage</h2>
         <div><span>Pending charges</span><strong>${money(billing.reservedMicros, 1000000)}</strong></div>
