@@ -119,6 +119,21 @@ export function createTextingSetupPage({
     view.setup = setup;
     view.uncertain = false;
   }
+  function restoreDraft(body) {
+    const localDate = (millis) => {
+      const date = new Date(millis);
+      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}T${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+    };
+    view.formValues = {
+      name: body.name,
+      audienceId: body.audienceId,
+      templateText: body.templateText,
+      budget: (body.budgetMicros / 1000000).toFixed(2),
+      start: localDate(body.deliveryNotBeforeMs),
+      end: localDate(body.deliveryBeforeMs),
+      volunteers: [...body.assignedUserIds],
+    };
+  }
   async function recoverCreation(key, ticket) {
     try {
       const result = await send(
@@ -138,8 +153,10 @@ export function createTextingSetupPage({
       ) {
         // A slow prior request may still finish. Retain the SAME identity even after a 404.
         view.uncertain = false;
-        view.error =
-          "No saved setup was found yet. Check again before saving; Save will keep the same recovery request.";
+        view.requestMissing = true;
+        view.error = view.pendingBody
+          ? "No saved setup was found yet. Your original draft is restored. Check again or explicitly retry that same draft; no new request will be created."
+          : "No saved setup was found yet. The original draft is unavailable in this tab, so another creation is blocked. Keep checking saved setups; do not create a replacement request.";
       } else throw error;
     }
   }
@@ -174,6 +191,17 @@ export function createTextingSetupPage({
         if (pending) {
           view.creationPending = view.requestId = pending;
           view.uncertain = true;
+          try {
+            const body = await recovery.readDraft(pending);
+            guard(key, ticket);
+            if (body) {
+              view.pendingBody = body;
+              restoreDraft(body);
+            }
+          } catch {
+            guard(key, ticket);
+            // A damaged/missing local draft never permits a substitute body under the saved identity.
+          }
           await recoverCreation(key, ticket);
         }
       }
@@ -387,6 +415,7 @@ export function createTextingSetupPage({
     if (
       view.busy ||
       view.uncertain ||
+      (view.creationPending && (!view.requestMissing || !view.pendingBody)) ||
       view.discovery?.capabilities?.createSetup !== true ||
       view.discovery?.capabilities?.manageBilling !== true
     )
@@ -414,7 +443,8 @@ export function createTextingSetupPage({
       deliveryBeforeMs: new Date(values.get("end")).getTime(),
       assignedUserIds: rows(view.discovery.volunteers)
         .filter((row) => values.getAll("volunteer").includes(row.userId))
-        .map((row) => row.userId),
+        .map((row) => row.userId)
+        .sort(),
     };
     if (!body.assignedUserIds.length) {
       view.formError =
@@ -436,12 +466,24 @@ export function createTextingSetupPage({
     }
     const key = view.key,
       ticket = sequence;
+    if (view.pendingBody && !recovery.matches(body, view.pendingBody)) {
+      restoreDraft(view.pendingBody);
+      view.formError =
+        "This request must keep its original message, recipients, team and sending window. The original draft has been restored; review it before retrying.";
+      changed();
+      return;
+    }
     view.busy = true;
     view.formError = "";
     view.creationPending = body.requestId;
-    recovery.save(body.requestId);
+    view.pendingBody = structuredClone(body);
     changed();
+    let dispatched = false;
     try {
+      await recovery.saveDraft(body);
+      guard(key, ticket);
+      view.requestMissing = false;
+      dispatched = true;
       const result = await send(`${base()}/drafts`, {
         auth: true,
         method: "POST",
@@ -455,8 +497,9 @@ export function createTextingSetupPage({
     } catch (error) {
       if (current(key, ticket)) {
         view.uncertain = true;
-        view.error =
-          "Your setup may have been saved. Check saved setups before creating another one.";
+        view.error = dispatched
+          ? "Your setup may have been saved. Check saved setups before creating another one."
+          : "The original draft could not be safely saved in this tab. No creation request was sent. Allow tab storage, then check saved setups before retrying the same draft.";
         if ([401, 403].includes(error.status)) {
           view.discovery = null;
           view.setup = null;
@@ -590,6 +633,14 @@ export function createTextingSetupPage({
           "Review a contact selection before creating a new setup. Existing campaigns remain available.",
         )
       );
+    if (view.creationPending && !view.pendingBody)
+      return (
+        html +
+        notice(
+          "Original draft unavailable",
+          "Keep checking the saved request. A different draft cannot replace an unconfirmed creation.",
+        )
+      );
     const f = view.formValues || {};
     html += `<form class="pt-card pt-form" data-setup-form="draft"><h2>New campaign setup</h2><label for="setup-name">Campaign name</label><input id="setup-name" name="name" value="${e(f.name || "")}" required maxlength="200" ${view.busy || view.uncertain ? "disabled" : ""}><label for="setup-audience">Reviewed recipient selection</label><select id="setup-audience" name="audienceId" required>${audiences.map((item) => `<option value="${e(item.audienceId)}"${f.audienceId === item.audienceId ? " selected" : ""}>${e(item.name || "Reviewed selection")} · ${count(item.count)} recipients</option>`).join("")}</select><label for="setup-message">Message</label><textarea id="setup-message" name="templateText" required maxlength="10000">${e(f.templateText || "")}</textarea><label for="setup-budget">Campaign spending limit ($)</label><input id="setup-budget" name="budget" value="${e(f.budget || "")}" type="number" min="0.01" step="0.01" required><label for="setup-start">Sending starts</label><input id="setup-start" name="start" value="${e(f.start || "")}" type="datetime-local" required><label for="setup-end">Sending ends</label><input id="setup-end" name="end" value="${e(f.end || "")}" type="datetime-local" required><fieldset><legend>Campaign volunteers</legend>${rows(
       view.discovery.volunteers,
@@ -601,7 +652,7 @@ export function createTextingSetupPage({
       )
       .join(
         "",
-      )}</fieldset><p>Saving freezes this exact message, selection, team and limits for review. Review all details before preparing. Preparation and opening send no messages; each individual text still needs human confirmation.</p>${view.formError ? `<p role="alert">${e(view.formError)}</p>` : ""}<button class="pt-btn" type="submit" ${view.busy || view.uncertain ? "disabled" : ""}>${view.busy ? "Saving…" : "Save setup draft"}</button></form>`;
+      )}</fieldset><p>Saving freezes this exact message, selection, team and limits for review. Review all details before preparing. Preparation and opening send no messages; each individual text still needs human confirmation.</p>${view.formError ? `<p role="alert">${e(view.formError)}</p>` : ""}<button class="pt-btn" type="submit" ${view.busy || view.uncertain ? "disabled" : ""}>${view.busy ? "Saving…" : view.creationPending ? "Retry same saved draft" : "Save setup draft"}</button></form>`;
     return html;
   }
   document.addEventListener("click", (event) => {

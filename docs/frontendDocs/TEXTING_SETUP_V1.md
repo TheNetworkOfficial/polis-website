@@ -23,13 +23,19 @@ message, reviewed recipient selection, team, window and limit. Prepare, manager
 takeover, provider reconciliation, publication and opening are separate actions.
 Each individual text still requires the existing person's exact confirmation.
 
-The client retains only an opaque actor/organization-scoped creation request ID
-in tab storage, with an opaque URL fallback. After response loss or reload it
+Before a creation POST, the client saves and reads back the exact original draft
+and its SHA-256 fingerprint in actor/organization-scoped tab storage. This record
+contains the reviewed message, selection identity, assigned volunteer identities,
+window and spending limit; it contains no raw contact rows or authentication tokens.
+Only the opaque request ID appears in the URL fallback. After response loss or reload it
 uses authenticated `GET /requests/:requestId` to recover the same saved setup.
-An unresolved request blocks another creation. Even after a missing lookup, an
-explicit Save retains the same request ID so a slow previous request cannot
-produce a second operation. No draft body, contact, amount, approval or token is
-stored in this recovery record.
+An unresolved request blocks another creation. After an authoritative missing lookup,
+the original draft is restored for an explicit retry with the same ID and exact body.
+Edits are rejected and the original values restored. A missing, corrupt or unavailable
+tab record cannot dispatch a replacement body. Failed persistence stops before POST;
+only confirmed server readback or creation clears this recovery record. Reads never
+retry automatically. Closing the tab removes its local draft; saved server operations
+remain available through Saved setups.
 
 An explicit Open action publishes the reviewed graph, requests a fresh handoff,
 then uses the manager's current session at the existing activation endpoint.

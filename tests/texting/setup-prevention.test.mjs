@@ -82,6 +82,12 @@ function fixture(
     addEventListener: (name, fn) => listeners.set(name, fn),
   };
   globalThis.window = { confirm: () => true };
+  const tabValues = new Map();
+  globalThis.sessionStorage = {
+    getItem: (key) => tabValues.get(key),
+    setItem: (key, value) => tabValues.set(key, value),
+    removeItem: (key) => tabValues.delete(key),
+  };
   globalThis.FormData = class {
     constructor(form) {
       this.values = form.values;
@@ -125,6 +131,8 @@ function fixture(
         preventDefault() {},
       });
       await flush();
+      for (let count = 0; count < 100 && /Saving…/.test(page.render()); count++)
+        await new Promise((resolve) => setTimeout(resolve, 1));
     },
     click: async (action) => {
       listeners.get("click")({
@@ -529,7 +537,33 @@ test("reload resolves the existing creation through GET without repeating create
   assert.equal(h.oldCalls.length, 0);
 });
 
-test("a missing creation lookup retains the same request identity across an explicit Save", async (t) => {
+const originalForm = () => ({
+  name: "Neighbors",
+  audienceId: "selection-one",
+  templateText: "Example Civic Team. Reply STOP.",
+  budget: "5.00",
+  start: "2099-01-01T10:00",
+  end: "2099-01-01T18:00",
+  volunteer: ["person-one"],
+});
+const originalBody = () => ({
+  requestId: "original-request",
+  name: "Neighbors",
+  audienceId: "selection-one",
+  templateText: "Example Civic Team. Reply STOP.",
+  mediaId: null,
+  budgetMicros: 5000000,
+  deliveryNotBeforeMs: new Date("2099-01-01T10:00").getTime(),
+  deliveryBeforeMs: new Date("2099-01-01T18:00").getTime(),
+  assignedUserIds: ["person-one"],
+});
+async function saveOriginalDraft() {
+  await createTextingSetupRecovery({
+    context: () => ({ userId: "actor-one", organizationId: "org-1" }),
+  }).saveDraft(originalBody());
+}
+
+test("a missing creation lookup restores and explicitly retries only the exact original body and identity", async (t) => {
   const h = fixture(t, {
     resourceId: "new",
     api: ({ path, options }) => {
@@ -540,30 +574,189 @@ test("a missing creation lookup retains the same request identity across an expl
           payload: { error: "texting_setup_request_not_found" },
         });
       assert.equal(options.body.requestId, "original-request");
+      assert.deepEqual(options.body, originalBody());
       return { setup: draft() };
     },
   });
-  const values = new Map([
-    ["polis.texting.setup.request.v1.actor-one.org-1", "original-request"],
-  ]);
-  globalThis.sessionStorage = {
-    getItem: (key) => values.get(key),
-    setItem: (key, value) => values.set(key, value),
-    removeItem: (key) => values.delete(key),
-  };
+  await saveOriginalDraft();
   await h.page.load();
-  assert.equal(values.size, 1);
-  await h.submit({
-    name: "Neighbors",
-    audienceId: "selection-one",
-    templateText: "Example Civic Team. Reply STOP.",
-    budget: "5.00",
-    start: "2099-01-01T10:00",
-    end: "2099-01-01T18:00",
-    volunteer: ["person-one"],
-  });
+  assert.match(h.page.render(), /original draft is restored/);
+  assert.match(h.page.render(), /value="2099-01-01T10:00"/);
+  assert.match(h.page.render(), /value="person-one" checked/);
+  assert.ok(h.calls.every((call) => !call.method || call.method === "GET"));
+  await h.submit({ ...originalForm(), name: "Changed draft" });
+  assert.equal(h.calls.filter((call) => call.method === "POST").length, 0);
+  assert.match(h.page.render(), /original draft has been restored/);
+  await h.submit(originalForm());
   assert.equal(h.calls.filter((call) => call.method === "POST").length, 1);
   assert.equal(h.calls.at(-1).body.requestId, "original-request");
+  assert.equal(
+    globalThis.sessionStorage.getItem(
+      "polis.texting.setup.draft.v2.actor-one.org-1",
+    ),
+    undefined,
+  );
+});
+
+test("an ID-only or corrupt pending record can read back but never submit a substituted draft", async (t) => {
+  const h = fixture(t, {
+    resourceId: "new",
+    api: ({ path }) => {
+      if (path === base) return discovery;
+      throw Object.assign(new Error("Not found"), {
+        status: 404,
+        payload: { error: "texting_setup_request_not_found" },
+      });
+    },
+  });
+  await saveOriginalDraft();
+  globalThis.sessionStorage.setItem(
+    "polis.texting.setup.draft.v2.actor-one.org-1",
+    "{broken",
+  );
+  await h.page.load();
+  assert.match(h.page.render(), /Original draft unavailable/);
+  await h.submit(originalForm());
+  assert.equal(h.calls.filter((call) => call.method === "POST").length, 0);
+  assert.equal(
+    globalThis.sessionStorage.getItem(
+      "polis.texting.setup.request.v1.actor-one.org-1",
+    ),
+    "original-request",
+  );
+});
+
+test("paused discovery and a missing request preserve the original draft without permitting a retry until enabled", async (t) => {
+  let enabled = false;
+  const h = fixture(t, {
+    resourceId: "new",
+    api: ({ path }) => {
+      if (path === base)
+        return {
+          ...discovery,
+          capabilities: { ...discovery.capabilities, createSetup: enabled },
+          setupAvailability: { state: enabled ? "enabled" : "paused" },
+        };
+      throw Object.assign(new Error("Not found"), {
+        status: 404,
+        payload: { error: "texting_setup_request_not_found" },
+      });
+    },
+  });
+  await saveOriginalDraft();
+  await h.page.load();
+  assert.match(h.page.render(), /New campaign setup is paused/);
+  await h.submit(originalForm());
+  assert.equal(h.calls.filter((call) => call.method === "POST").length, 0);
+  enabled = true;
+  await h.page.load({ force: true });
+  assert.match(h.page.render(), /value="Neighbors"/);
+  assert.match(h.page.render(), /Retry same saved draft/);
+  assert.equal(
+    globalThis.sessionStorage.getItem(
+      "polis.texting.setup.request.v1.actor-one.org-1",
+    ),
+    "original-request",
+  );
+});
+
+test("storage write or exact readback failure prevents dispatch and keeps the same identity guard", async (t) => {
+  const h = fixture(t, { resourceId: "new" });
+  await h.page.load();
+  const saved = new Map();
+  globalThis.sessionStorage = {
+    getItem: (key) => saved.get(key),
+    setItem: (key, value) => {
+      if (key.includes("draft.v2")) throw new Error("quota");
+      saved.set(key, value);
+    },
+    removeItem() {},
+  };
+  await h.submit(originalForm());
+  assert.equal(h.calls.filter((call) => call.method === "POST").length, 0);
+  assert.match(h.page.render(), /No creation request was sent/);
+  assert.equal(saved.size, 1);
+});
+
+test("pending draft fingerprint and scope binding reject corruption and another actor without dispatch", async () => {
+  const values = new Map();
+  let actor = "actor-one";
+  const recovery = createTextingSetupRecovery({
+    context: () => ({ userId: actor, organizationId: "org-1" }),
+    storage: () => ({
+      getItem: (key) => values.get(key),
+      setItem: (key, value) => values.set(key, value),
+      removeItem: (key) => values.delete(key),
+    }),
+    location: () => null,
+  });
+  await recovery.saveDraft(originalBody());
+  const key = "polis.texting.setup.draft.v2.actor-one.org-1",
+    raw = values.get(key);
+  assert.equal(JSON.parse(raw).fingerprint.length, 64);
+  actor = "actor-two";
+  assert.equal(recovery.read(), null);
+  assert.equal(await recovery.readDraft("original-request"), null);
+  values.set(key.replace("actor-one", "actor-two"), raw);
+  await assert.rejects(recovery.readDraft("original-request"), /draft_invalid/);
+  actor = "actor-one";
+  values.set(key, raw.replace("Neighbors", "Edited draft"));
+  await assert.rejects(recovery.readDraft("original-request"), /draft_invalid/);
+});
+
+test("a storage backend that silently drops the draft fails exact readback before any POST", async () => {
+  const values = new Map();
+  const recovery = createTextingSetupRecovery({
+    context: () => ({ userId: "actor-one", organizationId: "org-1" }),
+    storage: () => ({
+      getItem: (key) => values.get(key),
+      setItem: (key, value) => {
+        if (!key.includes("draft.v2")) values.set(key, value);
+      },
+    }),
+    location: () => null,
+  });
+  await assert.rejects(recovery.saveDraft(originalBody()), /storage_required/);
+  assert.equal(recovery.read(), "original-request");
+});
+
+test("the self-contained envelope retains identity if its opaque index disappears; index persistence still must verify before POST", async () => {
+  const values = new Map(),
+    storage = {
+      getItem: (key) => values.get(key),
+      setItem: (key, value) => values.set(key, value),
+    };
+  const recovery = createTextingSetupRecovery({
+    context: () => ({ userId: "actor-one", organizationId: "org-1" }),
+    storage: () => storage,
+    location: () => null,
+  });
+  await recovery.saveDraft(originalBody());
+  values.delete("polis.texting.setup.request.v1.actor-one.org-1");
+  assert.equal(recovery.read(), "original-request");
+  assert.deepEqual(
+    await recovery.readDraft("original-request"),
+    originalBody(),
+  );
+  storage.setItem = (key, value) => {
+    if (key.includes("draft.v2")) values.set(key, value);
+  };
+  await assert.rejects(recovery.saveDraft(originalBody()), /storage_required/);
+});
+
+test("an actor switch during durable draft hashing cannot dispatch or persist into another actor scope", async (t) => {
+  const h = fixture(t, { resourceId: "new" });
+  await h.page.load();
+  const pending = h.submit(originalForm());
+  h.actor("actor-two");
+  await pending;
+  assert.equal(h.calls.filter((call) => call.method === "POST").length, 0);
+  assert.equal(
+    globalThis.sessionStorage.getItem(
+      "polis.texting.setup.draft.v2.actor-two.org-1",
+    ),
+    undefined,
+  );
 });
 
 test("actual backend-generated publication DTO preserves the fixed legacy revision across a lost activation response", async (t) => {
