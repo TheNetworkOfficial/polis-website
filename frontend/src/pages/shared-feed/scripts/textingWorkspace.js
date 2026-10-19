@@ -35,6 +35,7 @@ export function createTextingWorkspacePage({
   changed,
   navigate,
   openBallotChaser,
+  setupEntry,
 }) {
   let view = {},
     sequence = 0,
@@ -296,6 +297,7 @@ export function createTextingWorkspacePage({
       can,
       view: () => view,
       workspace: () => view.workspace,
+      setupEntry,
       billing: () => view.billing,
       busy: () => view.busy === true || view.allocationExited === true,
       changed: () => {

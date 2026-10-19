@@ -1,6 +1,18 @@
 // Only this preflight boundary can establish that a request was never dispatched.
 // A server response or network error cannot assert this client-local evidence.
 const undispatched = new WeakSet();
+/** Independent read-only setup discovery and workspace requests share one refresh result. */
+export function createTextingSessionRestorer(restoreSession) {
+  let pending;
+  return () => {
+    pending ||= Promise.resolve()
+      .then(restoreSession)
+      .finally(() => {
+        pending = null;
+      });
+    return pending;
+  };
+}
 export const textingRequestWasNotDispatched = (error) =>
   error instanceof Error && undispatched.has(error);
 

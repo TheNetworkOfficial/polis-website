@@ -45,6 +45,7 @@ import {
 import { createTextingBalancePage } from "./scripts/textingBalance.js";
 import { createTextingSetupPage } from "./scripts/textingSetup.js";
 import { createTextingSetupTransport } from "./scripts/textingSetupTransport.js";
+import { createTextingSetupEntry } from "./scripts/textingSetupEntry.js";
 import { createTextingIntakePage } from "./scripts/textingIntake.js";
 import { createTextingWorkspacePage } from "./scripts/textingWorkspace.js";
 import { createOrganizationPeoplePage } from "./scripts/organizationPeople.js";
@@ -88,6 +89,7 @@ installOrganizationPersonFields({
 });
 import {
   createTextingSessionRequest,
+  createTextingSessionRestorer,
   createTextingExitRequest,
 } from "./scripts/textingSession.js";
 import {
@@ -109,11 +111,13 @@ import {
 const runtimeConfig =
   window.__POLIS_WEB_APP__ || window.__POLIS_SHARED_FEED__ || {};
 const root = document.getElementById("shared-feed-app");
+const restoreTextingSession = createTextingSessionRestorer(() =>
+  restoreSharedFeedSession(state.auth.config, { clearOnFailure: false }),
+);
 const textingRequest = createTextingSessionRequest({
   request: fetchJson,
   getSession: () => state.auth.session,
-  restoreSession: () =>
-    restoreSharedFeedSession(state.auth.config, { clearOnFailure: false }),
+  restoreSession: restoreTextingSession,
   saveSession: (session) => {
     state.auth.session = session;
     state.auth.user = getAuthenticatedUser(session);
@@ -127,14 +131,18 @@ const textingSetupRequest = createTextingSessionRequest({
       buildAuthorizedHeaders(state.auth.session, {}, { requestPath: path }),
   }),
   getSession: () => state.auth.session,
-  restoreSession: () =>
-    restoreSharedFeedSession(state.auth.config, { clearOnFailure: false }),
+  restoreSession: restoreTextingSession,
   saveSession: (session) => {
     state.auth.session = session;
     state.auth.user = getAuthenticatedUser(session);
   },
   userId: (session) => getAuthenticatedUser(session)?.userId || "",
   contextKey: getCurrentPathWithQuery,
+});
+const textingSetupEntry = createTextingSetupEntry({
+  request: textingSetupRequest,
+  context: currentTextingContext,
+  changed: scheduleRender,
 });
 let pendingBallotTerritories = null;
 const territoryDevelopment = createTerritoryDevelopmentAccess({
@@ -252,13 +260,17 @@ const textingSetupPage = createTextingSetupPage({
   legacyRequest: textingRequest,
   context: () => {
     const current = currentTextingContext();
-    return current?.section === "setup" ? current : null;
+    return current?.section === "setup" &&
+      (current.scopeType || "coalition") === "coalition"
+      ? current
+      : null;
   },
   changed: scheduleRender,
   navigate: navigateTexting,
 });
 const textingWorkspacePage = createTextingWorkspacePage({
   request: textingRequest,
+  setupEntry: textingSetupEntry.getState,
   requestExit: createTextingExitRequest({
     request: fetchJsonRaw,
     getSession: () => state.auth.session,
@@ -6961,6 +6973,7 @@ function renderCurrentTextingPage() {
     manageBilling: shellAccess.manageBilling === true,
     readContactBook: shellAccess.readContactBook === true,
     recovery: shellAccess.recovery === true,
+    setupAvailable: shellAccess.setup === true,
     userName:
       user?.displayName || user?.username || user?.name || "Your account",
     logoUrl: resolveSharedAssetUrl(polisLogoUrl),
@@ -63384,6 +63397,7 @@ async function loadCurrentRoute({ refresh = false } = {}) {
   state.renderError = "";
   const texting = currentTextingContext();
   if (!texting || !state.auth.session) {
+    textingSetupEntry.reset();
     textingShellAccess.reset();
     textingBalancePage.reset();
     textingIntakePage.reset();
@@ -63636,6 +63650,11 @@ async function loadCurrentRoute({ refresh = false } = {}) {
     return;
   }
   if (routeKey === ROUTE_KEY_ORGANIZATION_TEXTING) {
+    if (
+      currentTextingContext()?.section === "campaigns" &&
+      !currentTextingContext()?.resourceId
+    )
+      void textingSetupEntry.load();
     await (
       currentTextingContext()?.section === "setup"
         ? textingSetupPage

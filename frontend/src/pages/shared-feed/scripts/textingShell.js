@@ -96,7 +96,13 @@ export function createTextingShellAccess() {
       actor = "";
       permissions = {};
     },
-    read({ userId, organizationId, authorizationStatus, capabilities }) {
+    read({
+      userId,
+      organizationId,
+      scopeType = "coalition",
+      authorizationStatus,
+      capabilities,
+    }) {
       const key = userId && organizationId ? `${userId}:${organizationId}` : "";
       if (!key || key !== actor) {
         actor = key;
@@ -108,6 +114,10 @@ export function createTextingShellAccess() {
           readContactBook: capabilities?.readContactBook === true,
           manageBilling: capabilities?.manageBilling === true,
           recovery: capabilities?.recovery === true,
+          setup:
+            scopeType === "coalition" &&
+            (capabilities?.isolatedSetup === true ||
+              capabilities?.createCampaigns === true),
         };
       return { ...permissions };
     },
@@ -124,6 +134,7 @@ export function renderTextingShell({
   manageBilling = false,
   readContactBook = false,
   recovery = false,
+  setupAvailable = false,
 }) {
   const setup = section === "registration";
   const active =
@@ -139,6 +150,7 @@ export function renderTextingShell({
       : [
           "home",
           "campaigns",
+          ...(setupAvailable ? ["setup"] : []),
           "contacts",
           "inbox",
           "recovery",
@@ -155,7 +167,7 @@ export function renderTextingShell({
     .map((key) =>
       link(
         textingRoute(organizationId, key),
-        `${textingIcon(key)}<span>${key[0].toUpperCase() + key.slice(1)}</span>`,
+        `${textingIcon(key)}<span>${key === "setup" ? "Saved setups" : key[0].toUpperCase() + key.slice(1)}</span>`,
         `class="pt-nav-item${active === key ? " is-active" : ""}" ${active === key ? 'aria-current="page"' : ""}`,
       ),
     )

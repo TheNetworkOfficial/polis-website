@@ -1,0 +1,65 @@
+{
+  "ok": true,
+  "setup": {
+    "setupId": "generated_3",
+    "campaignId": "generated_4",
+    "runtimeVersion": "setup1",
+    "policyVersion": "setup1",
+    "fingerprint": "165f09b9bc43d05d5218bb3b8eb0b7e7d2489beb4fb632c2841637d538821380",
+    "revision": 11,
+    "epoch": 2,
+    "state": "published",
+    "phase": "continue_opening",
+    "progress": {
+      "selected": 2,
+      "submitted": 2,
+      "verified": 2
+    },
+    "updatedAtMs": 1792350036000,
+    "createdAtMs": 1792350028000,
+    "errorCode": null,
+    "owner": {
+      "isCurrentUser": true
+    },
+    "draft": {
+      "name": "Fixture outreach",
+      "audienceId": "book_sel_5d7642cc69080cf161bddfd3b46d",
+      "templateText": "Hello from Example. Reply STOP to opt out.",
+      "mediaId": null,
+      "deliveryNotBeforeMs": 1792350027000,
+      "deliveryBeforeMs": 1792436428000,
+      "deliverySchedule": null,
+      "assignedUserIds": [
+        "manager"
+      ],
+      "budgetMicros": 100000
+    },
+    "canPrepare": false,
+    "canResume": false,
+    "canReconcile": false,
+    "canTakeover": false,
+    "canPublish": false,
+    "readinessContractVersion": 1,
+    "readiness": {
+      "setupBlockedReasons": []
+    },
+    "purchaseReadiness": null,
+    "sendingReadiness": null,
+    "handoff": {
+      "state": "pending",
+      "campaignId": "generated_4",
+      "expectedRevision": 2,
+      "activationRequestId": "8b1e3d0192fe8b55f01921c1dcb2974ab7f9614584228c42c9974c8362f9caa5",
+      "fingerprint": "9441d0693edcbacd3965843ee5244385431d0f2bcf82bc67fb5b6c73a8d978e4",
+      "action": {
+        "method": "POST",
+        "path": "/api/text-banking/prompt/scopes/coalition%3Afictional/campaigns/generated_4/transition",
+        "body": {
+          "expectedRevision": 2,
+          "action": "activate"
+        }
+      }
+    },
+    "navigationPath": "/organizations/fictional/texting/send/generated_4"
+  }
+}

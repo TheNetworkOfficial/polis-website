@@ -176,6 +176,45 @@ test("failed assignment write keeps removed rows and selections, then reconciles
   assert.deepEqual(view.campaigns.selected, new Set(["b", "c", "d"]));
   assert.equal(view.campaigns.campaign.revision, 11);
   assert.equal(view.campaigns.assignmentsNeedRead, false);
+  assert.doesNotMatch(page.render("team"), /Continue to campaign review/);
+});
+
+test("a lost assignment response that committed is read back into a visible saved team without another write", async () => {
+  const campaign = {
+    campaignId: "campaign",
+    name: "Example",
+    revision: 2,
+    assignedUserIds: ["before"],
+  };
+  const view = { campaigns: { campaign, selected: new Set(["after"]) } },
+    calls = [];
+  const page = createCampaigns({
+    view: () => view,
+    context: () => ({ resourceId: "campaign" }),
+    can: () => true,
+    busy: () => false,
+    changed() {},
+    toast() {},
+    api: async (path, body) => {
+      calls.push({ path, body });
+      if (body) throw new Error("Response lost");
+      if (path.includes("/team?"))
+        return {
+          campaignId: "campaign",
+          campaignRevision: 3,
+          members: [{ userId: "after", displayName: "Helena Example" }],
+          nextCursor: null,
+        };
+      return {
+        campaign: { ...campaign, revision: 3, assignedUserIds: ["after"] },
+      };
+    },
+  });
+  await assert.rejects(page.action("assignments-save"), /Response lost/);
+  await page.action("assignments-refresh");
+  assert.match(page.render("team"), /Saved team · 1 volunteer assigned/);
+  assert.match(page.render("team"), /Continue to campaign review/);
+  assert.equal(calls.filter((call) => call.body).length, 1);
 });
 
 test("saved and unchanged teams confirm inline and continue only to campaign review", async () => {

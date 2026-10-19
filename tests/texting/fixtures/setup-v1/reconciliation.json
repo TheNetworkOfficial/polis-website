@@ -1,0 +1,51 @@
+{
+  "ok": true,
+  "setup": {
+    "setupId": "generated_3",
+    "campaignId": "generated_4",
+    "runtimeVersion": "setup1",
+    "policyVersion": "setup1",
+    "fingerprint": "0127a4d7cbecde9aecde4efee7b3ee48e5913eef7256eeced44b7f8dc5dd87c5",
+    "revision": 30,
+    "epoch": 2,
+    "state": "reconciliation_required",
+    "phase": "provider_transfer",
+    "progress": {
+      "selected": 2,
+      "submitted": 0,
+      "verified": 0
+    },
+    "updatedAtMs": 1792350028000,
+    "createdAtMs": 1792350000000,
+    "errorCode": "prompt_provider_records_not_ready",
+    "owner": {
+      "isCurrentUser": true
+    },
+    "draft": {
+      "name": "Fixture outreach",
+      "audienceId": "book_sel_5d7642cc69080cf161bddfd3b46d",
+      "templateText": "Hello from Example. Reply STOP to opt out.",
+      "mediaId": null,
+      "deliveryNotBeforeMs": 1792349999000,
+      "deliveryBeforeMs": 1792436400000,
+      "deliverySchedule": null,
+      "assignedUserIds": [
+        "manager"
+      ],
+      "budgetMicros": 100000
+    },
+    "canPrepare": false,
+    "canResume": false,
+    "canReconcile": true,
+    "canTakeover": false,
+    "canPublish": false,
+    "readinessContractVersion": 1,
+    "readiness": {
+      "setupBlockedReasons": []
+    },
+    "purchaseReadiness": null,
+    "sendingReadiness": null,
+    "handoff": null,
+    "navigationPath": "/organizations/fictional/texting/send/generated_4"
+  }
+}

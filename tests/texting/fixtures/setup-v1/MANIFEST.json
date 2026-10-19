@@ -1,0 +1,66 @@
+{
+  "schema": "POLIS_SYNTHETIC_SETUP_CONTRACT_FIXTURES_V1",
+  "syntheticOnly": true,
+  "productionCalls": 0,
+  "source": "D:/CodexHome/worktrees/texting-completion-20261019/polis_backend",
+  "records": [
+    {
+      "label": "enabled",
+      "file": "enabled.json",
+      "sha256": "02236cdbc0cc0212696826520bc83f5dedcfc6c664f3c265816afaf0813eff6e"
+    },
+    {
+      "label": "paused",
+      "file": "paused.json",
+      "sha256": "7e4ea01819682b8198e55e3438c16ce8fdbb25fa12e763fe7f5d28d04f2c6ed4"
+    },
+    {
+      "label": "unsupported",
+      "file": "unsupported.json",
+      "sha256": "5e433d29da7eef87ed93530a213e53f55a0b5d85346e8904a8294c64b3900f7e"
+    },
+    {
+      "label": "unavailable",
+      "file": "unavailable.json",
+      "sha256": "f9ff71d61c610035e090f69def78fcdc3f9b1a96c2dff4c6a34875648e94a6a9"
+    },
+    {
+      "label": "draft",
+      "file": "draft.json",
+      "sha256": "3e1222cdaa9796a5126613cfd3ab3070840b52bd0e5f558e8d3f33a0f3426a73"
+    },
+    {
+      "label": "reconciliation",
+      "file": "reconciliation.json",
+      "sha256": "d47543fdc0a0c148365d3b66e9a1d8a1b4588dc85600f9c85d4bc8910535afba"
+    },
+    {
+      "label": "published",
+      "file": "published.json",
+      "sha256": "db731db9521596079f664c940da65dd275b060d9cc11d92a8178d8e928c7507b"
+    },
+    {
+      "label": "complete-handoff",
+      "file": "complete-handoff.json",
+      "sha256": "1c1ae9c68238a34097f4210ff8b531e4a2811a8346ed006b4da3b9539ea7a309"
+    }
+  ],
+  "files": [
+    {
+      "file": "promptSetupService.js",
+      "sha256": "1e8058f0edda1716894f6efd5dd59c5b784ff1b129f5ffe3f20136251775be72"
+    },
+    {
+      "file": "promptSetupApi.js",
+      "sha256": "0ea7168e6e5cbe7cbb6f9654f396cca207c7ed826d432c2d27a799b69d46b549"
+    },
+    {
+      "file": "promptSetupAdapter.js",
+      "sha256": "6716ed6566e290f15a51fc32155d18625a9c3a72bd1b07432fd2c4fd20d3e46a"
+    },
+    {
+      "file": "promptSetupRuntime.js",
+      "sha256": "1d333c99b12b6b2d04497a38312fff60c4d563f540b3b71060c076662714fd59"
+    }
+  ]
+}

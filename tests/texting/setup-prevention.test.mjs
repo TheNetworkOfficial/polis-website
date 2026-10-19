@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { moduleUrl } from "./module-fixture.mjs";
 
 const { createTextingSetupPage } = await import(
@@ -63,6 +65,7 @@ function fixture(
     resourceId = "setup-one",
     capabilities = discovery.capabilities,
     legacy,
+    organizationId = "org-1",
   } = {},
 ) {
   const original = {
@@ -94,7 +97,7 @@ function fixture(
   let actor = "actor-one",
     saved = structuredClone(setup);
   const page = createTextingSetupPage({
-    context: () => ({ userId: actor, organizationId: "org-1", resourceId }),
+    context: () => ({ userId: actor, organizationId, resourceId }),
     changed() {},
     navigate: (...args) => navigation.push(args),
     schedule: () => 1,
@@ -166,6 +169,41 @@ test("setup config pins the dedicated HTTPS API and disabled config sends no cre
     /setup_route_invalid/,
   );
   assert.equal(calls.length, 1);
+});
+
+test("paused admissions keep paginated saved setups readable without creating or replaying an operation", async (t) => {
+  const saved = (setupId, name) => ({
+    ...draft(),
+    setupId,
+    draft: { name, templateText: "Example Civic Team. Reply STOP." },
+  });
+  const h = fixture(t, {
+    resourceId: "",
+    api: async ({ path }) => ({
+      ...discovery,
+      capabilities: { ...discovery.capabilities, createSetup: false },
+      setupAvailability: {
+        state: "paused",
+        supportedWorkflowTypes: ["contact_book_single"],
+      },
+      setups: path.includes("?cursor=")
+        ? [saved("older", "Older saved preparation")]
+        : [saved("recent", "Recent saved preparation")],
+      nextCursor: path.includes("?cursor=") ? null : "signed.cursor-value",
+    }),
+  });
+  await h.page.load();
+  assert.match(h.page.render(), /New campaign setup is paused/);
+  assert.match(h.page.render(), /Load more saved setups/);
+  await h.click("more");
+  assert.match(h.page.render(), /Recent saved preparation/);
+  assert.match(h.page.render(), /Older saved preparation/);
+  assert.doesNotMatch(h.page.render(), /Load more saved setups/);
+  assert.ok(
+    h.calls.some((call) => call.path === `${base}?cursor=signed.cursor-value`),
+  );
+  assert.ok(h.calls.every((call) => !call.method || call.method === "GET"));
+  assert.equal(h.oldCalls.length, 0);
 });
 
 test("setup transport sends credentials only to the pinned setup path and never follows redirects", async () => {
@@ -526,4 +564,44 @@ test("a missing creation lookup retains the same request identity across an expl
   });
   assert.equal(h.calls.filter((call) => call.method === "POST").length, 1);
   assert.equal(h.calls.at(-1).body.requestId, "original-request");
+});
+
+test("actual backend-generated publication DTO preserves the fixed legacy revision across a lost activation response", async (t) => {
+  const folder = new URL("./fixtures/setup-v1/", import.meta.url);
+  const manifest = JSON.parse(
+    await readFile(new URL("MANIFEST.json", folder), "utf8"),
+  );
+  const fixtures = {};
+  for (const record of manifest.records) {
+    const raw = await readFile(new URL(record.file, folder));
+    assert.equal(createHash("sha256").update(raw).digest("hex"), record.sha256);
+    fixtures[record.label] = JSON.parse(raw);
+  }
+  const published = fixtures.published.setup;
+  let complete = false;
+  const h = fixture(t, {
+    organizationId: "fictional",
+    resourceId: published.setupId,
+    api: async ({ path }) =>
+      path.endsWith("/fictional")
+        ? fixtures.enabled
+        : complete
+          ? fixtures["complete-handoff"]
+          : fixtures.published,
+    legacy: async () => {
+      throw new Error("response lost after acceptance");
+    },
+  });
+  await h.page.load();
+  assert.match(h.page.render(), /Continue opening/);
+  assert.doesNotMatch(h.page.render(), /Status unavailable/);
+  await h.click("open");
+  assert.equal(h.oldCalls.length, 1);
+  assert.deepEqual(h.oldCalls[0].body, published.handoff.action.body);
+  assert.notEqual(h.oldCalls[0].body.expectedRevision, published.revision);
+  assert.match(h.page.render(), /Check the saved result/);
+  complete = true;
+  await h.page.refresh();
+  assert.match(h.page.render(), /Start texting/);
+  assert.equal(h.oldCalls.length, 1);
 });

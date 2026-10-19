@@ -241,6 +241,53 @@ export function createTextingSetupPage({
       }
     }
   }
+  async function more() {
+    const cursor = view.discovery?.nextCursor;
+    if (
+      view.busy ||
+      view.loading ||
+      view.setup ||
+      typeof cursor !== "string" ||
+      cursor.length > 4096 ||
+      !/^[A-Za-z0-9_.-]+$/.test(cursor)
+    )
+      return;
+    const key = view.key,
+      ticket = sequence;
+    view.busy = true;
+    changed();
+    try {
+      const result = await send(
+        `${base()}?cursor=${encodeURIComponent(cursor)}`,
+        { auth: true },
+      );
+      guard(key, ticket);
+      const saved = new Map(
+        rows(view.discovery.setups).map((item) => [item.setupId, item]),
+      );
+      for (const item of rows(result.setups))
+        if (validId(item.setupId)) saved.set(item.setupId, item);
+      view.discovery = {
+        ...view.discovery,
+        ...result,
+        setups: [...saved.values()],
+      };
+      view.error = "";
+    } catch (error) {
+      if (current(key, ticket)) {
+        view.error = setupError(error);
+        if ([401, 403].includes(error.status)) {
+          view.discovery = null;
+          view.denied = true;
+        }
+      }
+    } finally {
+      if (current(key, ticket)) {
+        view.busy = false;
+        changed();
+      }
+    }
+  }
   async function act(action) {
     if (view.busy || view.loading || !view.setup || view.uncertain) return;
     const permissions = {
@@ -425,6 +472,14 @@ export function createTextingSetupPage({
   }
   function readiness(value) {
     return Object.entries(value || {})
+      .filter(
+        ([kind, status]) =>
+          ["purchase", "sending", "preparation", "volunteerAccess"].includes(
+            kind,
+          ) &&
+          status &&
+          typeof status === "object",
+      )
       .map(
         ([kind, status]) =>
           `<section><h3>${e({ purchase: "Purchasing", sending: "Sending", preparation: "Recipient preparation", volunteerAccess: "Volunteer access" }[kind] || "Setup")}</h3><p>${e({ ready: "Ready", blocked: "Needs attention", pending: "In progress", unavailable: "Status unavailable" }[status.state] || "Status unavailable")}</p>${rows(
@@ -464,7 +519,7 @@ export function createTextingSetupPage({
     if (!identity()) return notice("Sign in to your organization to continue.");
     if (view.key !== identity() || view.loading)
       return notice("Loading campaign setup…");
-    const fallback = `<a class="pt-btn pt-btn--secondary" href="${e(textingRoute(context().organizationId, "campaigns"))}" data-action="navigate" data-route="${e(textingRoute(context().organizationId, "campaigns"))}">Existing campaigns</a>`;
+    const fallback = `<a class="pt-btn pt-btn--secondary" href="${e(textingRoute(context().organizationId, "campaigns"))}" data-action="navigate" data-route="${e(textingRoute(context().organizationId, "campaigns"))}">Existing campaigns</a>${!view.setup && !view.creationPending && ["enabled", "unsupported"].includes(view.discovery?.setupAvailability?.state) ? `<a class="pt-btn pt-btn--secondary" href="${e(textingRoute(context().organizationId, "campaigns", "new"))}" data-action="navigate" data-route="${e(textingRoute(context().organizationId, "campaigns", "new"))}">Other campaign types</a>` : ""}`;
     let html = `<header class="pt-page-head"><div><div class="pt-eyebrow">CAMPAIGN SETUP</div><h1>Prepare your next conversation</h1><p>Saved setup is separate from campaigns already texting.</p></div>${fallback}</header>${view.error ? `<div role="alert">${notice(view.error)}</div>` : ""}${button("refresh", view.setup ? "Check setup status" : "Check saved setups")}`;
     if (!view.discovery || view.denied) return html;
     const s = view.setup;
@@ -500,12 +555,20 @@ export function createTextingSetupPage({
           `<section class="pt-card"><h2>${e(item.name || item.draft?.name || "Saved campaign setup")}</h2><p>${e(stateCopy[item.state]?.[0] || "Saved setup")}</p><a class="pt-btn" href="${e(textingRoute(context().organizationId, "setup", item.setupId))}" data-action="navigate" data-route="${e(textingRoute(context().organizationId, "setup", item.setupId))}">Continue saved setup</a></section>`,
       )
       .join("");
+    if (
+      typeof view.discovery.nextCursor === "string" &&
+      view.discovery.nextCursor.length <= 4096 &&
+      /^[A-Za-z0-9_.-]+$/.test(view.discovery.nextCursor)
+    )
+      html += button("more", "Load more saved setups");
     if (view.discovery.capabilities.createSetup !== true)
       return (
         html +
         notice(
-          "New setup is not enabled",
-          "Existing campaigns and saved setup remain available.",
+          view.discovery.setupAvailability?.state === "paused"
+            ? "New campaign setup is paused"
+            : "New setup is not enabled",
+          "Continue your saved setups or check their status. Existing campaigns remain available.",
         )
       );
     if (view.discovery.capabilities.manageBilling !== true)
@@ -545,6 +608,7 @@ export function createTextingSetupPage({
     const target = event.target.closest?.("[data-setup-action]");
     if (!target || target.disabled || identity() !== view.key) return;
     if (target.dataset.setupAction === "refresh") void refresh();
+    else if (target.dataset.setupAction === "more") void more();
     else void act(target.dataset.setupAction);
   });
   document.addEventListener("submit", (event) => {
