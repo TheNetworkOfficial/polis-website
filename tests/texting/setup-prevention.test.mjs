@@ -12,9 +12,8 @@ const {
   textingSetupActivation,
   textingSetupApiBase,
 } = await import(await moduleUrl("textingSetupTransport"));
-const { textingPurchaseStatus, textingPurchaseBlockers } = await import(
-  await moduleUrl("textingReadinessStatus")
-);
+const { textingPurchaseStatus, textingPurchaseBlockers, textingBlocker } =
+  await import(await moduleUrl("textingReadinessStatus"));
 const { renderTextingRenewals } = await import(
   await moduleUrl("textingRenewals")
 );
@@ -22,6 +21,32 @@ const { createTextingSetupRecovery } = await import(
   await moduleUrl("textingSetupRecovery")
 );
 const base = "/api/texting/setup/coalition/org-1";
+
+test("ordinary setup guidance names its manager without becoming a legacy purchase blocker", () => {
+  const setupCodes = [
+    "open_campaign_required",
+    "audience_not_prepared",
+    "content_not_prepared",
+    "delivery_window_expired",
+  ];
+  for (const code of setupCodes) {
+    const issue = textingBlocker(code);
+    assert.equal(issue.code, code);
+    assert.equal(issue.owner, "Campaign manager");
+    assert.notEqual(issue.nextAction, "check-status");
+  }
+  const admin = textingBlocker("organization_admin_required");
+  assert.equal(admin.owner, "Organization administrator");
+  const purchase = textingPurchaseBlockers({
+    blockedReasons: [...setupCodes, "organization_admin_required"],
+  });
+  assert.deepEqual(purchase, [admin]);
+  assert.equal(
+    textingBlocker("unrecognized_requirement").owner,
+    "Polis support",
+  );
+});
+
 const discovery = {
   capabilities: { isolatedSetup: true, createSetup: true, manageBilling: true },
   setups: [],

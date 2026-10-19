@@ -119,6 +119,31 @@ const blockers = {
     "Campaign manager",
     "team",
   ],
+  open_campaign_required: [
+    "Review and open the prepared campaign before volunteers can text.",
+    "Campaign manager",
+    "campaign",
+  ],
+  audience_not_prepared: [
+    "Prepare the saved recipients and message.",
+    "Campaign manager",
+    "prepare",
+  ],
+  content_not_prepared: [
+    "Prepare the saved recipients and message.",
+    "Campaign manager",
+    "prepare",
+  ],
+  delivery_window_expired: [
+    "The saved delivery window has ended. Review the campaign timing.",
+    "Campaign manager",
+    "campaign",
+  ],
+  organization_admin_required: [
+    "An organization administrator with billing access must review this step.",
+    "Organization administrator",
+    "billing-details",
+  ],
 };
 
 /** Display only known customer guidance; server capabilities still authorize every action. */
@@ -148,6 +173,10 @@ export function textingPurchaseBlockers(billing) {
             "provider_funding_required",
             "volunteer_assignment_required",
             "operator_assignment_required",
+            "open_campaign_required",
+            "audience_not_prepared",
+            "content_not_prepared",
+            "delivery_window_expired",
           ].includes(code),
       );
   return reasons.length ? reasons.map(textingBlocker) : [textingBlocker(null)];
