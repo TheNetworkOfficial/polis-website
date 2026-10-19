@@ -46,6 +46,7 @@ import { createCampaignDraftStore } from "./textingCampaignDraft";
 import { createTextingBallotRecipients } from "./textingBallotRecipients";
 import { createTextingCompletion } from "./textingCompletion";
 import { createVolunteerPicker } from "./textingVolunteerPicker";
+import { renderTextingSetupEntry } from "./textingSetupEntry";
 import { createRecipientOutcomes } from "./textingRecipientOutcomes";
 import { createRecipientBatches } from "./textingRecipientBatches";
 import { createCampaignManagement } from "./textingCampaignManagement";
@@ -163,6 +164,8 @@ export function createCampaigns(r) {
       if (section === "campaigns") preparation.observe(s.campaign);
       s.draft = { ...s.campaign };
       s.selected = new Set(list(s.campaign.assignedUserIds));
+      if (section === "team")
+        s.teamSaved = `Saved team · ${count(s.selected.size)} ${s.selected.size === 1 ? "volunteer" : "volunteers"} assigned`;
       if (s.campaign.mediaId)
         s.media = (
           await r.api(
@@ -434,23 +437,30 @@ export function createCampaigns(r) {
           : "")
       );
     }
-    if (!resource)
+    if (!resource) {
+      const entry =
+        r.can("createCampaigns") &&
+        (r.context().scopeType || "coalition") === "coalition"
+          ? renderTextingSetupEntry(r.setupEntry?.())
+          : null;
       return (
         head(
           "CAMPAIGNS",
           "Make the next connection",
           "One message at a time.",
-          r.can("createCampaigns") && r.can("manageBilling")
-            ? go("campaigns", "New campaign", "new")
-            : "",
+          entry?.action ||
+            (r.can("createCampaigns")
+              ? go("campaigns", "New campaign", "new")
+              : ""),
         ) +
+        (entry?.content || "") +
         campaignViews(s) +
         listCards(s)
       );
+    }
     if (s.addingRecipients) return additions.render();
     if (resource === "new" || s.editing)
-      return r.can("createCampaigns") &&
-        (resource !== "new" || r.can("manageBilling"))
+      return r.can("createCampaigns")
         ? head(
             "CAMPAIGNS",
             resource === "new" ? "Start a conversation" : "Edit campaign",
@@ -524,7 +534,7 @@ export function createCampaigns(r) {
       return true;
     }
     if (kind === "campaign") {
-      if (!r.can("createCampaigns") || (!s.campaign && !r.can("manageBilling")))
+      if (!r.can("createCampaigns"))
         throw new Error("Campaign editing is restricted.");
       const draft = readDraft(form);
       if (!/\bSTOP\b/i.test(draft.templateText))
@@ -623,7 +633,7 @@ export function createCampaigns(r) {
       return true;
     }
     if (name === "campaign-next") {
-      if (!r.can("createCampaigns") || !r.can("manageBilling"))
+      if (!r.can("createCampaigns"))
         throw new Error("Campaign creation is restricted.");
       if (!recipients.hasSelection())
         throw new Error("Choose at least one contact.");
@@ -733,6 +743,11 @@ export function createCampaigns(r) {
       );
       s.assignmentsNeedRead = false;
       await volunteerPicker.loadAssigned();
+      s.teamSaved =
+        s.selected.size === saved.assignedUserIds.length &&
+        saved.assignedUserIds.every((userId) => s.selected.has(userId))
+          ? `Saved team · ${count(saved.assignedUserIds.length)} ${saved.assignedUserIds.length === 1 ? "volunteer" : "volunteers"} assigned`
+          : "";
       return true;
     }
     if (name.startsWith("transition-")) {

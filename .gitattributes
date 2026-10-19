@@ -1,1 +1,2 @@
 frontend/src/assets/text-banking/*.pdf binary
+tests/texting/fixtures/setup-v1/*.json text eol=lf

@@ -9,10 +9,52 @@ const source = await readFile(
   ),
   "utf8",
 );
-const { createTextingSessionRequest, textingRequestWasNotDispatched } =
-  await import(
-    `data:text/javascript;base64,${Buffer.from(source).toString("base64")}`
+const {
+  createTextingSessionRequest,
+  createTextingSessionRestorer,
+  textingRequestWasNotDispatched,
+} = await import(
+  `data:text/javascript;base64,${Buffer.from(source).toString("base64")}`
+);
+
+test("workspace and isolated discovery share a refreshed session object without weakening actor fences", async () => {
+  let session = { userId: "manager", token: "before" },
+    restores = 0;
+  const calls = [];
+  const restore = createTextingSessionRestorer(async () => {
+    restores++;
+    return { userId: "manager", token: "refreshed" };
+  });
+  const wrapper = () =>
+    createTextingSessionRequest({
+      request: async (path) => {
+        calls.push(path);
+        return {};
+      },
+      getSession: () => session,
+      restoreSession: restore,
+      saveSession: (next) => {
+        session = next;
+      },
+      userId: (value) => value?.userId,
+      contextKey: () => "/organizations/org/texting/campaigns",
+    });
+  const workspace = wrapper(),
+    setup = wrapper();
+  await Promise.all([
+    workspace("/workspace", { auth: true }),
+    setup("/api/texting/setup/coalition/org", { auth: true }),
+  ]);
+  assert.equal(restores, 1);
+  assert.equal(calls.length, 2);
+  assert.equal(session.token, "refreshed");
+  session = { userId: "different-manager" };
+  await assert.rejects(
+    setup("/api/texting/setup/coalition/org", { auth: true }),
+    /session could not be refreshed/,
   );
+  assert.equal(calls.length, 2);
+});
 
 test("texting refreshes an expired session once before requests without retrying a mutation", async () => {
   let session = { userId: "admin", expiresAt: 0, token: "old-test-token" },

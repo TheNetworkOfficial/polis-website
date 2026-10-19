@@ -60,6 +60,10 @@ test("team save remains visible beside Continue on a narrow page and never opens
     path: info.outputPath("team-saved-mobile.png"),
     fullPage: true,
   });
+  await page.reload();
+  await expect(page.getByTestId("texting-team-saved")).toContainText(
+    "Saved team · 1 volunteer assigned",
+  );
   await page
     .getByRole("button", { name: "Continue to campaign review", exact: true })
     .click();
@@ -92,6 +96,10 @@ test("isolated setup reviews named choices and uses only its fixed explicit acti
     calls.push({ path, method, body: request.postDataJSON() });
     if (method === "GET" && path.endsWith("org-1"))
       return json(route, {
+        setupAvailability: {
+          state: "enabled",
+          supportedWorkflowTypes: ["contact_book_single"],
+        },
         capabilities: {
           isolatedSetup: true,
           createSetup: true,
@@ -145,12 +153,15 @@ test("isolated setup reviews named choices and uses only its fixed explicit acti
       state: "handed_off",
       handoff: { state: "complete", expectedRevision: 4, action: null },
     };
-    return json(route, {
-      campaign: { campaignId: "new-campaign", revision: 5, status: "active" },
-    });
+    return route.abort("failed");
   });
   page.on("dialog", (dialog) => dialog.accept());
-  await page.goto(`${BASE}/organizations/org-1/texting/setup/new`);
+  await page.goto(`${BASE}/organizations/org-1/texting/campaigns`);
+  await expect(
+    page.getByRole("link", { name: "Saved setups", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "New campaign", exact: true }).click();
+  await expect(page).toHaveURL(/texting\/setup\/new$/);
   await page
     .getByLabel("Campaign name", { exact: true })
     .fill("Neighborhood conversations");
@@ -184,6 +195,15 @@ test("isolated setup reviews named choices and uses only its fixed explicit acti
   await expect(
     page.getByRole("region", { name: "Saved campaign setup" }),
   ).toContainText("Preparing selected recipients");
+  await page.reload();
+  await expect(
+    page.getByRole("region", { name: "Saved campaign setup" }),
+  ).toContainText("Preparing selected recipients");
+  expect(
+    calls.filter(
+      (call) => call.method === "POST" && call.path.endsWith("/prepare"),
+    ),
+  ).toHaveLength(1);
   saved = {
     ...saved,
     revision: 3,
@@ -211,6 +231,13 @@ test("isolated setup reviews named choices and uses only its fixed explicit acti
   }
   await page
     .getByRole("button", { name: "Review and open campaign", exact: true })
+    .click();
+  await expect(
+    page.getByRole("region", { name: "Saved campaign setup" }),
+  ).toContainText("Check the saved result");
+  expect(oldWrites).toHaveLength(1);
+  await page
+    .getByRole("button", { name: "Check setup status", exact: true })
     .click();
   await expect(
     page.getByRole("link", { name: "Start texting", exact: true }),
@@ -256,6 +283,10 @@ test("a reloaded lost creation resolves its opaque saved request without repeati
     });
     if (request.url() === SETUP)
       return json(route, {
+        setupAvailability: {
+          state: "enabled",
+          supportedWorkflowTypes: ["contact_book_single"],
+        },
         capabilities: {
           isolatedSetup: true,
           createSetup: true,
