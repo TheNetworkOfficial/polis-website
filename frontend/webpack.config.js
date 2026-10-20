@@ -1139,6 +1139,17 @@ module.exports = {
       sourcePath: path.resolve(__dirname, "src/_redirects"),
       filename: "_redirects",
     }),
+    ...["viewer.html", "street-view.js", "street-view.css", "config.json"].map(
+      (filename) =>
+        new StaticTextAssetPlugin({
+          sourcePath: path.resolve(
+            __dirname,
+            "src/pages/street-view-test",
+            filename,
+          ),
+          filename: `street-view-test/${filename}`,
+        }),
+    ),
     new StaticTextAssetPlugin({
       sourcePath: path.resolve(__dirname, "src/assets/fonts/Inter-LICENSE.txt"),
       filename: "assets/Inter-LICENSE.txt",
