@@ -37,6 +37,18 @@ copied, stored or proxied by Polis.
 
 ## Presentation and deployment
 
+The thumbnail implementation is integrated for the next app release. Its
+existing hosted URL remains stable so review and release builds use the same
+viewer. Ordinary app builds retain their store identity.
+
+For a full production website build, set
+`POLIS_STREET_VIEW_TILES_CONFIG_PATH` to the populated runtime JSON outside Git.
+The build checks that `tilesApiKey` contains an API key. An unset/blank
+configuration fails the build rather than replacing the working hosted viewer
+with a disabled template. The key must remain restricted to Map Tiles API and
+the approved `https://polisapp.io/*` referrer. Never commit the populated file or
+print its contents. Preserve this runtime configuration during deployments.
+
 The photo displays without cropping or distortion. Google Maps text and the exact
 copyright from metadata appear below the photo, with Google's supplied
 report-problem link at its bottom right. The constrained mobile preview uses the

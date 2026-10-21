@@ -42,9 +42,21 @@ class StaticTextAssetPlugin {
           stage: webpack.Compilation.PROCESS_ASSETS_STAGE_ADDITIONAL,
         },
         () => {
+          const contents = fs.readFileSync(this.sourcePath);
+          if (
+            this.filename === "street-view-test/tiles-config.json" &&
+            compiler.options.mode === "production"
+          ) {
+            const config = JSON.parse(contents.toString("utf8"));
+            if (!/^AIza[0-9A-Za-z_-]+$/.test(config.tilesApiKey || "")) {
+              throw new Error(
+                "House thumbnails require a populated runtime config. Set POLIS_STREET_VIEW_TILES_CONFIG_PATH before a production website build.",
+              );
+            }
+          }
           compilation.emitAsset(
             this.filename,
-            new webpack.sources.RawSource(fs.readFileSync(this.sourcePath)),
+            new webpack.sources.RawSource(contents),
           );
         },
       );
@@ -1151,11 +1163,11 @@ module.exports = {
     ].map(
       (filename) =>
         new StaticTextAssetPlugin({
-          sourcePath: path.resolve(
-            __dirname,
-            "src/pages/street-view-test",
-            filename,
-          ),
+          sourcePath:
+            filename === "tiles-config.json" &&
+            process.env.POLIS_STREET_VIEW_TILES_CONFIG_PATH
+              ? path.resolve(process.env.POLIS_STREET_VIEW_TILES_CONFIG_PATH)
+              : path.resolve(__dirname, "src/pages/street-view-test", filename),
           filename: `street-view-test/${filename}`,
         }),
     ),
