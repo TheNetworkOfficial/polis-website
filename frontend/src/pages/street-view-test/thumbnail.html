@@ -9,7 +9,10 @@
       content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' https://tile.googleapis.com; img-src https://tile.googleapis.com; object-src 'none'; base-uri 'none'; form-action 'none'"
     />
     <title>House photo | Polis</title>
-    <link rel="stylesheet" href="/street-view-test/thumbnail.css" />
+    <link
+      rel="stylesheet"
+      href="/street-view-test/thumbnail.css?v=credits-below-photo-1"
+    />
     <script src="/street-view-test/thumbnail.js" defer></script>
   </head>
   <body>
@@ -29,27 +32,31 @@
         >
       </div>
       <figure id="thumbnail-picture" class="thumbnail__picture" hidden>
-        <a
-          id="explore-thumbnail"
-          rel="noopener noreferrer"
-          aria-label="Explore this house in Google Maps Street View"
-        >
-          <img
-            id="house-thumbnail"
-            width="600"
-            height="250"
-            alt="Street View near the selected house"
-            referrerpolicy="strict-origin-when-cross-origin"
-          />
-        </a>
-        <figcaption class="thumbnail__attribution">
-          <span class="thumbnail__sources">
-            <span class="thumbnail__google">Google Maps</span>
-            <span id="thumbnail-copyright"></span>
-          </span>
-          <a id="report-thumbnail" rel="noopener noreferrer"
-            >Report a problem with this image</a
+        <div class="thumbnail__image">
+          <a
+            id="explore-thumbnail"
+            rel="noopener noreferrer"
+            aria-label="Explore this house in Google Maps Street View"
           >
+            <img
+              id="house-thumbnail"
+              width="600"
+              height="250"
+              alt="Street View near the selected house"
+              referrerpolicy="strict-origin-when-cross-origin"
+            />
+          </a>
+          <a
+            id="report-thumbnail"
+            class="thumbnail__report"
+            rel="noopener noreferrer"
+            aria-label="Report a problem with this image"
+            >Report a problem</a
+          >
+        </div>
+        <figcaption class="thumbnail__attribution">
+          <span class="thumbnail__google">Google Maps</span>
+          <span id="thumbnail-copyright"></span>
         </figcaption>
       </figure>
     </main>

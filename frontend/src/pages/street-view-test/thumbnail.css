@@ -42,12 +42,16 @@ body {
 }
 
 .thumbnail__picture {
-  position: relative;
-  width: min(100%, 600px, 240vh);
+  /* Reserve footer room in the app's short viewport without cropping the photo. */
+  width: min(100%, 600px, calc(240vh - 76.8px));
   margin: 0;
 }
 
-.thumbnail__picture > a,
+.thumbnail__image {
+  position: relative;
+}
+
+.thumbnail__image > a:first-child,
 .thumbnail__picture img {
   display: block;
   width: 100%;
@@ -59,25 +63,15 @@ body {
 }
 
 .thumbnail__attribution {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
   display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 4px 12px;
-  padding: 4px 6px;
-  background: rgb(0 0 0 / 78%);
-  color: white;
-  font-size: 10px;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  padding: 3px 6px;
+  color: #e2e6ed;
+  font-size: 11px;
   line-height: 1.35;
-}
-
-.thumbnail__sources {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
+  overflow-wrap: anywhere;
 }
 
 .thumbnail__google {
@@ -85,9 +79,15 @@ body {
   white-space: nowrap;
 }
 
-.thumbnail__attribution a {
+.thumbnail__report {
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  padding: 2px 4px;
+  background: rgb(0 0 0 / 78%);
   color: white;
-  text-align: right;
+  font-size: 10px;
+  line-height: 1.35;
 }
 
 .thumbnail__message {
