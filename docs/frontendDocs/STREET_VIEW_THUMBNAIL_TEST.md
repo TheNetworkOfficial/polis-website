@@ -13,13 +13,22 @@ restricted to this API and `https://polisapp.io/*`. Put the public key into the
 deployed `tiles-config.json` as `tilesApiKey`; leave the checked-in copy blank.
 Do not alter the existing Embed API key or `config.json`.
 
-The page makes one session POST (`mapType: streetview`, `language: en-US`,
-`region: US`), one metadata request by house coordinates with radius 40 metres,
-and at most one 600 × 250 thumbnail request. It derives the heading from that
+The page reuses a valid session or makes one session POST (`mapType: streetview`,
+`language: en-US`, `region: US`), followed by one metadata request by house
+coordinates with radius 40 metres and at most one 600 × 250 thumbnail request.
+It derives the heading from that
 metadata's camera coordinates toward the house and uses that same metadata's
 panorama ID, with pitch 0 and field of view 80. No `panoIds` or image-tile calls,
-prefetch, automatic retries, custom caches, local counters, or paid fallback are
+prefetch, automatic retries, imagery/metadata caches, local counters, or paid fallback are
 implemented. Retry is an explicit user action that reloads the page.
+
+Only the Google session token, its API key and Google's actual expiry are kept
+in one versioned localStorage record. A key mismatch, malformed record or expiry
+within five minutes triggers normal session creation. Blocked storage falls back
+to the same flow. A failed metadata request with a reused token removes only its
+matching record so manual Retry can create a fresh token. No image, panorama ID,
+house coordinates or metadata are stored. Session-token reuse is documented by
+Google; the returned expiry controls validity rather than an assumed duration.
 
 Only `https://tile.googleapis.com` is added to the page's image/connect CSP.
 Requests omit credentials and use an origin-only cross-origin referrer. Google
@@ -28,9 +37,9 @@ copied, stored or proxied by Polis.
 
 ## Presentation and deployment
 
-The photo displays without cropping or distortion. The small attribution strip
-shows Google Maps text, the exact copyright from metadata, and Google's supplied
-report-problem link at the bottom right. The constrained mobile preview uses the
+The photo displays without cropping or distortion. Google Maps text and the exact
+copyright from metadata appear below the photo, with Google's supplied
+report-problem link at its bottom right. The constrained mobile preview uses the
 text attribution allowed by Google's current policy. Tapping the photo opens a
 public Google Maps Street View URL; the Android navigation delegate must open
 that externally. Links use normal navigation so they do not need a popup window.

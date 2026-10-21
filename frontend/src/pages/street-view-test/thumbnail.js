@@ -12,6 +12,7 @@
   const copyright = document.getElementById("thumbnail-copyright");
   const report = document.getElementById("report-thumbnail");
   const tileOrigin = "https://tile.googleapis.com";
+  const sessionStorageKey = "polis.street-view.tiles-session.v1";
   let externalViewAvailable = false;
 
   function coordinate(parameters, name, limit) {
@@ -69,6 +70,59 @@
     return url;
   }
 
+  function validSessionToken(session) {
+    return (
+      typeof session === "string" &&
+      session.length > 0 &&
+      session.length <= 4096
+    );
+  }
+
+  function reusableSessionExpiry(expiry) {
+    return Number.isFinite(expiry) && expiry > Date.now() / 1000 + 300;
+  }
+
+  /** Reuse only Google's session token; never retain house data or imagery. */
+  function readSession(key) {
+    try {
+      const saved = JSON.parse(window.localStorage.getItem(sessionStorageKey));
+      if (
+        saved?.apiKey === key &&
+        validSessionToken(saved.session) &&
+        reusableSessionExpiry(saved.expiry)
+      ) {
+        return saved.session;
+      }
+    } catch {
+      // Storage can be unavailable; the normal session request still works.
+    }
+    return null;
+  }
+
+  function saveSession(key, sessionResult) {
+    const expiry = Number(sessionResult.expiry);
+    if (!reusableSessionExpiry(expiry)) return;
+    try {
+      window.localStorage.setItem(
+        sessionStorageKey,
+        JSON.stringify({ apiKey: key, session: sessionResult.session, expiry }),
+      );
+    } catch {
+      // The current page can use its fresh session without persistent storage.
+    }
+  }
+
+  function forgetSession(key, session) {
+    try {
+      const saved = JSON.parse(window.localStorage.getItem(sessionStorageKey));
+      if (saved?.apiKey === key && saved.session === session) {
+        window.localStorage.removeItem(sessionStorageKey);
+      }
+    } catch {
+      // Do not turn a provider or storage failure into an automatic retry.
+    }
+  }
+
   /** Point the thumbnail camera from its actual panorama toward the house. */
   function bearing(panorama, target) {
     const rad = (value) => (value * Math.PI) / 180;
@@ -117,35 +171,42 @@
     if (typeof key !== "string" || !/^[A-Za-z0-9_-]{20,256}$/.test(key)) {
       throw new Error("The house photo is not configured yet.");
     }
-    const sessionResult = await requestJson(
-      googleUrl("/v1/createSession", { key }),
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mapType: "streetview",
-          language: "en-US",
-          region: "US",
-        }),
-      },
-    );
-    if (
-      typeof sessionResult.session !== "string" ||
-      !sessionResult.session ||
-      sessionResult.session.length > 4096
-    ) {
-      throw new Error("House photo unavailable.");
+    const cachedSession = readSession(key);
+    let session = cachedSession;
+    if (!session) {
+      const sessionResult = await requestJson(
+        googleUrl("/v1/createSession", { key }),
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            mapType: "streetview",
+            language: "en-US",
+            region: "US",
+          }),
+        },
+      );
+      if (!validSessionToken(sessionResult.session)) {
+        throw new Error("House photo unavailable.");
+      }
+      session = sessionResult.session;
+      saveSession(key, sessionResult);
     }
-    const session = sessionResult.session;
-    const metadata = await requestJson(
-      googleUrl("/v1/streetview/metadata", {
-        session,
-        key,
-        lat: String(target.lat),
-        lng: String(target.lng),
-        radius: "40",
-      }),
-    );
+    let metadata;
+    try {
+      metadata = await requestJson(
+        googleUrl("/v1/streetview/metadata", {
+          session,
+          key,
+          lat: String(target.lat),
+          lng: String(target.lng),
+          radius: "40",
+        }),
+      );
+    } catch (error) {
+      if (cachedSession) forgetSession(key, cachedSession);
+      throw error;
+    }
     if (
       typeof metadata.panoId !== "string" ||
       !/^[A-Za-z0-9_-]{1,512}$/.test(metadata.panoId) ||
