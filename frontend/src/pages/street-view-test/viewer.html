@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-src https://www.google.com; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <title>House view | Polis</title>
+    <link rel="stylesheet" href="/street-view-test/street-view.css" />
+    <script src="/street-view-test/street-view.js" defer></script>
+  </head>
+  <body>
+    <main class="viewer">
+      <p id="viewer-status" class="viewer__status" role="status">
+        Opening house view…
+      </p>
+      <section class="viewer__surface" aria-label="Google Street View">
+        <div id="viewer-message" class="viewer__message">
+          <p id="viewer-detail">Please wait while the viewer opens.</p>
+          <button id="retry-viewer" type="button" hidden>Retry</button>
+          <a
+            id="open-google-maps"
+            href="https://www.google.com/maps"
+            target="_blank"
+            rel="noopener noreferrer"
+            hidden
+            >Open in Google Maps</a
+          >
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
