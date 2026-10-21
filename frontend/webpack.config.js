@@ -1139,7 +1139,16 @@ module.exports = {
       sourcePath: path.resolve(__dirname, "src/_redirects"),
       filename: "_redirects",
     }),
-    ...["viewer.html", "street-view.js", "street-view.css", "config.json"].map(
+    ...[
+      "viewer.html",
+      "street-view.js",
+      "street-view.css",
+      "config.json",
+      "thumbnail.html",
+      "thumbnail.js",
+      "thumbnail.css",
+      "tiles-config.json",
+    ].map(
       (filename) =>
         new StaticTextAssetPlugin({
           sourcePath: path.resolve(

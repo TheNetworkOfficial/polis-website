@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' https://tile.googleapis.com; img-src https://tile.googleapis.com; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <title>House photo | Polis</title>
+    <link rel="stylesheet" href="/street-view-test/thumbnail.css" />
+    <script src="/street-view-test/thumbnail.js" defer></script>
+  </head>
+  <body>
+    <main class="thumbnail">
+      <p id="thumbnail-status" class="thumbnail__status" role="status">
+        Opening house photo…
+      </p>
+      <div id="thumbnail-message" class="thumbnail__message">
+        <p id="thumbnail-detail">Loading house photo…</p>
+        <button id="retry-thumbnail" type="button" hidden>Retry</button>
+        <a
+          id="thumbnail-fallback"
+          href="https://www.google.com/maps"
+          rel="noopener noreferrer"
+          hidden
+          >Open in Google Maps</a
+        >
+      </div>
+      <figure id="thumbnail-picture" class="thumbnail__picture" hidden>
+        <a
+          id="explore-thumbnail"
+          rel="noopener noreferrer"
+          aria-label="Explore this house in Google Maps Street View"
+        >
+          <img
+            id="house-thumbnail"
+            width="600"
+            height="250"
+            alt="Street View near the selected house"
+            referrerpolicy="strict-origin-when-cross-origin"
+          />
+        </a>
+        <figcaption class="thumbnail__attribution">
+          <span class="thumbnail__sources">
+            <span class="thumbnail__google">Google Maps</span>
+            <span id="thumbnail-copyright"></span>
+          </span>
+          <a id="report-thumbnail" rel="noopener noreferrer"
+            >Report a problem with this image</a
+          >
+        </figcaption>
+      </figure>
+    </main>
+  </body>
+</html>
