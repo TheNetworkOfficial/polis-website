@@ -7,6 +7,7 @@
   const retry = document.getElementById("retry-viewer");
   const externalLink = document.getElementById("open-google-maps");
   const surface = document.querySelector(".viewer__surface");
+  let externalViewAvailable = false;
   const allowedParameters = new Set([
     "lat",
     "lng",
@@ -62,6 +63,7 @@
     detail.textContent = text;
     message.hidden = false;
     retry.hidden = false;
+    externalLink.hidden = !externalViewAvailable;
   }
 
   retry.addEventListener("click", () => window.location.reload());
@@ -80,7 +82,7 @@
       ...(view.pano ? { pano: view.pano } : {}),
     });
     externalLink.href = externalUrl.href;
-    externalLink.hidden = false;
+    externalViewAvailable = true;
 
     const response = await fetch("/street-view-test/config.json", {
       cache: "no-store",
