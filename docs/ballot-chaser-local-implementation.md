@@ -35,8 +35,13 @@ permission and stale-snapshot failures stop the flow without creating replacemen
 jobs. This source work performs no deployment, customer import, provider send,
 infrastructure upgrade or store release.
 
+Imports held at a server processing limit show a plain review notice and no
+advance, apply or remapping actions. Import/export quota and active-work errors
+have plain messages; retrying does not restore a spent processing allowance.
+Previously published results remain available.
+
 Focused validation passes: 21 streaming/parser tests, 11 preparation-controller
-tests, 37 existing model/checksum tests, three new real-Worker browser scenarios
+tests, 38 model/checksum/held-state tests, three new real-Worker browser scenarios
 and 31 existing Ballot Chaser/register browser scenarios. The production build,
 changed-file ESLint, formatting and diff checks pass; two existing bundle-size
 warnings remain. Evidence is recorded outside the repository under
