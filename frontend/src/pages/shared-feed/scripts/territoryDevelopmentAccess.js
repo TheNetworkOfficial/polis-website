@@ -12,8 +12,9 @@ const scopeKey = ({ scopeType, scopeId } = {}) =>
 
 /** A grant comes only from a completed access read for this actor and location.
  * Cached organization roles, browser flags and old responses cannot enable it.
+ * Production authoring never enables the separate development-only controls.
  */
-export function createTerritoryDevelopmentAccess({
+export function createTerritoryAuthoringAccess({
   enabled = territoryDevelopmentBuildEnabled,
   context,
 }) {
@@ -40,7 +41,7 @@ export function createTerritoryDevelopmentAccess({
           }
         : null;
     }
-    return Boolean(enabled === true && actor?.userId && actor.session);
+    return Boolean(actor?.userId && actor.session);
   }
   function begin(scope) {
     sync();
@@ -64,13 +65,22 @@ export function createTerritoryDevelopmentAccess({
       payload?.access && typeof payload.access === "object"
         ? payload.access
         : payload;
-    const allowed =
+    const successful =
       (payload?.ok === true || access?.ok === true) &&
       payload?.ok !== false &&
-      access?.ok !== false &&
+      access?.ok !== false;
+    const development =
+      successful &&
+      enabled === true &&
       access?.capabilities?.territoryDevelopmentAccess === true;
-    if (allowed) grants.set(ticket.key, true);
-    return allowed;
+    const authoring =
+      successful &&
+      access?.canManageTerritories === true &&
+      ["full", "territories"].includes(access?.scope) &&
+      access?.capabilities?.territoryAuthoringAccess === true;
+    if (development || authoring)
+      grants.set(ticket.key, { development, authoring });
+    return development || authoring;
   }
   function fail(ticket) {
     sync();
@@ -93,13 +103,17 @@ export function createTerritoryDevelopmentAccess({
     read,
     allowed: (scope) =>
       sync() &&
-      grants.get(scopeKey(scope)) === true &&
+      Boolean(grants.get(scopeKey(scope))) &&
+      !pending.has(scopeKey(scope)),
+    developmentAllowed: (scope) =>
+      sync() &&
+      grants.get(scopeKey(scope))?.development === true &&
       !pending.has(scopeKey(scope)),
   };
 }
 
-export function visibleTerritorySections(items, developmentAllowed) {
+export function visibleTerritorySections(items, authoringAllowed) {
   return items.filter(
-    (item) => item.key !== "territories/admin" || developmentAllowed === true,
+    (item) => item.key !== "territories/admin" || authoringAllowed === true,
   );
 }
