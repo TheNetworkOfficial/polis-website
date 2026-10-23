@@ -166,10 +166,8 @@ async function inspect(page, name, text) {
     page.getByRole("heading", { name: "Review county columns" }),
   ).toBeVisible();
 }
-async function upload(page) {
-  await page
-    .getByLabel("Official report date and time")
-    .fill("2026-10-24T12:00");
+async function upload(page, reportDate = "2026-10-24") {
+  await page.getByLabel("Official report date or timestamp").fill(reportDate);
   await page
     .getByLabel("I checked the selected count and this report's meaning.")
     .check();
@@ -221,6 +219,7 @@ test("real browser worker previews and filters a county TXT before the first bou
     (call) => call.suffix === "/imports" && call.method === "POST",
   );
   expect(create.body.preparation).toEqual({ mode: "baseline" });
+  expect(create.body.sourceAsOf).toBe("2026-10-24T00:00:00.000Z");
   expect(create.body.format).toBe("csv");
   expect(h.uploaded).toEqual([
     "ID,CD,Party,Name\r\n0001,8,ind,Alex Example\r\n0003,8,ind,Casey Example\r\n",
@@ -274,12 +273,16 @@ test("returns include already-returned voters, deduplicate exact IDs and upload 
   await expect(
     page.getByText(/2 unique IDs matched this election; 1 rows outside/),
   ).toBeVisible();
-  await upload(page);
+  await upload(page, "2026-10-24T12:00:00-07:00");
   expect(h.uploaded).toEqual(["Voter ID\r\n0002\r\n0001\r\n"]);
   expect(
     h.calls.find((call) => call.suffix === "/imports" && call.method === "POST")
       ?.body.preparation,
   ).toEqual({ mode: "returns", snapshotId: "snapshot-one" });
+  expect(
+    h.calls.find((call) => call.suffix === "/imports" && call.method === "POST")
+      ?.body.sourceAsOf,
+  ).toBe("2026-10-24T19:00:00.000Z");
   await page
     .getByRole("button", { name: "Review this report", exact: true })
     .click();

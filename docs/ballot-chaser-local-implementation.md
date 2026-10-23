@@ -27,14 +27,15 @@ through later issued files in this workflow.
 
 Staff review counts, report meaning and the genuine official report date before
 uploading. Baselines use Issued and returns use Returned; missing voters retain
-their earlier status. All bounded uploads use the existing checksum-pinned
+their earlier status. A county date alone is accepted without inventing a time;
+timestamps must include Z or an explicit time-zone offset. All bounded uploads use the existing checksum-pinned
 multipart path, including small prepared files. Interrupted uploads can prepare
 the original source again and resume the same acknowledged import. Server quota,
 permission and stale-snapshot failures stop the flow without creating replacement
 jobs. This source work performs no deployment, customer import, provider send,
 infrastructure upgrade or store release.
 
-Focused validation passes: 21 streaming/parser tests, nine preparation-controller
+Focused validation passes: 21 streaming/parser tests, 11 preparation-controller
 tests, 37 existing model/checksum tests, three new real-Worker browser scenarios
 and 31 existing Ballot Chaser/register browser scenarios. The production build,
 changed-file ESLint, formatting and diff checks pass; two existing bundle-size

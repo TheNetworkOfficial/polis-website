@@ -1,9 +1,34 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { moduleUrl } from "../texting/module-fixture.mjs";
-const { createBallotPreparation } = await import(
+const { createBallotPreparation, preparedReportDate } = await import(
   await moduleUrl("ballotPreparation")
 );
+
+test("date-only county reports preserve the date without requiring a made-up time", () => {
+  assert.equal(preparedReportDate("2026-10-24"), "2026-10-24T00:00:00.000Z");
+  assert.equal(preparedReportDate("2028-02-29"), "2028-02-29T00:00:00.000Z");
+  assert.throws(() => preparedReportDate("2026-02-29"), /actual YYYY-MM-DD/);
+});
+
+test("a county timestamp must include a zone, and local-only times are rejected", () => {
+  assert.equal(
+    preparedReportDate("2026-10-24T12:00:00-07:00"),
+    "2026-10-24T19:00:00.000Z",
+  );
+  assert.equal(
+    preparedReportDate("2026-10-24T19:00Z"),
+    "2026-10-24T19:00:00.000Z",
+  );
+  assert.throws(
+    () => preparedReportDate("2026-10-24T12:00"),
+    /time-zone offset/,
+  );
+  assert.throws(
+    () => preparedReportDate("2026-10-24T25:00:00Z"),
+    /actual YYYY-MM-DD/,
+  );
+});
 
 const form = (values) => new Map(Object.entries(values));
 const sourceForm = () => form({ delimiter: "comma", encoding: "utf-8" });
