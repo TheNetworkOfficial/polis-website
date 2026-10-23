@@ -15,6 +15,7 @@ export function createBallotExport({
   changed,
   schedule = setTimeout,
   cancel = clearTimeout,
+  explainError = () => null,
 }) {
   let state = {},
     generation = 0,
@@ -91,11 +92,12 @@ export function createBallotExport({
       download: null,
       ...(stale ? { job: null, stale: true } : {}),
       error:
-        code === "contact_book_changed"
+        explainError(error) ||
+        (code === "contact_book_changed"
           ? "The list changed. Refresh the ballot list and start a new export."
           : stale
             ? "A new county update is available. Refresh Ballot Chaser and choose your list again."
-            : error.message || "Export paused. Check progress to retry.",
+            : error.message || "Export paused. Check progress to retry."),
     };
     changed();
   }

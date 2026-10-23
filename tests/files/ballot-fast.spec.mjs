@@ -9,6 +9,64 @@ const model = await load("ballotChaserModel"),
   { createBallotExport, checkedBallotDownload } = await load("ballotExport");
 const MiB = 1048576;
 
+test("held bounded imports suppress mutation controls and explain limits without exposing server details", async () => {
+  for (const status of [
+    "needs_review",
+    "review_ready",
+    "reviewing",
+    "awaiting_mapping",
+  ]) {
+    assert.deepEqual(
+      model.ballotImportControls({ status, boundedHeld: true }, true),
+      { advance: false, apply: false, remap: false, mapping: false },
+    );
+  }
+  assert.equal(
+    model.ballotImportControls({ status: "review_ready" }).apply,
+    true,
+  );
+  const held = model.ballotPreparationMessage({
+    payload: { error: "ballot_preparation_work_limit" },
+    message: "private-job-123 details",
+  });
+  assert.match(held, /Retrying does not reset the limit/);
+  assert.ok(!held.includes("private-job-123"));
+  assert.match(
+    model.ballotPreparationMessage("ballot_preparation_usage_limit"),
+    /processing limit/,
+  );
+  assert.match(
+    model.ballotPreparationMessage("ballot_preparation_job_active"),
+    /still running/,
+  );
+  assert.match(
+    model.ballotPreparationMessage("ballot_preparation_job_busy"),
+    /being processed/,
+  );
+  assert.ok(
+    !model
+      .ballotPreparationMessage("ballot_preparation_future_private_code")
+      .includes("future_private_code"),
+  );
+  const exporter = createBallotExport({
+    guard: () => {},
+    changed: () => {},
+    explainError: model.ballotPreparationMessage,
+    request: async () => {
+      throw Object.assign(new Error("private-job-123 details"), {
+        payload: { error: "ballot_preparation_usage_limit" },
+      });
+    },
+  });
+  await exporter.start("/ballot", {
+    electionId: "election",
+    snapshotId: "snapshot",
+    columns: ["ballotVoterId"],
+  });
+  assert.match(exporter.view().error, /processing limit/);
+  assert.ok(!exporter.view().error.includes("private-job-123"));
+});
+
 test("register exports do not force a voter ID column hidden by the authorized schema", async () => {
   let body;
   const controller = createBallotExport({

@@ -36,6 +36,60 @@ export function ballotImportStatus(status) {
   return Object.hasOwn(captions, status) ? captions[status] : "Check progress";
 }
 
+/** Server policy failures expose a useful next step without internal job details. */
+export function ballotPreparationMessage(error) {
+  const code =
+    typeof error === "string"
+      ? error
+      : error?.payload?.error || error?.code || error?.message;
+  const messages = {
+    ballot_preparation_usage_limit:
+      "This organization has reached its county-file processing limit. Ask an organization administrator to review usage before starting another update.",
+    ballot_preparation_job_active:
+      "Another county-file job is still running. Check its progress before starting another update.",
+    ballot_preparation_job_busy:
+      "This county-file job is being processed. Check its progress before making changes.",
+    ballot_preparation_admission_changed:
+      "County-file activity changed. Check current progress before trying this action again.",
+    ballot_preparation_work_limit:
+      "This update stopped at its processing limit and needs an organization administrator's review. Retrying does not reset the limit. The last published list remains available.",
+    ballot_preparation_cohort_limit:
+      "This change falls outside the fixed voter cohort allowed for this workflow. Ask an organization administrator to review it.",
+    ballot_preparation_unavailable:
+      "County-file preparation is not enabled for this organization. Ask an organization administrator to review access.",
+    ballot_preparation_policy_required:
+      "This election cannot use prepared-file updates. Ask an organization administrator to review the election.",
+    ballot_preparation_input_invalid:
+      "The prepared file must be CSV or TSV within 50 MB and 50,000 voters. Review the prepared list before uploading.",
+    ballot_preparation_columns_limit:
+      "The prepared file exceeds the supported county-column limits. Review its columns with an organization administrator.",
+    ballot_preparation_export_limit:
+      "This export exceeds the supported voter-list limit. Ask an organization administrator to review the election.",
+  };
+  if (Object.hasOwn(messages, code)) return messages[code];
+  return typeof code === "string" && code.startsWith("ballot_preparation_")
+    ? "This county-file update needs an organization administrator's review. The last published list remains available."
+    : null;
+}
+
+export function ballotImportControls(job, editingMapping = false) {
+  const mutable = Boolean(job) && !job.boundedHeld;
+  return {
+    advance:
+      mutable &&
+      !["complete", "cancelled", "failed", "awaiting_mapping"].includes(
+        job?.status,
+      ) &&
+      !editingMapping,
+    apply: mutable && job?.status === "review_ready" && !editingMapping,
+    remap:
+      mutable &&
+      ["reviewing", "review_ready", "needs_review"].includes(job?.status) &&
+      !editingMapping,
+    mapping: mutable && (job?.status === "awaiting_mapping" || editingMapping),
+  };
+}
+
 /** Empty choices retain raw evidence without creating volatile contact fields. */
 export function ballotContactColumns(headers, choices = {}) {
   return {
