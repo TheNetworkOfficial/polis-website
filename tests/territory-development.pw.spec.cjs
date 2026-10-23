@@ -5,11 +5,11 @@ const scopeRoute = (scope, section = "") =>
   scope === "coalition"
     ? `/coalitions/territory-fixture/voter-map${section ? `/${section}` : ""}`
     : `/candidate/voter-map${section ? `/${section}` : ""}?candidateId=candidate-fixture`;
-async function fixture(page, testInfo, capability = false) {
+async function fixture(page, testInfo, capability = false, authoring = false) {
   const base = testInfo.project.use.baseURL,
     calls = [],
     external = [],
-    state = { capability, hold: null };
+    state = { capability, authoring, hold: null };
   const token = `e30.${Buffer.from(JSON.stringify({ sub: "territory-test-actor", name: "Alex Example" })).toString("base64url")}.fixture`;
   await page.addInitScript(
     ({ token, base }) => {
@@ -32,6 +32,7 @@ async function fixture(page, testInfo, capability = false) {
             apiBaseUrl: base,
             territoryDevelopmentAccess: true,
             territoryDevelopmentEnabled: true,
+            territoryAuthoringAccess: true,
             auth: {
               ...value.auth,
               region: "us-west-2",
@@ -139,7 +140,10 @@ async function fixture(page, testInfo, capability = false) {
           ok: true,
           scope: "territories",
           canManageTerritories: true,
-          capabilities: { territoryDevelopmentAccess: state.capability },
+          capabilities: {
+            territoryDevelopmentAccess: state.capability,
+            territoryAuthoringAccess: state.authoring,
+          },
           territories: [
             {
               territoryId: "assigned",
@@ -293,8 +297,8 @@ for (const scope of ["coalition", "candidate"]) {
       ).toBeVisible();
       expect(f.builderCalls()).toEqual([]);
       expect(
-        f.calls.filter((row) => row.path.endsWith("/voter-map/access")),
-      ).toEqual([]);
+        f.calls.some((row) => row.path.endsWith("/voter-map/access")),
+      ).toBe(true);
     }
     expect(f.calls.filter((row) => row.method !== "GET")).toEqual([]);
     fs.mkdirSync(artifacts, { recursive: true });
@@ -336,6 +340,57 @@ for (const scope of ["coalition", "candidate"]) {
     ).toBeVisible();
     expect(f.builderCalls()).toEqual([]);
   });
+  test(`${scope} production grant opens aliases, menus and read-only existing territories`, async ({
+    page,
+  }, info) => {
+    const f = await fixture(page, info, false, true);
+    for (const alias of ["territories", "territory-admin"]) {
+      await page.goto(scopeRoute(scope, alias));
+      await expect(
+        page.getByRole("heading", { name: "Where are we working?" }),
+      ).toBeVisible();
+    }
+    await page.goto(scopeRoute(scope));
+    await page.locator('[data-route*="territories/admin"]').first().click();
+    await expect(
+      page.getByRole("heading", { name: "Where are we working?" }),
+    ).toBeVisible();
+    await page
+      .getByRole("button", { name: "Existing territories", exact: true })
+      .click();
+    await expect(page.locator("[data-territory-legacy]")).toBeVisible();
+    await expect(page.locator('[data-route-form*="territory-"]')).toHaveCount(
+      0,
+    );
+    await expect(
+      page.getByRole("button", { name: "Wizard", exact: true }),
+    ).toHaveCount(0);
+    await page
+      .getByRole("button", { name: "Back to builder", exact: true })
+      .click();
+    await expect(
+      page.getByRole("heading", { name: "Where are we working?" }),
+    ).toBeVisible();
+    expect(f.calls.filter((row) => row.method !== "GET")).toEqual([]);
+  });
+  test(`${scope} navigation rechecks a production authoring grant`, async ({
+    page,
+  }, info) => {
+    const f = await fixture(page, info, false, true);
+    await page.goto(scopeRoute(scope));
+    await page.locator('[data-route*="territories/admin"]').first().click();
+    await expect(
+      page.getByRole("heading", { name: "Where are we working?" }),
+    ).toBeVisible();
+    f.state.authoring = false;
+    await page.goBack();
+    await page.goForward();
+    await expect(
+      page.getByText("This tool is unavailable.", { exact: true }),
+    ).toBeVisible();
+    await expect(page.locator(".territory-builder")).toHaveCount(0);
+    expect(f.calls.filter((row) => row.method !== "GET")).toEqual([]);
+  });
 }
 
 test("forged legacy controls cannot dispatch work from the denied route", async ({
@@ -367,15 +422,8 @@ test("forged legacy controls cannot dispatch work from the denied route", async 
 test("grant stays closed during access refresh and after revocation", async ({
   page,
 }, info) => {
-  const f = await fixture(page, info, true);
+  const f = await fixture(page, info, true, info.project.name === "production");
   await page.goto(scopeRoute("coalition", "territories/admin"));
-  if (info.project.name === "production") {
-    await expect(
-      page.getByText("This tool is unavailable.", { exact: true }),
-    ).toBeVisible();
-    expect(f.builderCalls()).toEqual([]);
-    return;
-  }
   await expect(
     page.getByRole("heading", { name: "Where are we working?" }),
   ).toBeVisible();
@@ -384,6 +432,7 @@ test("grant stays closed during access refresh and after revocation", async ({
     release = resolve;
   });
   f.state.capability = false;
+  f.state.authoring = false;
   await page.evaluate(() => {
     const button = document.createElement("button");
     button.textContent = "Fixture refresh access";
@@ -398,42 +447,50 @@ test("grant stays closed during access refresh and after revocation", async ({
   ).toBeVisible();
   fs.mkdirSync(artifacts, { recursive: true });
   await page.screenshot({
-    path: `${artifacts}/development-revoked.png`,
+    path: `${artifacts}/${info.project.name}-revoked.png`,
     fullPage: true,
   });
 });
 
-test("Ballot Chaser territory handoff requires its own fresh development grant", async ({
-  page,
-}, info) => {
-  const f = await fixture(page, info, true);
-  await page.goto("/workspace/coalition/territory-fixture/work/ballot-chaser");
-  await page.getByRole("button", { name: "Show ballots not returned" }).click();
-  await expect(
-    page.getByText("Alex Example", { exact: true }).first(),
-  ).toBeVisible();
-  await page
-    .getByRole("button", { name: "Select this page", exact: true })
-    .click();
-  await page.getByRole("button", { name: "Actions", exact: true }).click();
-  const handoff = page.getByRole("button", {
-    name: "Build DoorKnocker territories",
-  });
-  if (info.project.name === "development") {
-    await expect(handoff).toBeVisible();
+for (const grant of ["development", "production"]) {
+  test(`Ballot Chaser territory handoff requires its own fresh ${grant} grant`, async ({
+    page,
+  }, info) => {
+    const f = await fixture(
+      page,
+      info,
+      grant === "development",
+      grant === "production",
+    );
+    await page.goto(
+      "/workspace/coalition/territory-fixture/work/ballot-chaser",
+    );
+    await page
+      .getByRole("button", { name: "Show ballots not returned" })
+      .click();
+    await expect(
+      page.getByText("Alex Example", { exact: true }).first(),
+    ).toBeVisible();
+    await page
+      .getByRole("button", { name: "Select this page", exact: true })
+      .click();
+    await page.getByRole("button", { name: "Actions", exact: true }).click();
+    const handoff = page.getByRole("button", {
+      name: "Build DoorKnocker territories",
+    });
+    if (grant === "production" || info.project.name === "development") {
+      await expect(handoff).toBeVisible();
+    } else {
+      await expect(handoff).toHaveCount(0);
+    }
     expect(
       f.calls.filter((row) => row.path.endsWith("/voter-map/access")),
     ).toHaveLength(1);
-  } else {
-    await expect(handoff).toHaveCount(0);
+    expect(f.builderCalls()).toEqual([]);
     expect(
-      f.calls.filter((row) => row.path.endsWith("/voter-map/access")),
-    ).toHaveLength(0);
-  }
-  expect(f.builderCalls()).toEqual([]);
-  expect(
-    f.calls.filter(
-      (row) => row.method !== "GET" && !row.path.endsWith("/query"),
-    ),
-  ).toEqual([]);
-});
+      f.calls.filter(
+        (row) => row.method !== "GET" && !row.path.endsWith("/query"),
+      ),
+    ).toEqual([]);
+  });
+}

@@ -9,7 +9,7 @@ const source = await readFile(
   ),
   "utf8",
 );
-const { createTerritoryDevelopmentAccess, visibleTerritorySections } =
+const { createTerritoryAuthoringAccess, visibleTerritorySections } =
   await import(
     `data:text/javascript;base64,${Buffer.from(source).toString("base64")}`
   );
@@ -17,6 +17,15 @@ const scope = { scopeType: "coalition", scopeId: "fixture" };
 const capability = (value = true) => ({
   ok: true,
   access: { capabilities: { territoryDevelopmentAccess: value } },
+});
+const authoringCapability = (value = true, overrides = {}) => ({
+  ok: true,
+  access: {
+    scope: "full",
+    canManageTerritories: true,
+    capabilities: { territoryAuthoringAccess: value },
+    ...overrides,
+  },
 });
 const deferred = () => {
   let resolve, reject;
@@ -32,7 +41,7 @@ function fixture(enabled = true) {
     session: {},
     location: "/coalitions/fixture/voter-map",
   };
-  const gate = createTerritoryDevelopmentAccess({
+  const gate = createTerritoryAuthoringAccess({
     enabled,
     context: () => context,
   });
@@ -183,3 +192,85 @@ for (const [mode, optIn, expected] of [
     assert.equal(module.territoryDevelopmentBuildEnabled, expected);
   });
 }
+
+test("production authoring is independent from development and cannot enable legacy controls", async () => {
+  const { gate } = fixture(false);
+  await gate.read(scope, async () => authoringCapability());
+  assert.equal(gate.allowed(scope), true);
+  assert.equal(gate.developmentAllowed(scope), false);
+  assert.equal(gate.allowed({ ...scope, scopeId: "other" }), false);
+  await gate.read(scope, async () => capability());
+  assert.equal(gate.allowed(scope), false);
+  assert.equal(gate.developmentAllowed(scope), false);
+});
+
+test("production capability, management, successful response and valid raw map scope are strict", async () => {
+  const { gate } = fixture(false);
+  for (const value of [undefined, false, "true", 1, {}, []]) {
+    await gate.read(scope, async () =>
+      authoringCapability(true, {
+        capabilities: { territoryAuthoringAccess: value },
+      }),
+    );
+    assert.equal(gate.allowed(scope), false);
+  }
+  for (const overrides of [
+    { canManageTerritories: false },
+    { canManageTerritories: "true" },
+    { canManageTerritories: undefined },
+    { scope: undefined },
+    { scope: "none" },
+    { scope: "coalition" },
+    { ok: false },
+  ]) {
+    await gate.read(scope, async () => authoringCapability(true, overrides));
+    assert.equal(gate.allowed(scope), false);
+  }
+  await gate.read(scope, async () => ({ ...authoringCapability(), ok: false }));
+  assert.equal(gate.allowed(scope), false);
+  for (const mapScope of ["full", "territories"]) {
+    await gate.read(scope, async () =>
+      authoringCapability(true, { scope: mapScope }),
+    );
+    assert.equal(gate.allowed(scope), true);
+    assert.equal(gate.developmentAllowed(scope), false);
+  }
+});
+
+test("production grant invalidates immediately for refresh, failure, account, session and navigation changes", async () => {
+  const { gate, set } = fixture(false);
+  await gate.read(scope, async () => authoringCapability());
+  const pending = deferred();
+  const read = gate.read(scope, () => pending.promise);
+  assert.equal(gate.allowed(scope), false);
+  pending.reject(new Error("unavailable"));
+  await assert.rejects(read, /unavailable/);
+  assert.equal(gate.allowed(scope), false);
+  for (const next of [
+    { userId: "actor-b", session: {} },
+    { session: {} },
+    { location: "/coalitions/other/voter-map" },
+    { userId: "", session: null },
+  ]) {
+    await gate.read(scope, async () => authoringCapability());
+    assert.equal(gate.allowed(scope), true);
+    set(next);
+    assert.equal(gate.allowed(scope), false);
+  }
+});
+
+test("late production success cannot restore an old actor or override a newer denial", async () => {
+  const { gate, set } = fixture(false);
+  const oldActor = deferred();
+  const first = gate.read(scope, () => oldActor.promise);
+  set({ userId: "actor-b", session: {} });
+  oldActor.resolve(authoringCapability());
+  await first;
+  assert.equal(gate.allowed(scope), false);
+  const oldRead = deferred();
+  const second = gate.read(scope, () => oldRead.promise);
+  await gate.read(scope, async () => authoringCapability(false));
+  oldRead.resolve(authoringCapability());
+  await second;
+  assert.equal(gate.allowed(scope), false);
+});
