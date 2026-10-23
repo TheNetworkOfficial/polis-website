@@ -1,5 +1,46 @@
 # Organization Ballot Chaser: local implementation
 
+## October 23 county-file preparation (source only)
+
+When the server enables bounded preparation for an organization, new register
+elections use `preparationPolicy: "bounded_v1"`. The website requires the fresh
+election-list availability flag and the selected election's enabled policy;
+missing availability or a disabled rollout stops preparation. Other organizations
+retain the existing workflow. Existing published lists remain readable.
+
+The import flow previews a header and three records from county TXT, CSV or TSV,
+then asks for the official voter-ID column and exact district/party conditions.
+A Web Worker reads bounded file slices and prepares UTF-8 CSV on the device.
+It preserves strings and leading zeroes and rejects ambiguous layouts, invalid
+encoding, conflicting selected IDs and unsupported limits. Source files may be
+up to 512 MiB; prepared files and the retained cohort are limited to 50,000,000
+bytes, 50,000 voters and 55 source columns with 64-byte headers. Fixed-width
+layouts and unknown county meanings require review rather than inferred mapping.
+
+Daily returns use the existing authorized private export with `view: "all"`
+and only `ballotVoterId`, including already-returned voters. The website checks
+the pinned snapshot, reauthorizes the download, and intersects exact official IDs
+locally. It removes repeated matching IDs and reports unknown/excluded rows.
+The prepared return file contains only the canonical `Voter ID` column. A day
+with no matches produces a local receipt and no import. The cohort cannot grow
+through later issued files in this workflow.
+
+Staff review counts, report meaning and the genuine official report date before
+uploading. Baselines use Issued and returns use Returned; missing voters retain
+their earlier status. All bounded uploads use the existing checksum-pinned
+multipart path, including small prepared files. Interrupted uploads can prepare
+the original source again and resume the same acknowledged import. Server quota,
+permission and stale-snapshot failures stop the flow without creating replacement
+jobs. This source work performs no deployment, customer import, provider send,
+infrastructure upgrade or store release.
+
+Focused validation passes: 21 streaming/parser tests, nine preparation-controller
+tests, 37 existing model/checksum tests, three new real-Worker browser scenarios
+and 31 existing Ballot Chaser/register browser scenarios. The production build,
+changed-file ESLint, formatting and diff checks pass; two existing bundle-size
+warnings remain. Evidence is recorded outside the repository under
+`D:/CodexHome/artifacts/polis-ballot-selfservice-20261023/`.
+
 ## Compact county voter register (local source)
 
 New elections explicitly request `storageMode: "register"`. Their five ballot
