@@ -5,7 +5,10 @@ import { loadContactCities } from "./organizationContactCities";
 import { createBallotChaserCanvassing } from "./ballotChaserCanvassing";
 import { createBallotExport } from "./ballotExport";
 import { createBallotRegister } from "./ballotRegister";
-import { createBallotPreparation } from "./ballotPreparation";
+import {
+  createBallotPreparation,
+  preparedReportDate,
+} from "./ballotPreparation";
 import { readBallotTextingAccess } from "./textingBallotRecipients";
 import { contactStateOptions } from "./organizationContactPresentation";
 import { checksumBlob } from "../../files/scripts/sha256";
@@ -1034,11 +1037,12 @@ export function createBallotChaser({
     }
     let prepared;
     if (type === "prepare-upload") {
-      await refreshPreparationAccess();
       if (!data.has("preparedReviewed"))
         throw new Error(
           "Review the selected voters and report meaning before uploading.",
         );
+      data.set("sourceAsOf", preparedReportDate(data.get("sourceAsOf")));
+      await refreshPreparationAccess();
       prepared = preparation.ready();
       file = prepared.file;
       data.set("kind", prepared.mode === "baseline" ? "base" : "snapshot");

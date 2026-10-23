@@ -13,6 +13,32 @@ const workerFactory = () =>
 const deadlineMs = 10 * 60 * 1000;
 const maxIdBytes = 10 * 1024 * 1024;
 
+/** A county date needs no invented time; supplied times must identify their zone. */
+export function preparedReportDate(value) {
+  const text = String(value || "").trim(),
+    date = text.slice(0, 10);
+  const day = /^\d{4}-\d{2}-\d{2}$/u.test(date)
+    ? new Date(`${date}T00:00:00.000Z`)
+    : null;
+  const validDay =
+    day &&
+    Number.isFinite(day.getTime()) &&
+    day.toISOString().slice(0, 10) === date;
+  if (validDay && text === date) return day.toISOString();
+  if (
+    validDay &&
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/u.test(
+      text,
+    )
+  ) {
+    const timestamp = new Date(text);
+    if (Number.isFinite(timestamp.getTime())) return timestamp.toISOString();
+  }
+  throw new Error(
+    "Enter the county's actual YYYY-MM-DD date, or an ISO date and time with Z or a time-zone offset. Do not invent a time for a date-only report.",
+  );
+}
+
 /** Browser-only preparation never uploads the original county file. */
 export function createBallotPreparation({
   request,
@@ -393,7 +419,7 @@ export function createBallotPreparation({
       const receipt = state.prepared.receipt;
       if (receipt.selectedRows === 0)
         return `<section class="pt-card"><h2>No matching returns</h2><p>${count(receipt.inputRows)} source records checked · ${count(receipt.unknownRows || 0)} rows outside this election · ${count(receipt.duplicateRows || 0)} repeated IDs removed.</p><p>No update is needed. No file was uploaded.</p>${cancelButton}</section>`;
-      return `<form class="pt-card" data-ballot-form="prepare-upload"><h2>Review prepared ${state.mode === "returns" ? "returns" : "sent ballots"}</h2><p>${count(receipt.inputRows)} source records · ${count(receipt.selectedRows)} selected · ${count(receipt.excludedRows)} excluded</p><p>${count(receipt.duplicateRows || 0)} repeated IDs were removed.</p>${state.mode === "returns" ? `<p>${count(receipt.matchedUnique || receipt.selectedRows)} unique IDs matched this election; ${count(receipt.unknownRows || 0)} rows outside this election were excluded.</p>` : ""}<p>${(state.prepared.blob.size / 1000000).toFixed(2)} MB prepared. Only this list will upload. Official IDs and their leading zeroes are preserved.</p><p>Every selected row means <strong>${state.mode === "returns" ? "Returned" : "Issued"}</strong>. Missing voters keep their earlier status.</p>${state.binding.sourceAsOf ? `<p>Original report date: ${e(state.binding.sourceAsOf)}</p><input name="sourceAsOf" type="hidden" value="${e(state.binding.sourceAsOf)}">` : field("sourceAsOf", "Official report date and time", state.sourceAsOf || "", { type: "datetime-local", required: true })}<label class="pt-workspace-check"><input type="checkbox" name="preparedReviewed" required>I checked the selected count and this report's meaning.</label><div class="pt-actions">${submit("Upload prepared list and review columns")}${cancelButton}</div></form>`;
+      return `<form class="pt-card" data-ballot-form="prepare-upload"><h2>Review prepared ${state.mode === "returns" ? "returns" : "sent ballots"}</h2><p>${count(receipt.inputRows)} source records · ${count(receipt.selectedRows)} selected · ${count(receipt.excludedRows)} excluded</p><p>${count(receipt.duplicateRows || 0)} repeated IDs were removed.</p>${state.mode === "returns" ? `<p>${count(receipt.matchedUnique || receipt.selectedRows)} unique IDs matched this election; ${count(receipt.unknownRows || 0)} rows outside this election were excluded.</p>` : ""}<p>${(state.prepared.blob.size / 1000000).toFixed(2)} MB prepared. Only this list will upload. Official IDs and their leading zeroes are preserved.</p><p>Every selected row means <strong>${state.mode === "returns" ? "Returned" : "Issued"}</strong>. Missing voters keep their earlier status.</p>${state.binding.sourceAsOf ? `<p>Original report date: ${e(state.binding.sourceAsOf)}</p><input name="sourceAsOf" type="hidden" value="${e(state.binding.sourceAsOf)}">` : field("sourceAsOf", "Official report date or timestamp", state.sourceAsOf || "", { required: true, extra: 'placeholder="YYYY-MM-DD or 2026-10-24T12:00:00-07:00"' }) + "<p>Use the county date alone when no time is supplied. A timestamp must include its time zone. Never add a time to work around same-date reports.</p>"}<label class="pt-workspace-check"><input type="checkbox" name="preparedReviewed" required>I checked the selected count and this report's meaning.</label><div class="pt-actions">${submit("Upload prepared list and review columns")}${cancelButton}</div></form>`;
     }
     if (state.stage === "review") {
       const choices = [
