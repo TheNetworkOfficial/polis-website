@@ -1,0 +1,63 @@
+.polis-policy-review {
+  box-sizing: border-box;
+  font-family: var(--polis-font-body);
+  background: var(--polis-surface);
+  color: var(--polis-text);
+  border: 1px solid var(--polis-border);
+  border-radius: var(--polis-radius-lg);
+  max-width: 44rem;
+  width: calc(100% - 2rem);
+  max-height: 90dvh;
+  padding: 1.5rem;
+  overflow-y: auto;
+}
+.polis-policy-review::backdrop {
+  background: rgb(0 0 0 / 60%);
+}
+.polis-policy-review details {
+  margin-block: 1rem;
+}
+.polis-policy-review summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+.polis-policy-review__document {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+  padding-block: 1rem;
+}
+.polis-policy-review label {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  margin-block: 1rem;
+}
+.polis-policy-review input {
+  min-width: 1.25rem;
+  min-height: 1.25rem;
+}
+.polis-policy-review button {
+  font: inherit;
+  background: var(--polis-surface-raised);
+  color: var(--polis-text);
+  border: 1px solid var(--polis-border);
+  border-radius: var(--polis-radius-sm);
+  padding: 0.75rem 1rem;
+  margin: 0.25rem;
+  cursor: pointer;
+}
+.polis-policy-review button.shared-feed-chip--primary {
+  background: var(--polis-primary);
+  color: var(--polis-on-primary);
+}
+.polis-policy-review button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.polis-policy-review button:focus-visible,
+.polis-policy-review summary:focus-visible,
+.polis-policy-review input:focus-visible {
+  outline: 2px solid var(--polis-primary);
+  outline-offset: 2px;
+}

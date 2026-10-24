@@ -167,6 +167,11 @@ async function mockBook(
         contentType: "application/json",
         body: JSON.stringify({ ok: true, ...data }),
       });
+    if (path === "/api/me/policy-acceptance" && request.method() === "GET")
+      return respond({
+        accepted: true,
+        policySetVersion: "2026-10-23-v1",
+      });
     if (path === "/api/geo/cities")
       return respond({
         state: url.searchParams.get("state"),

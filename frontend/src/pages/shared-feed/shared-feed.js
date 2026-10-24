@@ -1,6 +1,8 @@
 import "../../css/polis-design-system.css";
 import "./css/shared-feed.css";
 import "./css/civic-neon.css";
+import "./css/policy-acceptance.css";
+import { createPolicyAcceptanceController } from "./scripts/policyAcceptance.js";
 import "./css/texting-workspace.css";
 import "./css/coalition-workspace.css";
 import "./css/coalition-features.css";
@@ -7580,6 +7582,7 @@ async function finalizeAuthSuccess({
   state.auth.user = user || getAuthenticatedUser(session);
   state.auth.message = "";
   closeAuthModal();
+  await policyAcceptance.review();
   if (toastMessage) {
     showToast(toastMessage);
   }
@@ -9781,6 +9784,11 @@ function ensureActiveIndexInBounds() {
   );
 }
 
+const policyAcceptance = createPolicyAcceptanceController({
+  request: fetchJsonRaw,
+  getUserId: () => getAuthenticatedUser(state.auth.session)?.userId || "",
+});
+
 function fetchJson(path, options = {}) {
   return messagingProof.request(path, options);
 }
@@ -9795,6 +9803,7 @@ async function fetchJsonRaw(
     includeAccessToken = false,
     signal,
     keepalive = false,
+    beforeDispatch,
   } = {},
 ) {
   const baseUrl = getApiBaseUrl();
@@ -9825,6 +9834,7 @@ async function fetchJsonRaw(
     nextHeaders["Content-Type"] = "application/json";
   }
 
+  if (typeof beforeDispatch === "function") beforeDispatch();
   const response = await fetch(`${baseUrl}${path}`, {
     method,
     signal,
@@ -9839,6 +9849,9 @@ async function fetchJsonRaw(
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
+    if (response.status === 428 && payload?.error === "policy_acceptance_required") {
+      policyAcceptance.review({ force: true }).catch(() => {});
+    }
     const error = new Error(
       normalizeString(payload?.message || payload?.error) || "request_failed",
     );
@@ -137085,6 +137098,7 @@ async function bootstrapAuth() {
       : await restoreSharedFeedSession(state.auth.config);
   state.auth.session = session;
   state.auth.user = getAuthenticatedUser(session);
+  if (session) await policyAcceptance.review();
   if (session) {
     state.ui.authModal = null;
   }
