@@ -9,6 +9,25 @@ export const BALLOT_PREPARATION_LIMITS = Object.freeze({
   maxElapsedMs: 10 * 60 * 1000,
   chunkBytes: 256 * 1024,
 });
+export const BALLOT_PREPARATION_MAX_ROWS = 125000;
+export const BALLOT_PREPARATION_MAX_PARTY_VALUES = 16;
+
+/** Accept only the supported server policy, keeping raw-device work bounded. */
+export function ballotPreparationPolicyLimits(value) {
+  if (
+    !value ||
+    value.enabled !== true ||
+    (value.policy || value.version) !== "bounded_v1" ||
+    !Number.isSafeInteger(value.maxRows) ||
+    value.maxRows < 1 ||
+    value.maxRows > BALLOT_PREPARATION_MAX_ROWS ||
+    value.maxSourceBytes !== BALLOT_PREPARATION_LIMITS.maxOutputBytes ||
+    value.maxColumns !== BALLOT_PREPARATION_LIMITS.maxColumns ||
+    value.maxHeaderBytes !== 64
+  )
+    return null;
+  return { ...BALLOT_PREPARATION_LIMITS, maxRows: value.maxRows };
+}
 
 const DELIMITERS = { comma: ",", tab: "\t", pipe: "|" };
 const ENCODINGS = new Set(["utf-8", "utf-16le", "utf-16be", "windows-1252"]);
@@ -20,7 +39,7 @@ function fail(message, code = "ballot_preparation_invalid") {
   throw error;
 }
 
-/** Only lower limits are accepted, making small deterministic boundary tests safe. */
+/** Limits remain bounded by supported capacity; default callers keep 50k rows. */
 function context(file, options) {
   const limits = { ...BALLOT_PREPARATION_LIMITS };
   for (const [key, value] of Object.entries(options.limits || {})) {
@@ -28,7 +47,7 @@ function context(file, options) {
       !Object.hasOwn(limits, key) ||
       !Number.isSafeInteger(value) ||
       value < 1 ||
-      value > limits[key]
+      value > (key === "maxRows" ? BALLOT_PREPARATION_MAX_ROWS : limits[key])
     )
       fail("Preparation limits must stay within the supported file limits.");
     limits[key] = value;
@@ -332,7 +351,7 @@ function retainedSet(ids, state) {
     ids.some((id) => !validId(id))
   )
     fail(
-      "Choose a current retained voter-ID export containing at most 50,000 valid official IDs.",
+      `Choose a current retained voter-ID export containing at most ${state.limits.maxRows.toLocaleString("en-US")} valid official IDs.`,
     );
   if (new Set(ids).size !== ids.length)
     fail("The retained voter-ID list contains repeated IDs. Export it again.");
@@ -398,10 +417,16 @@ export async function prepareBallotFile(file, options = {}) {
       (filter) =>
         !filter ||
         typeof filter.column !== "string" ||
-        typeof filter.value !== "string",
+        (Object.hasOwn(filter, "values")
+          ? Object.hasOwn(filter, "value") ||
+            !Array.isArray(filter.values) ||
+            filter.values.length < 1 ||
+            filter.values.length > BALLOT_PREPARATION_MAX_PARTY_VALUES ||
+            filter.values.some((value) => typeof value !== "string")
+          : typeof filter.value !== "string"),
     )
   )
-    fail("Each county filter needs a column and an exact text value.");
+    fail("Each county filter needs a column and supported exact text values.");
   const retained =
     mode === "returns" ? retainedSet(options.retainedIds, state) : null;
   const receipt = {
@@ -423,7 +448,7 @@ export async function prepareBallotFile(file, options = {}) {
   const append = (bytes) => {
     if (receipt.outputBytes + bytes.length > state.limits.maxOutputBytes)
       fail(
-        "The prepared file exceeds 50,000,000 bytes. Narrow the county filters.",
+        "The prepared file exceeds 50 MB. Ask an organization administrator to review capacity; do not exclude eligible voters to fit.",
         "ballot_preparation_output_limit",
       );
     receipt.outputBytes += bytes.length;
@@ -442,7 +467,10 @@ export async function prepareBallotFile(file, options = {}) {
         const index = headers.indexOf(filter.column);
         if (index < 0)
           fail("A selected filter column is missing from this county file.");
-        return { index, value: filter.value };
+        return {
+          index,
+          values: new Set(filter.values || [filter.value]),
+        };
       });
       append(
         encoder.encode(csvRow(mode === "returns" ? ["Voter ID"] : headers)),
@@ -451,7 +479,9 @@ export async function prepareBallotFile(file, options = {}) {
     }
     validateWidth(row, headers);
     receipt.inputRows += 1;
-    if (preparedFilters.some((filter) => row[filter.index] !== filter.value)) {
+    if (
+      preparedFilters.some((filter) => !filter.values.has(row[filter.index]))
+    ) {
       receipt.excludedRows += 1;
       return;
     }
@@ -478,7 +508,7 @@ export async function prepareBallotFile(file, options = {}) {
     }
     if (receipt.selectedRows >= state.limits.maxRows)
       fail(
-        "The prepared file exceeds 50,000 voters. Narrow the county filters.",
+        `The prepared file exceeds this election's ${state.limits.maxRows.toLocaleString("en-US")}-voter capacity. Ask an organization administrator to review capacity; do not exclude eligible voters to fit.`,
         "ballot_preparation_row_limit",
       );
     append(bytes);
@@ -537,7 +567,9 @@ export async function readRetainedBallotIds(file, options = {}) {
         "The retained export contains invalid or repeated voter IDs. Export it again.",
       );
     if (ids.length >= state.limits.maxRows)
-      fail("The retained export exceeds 50,000 voter IDs.");
+      fail(
+        `The retained export exceeds this election's ${state.limits.maxRows.toLocaleString("en-US")} voter IDs.`,
+      );
     seen.add(id);
     ids.push(id);
   });

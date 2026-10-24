@@ -8,7 +8,9 @@ import { createBallotRegister } from "./ballotRegister";
 import {
   createBallotPreparation,
   preparedReportDate,
+  ballotPreparationCapacity,
 } from "./ballotPreparation";
+import { ballotPreparationPolicyLimits } from "./ballotPreparationModel";
 import { readBallotTextingAccess } from "./textingBallotRecipients";
 import { contactStateOptions } from "./organizationContactPresentation";
 import { checksumBlob } from "../../files/scripts/sha256";
@@ -107,19 +109,26 @@ export function createBallotChaser({
     },
     guard,
     changed,
-    context: () => ({
-      base: path(""),
-      electionId: view.electionId,
-      snapshotId: view.dashboard?.snapshotId || null,
-      mode: view.resumePreparedImport?.preparation?.mode,
-      sourceAsOf: view.resumePreparedImport?.sourceAsOf,
-      allowed:
-        can("import") &&
-        view.preparationAvailability?.enabled === true &&
-        boundedElection() &&
-        view.election.preparationPolicy.enabled === true,
-      canExport: can("export"),
-    }),
+    context: () => {
+      const limits = ballotPreparationCapacity(
+        view.preparationAvailability,
+        view.election?.preparationPolicy,
+      );
+      return {
+        base: path(""),
+        electionId: view.electionId,
+        snapshotId: view.dashboard?.snapshotId || null,
+        mode: view.resumePreparedImport?.preparation?.mode,
+        sourceAsOf: view.resumePreparedImport?.sourceAsOf,
+        allowed:
+          can("import") &&
+          limits !== null &&
+          boundedElection() &&
+          view.election.preparationPolicy.enabled === true,
+        limits,
+        canExport: can("export"),
+      };
+    },
   });
   const exports = createBallotExport({
     request,
@@ -526,12 +535,15 @@ export function createBallotChaser({
     await contacts.load();
   }
   function electionForm() {
+    const capacity = ballotPreparationPolicyLimits(
+      view.preparationAvailability,
+    );
     return `<form class="pt-card" data-ballot-form="election"><h2>Add an election</h2><div class="pt-fields">${field("name", "Election name", "", { required: true, extra: 'placeholder="Arizona general election"' })}${field("electionDate", "Election date", "", { type: "date", required: true })}${field("county", "County", "Pinal", { required: true })}${select("state", "State", contactStateOptions, "AZ", true)}${field("sourceNamespace", "County voter file source", "", { extra: 'placeholder="Pinal County voter records"' })}${select(
       "sourceUse",
       "Permitted use of this voter file",
       sourceUseOptions,
       "unreviewed",
-    )}</div>${view.preparationAvailability?.enabled === true ? "<p>New elections prepare county files on this device, then match daily returns to one fixed voter cohort within 50,000 voters and 50 MB. Review exact county columns and codes before preparing a file.</p>" : ""}<p>Confirm the source’s permitted use before applying the first report. Text Banking still checks sender consent, documented opt-in when required, and opt-outs.</p><p>Each election keeps its own ballot history. County voters are available without adding everyone to Contact Book.</p><button type="submit" class="pt-btn"${view.busy ? " disabled" : ""}>Add election</button></form>`;
+    )}</div>${capacity ? `<p>New elections prepare county files on this device, then match daily returns to one fixed voter cohort within ${count(capacity.maxRows)} voters and ${count(capacity.maxOutputBytes / 1000000)} MB. Review exact county columns and all intended party codes before preparing a file.</p>` : ""}<p>Confirm the source’s permitted use before applying the first report. Text Banking still checks sender consent, documented opt-in when required, and opt-outs.</p><p>Each election keeps its own ballot history. County voters are available without adding everyone to Contact Book.</p><button type="submit" class="pt-btn"${view.busy ? " disabled" : ""}>Add election</button></form>`;
   }
   const sourcePolicyLocked = () =>
     Boolean(

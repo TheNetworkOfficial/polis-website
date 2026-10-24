@@ -17,6 +17,8 @@ const {
   readRetainedBallotIds,
   ballotPreparationError,
   BALLOT_PREPARATION_LIMITS,
+  BALLOT_PREPARATION_MAX_ROWS,
+  ballotPreparationPolicyLimits,
 } = await import(modelUrl);
 const file = (text) => new Blob([text]);
 const options = { idColumn: "Official ID", mode: "baseline", filters: [] };
@@ -339,7 +341,7 @@ test("input size, column, record, field, output byte, and output row caps fail c
     await assert.rejects(prepareBallotFile(input, { ...options, limits }));
   }
   await assert.rejects(
-    prepareBallotFile(input, { ...options, limits: { maxRows: 50001 } }),
+    prepareBallotFile(input, { ...options, limits: { maxRows: 125001 } }),
     /within the supported file limits/,
   );
   await assert.rejects(
@@ -462,8 +464,106 @@ test("retained ID exports require the exact server header and preserve leading z
     readRetainedBallotIds(file("ballotVoterId\n001\n002\n"), {
       limits: { maxRows: 1 },
     }),
-    /50,000 voter IDs/,
+    /1 voter IDs/,
   );
+});
+
+test("party alternatives are exact OR values while district remains an AND condition", async () => {
+  const input = file(
+    "Official ID,Party,District,Name\r\n0001,IND,8,One\r\n0002,PND,8,Two\r\n0003,NOL,8,Three\r\n0004,IND,3,Four\r\n0005,ind,8,Five\r\n0006,PND,08,Six\r\n",
+  );
+  const prepared = await prepareBallotFile(input, {
+    ...options,
+    filters: [
+      { column: "District", value: "8" },
+      { column: "Party", values: ["IND", "PND", "IND"] },
+    ],
+  });
+  assert.equal(
+    await prepared.blob.text(),
+    "Official ID,Party,District,Name\r\n0001,IND,8,One\r\n0002,PND,8,Two\r\n",
+  );
+  assert.equal(prepared.receipt.selectedRows, 2);
+  assert.equal(prepared.receipt.excludedRows, 4);
+  for (const values of [[], "IND", ["IND", 4], Array(17).fill("IND")]) {
+    await assert.rejects(
+      prepareBallotFile(input, {
+        ...options,
+        filters: [{ column: "Party", values }],
+      }),
+      /supported exact text values/,
+    );
+  }
+  await assert.rejects(
+    prepareBallotFile(input, {
+      ...options,
+      filters: [{ column: "Party", value: "IND", values: ["PND"] }],
+    }),
+    /supported exact text values/,
+  );
+});
+
+test("approved capacity preserves the legacy default and admits exactly 125,000 rows", async () => {
+  const rows = Array.from(
+    { length: BALLOT_PREPARATION_MAX_ROWS },
+    (_, index) => `${String(index).padStart(6, "0")},One\r\n`,
+  ).join("");
+  const input = file("Official ID,Name\r\n" + rows);
+  await assert.rejects(
+    prepareBallotFile(input, options),
+    /50,000-voter capacity/,
+  );
+  const prepared = await prepareBallotFile(input, {
+    ...options,
+    limits: { maxRows: BALLOT_PREPARATION_MAX_ROWS },
+  });
+  assert.equal(prepared.receipt.selectedRows, 125000);
+  assert.match((await prepared.blob.text()).slice(0, 40), /000000,One/);
+  await assert.rejects(
+    prepareBallotFile(file("Official ID,Name\r\n" + rows + "125000,Two\r\n"), {
+      ...options,
+      limits: { maxRows: BALLOT_PREPARATION_MAX_ROWS },
+    }),
+    /125,000-voter capacity/,
+  );
+});
+
+test("fresh supported policy bounds are validated and retained-ID reads use their row limit", async () => {
+  const policy = {
+    enabled: true,
+    policy: "bounded_v1",
+    maxRows: 125000,
+    maxSourceBytes: 50000000,
+    maxColumns: 55,
+    maxHeaderBytes: 64,
+  };
+  assert.equal(ballotPreparationPolicyLimits(policy).maxRows, 125000);
+  assert.equal(
+    ballotPreparationPolicyLimits({ ...policy, maxRows: 50000 }).maxRows,
+    50000,
+  );
+  for (const invalid of [
+    { maxRows: 125001 },
+    { maxRows: "125000" },
+    { maxRows: 0 },
+    { enabled: false },
+    { policy: "other" },
+    { maxSourceBytes: 50000001 },
+    { maxColumns: 56 },
+    { maxHeaderBytes: 65 },
+  ])
+    assert.equal(
+      ballotPreparationPolicyLimits({ ...policy, ...invalid }),
+      null,
+    );
+  const ids = Array.from({ length: 125000 }, (_, index) => String(index));
+  const input = file("ballotVoterId\r\n" + ids.join("\r\n") + "\r\n");
+  assert.equal(
+    (await readRetainedBallotIds(input, { limits: { maxRows: 125000 } }))
+      .length,
+    125000,
+  );
+  await assert.rejects(readRetainedBallotIds(input), /50,000 voter IDs/);
 });
 
 test("worker error sanitization never forwards unexpected exception text", () => {

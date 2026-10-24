@@ -60,7 +60,7 @@ export function ballotPreparationMessage(error) {
     ballot_preparation_policy_required:
       "This election cannot use prepared-file updates. Ask an organization administrator to review the election.",
     ballot_preparation_input_invalid:
-      "The prepared file must be CSV or TSV within 50 MB and 50,000 voters. Review the prepared list before uploading.",
+      "The prepared CSV or TSV exceeds this election's approved file or voter capacity. Ask an organization administrator to review capacity; do not remove eligible voters to fit.",
     ballot_preparation_columns_limit:
       "The prepared file exceeds the supported county-column limits. Review its columns with an organization administrator.",
     ballot_preparation_export_limit:

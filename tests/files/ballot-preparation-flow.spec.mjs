@@ -1,9 +1,44 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { moduleUrl } from "../texting/module-fixture.mjs";
-const { createBallotPreparation, preparedReportDate } = await import(
-  await moduleUrl("ballotPreparation")
-);
+const {
+  createBallotPreparation,
+  preparedReportDate,
+  ballotPreparationCapacity,
+} = await import(await moduleUrl("ballotPreparation"));
+
+test("expanded availability preserves an enrolled cohort's smaller frozen capacity", () => {
+  const policy = {
+    enabled: true,
+    version: "bounded_v1",
+    maxRows: 50000,
+    maxSourceBytes: 50000000,
+    maxColumns: 55,
+    maxHeaderBytes: 64,
+  };
+  assert.equal(
+    ballotPreparationCapacity({ ...policy, maxRows: 125000 }, policy).maxRows,
+    50000,
+  );
+  assert.equal(
+    ballotPreparationCapacity(
+      { ...policy, maxRows: 125000 },
+      { ...policy, maxRows: 125000 },
+    ).maxRows,
+    125000,
+  );
+  assert.equal(
+    ballotPreparationCapacity({ ...policy, maxRows: 125001 }, policy),
+    null,
+  );
+  assert.equal(
+    ballotPreparationCapacity(
+      { ...policy, maxRows: 125000 },
+      { ...policy, enabled: false },
+    ),
+    null,
+  );
+});
 
 test("date-only county reports preserve the date without requiring a made-up time", () => {
   assert.equal(preparedReportDate("2026-10-24"), "2026-10-24T00:00:00.000Z");
@@ -340,4 +375,75 @@ test("an unknown ID-export creation outcome stops and explicit retry retains the
   await h.controller.prepare(returnForm());
   assert.equal(operations.length, 2);
   assert.equal(operations[0], operations[1]);
+});
+
+test("approved capacity and both reviewed party codes reach the worker without broadening selection", async () => {
+  const h = fixture();
+  h.setContext({ limits: { maxRows: 125000 } });
+  assert.match(h.controller.render(), /125,000 retained voters/);
+  await h.controller.inspect(file(), sourceForm());
+  const reviewed = baselineForm();
+  reviewed.set("partyValue", " IND, PND, IND ");
+  await h.controller.prepare(reviewed);
+  assert.deepEqual(h.workerCalls.at(-1).options.filters, [
+    { column: "CD", value: "8" },
+    { column: "Party", values: ["IND", "PND"] },
+  ]);
+  assert.equal(h.workerCalls.at(-1).options.limits.maxRows, 125000);
+  assert.match(h.controller.render(), /IND or PND/);
+  assert.doesNotMatch(h.controller.render(), /NOL/);
+  h.setContext({ limits: { maxRows: 50000 } });
+  assert.throws(() => h.controller.ready(), /changed/);
+});
+
+test("supported return capacity exceeds the legacy cohort but unsupported capacity fails closed", async () => {
+  const ids = Array.from({ length: 50001 }, (_, index) => String(index));
+  const h = fixture({
+    returns: true,
+    handler: (message) =>
+      message.action === "inspect"
+        ? {
+            headers: ["Return ID"],
+            sample: [["0001"]],
+            delimiter: "comma",
+            encoding: "utf-8",
+          }
+        : message.action === "ids"
+          ? ids
+          : {
+              blob: new Blob(["Voter ID\r\n0001\r\n"]),
+              receipt: { selectedRows: 1 },
+            },
+    requestHandler: async () => ({
+      ok: true,
+      export: {
+        exportId: "ids",
+        snapshotId: "snapshot-one",
+        status: "ready",
+        rows: ids.length,
+      },
+      download: {
+        method: "GET",
+        url: "https://fixture-private.s3.us-west-2.amazonaws.com/ids.csv",
+        expiresAt: Date.now() + 60000,
+      },
+    }),
+  });
+  h.setContext({ limits: { maxRows: 125000 } });
+  await h.controller.inspect(file(), sourceForm());
+  await h.controller.prepare(returnForm());
+  assert.equal(
+    h.workerCalls.find((call) => call.action === "ids").options.limits.maxRows,
+    125000,
+  );
+  assert.equal(h.workerCalls.at(-1).options.retainedIds.length, 50001);
+  assert.equal(h.controller.ready().snapshotId, "snapshot-one");
+  const unsupported = fixture();
+  unsupported.setContext({ limits: { maxRows: 125001 } });
+  await assert.rejects(
+    unsupported.controller.inspect(file(), sourceForm()),
+    /capacity could not be confirmed/,
+  );
+  assert.equal(unsupported.calls.length, 0);
+  assert.equal(unsupported.workerCalls.length, 0);
 });
