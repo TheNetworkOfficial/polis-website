@@ -11,6 +11,8 @@ export const BALLOT_PREPARATION_LIMITS = Object.freeze({
 });
 export const BALLOT_PREPARATION_MAX_ROWS = 125000;
 export const BALLOT_PREPARATION_MAX_PARTY_VALUES = 16;
+const MAX_RETURN_STATUS_VALUES = 32;
+const MAX_RETURN_STATUS_BYTES = 160;
 
 /** Accept only the supported server policy, keeping raw-device work bounded. */
 export function ballotPreparationPolicyLimits(value) {
@@ -401,6 +403,129 @@ export async function inspectBallotFile(file, options = {}) {
   };
 }
 
+function validReturnStatus(value) {
+  return (
+    typeof value === "string" &&
+    encoder.encode(value).length <= MAX_RETURN_STATUS_BYTES
+  );
+}
+
+function returnStatusColumns(headers, idColumn, statusColumn) {
+  const idIndex = headers.indexOf(idColumn);
+  const statusIndex = headers.indexOf(statusColumn);
+  if (idIndex < 0 || statusIndex < 0 || idIndex === statusIndex)
+    fail(
+      "Choose separate official voter-ID and ballot-status columns from this file.",
+      "ballot_preparation_return_status_columns",
+    );
+  return { idIndex, statusIndex };
+}
+
+/** Read every status code locally so staff can resolve unfamiliar values in the website. */
+export async function inspectBallotReturnStatuses(file, options = {}) {
+  const state = context(file, options);
+  if (
+    typeof options.idColumn !== "string" ||
+    !options.idColumn ||
+    typeof options.statusColumn !== "string" ||
+    !options.statusColumn
+  )
+    fail(
+      "Choose the official voter-ID and ballot-status columns first.",
+      "ballot_preparation_return_status_columns",
+    );
+  let headers, idIndex, statusIndex;
+  let inputRows = 0;
+  const statuses = new Map();
+  await records(file, state, (row) => {
+    if (!headers) {
+      validateHeaders(row);
+      headers = row;
+      ({ idIndex, statusIndex } = returnStatusColumns(
+        headers,
+        options.idColumn,
+        options.statusColumn,
+      ));
+      return;
+    }
+    validateWidth(row, headers);
+    if (!validId(row[idIndex]))
+      fail(
+        "A county row has a missing or invalid official voter ID. Review the selected ID column.",
+      );
+    const value = row[statusIndex];
+    if (!validReturnStatus(value))
+      fail(
+        "A ballot-status value exceeds 160 bytes. Review the selected status column.",
+        "ballot_preparation_return_status_values",
+      );
+    if (!statuses.has(value) && statuses.size >= MAX_RETURN_STATUS_VALUES)
+      fail(
+        "The selected column contains more than 32 status values. Choose the county's ballot-status column.",
+        "ballot_preparation_return_status_values",
+      );
+    statuses.set(value, (statuses.get(value) || 0) + 1);
+    inputRows += 1;
+  });
+  if (!headers) fail("The county file has no header row.");
+  state.progress({ phase: "complete", inputRows });
+  return {
+    statusColumn: options.statusColumn,
+    inputRows,
+    statuses: [...statuses].map(([value, count]) => ({ value, count })),
+    delimiter: state.delimiter,
+    encoding: state.encoding,
+  };
+}
+
+function returnStatusProfile(value) {
+  // Existing internal callers retain their ID-only behavior. The website always
+  // sends either a reviewed mapping or an explicit returned-only confirmation.
+  if (value === undefined) return { returnedOnly: true };
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    fail(
+      "Review the county return-status meanings before preparing this file.",
+    );
+  const keys = Object.keys(value);
+  if (keys.length === 1 && value.returnedOnly === true)
+    return { returnedOnly: true, definition: { returnedOnly: true } };
+  if (
+    keys.some((key) => !["column", "mappings"].includes(key)) ||
+    typeof value.column !== "string" ||
+    !value.column ||
+    !Array.isArray(value.mappings) ||
+    value.mappings.length > MAX_RETURN_STATUS_VALUES
+  )
+    fail(
+      "Review the county return-status meanings before preparing this file.",
+    );
+  const meanings = new Map();
+  for (const mapping of value.mappings) {
+    if (
+      !mapping ||
+      typeof mapping !== "object" ||
+      Array.isArray(mapping) ||
+      Object.keys(mapping).some((key) => !["value", "meaning"].includes(key)) ||
+      !validReturnStatus(mapping.value) ||
+      !["returned", "voided", "ignore"].includes(mapping.meaning) ||
+      meanings.has(mapping.value)
+    )
+      fail(
+        "Give every exact county status one meaning: Returned, Voided, or Exclude from this update.",
+        "ballot_preparation_return_status_mapping",
+      );
+    meanings.set(mapping.value, mapping.meaning);
+  }
+  return {
+    column: value.column,
+    meanings,
+    definition: {
+      column: value.column,
+      mappings: [...meanings].map(([value, meaning]) => ({ value, meaning })),
+    },
+  };
+}
+
 /** Preserves exact text and leading zeroes; returns are intersected before any upload. */
 export async function prepareBallotFile(file, options = {}) {
   const state = context(file, options);
@@ -429,6 +554,8 @@ export async function prepareBallotFile(file, options = {}) {
     fail("Each county filter needs a column and supported exact text values.");
   const retained =
     mode === "returns" ? retainedSet(options.retainedIds, state) : null;
+  const returnProfile =
+    mode === "returns" ? returnStatusProfile(options.returnStatus) : null;
   const receipt = {
     inputRows: 0,
     selectedRows: 0,
@@ -441,8 +568,20 @@ export async function prepareBallotFile(file, options = {}) {
     idColumn: options.idColumn,
     outputIdColumn: mode === "returns" ? "Voter ID" : options.idColumn,
     mode,
+    ...(returnProfile
+      ? {
+          returnedRows: 0,
+          voidedRows: 0,
+          ignoredStatusRows: 0,
+          conflictingIds: 0,
+          voidedIds: 0,
+          ...(returnProfile.definition
+            ? { returnStatus: returnProfile.definition }
+            : {}),
+        }
+      : {}),
   };
-  let headers, idIndex, preparedFilters;
+  let headers, idIndex, preparedFilters, statusIndex;
   const parts = [],
     selected = new Map();
   const append = (bytes) => {
@@ -463,6 +602,12 @@ export async function prepareBallotFile(file, options = {}) {
         fail(
           "The selected official voter-ID column is missing from this file.",
         );
+      if (returnProfile && !returnProfile.returnedOnly)
+        ({ statusIndex } = returnStatusColumns(
+          headers,
+          options.idColumn,
+          returnProfile.column,
+        ));
       preparedFilters = filters.map((filter) => {
         const index = headers.indexOf(filter.column);
         if (index < 0)
@@ -472,9 +617,7 @@ export async function prepareBallotFile(file, options = {}) {
           values: new Set(filter.values || [filter.value]),
         };
       });
-      append(
-        encoder.encode(csvRow(mode === "returns" ? ["Voter ID"] : headers)),
-      );
+      if (mode === "baseline") append(encoder.encode(csvRow(headers)));
       return;
     }
     validateWidth(row, headers);
@@ -484,6 +627,24 @@ export async function prepareBallotFile(file, options = {}) {
     ) {
       receipt.excludedRows += 1;
       return;
+    }
+    let returnMeaning;
+    if (returnProfile) {
+      returnMeaning = returnProfile.returnedOnly
+        ? "returned"
+        : returnProfile.meanings.get(row[statusIndex]);
+      if (!returnMeaning)
+        fail(
+          "The file contains an unmapped return status, including a possible blank. Read its statuses again and choose a meaning for every value.",
+          "ballot_preparation_return_status_unmapped",
+        );
+      receipt[
+        returnMeaning === "returned"
+          ? "returnedRows"
+          : returnMeaning === "voided"
+            ? "voidedRows"
+            : "ignoredStatusRows"
+      ] += 1;
     }
     const id = row[idIndex];
     if (!validId(id))
@@ -495,7 +656,14 @@ export async function prepareBallotFile(file, options = {}) {
       receipt.excludedRows += 1;
       return;
     }
-    const bytes = encoder.encode(csvRow(mode === "returns" ? [id] : row));
+    if (returnProfile) {
+      if (returnMeaning === "ignore") return;
+      const previous = selected.get(id) || 0;
+      if (previous) receipt.duplicateRows += 1;
+      selected.set(id, previous | (returnMeaning === "returned" ? 1 : 2));
+      return;
+    }
+    const bytes = encoder.encode(csvRow(row));
     if (selected.has(id)) {
       if (!sameBytes(selected.get(id), bytes))
         fail(
@@ -516,6 +684,27 @@ export async function prepareBallotFile(file, options = {}) {
     receipt.selectedRows += 1;
     receipt.matchedUnique += 1;
   });
+  if (returnProfile) {
+    // No CSV bytes are emitted until every status has been validated. Keeping
+    // only a two-bit decision per retained ID also lets a later voided record
+    // suppress an earlier returned record without relying on file order.
+    append(encoder.encode(csvRow(["Voter ID"])));
+    for (const [id, meanings] of selected) {
+      state.check();
+      if (meanings & 2) receipt.voidedIds += 1;
+      if (meanings === 3) receipt.conflictingIds += 1;
+      if (meanings !== 1) continue;
+      if (receipt.selectedRows >= state.limits.maxRows)
+        fail(
+          `The prepared file exceeds this election's ${state.limits.maxRows.toLocaleString("en-US")}-voter capacity. Ask an organization administrator to review capacity; do not exclude eligible voters to fit.`,
+          "ballot_preparation_row_limit",
+        );
+      append(encoder.encode(csvRow([id])));
+      receipt.selectedRows += 1;
+    }
+    receipt.matchedUnique = receipt.selectedRows;
+    receipt.excludedRows = receipt.inputRows - receipt.selectedRows;
+  }
   if (!headers || (mode === "baseline" && receipt.selectedRows === 0))
     fail(
       "No county rows match the chosen scope. Review the ID column and exact filter values.",

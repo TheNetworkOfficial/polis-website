@@ -1091,6 +1091,10 @@ export function createBallotChaser({
       await preparation.prepare(data);
       return;
     }
+    if (type === "prepare-return-edit") {
+      preparation.reviewReturns();
+      return;
+    }
     let prepared;
     if (type === "prepare-upload") {
       if (!data.has("preparedReviewed"))
@@ -1099,7 +1103,7 @@ export function createBallotChaser({
         );
       data.set("sourceAsOf", preparedReportDate(data.get("sourceAsOf")));
       await refreshPreparationAccess();
-      prepared = preparation.ready();
+      prepared = preparation.ready(data);
       file = prepared.file;
       data.set("kind", prepared.mode === "baseline" ? "base" : "snapshot");
       data.set("fileMode", prepared.mode === "baseline" ? "full" : "delta");
@@ -1357,9 +1361,13 @@ export function createBallotChaser({
     if (form.matches?.("[data-ballot-door-form]")) return;
     if (!owned(form)) return;
     event.preventDefault();
-    if (!form.reportValidity()) return;
+    const statusRescan =
+      form.dataset.ballotForm === "prepare-review" &&
+      event.submitter?.name === "readStatuses";
+    if (!statusRescan && !form.reportValidity()) return;
     const data = new FormData(form),
       file = form.querySelector('input[type="file"]')?.files?.[0];
+    if (statusRescan) data.set("readStatuses", "on");
     if (form.dataset.workspaceForm?.endsWith("-import-preview") && file)
       contacts?.change(form.querySelector('input[type="file"]'));
     void run(() =>

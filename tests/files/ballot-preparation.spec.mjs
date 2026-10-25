@@ -13,6 +13,7 @@ const source = await readFile(
 const modelUrl = `data:text/javascript;base64,${Buffer.from(source).toString("base64")}`;
 const {
   inspectBallotFile,
+  inspectBallotReturnStatuses,
   prepareBallotFile,
   readRetainedBallotIds,
   ballotPreparationError,
@@ -438,6 +439,259 @@ test("zero-match returns keep unknown and excluded counts in a local header-only
   assert.equal(result.receipt.outputIdColumn, "Voter ID");
 });
 
+const returnStatus = {
+  column: "BALSTATUS",
+  mappings: [
+    { value: "R", meaning: "returned" },
+    { value: "X", meaning: "voided" },
+  ],
+};
+const returnOptions = {
+  mode: "returns",
+  idColumn: "VOTERID",
+  retainedIds: ["0001", "0002", "0003", "0004", "0005"],
+  returnStatus,
+};
+
+test("status inspection scans the whole bounded file and preserves exact codes including blanks", async () => {
+  const input = boundedFile(
+    file(
+      "VOTERID,BALSTATUS\r\n0001,R\r\n0002,R\r\n0003,R\r\n0004,X\r\n0005,\r\n0006,r\r\n",
+    ),
+  );
+  const result = await inspectBallotReturnStatuses(input, {
+    idColumn: "VOTERID",
+    statusColumn: "BALSTATUS",
+    limits: { chunkBytes: 5 },
+  });
+  assert.deepEqual(result, {
+    statusColumn: "BALSTATUS",
+    inputRows: 6,
+    statuses: [
+      { value: "R", count: 3 },
+      { value: "X", count: 1 },
+      { value: "", count: 1 },
+      { value: "r", count: 1 },
+    ],
+    delimiter: "comma",
+    encoding: "utf-8",
+  });
+  assert.equal(input.reads.at(-1)[1], input.size);
+});
+
+test("return status inspection rejects the wrong column, invalid IDs and unbounded status choices", async () => {
+  const inspectOptions = { idColumn: "VOTERID", statusColumn: "BALSTATUS" };
+  await assert.rejects(
+    inspectBallotReturnStatuses(file("VOTERID\n0001\n"), {
+      idColumn: "VOTERID",
+      statusColumn: "VOTERID",
+    }),
+    /separate official voter-ID and ballot-status columns/,
+  );
+  await assert.rejects(
+    inspectBallotReturnStatuses(
+      file("VOTERID,BALSTATUS\ninvalid id,R\n"),
+      inspectOptions,
+    ),
+    /invalid official voter ID/,
+  );
+  const rows = Array.from(
+    { length: 32 },
+    (_, index) => `00${index},code${index}\n`,
+  ).join("");
+  assert.equal(
+    (
+      await inspectBallotReturnStatuses(
+        file("VOTERID,BALSTATUS\n" + rows),
+        inspectOptions,
+      )
+    ).statuses.length,
+    32,
+  );
+  await assert.rejects(
+    inspectBallotReturnStatuses(
+      file("VOTERID,BALSTATUS\n" + rows + "0032,code32\n"),
+      inspectOptions,
+    ),
+    /more than 32 status values/,
+  );
+  await assert.rejects(
+    inspectBallotReturnStatuses(
+      file(`VOTERID,BALSTATUS\n0001,${"é".repeat(81)}\n`),
+      inspectOptions,
+    ),
+    /160 bytes/,
+  );
+  const controller = new AbortController();
+  const input = boundedFile(
+    file("VOTERID,BALSTATUS\n0001,R\n0002,X\n"),
+    (start) => {
+      if (start > 0) controller.abort();
+    },
+  );
+  await assert.rejects(
+    inspectBallotReturnStatuses(input, {
+      ...inspectOptions,
+      signal: controller.signal,
+      limits: { chunkBytes: 5 },
+    }),
+    { name: "AbortError" },
+  );
+});
+
+test("returned and voided rows are classified before deduplicating retained voter IDs", async () => {
+  const rows = [
+    "0001,R",
+    "0001,R",
+    "0002,X",
+    "0003,R",
+    "0003,X",
+    "0004,X",
+    "0004,R",
+    "0005,I",
+    "0005,R",
+    "9999,R",
+  ];
+  for (const values of [rows, [...rows].reverse()]) {
+    const prepared = await prepareBallotFile(
+      boundedFile(file("VOTERID,BALSTATUS\r\n" + values.join("\r\n") + "\r\n")),
+      {
+        ...returnOptions,
+        returnStatus: {
+          ...returnStatus,
+          mappings: [
+            ...returnStatus.mappings,
+            { value: "I", meaning: "ignore" },
+          ],
+        },
+        limits: { chunkBytes: 3 },
+      },
+    );
+    const outputIds = (await prepared.blob.text())
+      .trim()
+      .split("\r\n")
+      .slice(1)
+      .sort();
+    assert.deepEqual(outputIds, ["0001", "0005"]);
+    assert.deepEqual(
+      Object.fromEntries(
+        [
+          "inputRows",
+          "selectedRows",
+          "matchedUnique",
+          "excludedRows",
+          "unknownRows",
+          "duplicateRows",
+          "returnedRows",
+          "voidedRows",
+          "ignoredStatusRows",
+          "conflictingIds",
+          "voidedIds",
+        ].map((key) => [key, prepared.receipt[key]]),
+      ),
+      {
+        inputRows: 10,
+        selectedRows: 2,
+        matchedUnique: 2,
+        excludedRows: 8,
+        unknownRows: 1,
+        duplicateRows: 3,
+        returnedRows: 6,
+        voidedRows: 3,
+        ignoredStatusRows: 1,
+        conflictingIds: 2,
+        voidedIds: 3,
+      },
+    );
+  }
+});
+
+test("all voided, ignored or outside-cohort records produce no returned IDs", async () => {
+  const prepared = await prepareBallotFile(
+    file("VOTERID,BALSTATUS\n0001,X\n0002,I\n9999,R\n"),
+    {
+      ...returnOptions,
+      returnStatus: {
+        ...returnStatus,
+        mappings: [...returnStatus.mappings, { value: "I", meaning: "ignore" }],
+      },
+    },
+  );
+  assert.equal(await prepared.blob.text(), "Voter ID\r\n");
+  assert.equal(prepared.receipt.selectedRows, 0);
+  assert.equal(prepared.receipt.voidedRows, 1);
+  assert.equal(prepared.receipt.voidedIds, 1);
+  assert.equal(prepared.receipt.ignoredStatusRows, 1);
+  assert.equal(prepared.receipt.excludedRows, 3);
+});
+
+test("unmapped and blank statuses fail without exposing source values, while explicit blank exclusion works", async () => {
+  for (const value of ["Private Name", ""]) {
+    await assert.rejects(
+      prepareBallotFile(
+        file(`VOTERID,BALSTATUS\n0001,R\n0002,${value}\n`),
+        returnOptions,
+      ),
+      (error) => {
+        assert.equal(error.code, "ballot_preparation_return_status_unmapped");
+        assert.equal(error.message.includes("Private Name"), false);
+        return true;
+      },
+    );
+  }
+  const prepared = await prepareBallotFile(
+    file("VOTERID,BALSTATUS\n0001,R\n0002,\n"),
+    {
+      ...returnOptions,
+      returnStatus: {
+        ...returnStatus,
+        mappings: [...returnStatus.mappings, { value: "", meaning: "ignore" }],
+      },
+    },
+  );
+  assert.equal(await prepared.blob.text(), "Voter ID\r\n0001\r\n");
+  assert.equal(prepared.receipt.ignoredStatusRows, 1);
+});
+
+test("return meanings are explicit, disjoint and bounded; confirmed returned-only files remain supported", async () => {
+  const input = file("VOTERID,BALSTATUS\n0001,R\n");
+  for (const invalid of [
+    null,
+    { returnedOnly: false },
+    { returnedOnly: true, column: "BALSTATUS" },
+    { column: "BALSTATUS", mappings: [{ value: "R", meaning: "accepted" }] },
+    {
+      column: "BALSTATUS",
+      mappings: [
+        { value: "R", meaning: "returned" },
+        { value: "R", meaning: "voided" },
+      ],
+    },
+    {
+      column: "BALSTATUS",
+      mappings: Array.from({ length: 33 }, (_, index) => ({
+        value: String(index),
+        meaning: "ignore",
+      })),
+    },
+    { column: "VOTERID", mappings: [] },
+  ])
+    await assert.rejects(
+      prepareBallotFile(input, { ...returnOptions, returnStatus: invalid }),
+    );
+  const prepared = await prepareBallotFile(
+    file("VOTERID\r\n0001\r\n0001\r\n"),
+    {
+      ...returnOptions,
+      returnStatus: { returnedOnly: true },
+    },
+  );
+  assert.equal(await prepared.blob.text(), "Voter ID\r\n0001\r\n");
+  assert.equal(prepared.receipt.returnedRows, 2);
+  assert.equal(prepared.receipt.duplicateRows, 1);
+  assert.deepEqual(prepared.receipt.returnStatus, { returnedOnly: true });
+});
+
 test("retained ID exports require the exact server header and preserve leading zeroes", async () => {
   assert.deepEqual(
     await readRetainedBallotIds(file("ballotVoterId\r\n00001\r\nA02-x\r\n")),
@@ -595,7 +849,7 @@ test("worker supports inspection, preparation, retained IDs, progress and friend
     await import(
       `data:text/javascript;base64,${Buffer.from(worker).toString("base64")}`
     );
-    for (const action of ["inspect", "prepare", "ids"]) {
+    for (const action of ["inspect", "prepare", "ids", "return-statuses"]) {
       messages.length = 0;
       await handler({
         data: {
@@ -604,9 +858,11 @@ test("worker supports inspection, preparation, retained IDs, progress and friend
           file: file(
             action === "ids"
               ? "ballotVoterId\n0001\n"
-              : "Official ID,Name\n0001,One\n",
+              : action === "return-statuses"
+                ? "Official ID,BALSTATUS\n0001,R\n"
+                : "Official ID,Name\n0001,One\n",
           ),
-          options,
+          options: { ...options, statusColumn: "BALSTATUS" },
         },
       });
       assert.ok(messages.some((message) => message.type === "progress"));

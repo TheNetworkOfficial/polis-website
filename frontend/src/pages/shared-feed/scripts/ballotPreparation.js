@@ -355,7 +355,69 @@ export function createBallotPreparation({
       );
     return ids;
   }
+  /** Scan only local status codes before C4D decides how each code is handled. */
+  async function readReturnStatuses(idColumn, statusColumn) {
+    const version = generation;
+    bound();
+    state.prepared = null;
+    state.returnStatusReview = null;
+    state.returnMeanings = null;
+    state.stage = "working";
+    state.startedAt = Date.now();
+    changed();
+    try {
+      const result = await runWorker(
+        "return-statuses",
+        state.file,
+        {
+          ...state.format,
+          delimiter: state.preview.delimiter,
+          encoding: state.preview.encoding,
+          idColumn,
+          statusColumn,
+        },
+        version,
+      );
+      check(version);
+      bound();
+      if (
+        result.statusColumn !== statusColumn ||
+        !Number.isSafeInteger(result.inputRows) ||
+        result.inputRows < 0 ||
+        !Array.isArray(result.statuses) ||
+        result.statuses.length > 32 ||
+        result.statuses.some(
+          (item) =>
+            typeof item.value !== "string" ||
+            !Number.isSafeInteger(item.count) ||
+            item.count < 1,
+        ) ||
+        new Set(result.statuses.map((item) => item.value)).size !==
+          result.statuses.length ||
+        result.statuses.reduce((sum, item) => sum + item.count, 0) !==
+          result.inputRows
+      )
+        throw new Error("The county status counts could not be confirmed.");
+      state.returnStatusReview = { ...result, idColumn };
+      state.returnMeanings = result.statuses.map(({ value }) =>
+        value === "R" ? "returned" : value === "X" ? "voided" : "",
+      );
+      state.stage = "review";
+      state.progress = null;
+      changed();
+    } catch (error) {
+      if (version === generation) {
+        state.stage = "review";
+        state.progress = null;
+        changed();
+      }
+      throw error;
+    }
+  }
   async function prepare(data) {
+    // A changed or rejected review must never leave an older file uploadable.
+    state.prepared = null;
+    state.stage = "review";
     if (!data.has("headersReviewed"))
       throw new Error(
         "Confirm the displayed header row and official voter ID column first.",
@@ -366,6 +428,7 @@ export function createBallotPreparation({
     if (!state.preview?.headers.includes(idColumn))
       throw new Error("Choose the county's official voter ID column.");
     const filters = [];
+    let returnStatus;
     if (state.mode === "baseline") {
       const district = data.get("districtColumn"),
         party = data.get("partyColumn"),
@@ -398,6 +461,57 @@ export function createBallotPreparation({
         district: String(data.get("districtValue")),
         partyValues,
       };
+    } else {
+      const statusColumn = String(data.get("statusColumn") || "");
+      state.returnColumns = { idColumn, statusColumn };
+      if (statusColumn) {
+        if (
+          statusColumn === idColumn ||
+          !state.preview.headers.includes(statusColumn)
+        )
+          throw new Error("Choose a separate county return-status column.");
+        const review = state.returnStatusReview;
+        if (
+          data.has("readStatuses") ||
+          review?.idColumn !== idColumn ||
+          review?.statusColumn !== statusColumn
+        )
+          return readReturnStatuses(idColumn, statusColumn);
+        state.returnMeanings = review.statuses.map((_, index) =>
+          String(data.get(`returnMeaning_${index}`) || ""),
+        );
+        if (
+          state.returnMeanings.some(
+            (meaning) => !["returned", "voided", "ignore"].includes(meaning),
+          )
+        )
+          throw new Error(
+            "Choose a meaning for every observed status, including blank values, before matching returns.",
+          );
+        if (!data.has("statusMeaningsReviewed"))
+          throw new Error(
+            "Confirm the displayed county status meanings first.",
+          );
+        returnStatus = {
+          column: statusColumn,
+          mappings: review.statuses.map(({ value }, index) => ({
+            value,
+            meaning: state.returnMeanings[index],
+          })),
+        };
+      } else {
+        if (state.preview.headers.includes("BALSTATUS"))
+          throw new Error(
+            "This file includes BALSTATUS. Review its received and voided codes before matching returns.",
+          );
+        if (!data.has("confirmedReturnsOnly"))
+          throw new Error(
+            "Select the return-status column, or explicitly confirm this file contains only received ballots.",
+          );
+        state.returnStatusReview = null;
+        state.returnMeanings = null;
+        returnStatus = { returnedOnly: true };
+      }
     }
     state.stage = "working";
     state.startedAt = Date.now();
@@ -417,6 +531,7 @@ export function createBallotPreparation({
           filters,
           limits: preparationLimits(ctx),
           mode: state.mode,
+          ...(returnStatus ? { returnStatus } : {}),
           ...(retained ? { retainedIds: retained } : {}),
         },
         version,
@@ -439,13 +554,20 @@ export function createBallotPreparation({
       clearTimeout(deadline);
     }
   }
-  function ready() {
+  function ready(data) {
     guard();
     bound();
     if (state.stage !== "ready" || !state.prepared?.blob)
       throw new Error("Prepare and review the county file before uploading.");
     if (state.prepared.receipt.selectedRows < 1)
       throw new Error("No returns match this election. No update is needed.");
+    if (
+      state.prepared.receipt.conflictingIds > 0 &&
+      !data?.has("excludeConflicted")
+    )
+      throw new Error(
+        "Confirm that voters with both received and voided records will be left unchanged in this update.",
+      );
     return {
       file: new File([state.prepared.blob], "prepared-ballots.csv", {
         type: "text/csv",
@@ -456,6 +578,23 @@ export function createBallotPreparation({
       receipt: state.prepared.receipt,
     };
   }
+  function reviewReturns() {
+    guard();
+    bound();
+    if (state.mode !== "returns" || !state.preview)
+      throw new Error("Choose the county returns file first.");
+    state.prepared = null;
+    state.stage = "review";
+    changed();
+  }
+  function returnSummary(receipt) {
+    if (state.mode !== "returns") return "";
+    return `<section aria-label="County return status summary"><p>County status counts: ${count(receipt.returnedRows ?? receipt.selectedRows)} received rows · ${count(receipt.voidedRows || 0)} voided rows excluded · ${count(receipt.ignoredStatusRows || 0)} other rows excluded.</p><p>${count(receipt.conflictingIds || 0)} voters with both received and voided records are excluded from this update. Voided records do not count as new returns. Previous ballot status stays unchanged for excluded voters; a received ballot is separate from an accepted ballot.</p></section>`;
+  }
+  const reviewReturnsButton = () =>
+    state.mode === "returns"
+      ? '<form data-ballot-form="prepare-return-edit"><button class="pt-btn pt-btn--secondary" type="submit">Review return status choices</button></form>'
+      : "";
   function render(busy = false) {
     if (!context().allowed)
       return notice(
@@ -475,15 +614,66 @@ export function createBallotPreparation({
         ? `<p>Reviewed selection: district <strong>${e(state.reviewedFilters.district)}</strong> and party <strong>${state.reviewedFilters.partyValues.map(e).join(" or ")}</strong>.</p>`
         : "";
       if (receipt.selectedRows === 0)
-        return `<section class="pt-card"><h2>No matching returns</h2><p>${count(receipt.inputRows)} source records checked · ${count(receipt.unknownRows || 0)} rows outside this election · ${count(receipt.duplicateRows || 0)} repeated IDs removed.</p><p>No update is needed. No file was uploaded.</p>${cancelButton}</section>`;
-      return `<form class="pt-card" data-ballot-form="prepare-upload"><h2>Review prepared ${state.mode === "returns" ? "returns" : "sent ballots"}</h2>${reviewedSelection}<p>${count(receipt.inputRows)} source records · ${count(receipt.selectedRows)} selected · ${count(receipt.excludedRows)} excluded</p><p>${count(receipt.duplicateRows || 0)} repeated IDs were removed.</p>${state.mode === "returns" ? `<p>${count(receipt.matchedUnique || receipt.selectedRows)} unique IDs matched this election; ${count(receipt.unknownRows || 0)} rows outside this election were excluded.</p>` : ""}<p>${(state.prepared.blob.size / 1000000).toFixed(2)} MB prepared. Only this list will upload. Official IDs and their leading zeroes are preserved.</p><p>Every selected row means <strong>${state.mode === "returns" ? "Returned" : "Issued"}</strong>. Missing voters keep their earlier status.</p>${state.binding.sourceAsOf ? `<p>Original report date: ${e(state.binding.sourceAsOf)}</p><input name="sourceAsOf" type="hidden" value="${e(state.binding.sourceAsOf)}">` : field("sourceAsOf", "Official report date or timestamp", state.sourceAsOf || "", { required: true, extra: 'placeholder="YYYY-MM-DD or 2026-10-24T12:00:00-07:00"' }) + "<p>Use the county date alone when no time is supplied. A timestamp must include its time zone. Never add a time to work around same-date reports.</p>"}<label class="pt-workspace-check"><input type="checkbox" name="preparedReviewed" required>I checked the selected count and this report's meaning.</label><div class="pt-actions">${submit("Upload prepared list and review columns")}${cancelButton}</div></form>`;
+        return `<section class="pt-card"><h2>No matching returns</h2><p>${count(receipt.inputRows)} source records checked · ${count(receipt.unknownRows || 0)} rows outside this election · ${count(receipt.duplicateRows || 0)} repeated IDs removed.</p>${returnSummary(receipt)}<p>No update is needed. No file was uploaded.</p>${cancelButton}</section>${reviewReturnsButton()}`;
+      const conflictReview =
+        receipt.conflictingIds > 0
+          ? '<label class="pt-workspace-check"><input type="checkbox" name="excludeConflicted" required>Leave voters with both received and voided records unchanged in this update.</label>'
+          : "";
+      return `<form class="pt-card" data-ballot-form="prepare-upload"><h2>Review prepared ${state.mode === "returns" ? "returns" : "sent ballots"}</h2>${reviewedSelection}<p>${count(receipt.inputRows)} source records · ${count(receipt.selectedRows)} selected · ${count(receipt.excludedRows)} excluded</p><p>${count(receipt.duplicateRows || 0)} repeated IDs were removed.</p>${state.mode === "returns" ? `<p>${count(receipt.matchedUnique || receipt.selectedRows)} unique IDs matched this election; ${count(receipt.unknownRows || 0)} rows outside this election were excluded.</p>` : ""}${returnSummary(receipt)}<p>${(state.prepared.blob.size / 1000000).toFixed(2)} MB prepared. Only this list will upload. Official IDs and their leading zeroes are preserved.</p><p>Every selected row means <strong>${state.mode === "returns" ? "Returned" : "Issued"}</strong>. Missing voters keep their earlier status.</p>${state.binding.sourceAsOf ? `<p>Original report date: ${e(state.binding.sourceAsOf)}</p><input name="sourceAsOf" type="hidden" value="${e(state.binding.sourceAsOf)}">` : field("sourceAsOf", "Official report date or timestamp", state.sourceAsOf || "", { required: true, extra: 'placeholder="YYYY-MM-DD or 2026-10-24T12:00:00-07:00"' }) + "<p>Use the county date alone when no time is supplied. A timestamp must include its time zone. Never add a time to work around same-date reports.</p>"}${conflictReview}<label class="pt-workspace-check"><input type="checkbox" name="preparedReviewed" required>I checked the selected count and this report's meaning.</label><div class="pt-actions">${submit("Upload prepared list and review columns")}${cancelButton}</div></form>${reviewReturnsButton()}`;
     }
     if (state.stage === "review") {
       const choices = [
         ["", "Choose a column"],
         ...state.preview.headers.map((header) => [header, header]),
       ];
-      return `<form class="pt-card" data-ballot-form="prepare-review"><h2>Review county columns</h2><p>${e(state.file.name)} · ${e(state.preview.delimiter)} · ${e(state.preview.encoding)}</p><div class="pt-workspace-table-wrap"><table class="pt-workspace-table"><thead><tr>${state.preview.headers.map((header) => `<th>${e(header)}</th>`).join("")}</tr></thead><tbody>${state.preview.sample.map((row) => `<tr>${row.map((value) => `<td>${e(value)}</td>`).join("")}</tr>`).join("")}</tbody></table></div><div class="pt-fields">${select("idColumn", "Official voter ID column", choices, "", true)}${state.mode === "baseline" ? select("districtColumn", "Congressional district column", choices, "", true) + field("districtValue", "Exact district value", "", { required: true }) + select("partyColumn", "Party column", choices, "", true) + field("partyValue", "Exact party values (comma-separated)", "", { required: true, extra: 'placeholder="IND, PND"' }) : ""}</div><p>${state.mode === "returns" ? "Returns will match official IDs against every voter retained in this election, including voters already returned. Unmatched IDs will be excluded." : "The district must match exactly and any one of the listed party values must match exactly. Separate party values with commas. No county codes are inferred."}</p><label class="pt-workspace-check"><input type="checkbox" name="headersReviewed" required>I confirmed this is the county header row and selected its official voter ID.</label><div class="pt-actions">${submit(state.mode === "returns" ? "Match returns to this election" : "Prepare matching voters")}${cancelButton}</div></form>`;
+      const review = state.returnStatusReview;
+      const countyStatus = state.preview.headers.includes("BALSTATUS");
+      const statusChoices = [
+        [
+          "",
+          countyStatus
+            ? "Choose a status column"
+            : "No status column — confirmed returns only",
+        ],
+        ...state.preview.headers.map((header) => [header, header]),
+      ];
+      const returnFields =
+        state.mode === "returns"
+          ? select(
+              "statusColumn",
+              "Return-status column",
+              statusChoices,
+              state.returnColumns?.statusColumn ??
+                (countyStatus ? "BALSTATUS" : ""),
+              countyStatus,
+            ) +
+            (countyStatus
+              ? "<p>Use the county's returns report here. Maricopa's S code does not confirm a received ballot.</p>"
+              : '<label class="pt-workspace-check"><input type="checkbox" name="confirmedReturnsOnly">For a file without a status column, I confirmed every record is a received ballot.</label>')
+          : "";
+      const statusMeanings =
+        state.mode === "returns" && review
+          ? `<section aria-label="Review county return statuses"><h3>Review every return status</h3><p>${count(review.inputRows)} rows checked locally. Confirm each exact county code. Maricopa documents R as received and X as voided; other codes and blank values need your choice.</p>${review.statuses
+              .map(
+                ({ value, count: rows }, index) =>
+                  `<div class="pt-fields"><p><strong>${value === "" ? "Blank status" : e(JSON.stringify(value))}</strong> · ${count(rows)} rows</p>${select(
+                    `returnMeaning_${index}`,
+                    `Meaning for ${value === "" ? "blank status" : value}`,
+                    [
+                      ["", "Choose meaning"],
+                      ["returned", "Received ballot — include as Returned"],
+                      ["voided", "Voided ballot — exclude"],
+                      ["ignore", "Other record — exclude"],
+                    ],
+                    state.returnMeanings?.[index] || "",
+                    true,
+                  )}</div>`,
+              )
+              .join(
+                "",
+              )}<label class="pt-workspace-check"><input type="checkbox" name="statusMeaningsReviewed" required>I reviewed how every county status will be handled.</label><p>Only received voter IDs will upload. Voided and excluded rows preserve previous ballot history. Conflicting received/voided records will be counted in the review before upload.</p><button class="pt-btn pt-btn--secondary" type="submit" name="readStatuses" value="on" formnovalidate${busy ? " disabled" : ""}>Read status codes again</button></section>`
+          : "";
+      return `<form class="pt-card" data-ballot-form="prepare-review"><h2>Review county columns</h2><p>${e(state.file.name)} · ${e(state.preview.delimiter)} · ${e(state.preview.encoding)}</p><div class="pt-workspace-table-wrap"><table class="pt-workspace-table"><thead><tr>${state.preview.headers.map((header) => `<th>${e(header)}</th>`).join("")}</tr></thead><tbody>${state.preview.sample.map((row) => `<tr>${row.map((value) => `<td>${e(value)}</td>`).join("")}</tr>`).join("")}</tbody></table></div><div class="pt-fields">${select("idColumn", "Official voter ID column", choices, state.returnColumns?.idColumn || "", true)}${state.mode === "baseline" ? select("districtColumn", "Congressional district column", choices, "", true) + field("districtValue", "Exact district value", "", { required: true }) + select("partyColumn", "Party column", choices, "", true) + field("partyValue", "Exact party values (comma-separated)", "", { required: true, extra: 'placeholder="IND, PND"' }) : returnFields}</div><p>${state.mode === "returns" ? "Returns will match official IDs against every voter retained in this election, including voters already returned. Review status codes before matching; unmatched IDs will be excluded." : "The district must match exactly and any one of the listed party values must match exactly. Separate party values with commas. No county codes are inferred."}</p><label class="pt-workspace-check"><input type="checkbox" name="headersReviewed" required>I confirmed this is the county header row and selected its official voter ID.</label>${statusMeanings}<div class="pt-actions">${submit(state.mode === "returns" ? (review ? "Match returns to this election" : "Read return statuses") : "Prepare matching voters")}${cancelButton}</div></form>`;
     }
     return `<form class="pt-card" data-ballot-form="prepare-source"><h2>${context().snapshotId ? "Prepare a county returns file" : "Prepare the county sent-ballot file"}</h2><label class="pt-field"><span>County TXT, CSV or TSV file</span><input type="file" name="file" accept=".txt,.csv,.tsv" required></label><div class="pt-fields">${select(
       "delimiter",
@@ -511,6 +701,7 @@ export function createBallotPreparation({
     inspect,
     prepare,
     ready,
+    reviewReturns,
     render,
     reset,
     cancel,

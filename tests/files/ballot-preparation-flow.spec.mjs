@@ -76,8 +76,30 @@ const baselineForm = () =>
     partyColumn: "Party",
     partyValue: "ind",
   });
-const returnForm = () => form({ headersReviewed: "on", idColumn: "Return ID" });
-function fixture({ returns = false, handler, requestHandler, transport } = {}) {
+const returnForm = () =>
+  form({
+    headersReviewed: "on",
+    idColumn: "Return ID",
+    confirmedReturnsOnly: "on",
+  });
+const statusForm = (overrides = {}) =>
+  form({
+    headersReviewed: "on",
+    idColumn: "Return ID",
+    statusColumn: "BALSTATUS",
+    statusMeaningsReviewed: "on",
+    returnMeaning_0: "returned",
+    returnMeaning_1: "voided",
+    ...overrides,
+  });
+function fixture({
+  returns = false,
+  handler,
+  requestHandler,
+  transport,
+  returnStatuses,
+  preparedReceipt = {},
+} = {}) {
   const calls = [],
     workerCalls = [],
     workers = [];
@@ -108,25 +130,39 @@ function fixture({ returns = false, handler, requestHandler, transport } = {}) {
                 : message.action === "inspect"
                   ? {
                       headers: returns
-                        ? ["Return ID", "Date"]
+                        ? returnStatuses
+                          ? ["Return ID", "BALSTATUS", "Date"]
+                          : ["Return ID", "Date"]
                         : ["ID", "CD", "Party"],
                       sample: [["0001", "8", "ind"]],
                       delimiter: "comma",
                       encoding: "utf-8",
                     }
-                  : message.action === "ids"
-                    ? ["0001", "0002"]
-                    : {
-                        blob: new Blob(["Voter ID\r\n0001\r\n"]),
-                        receipt: {
-                          inputRows: 4,
-                          selectedRows: 1,
-                          excludedRows: 3,
-                          unknownRows: 2,
-                          duplicateRows: 1,
-                          matchedUnique: 1,
-                        },
-                      };
+                  : message.action === "return-statuses"
+                    ? {
+                        statusColumn: message.options.statusColumn,
+                        inputRows: returnStatuses.reduce(
+                          (sum, item) => sum + item.count,
+                          0,
+                        ),
+                        statuses: returnStatuses,
+                        delimiter: "comma",
+                        encoding: "utf-8",
+                      }
+                    : message.action === "ids"
+                      ? ["0001", "0002"]
+                      : {
+                          blob: new Blob(["Voter ID\r\n0001\r\n"]),
+                          receipt: {
+                            inputRows: 4,
+                            selectedRows: 1,
+                            excludedRows: 3,
+                            unknownRows: 2,
+                            duplicateRows: 1,
+                            matchedUnique: 1,
+                            ...preparedReceipt,
+                          },
+                        };
               if (!worker.stopped)
                 worker.onmessage({
                   data: { id: message.id, type: "result", result },
@@ -446,4 +482,204 @@ test("supported return capacity exceeds the legacy cohort but unsupported capaci
   );
   assert.equal(unsupported.calls.length, 0);
   assert.equal(unsupported.workerCalls.length, 0);
+});
+
+test("county status review scans locally before any retained-ID export and confirms exact R/X choices", async () => {
+  const h = fixture({
+    returns: true,
+    returnStatuses: [
+      { value: "R", count: 3 },
+      { value: "X", count: 1 },
+    ],
+    preparedReceipt: { returnedRows: 3, voidedRows: 1, conflictingIds: 0 },
+  });
+  await h.controller.inspect(file(), sourceForm());
+  assert.match(h.controller.render(), /Return-status column/);
+  assert.match(h.controller.render(), /value="BALSTATUS" selected/);
+  assert.doesNotMatch(h.controller.render(), /name="confirmedReturnsOnly"/);
+  assert.doesNotMatch(h.controller.render(), /No status column — confirmed/);
+  assert.match(
+    h.controller.render(),
+    /S code does not confirm a received ballot/,
+  );
+  await h.controller.prepare(statusForm());
+  assert.equal(h.calls.length, 0);
+  assert.equal(h.workerCalls.at(-1).action, "return-statuses");
+  assert.deepEqual(h.controller.state().returnMeanings, ["returned", "voided"]);
+  assert.match(h.controller.render(), /4 rows checked locally/);
+  assert.throws(() => h.controller.ready(), /Prepare and review/);
+  await h.controller.prepare(statusForm());
+  assert.deepEqual(h.workerCalls.at(-1).options.returnStatus, {
+    column: "BALSTATUS",
+    mappings: [
+      { value: "R", meaning: "returned" },
+      { value: "X", meaning: "voided" },
+    ],
+  });
+  assert.match(h.controller.render(), /3 received rows/);
+  assert.match(h.controller.render(), /1 voided rows excluded/);
+  assert.match(h.controller.render(), /Previous ballot status stays unchanged/);
+  assert.doesNotMatch(h.controller.render(), /send.*Sam|file.*review first/);
+});
+
+test("blank and unknown statuses require a self-service meaning before matching", async () => {
+  const h = fixture({
+    returns: true,
+    returnStatuses: [
+      { value: "R", count: 1 },
+      { value: "", count: 2 },
+      { value: "?", count: 1 },
+    ],
+  });
+  await h.controller.inspect(file(), sourceForm());
+  await h.controller.prepare(statusForm());
+  assert.deepEqual(h.controller.state().returnMeanings, ["returned", "", ""]);
+  assert.match(h.controller.render(), /Blank status/);
+  assert.match(
+    h.controller.render(),
+    /name="readStatuses" value="on" formnovalidate/,
+  );
+  await assert.rejects(
+    h.controller.prepare(
+      statusForm({ returnMeaning_1: "", returnMeaning_2: "" }),
+    ),
+    /meaning for every observed status/,
+  );
+  assert.equal(h.calls.length, 0);
+  await h.controller.prepare(
+    statusForm({ returnMeaning_1: "ignore", returnMeaning_2: "ignore" }),
+  );
+  assert.deepEqual(h.workerCalls.at(-1).options.returnStatus.mappings, [
+    { value: "R", meaning: "returned" },
+    { value: "", meaning: "ignore" },
+    { value: "?", meaning: "ignore" },
+  ]);
+});
+
+test("a BALSTATUS file cannot bypass classification through the returned-only confirmation", async () => {
+  const h = fixture({
+    returns: true,
+    returnStatuses: [{ value: "S", count: 4 }],
+  });
+  await h.controller.inspect(file(), sourceForm());
+  await assert.rejects(
+    h.controller.prepare(returnForm()),
+    /includes BALSTATUS/,
+  );
+  assert.equal(h.calls.length, 0);
+  assert.equal(h.workerCalls.length, 1);
+  await h.controller.prepare(statusForm());
+  assert.deepEqual(h.controller.state().returnMeanings, [""]);
+  await assert.rejects(
+    h.controller.prepare(statusForm({ returnMeaning_0: "" })),
+    /meaning for every observed status/,
+  );
+  assert.equal(h.calls.length, 0);
+});
+
+test("returned-only files need an explicit confirmation before a server operation", async () => {
+  const h = fixture({ returns: true });
+  await h.controller.inspect(file(), sourceForm());
+  await assert.rejects(
+    h.controller.prepare(
+      form({ headersReviewed: "on", idColumn: "Return ID" }),
+    ),
+    /explicitly confirm/,
+  );
+  assert.equal(h.calls.length, 0);
+  await h.controller.prepare(returnForm());
+  assert.deepEqual(h.workerCalls.at(-1).options.returnStatus, {
+    returnedOnly: true,
+  });
+});
+
+test("conflicting received and voided voter IDs need acknowledgment before upload", async () => {
+  const h = fixture({
+    returns: true,
+    returnStatuses: [
+      { value: "R", count: 2 },
+      { value: "X", count: 1 },
+    ],
+    preparedReceipt: { returnedRows: 2, voidedRows: 1, conflictingIds: 1 },
+  });
+  await h.controller.inspect(file(), sourceForm());
+  await h.controller.prepare(statusForm());
+  await h.controller.prepare(statusForm());
+  assert.match(h.controller.render(), /name="excludeConflicted" required/);
+  assert.match(h.controller.render(), /1 voters with both received and voided/);
+  assert.throws(() => h.controller.ready(), /left unchanged/);
+  assert.equal(
+    h.controller.ready(form({ excludeConflicted: "on" })).receipt
+      .conflictingIds,
+    1,
+  );
+  h.controller.reviewReturns();
+  assert.throws(() => h.controller.ready(), /Prepare and review/);
+  assert.match(h.controller.render(), /Review every return status/);
+});
+
+test("all-voided results show excluded counts and cannot create an upload", async () => {
+  const h = fixture({
+    returns: true,
+    returnStatuses: [{ value: "X", count: 4 }],
+    preparedReceipt: {
+      selectedRows: 0,
+      matchedUnique: 0,
+      returnedRows: 0,
+      voidedRows: 4,
+      conflictingIds: 0,
+    },
+  });
+  await h.controller.inspect(file(), sourceForm());
+  await h.controller.prepare(statusForm());
+  await h.controller.prepare(statusForm({ returnMeaning_0: "voided" }));
+  assert.match(h.controller.render(), /4 voided rows excluded/);
+  assert.match(h.controller.render(), /No file was uploaded/);
+  assert.doesNotMatch(
+    h.controller.render(),
+    /data-ballot-form="prepare-upload"/,
+  );
+  assert.throws(() => h.controller.ready(), /No update is needed/);
+  assert.ok(h.calls.every((call) => !call.path.endsWith("/imports")));
+});
+
+test("changed status columns rescan locally and rejected mappings invalidate prior preparation", async () => {
+  const h = fixture({
+    returns: true,
+    returnStatuses: [
+      { value: "R", count: 1 },
+      { value: "X", count: 1 },
+    ],
+  });
+  await h.controller.inspect(file(), sourceForm());
+  await h.controller.prepare(statusForm());
+  await h.controller.prepare(statusForm());
+  assert.equal(h.controller.ready().mode, "returns");
+  const calls = h.calls.length;
+  await assert.rejects(
+    h.controller.prepare(statusForm({ returnMeaning_0: "" })),
+    /meaning for every observed status/,
+  );
+  assert.throws(() => h.controller.ready(), /Prepare and review/);
+  assert.equal(h.calls.length, calls);
+  await h.controller.prepare(statusForm({ statusColumn: "Date" }));
+  assert.equal(h.workerCalls.at(-1).action, "return-statuses");
+  assert.equal(h.workerCalls.at(-1).options.statusColumn, "Date");
+  assert.equal(h.calls.length, calls);
+  h.setContext({ snapshotId: "new-snapshot" });
+  await assert.rejects(h.controller.prepare(statusForm()), /changed/);
+});
+
+test("status labels are escaped rather than inserted as county-supplied HTML", async () => {
+  const code = '<img src=x onerror="alert(1)">';
+  const h = fixture({
+    returns: true,
+    returnStatuses: [{ value: code, count: 1 }],
+  });
+  await h.controller.inspect(file(), sourceForm());
+  await h.controller.prepare(statusForm());
+  const html = h.controller.render();
+  assert.doesNotMatch(html, /<img src=x/);
+  assert.match(html, /&lt;img/);
+  assert.deepEqual(h.controller.state().returnMeanings, [""]);
 });

@@ -1,5 +1,6 @@
 import {
   inspectBallotFile,
+  inspectBallotReturnStatuses,
   prepareBallotFile,
   readRetainedBallotIds,
   ballotPreparationError,
@@ -15,7 +16,10 @@ self.addEventListener("message", async ({ data }) => {
     active.get(id)?.abort();
     return;
   }
-  if (active.size || !["inspect", "prepare", "ids"].includes(action)) {
+  if (
+    active.size ||
+    !["inspect", "prepare", "ids", "return-statuses"].includes(action)
+  ) {
     self.postMessage({
       id,
       type: "error",
@@ -32,9 +36,11 @@ self.addEventListener("message", async ({ data }) => {
     const run =
       action === "inspect"
         ? inspectBallotFile
-        : action === "ids"
-          ? readRetainedBallotIds
-          : prepareBallotFile;
+        : action === "return-statuses"
+          ? inspectBallotReturnStatuses
+          : action === "ids"
+            ? readRetainedBallotIds
+            : prepareBallotFile;
     const result = await run(file, {
       ...options,
       signal: controller.signal,
