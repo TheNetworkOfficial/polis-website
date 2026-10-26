@@ -1,0 +1,3244 @@
+/* Approved Calendar v3 presentation. All component rules are scoped to the coalition Calendar. */
+#shared-feed-app .coalition-calendar-page {
+  --background: var(--polis-background);
+  --surface: var(--polis-surface);
+  --raised: var(--polis-surface-raised);
+  --border: var(--polis-border);
+  --primary: var(--polis-primary);
+  --primary-strong: var(--polis-primary-strong);
+  --primary-soft: var(--polis-primary-container);
+  --on-primary: var(--polis-on-primary);
+  --text: var(--polis-text);
+  --muted: var(--polis-text-muted);
+  --subtle: var(--polis-text-subtle);
+  --success: var(--polis-success);
+  --success-soft: var(--polis-success-container);
+  --warning: var(--polis-warning);
+  --warning-soft: var(--polis-tertiary-container);
+  --danger: var(--polis-danger);
+  --danger-soft: var(--polis-danger-container);
+  --line: color-mix(in srgb, var(--polis-border) 62%, transparent);
+  --shell-line: color-mix(in srgb, var(--polis-border) 66%, transparent);
+  --event-color: var(--primary);
+  --meeting-color: #b394ed;
+  --shift-color: var(--success);
+  --mission-color: var(--warning);
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  gap: 14px;
+  color: var(--text);
+  font:
+    14px/1.5 "Polis Texting Inter",
+    Inter,
+    "Segoe UI",
+    sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+#shared-feed-app .coalition-calendar-page h1,
+#shared-feed-app .coalition-calendar-page h2,
+#shared-feed-app .coalition-calendar-page h3,
+#shared-feed-app .coalition-calendar-page h4 {
+  font-family: inherit;
+}
+html[data-polis-theme-resolved="dark"]
+  #shared-feed-app
+  .coalition-calendar-page {
+  --danger: #ef8798;
+}
+html[data-polis-theme-resolved="light"]
+  #shared-feed-app
+  .coalition-calendar-page {
+  --meeting-color: #8455c4;
+}
+#shared-feed-app .coalition-calendar-page *,
+#shared-feed-app .coalition-calendar-page *::before,
+#shared-feed-app .coalition-calendar-page *::after {
+  box-sizing: border-box;
+}
+#shared-feed-app .coalition-calendar-page [hidden] {
+  display: none !important;
+}
+#shared-feed-app .coalition-calendar-page button,
+#shared-feed-app .coalition-calendar-page input,
+#shared-feed-app .coalition-calendar-page select,
+#shared-feed-app .coalition-calendar-page textarea {
+  font: inherit;
+}
+#shared-feed-app .coalition-calendar-page button,
+#shared-feed-app .coalition-calendar-page summary {
+  -webkit-tap-highlight-color: transparent;
+}
+#shared-feed-app .coalition-calendar-page button,
+#shared-feed-app .coalition-calendar-page a,
+#shared-feed-app .coalition-calendar-page summary {
+  touch-action: manipulation;
+}
+#shared-feed-app .coalition-calendar-page button {
+  cursor: pointer;
+}
+#shared-feed-app .coalition-calendar-page button:disabled {
+  cursor: not-allowed;
+}
+#shared-feed-app .coalition-calendar-page button:focus-visible,
+#shared-feed-app .coalition-calendar-page a:focus-visible,
+#shared-feed-app .coalition-calendar-page input:focus-visible,
+#shared-feed-app .coalition-calendar-page select:focus-visible,
+#shared-feed-app .coalition-calendar-page textarea:focus-visible,
+#shared-feed-app .coalition-calendar-page summary:focus-visible {
+  outline: 3px solid var(--primary);
+  outline-offset: 3px;
+}
+#shared-feed-app .coalition-calendar-page svg {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vertical-align: middle;
+}
+#shared-feed-app .coalition-calendar-page a {
+  color: var(--primary);
+}
+#shared-feed-app .coalition-calendar-page h1,
+#shared-feed-app .coalition-calendar-page h2,
+#shared-feed-app .coalition-calendar-page h3,
+#shared-feed-app .coalition-calendar-page h4,
+#shared-feed-app .coalition-calendar-page p {
+  margin-top: 0;
+}
+#shared-feed-app .coalition-calendar-page h1,
+#shared-feed-app .coalition-calendar-page h2,
+#shared-feed-app .coalition-calendar-page h3,
+#shared-feed-app .coalition-calendar-page h4 {
+  color: var(--text);
+  letter-spacing: -0.035em;
+}
+#shared-feed-app .coalition-calendar-page .icon-button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  padding: 8px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--muted);
+}
+#shared-feed-app .coalition-calendar-page .icon-button:hover {
+  background: var(--raised);
+  color: var(--text);
+}
+#shared-feed-app .coalition-calendar-page .icon-button svg {
+  width: 22px;
+  height: 22px;
+}
+#shared-feed-app .coalition-calendar-page .page-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  min-width: 0;
+}
+#shared-feed-app .coalition-calendar-page .eyebrow {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+}
+#shared-feed-app .coalition-calendar-page h1 {
+  margin: 0;
+  font-size: clamp(27px, 3vw, 36px);
+  font-weight: 700;
+  line-height: 1.2;
+}
+#shared-feed-app .coalition-calendar-page .role-pill {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 7px 12px;
+  border: 1px solid var(--shell-line);
+  border-radius: 50px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+#shared-feed-app .coalition-calendar-page .primary-button,
+#shared-feed-app .coalition-calendar-page .secondary-button,
+#shared-feed-app .coalition-calendar-page .danger-button,
+#shared-feed-app .coalition-calendar-page .text-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 11px 15px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+  text-align: center;
+  text-decoration: none;
+  white-space: normal;
+}
+#shared-feed-app .coalition-calendar-page .primary-button {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--on-primary);
+}
+#shared-feed-app .coalition-calendar-page .primary-button:hover:not(:disabled) {
+  border-color: var(--primary-strong);
+  background: var(--primary-strong);
+}
+#shared-feed-app
+  .coalition-calendar-page
+  .secondary-button:hover:not(:disabled) {
+  border-color: var(--border);
+  background: var(--raised);
+}
+#shared-feed-app .coalition-calendar-page .text-button {
+  border-color: transparent;
+  background: transparent;
+  color: var(--primary);
+}
+#shared-feed-app .coalition-calendar-page .text-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--primary-soft) 35%, transparent);
+}
+#shared-feed-app .coalition-calendar-page .danger-button {
+  border-color: color-mix(in srgb, var(--danger) 35%, var(--line));
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+#shared-feed-app .coalition-calendar-page .primary-button:disabled,
+#shared-feed-app .coalition-calendar-page .secondary-button:disabled,
+#shared-feed-app .coalition-calendar-page .danger-button:disabled {
+  border-color: var(--line);
+  background: var(--raised);
+  color: var(--subtle);
+}
+#shared-feed-app .coalition-calendar-page .view-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 24px;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-bottom: 1px solid var(--line);
+  scrollbar-width: none;
+}
+#shared-feed-app .coalition-calendar-page .view-tabs::-webkit-scrollbar {
+  display: none;
+}
+#shared-feed-app .coalition-calendar-page .view-tabs button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-width: 0;
+  min-height: 52px;
+  margin: 0 0 -1px;
+  padding: 10px 0 16px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 550;
+  line-height: 1.5;
+  text-align: center;
+  white-space: nowrap;
+}
+#shared-feed-app .coalition-calendar-page .view-tabs button:hover {
+  color: var(--primary);
+}
+#shared-feed-app
+  .coalition-calendar-page
+  .view-tabs
+  button[aria-selected="true"] {
+  border-bottom-color: var(--primary);
+  color: var(--primary);
+  font-weight: 650;
+}
+#shared-feed-app .coalition-calendar-page .count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  min-height: 22px;
+  padding: 1px 6px;
+  border-radius: 7px;
+  background: var(--raised);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+}
+#shared-feed-app
+  .coalition-calendar-page
+  .view-tabs
+  button[aria-selected="true"]
+  .count {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+#shared-feed-app .coalition-calendar-page .panel {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: var(--surface);
+}
+#shared-feed-app .coalition-calendar-page .panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  min-width: 0;
+  padding: 24px 26px 20px;
+}
+#shared-feed-app .coalition-calendar-page .panel-title,
+#shared-feed-app .coalition-calendar-page .panel-header h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: 17px;
+  font-weight: 620;
+  line-height: 1.4;
+  letter-spacing: -0.025em;
+}
+#shared-feed-app .coalition-calendar-page .panel-header p {
+  max-width: 68ch;
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.65;
+}
+#shared-feed-app .coalition-calendar-page .panel-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: 0;
+}
+#shared-feed-app .coalition-calendar-page .filters {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(130px, 0.7fr) minmax(
+      130px,
+      0.7fr
+    );
+  align-items: end;
+  gap: 14px 16px;
+  min-width: 0;
+  padding: 0 26px 20px;
+}
+#shared-feed-app .coalition-calendar-page .field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 550;
+  line-height: 1.5;
+}
+#shared-feed-app
+  .coalition-calendar-page
+  .field
+  input:not([type="checkbox"]):not([type="radio"]),
+#shared-feed-app .coalition-calendar-page .field select,
+#shared-feed-app .coalition-calendar-page .field textarea {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 46px;
+  margin: 0;
+  padding: 11px 13px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 450;
+  line-height: 1.5;
+}
+#shared-feed-app .coalition-calendar-page .filters .field input,
+#shared-feed-app .coalition-calendar-page .filters .field select {
+  background: var(--background);
+}
+#shared-feed-app .coalition-calendar-page input::placeholder,
+#shared-feed-app .coalition-calendar-page textarea::placeholder {
+  color: var(--subtle);
+  opacity: 1;
+}
+#shared-feed-app .coalition-calendar-page .field textarea {
+  min-height: 108px;
+  resize: vertical;
+}
+#shared-feed-app .coalition-calendar-page .field small {
+  color: var(--subtle);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.6;
+}
+#shared-feed-app .coalition-calendar-page .search-field,
+#shared-feed-app .coalition-calendar-page .search-field > div,
+#shared-feed-app .coalition-calendar-page .search-input {
+  position: relative;
+  min-width: 0;
+}
+#shared-feed-app .coalition-calendar-page .search-input {
+  display: block;
+  width: 100%;
+}
+#shared-feed-app .coalition-calendar-page .search-field svg {
+  position: absolute;
+  z-index: 1;
+  bottom: 14px;
+  left: 13px;
+  color: var(--muted);
+  pointer-events: none;
+}
+#shared-feed-app
+  .coalition-calendar-page
+  .search-field
+  input:not([type="checkbox"]):not([type="radio"]) {
+  padding-left: 40px;
+}
+#shared-feed-app .coalition-calendar-page .filter-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  min-height: 36px;
+  padding: 0 26px 20px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 450;
+  line-height: 1.6;
+}
+#shared-feed-app .coalition-calendar-page .filter-summary .text-button {
+  min-height: 36px;
+  padding: 6px 0 6px 12px;
+  font-size: 12px;
+  font-weight: 550;
+}
+#shared-feed-app .coalition-calendar-page .empty-state {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 10px;
+  min-height: 220px;
+  padding: 40px 24px;
+  color: var(--muted);
+  text-align: center;
+}
+#shared-feed-app .coalition-calendar-page .empty-state h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 620;
+}
+#shared-feed-app .coalition-calendar-page .empty-state p {
+  max-width: 46ch;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.7;
+}
+#shared-feed-app .coalition-calendar-page .empty-state > svg {
+  width: 36px;
+  height: 36px;
+  margin-bottom: 4px;
+  color: var(--subtle);
+}
+#shared-feed-app .coalition-calendar-page dialog.drawer,
+#shared-feed-app .coalition-calendar-page dialog.create-dialog {
+  padding: 0;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 24px 80px rgb(0 0 0 / 25%);
+}
+#shared-feed-app .coalition-calendar-page dialog.drawer::backdrop,
+#shared-feed-app .coalition-calendar-page dialog.create-dialog::backdrop {
+  background: rgb(3 9 20 / 55%);
+  backdrop-filter: blur(3px);
+}
+#shared-feed-app .coalition-calendar-page dialog.drawer {
+  position: fixed;
+  inset: 0 0 0 auto;
+  width: min(540px, 100vw);
+  max-width: 100vw;
+  height: 100dvh;
+  max-height: 100dvh;
+  margin: 0;
+  border-top: 0;
+  border-right: 0;
+  border-bottom: 0;
+  border-radius: 0;
+}
+#shared-feed-app .coalition-calendar-page dialog.drawer[open],
+#shared-feed-app .coalition-calendar-page dialog.create-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+#shared-feed-app .coalition-calendar-page .dialog-header {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  min-width: 0;
+  padding: 24px 26px;
+  border-bottom: 1px solid var(--line);
+}
+#shared-feed-app .coalition-calendar-page .dialog-header > div {
+  min-width: 0;
+}
+#shared-feed-app .coalition-calendar-page .dialog-header h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: 24px;
+  font-weight: 650;
+  line-height: 1.3;
+  letter-spacing: -0.035em;
+  overflow-wrap: anywhere;
+}
+#shared-feed-app .coalition-calendar-page .dialog-header p {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.65;
+}
+#shared-feed-app .coalition-calendar-page .dialog-header .icon-button {
+  margin-top: -4px;
+  margin-right: -6px;
+}
+#shared-feed-app .coalition-calendar-page .dialog-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 24px;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 24px 26px;
+  overscroll-behavior: contain;
+}
+#shared-feed-app .coalition-calendar-page .dialog-body > p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.7;
+}
+#shared-feed-app .coalition-calendar-page .dialog-footer {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 18px 26px;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+#shared-feed-app .coalition-calendar-page .dialog-footer > small {
+  margin-right: auto;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+#shared-feed-app .coalition-calendar-page .detail-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+#shared-feed-app .coalition-calendar-page .detail-meta > div {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-width: 0;
+  padding: 13px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--background);
+}
+#shared-feed-app .coalition-calendar-page .detail-meta dt,
+#shared-feed-app .coalition-calendar-page .detail-meta label,
+#shared-feed-app .coalition-calendar-page .detail-meta small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 450;
+  line-height: 1.5;
+}
+#shared-feed-app .coalition-calendar-page .detail-meta dd,
+#shared-feed-app .coalition-calendar-page .detail-meta strong {
+  min-width: 0;
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 550;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+#shared-feed-app .coalition-calendar-page .detail-section {
+  min-width: 0;
+}
+#shared-feed-app .coalition-calendar-page .detail-section h3 {
+  margin: 0 0 12px;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 620;
+  line-height: 1.4;
+  letter-spacing: -0.025em;
+}
+#shared-feed-app .coalition-calendar-page .detail-section p {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.75;
+}
+#shared-feed-app .coalition-calendar-page .detail-section p:last-child {
+  margin-bottom: 0;
+}
+#shared-feed-app .coalition-calendar-page .check-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 46px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.6;
+}
+#shared-feed-app .coalition-calendar-page .check-item:last-child {
+  border-bottom: 0;
+}
+#shared-feed-app .coalition-calendar-page input[type="checkbox"],
+#shared-feed-app .coalition-calendar-page input[type="radio"] {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--primary);
+}
+#shared-feed-app .coalition-calendar-page .check-item input:checked + span {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+#shared-feed-app .coalition-calendar-page .note-box {
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--primary);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--primary-soft) 20%, var(--surface));
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
+#shared-feed-app .coalition-calendar-page .note-box strong {
+  color: var(--text);
+  font-weight: 600;
+}
+#shared-feed-app .coalition-calendar-page .note-box p {
+  margin: 5px 0 0;
+}
+#shared-feed-app .coalition-calendar-page dialog.create-dialog {
+  width: min(700px, calc(100vw - 32px));
+  max-width: calc(100vw - 32px);
+  max-height: calc(100dvh - 48px);
+  margin: auto;
+  overflow: hidden;
+  border-radius: 24px;
+}
+#shared-feed-app .coalition-calendar-page .create-dialog > form {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+#shared-feed-app .coalition-calendar-page .form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  min-width: 0;
+}
+#shared-feed-app .coalition-calendar-page .full-width {
+  grid-column: 1 / -1;
+}
+#shared-feed-app .coalition-calendar-page .dialog-body.form-grid {
+  display: grid;
+  align-content: start;
+}
+#shared-feed-app .coalition-calendar-page .advanced-settings {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--background);
+}
+#shared-feed-app .coalition-calendar-page .advanced-settings > summary {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 550;
+  cursor: pointer;
+}
+#shared-feed-app .coalition-calendar-page .advanced-settings[open] > summary {
+  margin-bottom: 18px;
+}
+#shared-feed-app .coalition-calendar-page .advanced-settings .field input,
+#shared-feed-app .coalition-calendar-page .advanced-settings .field select {
+  background: var(--surface);
+}
+#shared-feed-app .coalition-calendar-page .toast {
+  position: fixed;
+  z-index: 1200;
+  bottom: 90px;
+  left: 50%;
+  width: max-content;
+  max-width: min(500px, calc(100vw - 32px));
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 10px 32px rgb(3 9 20 / 16%);
+  font-size: 13px;
+  line-height: 1.65;
+  text-align: center;
+  transform: translateX(-50%);
+}
+#shared-feed-app .coalition-calendar-page .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  padding: 0;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
+  border: 0;
+}
+#shared-feed-app .coalition-calendar-page .dialog-body > h2 {
+  margin: 0 0 -10px;
+  color: var(--text);
+  font-size: 24px;
+  font-weight: 650;
+  line-height: 1.3;
+  letter-spacing: -0.035em;
+}
+#shared-feed-app .coalition-calendar-page .drawer .dialog-header {
+  align-items: center;
+}
+#shared-feed-app .coalition-calendar-page .drawer .dialog-header > .eyebrow {
+  margin: 0;
+}
+#shared-feed-app .coalition-calendar-page .detail-badges {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+#shared-feed-app .coalition-calendar-page .advanced-settings > p {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+#shared-feed-app .coalition-calendar-page .advanced-settings > .field + .field {
+  margin-top: 16px;
+}
+@media (max-width: 760px) {
+  #shared-feed-app .coalition-calendar-page .page-heading {
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  #shared-feed-app .coalition-calendar-page .role-pill {
+    min-height: 30px;
+    padding: 6px 9px;
+    font-size: 11px;
+  }
+
+  #shared-feed-app .coalition-calendar-page .view-tabs {
+    gap: 20px;
+    scroll-snap-type: x proximity;
+  }
+
+  #shared-feed-app .coalition-calendar-page .view-tabs button {
+    gap: 6px;
+    padding-bottom: 12px;
+    font-size: 12px;
+    scroll-snap-align: start;
+  }
+
+  #shared-feed-app .coalition-calendar-page .count {
+    min-width: 20px;
+    min-height: 19px;
+    padding: 0 5px;
+    font-size: 10px;
+  }
+
+  #shared-feed-app .coalition-calendar-page .panel {
+    border-radius: 20px;
+  }
+
+  #shared-feed-app .coalition-calendar-page .panel-header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 16px;
+    padding: 20px;
+  }
+
+  #shared-feed-app .coalition-calendar-page .panel-toolbar {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  #shared-feed-app .coalition-calendar-page .filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px 12px;
+    padding: 0 20px 16px;
+  }
+
+  #shared-feed-app .coalition-calendar-page .filters > :first-child {
+    grid-column: 1 / -1;
+  }
+
+  #shared-feed-app
+    .coalition-calendar-page
+    .field
+    input:not([type="checkbox"]):not([type="radio"]),
+  #shared-feed-app .coalition-calendar-page .field select,
+  #shared-feed-app .coalition-calendar-page .field textarea {
+    font-size: 16px;
+  }
+
+  #shared-feed-app .coalition-calendar-page .filter-summary {
+    align-items: flex-start;
+    gap: 8px;
+    padding: 0 20px 16px;
+    font-size: 11px;
+  }
+
+  #shared-feed-app .coalition-calendar-page .filter-summary .text-button {
+    font-size: 11px;
+  }
+
+  #shared-feed-app .coalition-calendar-page dialog.drawer {
+    width: 100vw;
+    border-left: 0;
+  }
+
+  #shared-feed-app .coalition-calendar-page .dialog-header {
+    gap: 12px;
+    padding: 22px 20px;
+  }
+
+  #shared-feed-app .coalition-calendar-page .dialog-header h2 {
+    font-size: 22px;
+  }
+
+  #shared-feed-app .coalition-calendar-page .dialog-body > h2 {
+    font-size: 22px;
+  }
+
+  #shared-feed-app .coalition-calendar-page .dialog-body {
+    gap: 22px;
+    padding: 22px 20px;
+  }
+
+  #shared-feed-app .coalition-calendar-page .dialog-footer {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 16px 20px;
+  }
+
+  #shared-feed-app .coalition-calendar-page .dialog-footer > button {
+    flex: 1 1 auto;
+  }
+
+  #shared-feed-app .coalition-calendar-page .dialog-footer > small {
+    width: 100%;
+  }
+
+  #shared-feed-app .coalition-calendar-page .detail-meta {
+    gap: 10px;
+  }
+
+  #shared-feed-app .coalition-calendar-page .detail-meta > div {
+    padding: 12px;
+  }
+
+  #shared-feed-app .coalition-calendar-page dialog.create-dialog {
+    width: calc(100vw - 24px);
+    max-width: calc(100vw - 24px);
+    max-height: calc(100dvh - 24px);
+    border-radius: 20px;
+  }
+
+  #shared-feed-app .coalition-calendar-page .form-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+  }
+
+  #shared-feed-app .coalition-calendar-page .toast {
+    bottom: 110px;
+    font-size: 12px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  #shared-feed-app .coalition-calendar-page *,
+  #shared-feed-app .coalition-calendar-page *::before,
+  #shared-feed-app .coalition-calendar-page *::after {
+    scroll-behavior: auto !important;
+    transition: none !important;
+    animation: none !important;
+  }
+}
+#shared-feed-app .coalition-calendar-page .calendar-page,
+#shared-feed-app .coalition-calendar-page .calendar-stack {
+  display: grid;
+  gap: 24px;
+  min-width: 0;
+}
+#shared-feed-app .coalition-calendar-page .calendar-panel {
+  min-width: 0;
+}
+#shared-feed-app .coalition-calendar-page .calendar-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 24px 26px 22px;
+}
+#shared-feed-app .coalition-calendar-page .month-nav {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+#shared-feed-app .coalition-calendar-page .month-nav h2 {
+  margin: 0 12px 0 0;
+  font-size: 19px;
+  font-weight: 650;
+  line-height: 1.4;
+  letter-spacing: -0.025em;
+}
+#shared-feed-app .coalition-calendar-page .month-nav .icon-button {
+  width: 34px;
+  height: 36px;
+  border-color: var(--line);
+  border-radius: 9px;
+}
+#shared-feed-app .coalition-calendar-page .month-nav .icon-button svg {
+  width: 17px;
+  height: 17px;
+}
+#shared-feed-app .coalition-calendar-page .month-nav .secondary-button {
+  min-height: 36px;
+  padding: 7px 12px;
+  margin-left: 2px;
+  border-radius: 9px;
+}
+#shared-feed-app .coalition-calendar-page .view-switch {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 3px;
+  max-width: 100%;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--background);
+}
+#shared-feed-app .coalition-calendar-page .view-switch button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 7px 11px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 550;
+}
+#shared-feed-app .coalition-calendar-page .view-switch button svg {
+  width: 15px;
+  height: 15px;
+}
+#shared-feed-app .coalition-calendar-page .view-switch button:hover {
+  color: var(--primary);
+}
+#shared-feed-app
+  .coalition-calendar-page
+  .view-switch
+  button[aria-pressed="true"],
+#shared-feed-app
+  .coalition-calendar-page
+  .view-switch
+  button[aria-selected="true"],
+#shared-feed-app .coalition-calendar-page .view-switch button.is-active {
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--primary);
+}
+#shared-feed-app .coalition-calendar-page .calendar-filters {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.65fr) minmax(150px, 0.8fr) minmax(
+      150px,
+      0.8fr
+    );
+  align-items: end;
+  gap: 14px 16px;
+  padding: 0 26px 22px;
+  min-width: 0;
+}
+#shared-feed-app .coalition-calendar-page .calendar-filters .field input,
+#shared-feed-app .coalition-calendar-page .calendar-filters .field select {
+  background: var(--background);
+}
+#shared-feed-app .coalition-calendar-page .calendar-filter-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 0 26px 18px;
+  color: var(--muted);
+  font-size: 12px;
+}
+#shared-feed-app .coalition-calendar-page .calendar-filter-summary p {
+  margin: 0;
+}
+#shared-feed-app .coalition-calendar-page .calendar-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  min-width: 0;
+  border-top: 1px solid var(--line);
+}
+#shared-feed-app .coalition-calendar-page .calendar-main {
+  min-width: 0;
+}
+#shared-feed-app .coalition-calendar-page .month-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  min-width: 0;
+}
+#shared-feed-app .coalition-calendar-page .weekday-label {
+  padding: 13px 8px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 550;
+  text-align: center;
+}
+#shared-feed-app .coalition-calendar-page .day-cell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  min-height: 116px;
+  padding: 8px 6px 10px;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+#shared-feed-app .coalition-calendar-page .day-cell:nth-child(7n) {
+  border-right: 0;
+}
+#shared-feed-app .coalition-calendar-page .day-cell.outside,
+#shared-feed-app .coalition-calendar-page .day-cell.is-outside {
+  background: color-mix(in srgb, var(--background) 56%, var(--surface));
+}
+#shared-feed-app .coalition-calendar-page .day-cell.selected,
+#shared-feed-app .coalition-calendar-page .day-cell.is-selected {
+  background: color-mix(in srgb, var(--primary-soft) 27%, var(--surface));
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--primary) 72%, transparent);
+}
+#shared-feed-app .coalition-calendar-page .day-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: flex-start;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 550;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+#shared-feed-app .coalition-calendar-page .day-number:hover {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+#shared-feed-app .coalition-calendar-page .outside .day-number,
+#shared-feed-app .coalition-calendar-page .is-outside .day-number {
+  color: var(--subtle);
+}
+#shared-feed-app .coalition-calendar-page .today .day-number,
+#shared-feed-app .coalition-calendar-page .is-today .day-number,
+#shared-feed-app .coalition-calendar-page .day-number[aria-current="date"] {
+  background: var(--primary);
+  color: var(--on-primary);
+  font-weight: 700;
+}
+#shared-feed-app .coalition-calendar-page .calendar-event {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  width: 100%;
+  padding: 5px 5px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--primary-soft) 40%, var(--surface));
+  color: var(--text);
+  font-size: 10px;
+  line-height: 1.4;
+  text-align: left;
+}
+#shared-feed-app .coalition-calendar-page .calendar-event:hover {
+  border-color: var(--border);
+  background: var(--raised);
+}
+#shared-feed-app .coalition-calendar-page .calendar-event > span:not(.type-dot),
+#shared-feed-app .coalition-calendar-page .event-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#shared-feed-app .coalition-calendar-page .calendar-event time,
+#shared-feed-app .coalition-calendar-page .event-time {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+#shared-feed-app .coalition-calendar-page .type-dot {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--event-color);
+}
+#shared-feed-app .coalition-calendar-page .type-dot[data-kind="meeting"] {
+  background: var(--meeting-color);
+}
+#shared-feed-app .coalition-calendar-page .type-dot[data-kind="shift"] {
+  background: var(--shift-color);
+}
+#shared-feed-app .coalition-calendar-page .type-dot[data-kind="mission"] {
+  background: var(--mission-color);
+}
+#shared-feed-app .coalition-calendar-page .type-dot[data-kind="other"] {
+  background: var(--subtle);
+}
+#shared-feed-app .coalition-calendar-page .calendar-event[data-kind="meeting"] {
+  background: color-mix(in srgb, var(--meeting-color) 10%, var(--surface));
+}
+#shared-feed-app .coalition-calendar-page .calendar-event[data-kind="shift"] {
+  background: color-mix(in srgb, var(--success-soft) 48%, var(--surface));
+}
+#shared-feed-app .coalition-calendar-page .calendar-event[data-kind="mission"] {
+  background: color-mix(in srgb, var(--warning-soft) 35%, var(--surface));
+}
+#shared-feed-app .coalition-calendar-page .more-events {
+  align-self: flex-start;
+  padding: 2px 5px;
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  font-size: 10px;
+  font-weight: 550;
+  text-align: left;
+}
+#shared-feed-app .coalition-calendar-page .calendar-legend {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  min-width: 0;
+  padding: 16px 26px;
+  color: var(--muted);
+  font-size: 11px;
+}
+#shared-feed-app .coalition-calendar-page .calendar-legend > div,
+#shared-feed-app .coalition-calendar-page .calendar-legend span {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+#shared-feed-app .coalition-calendar-page .calendar-legend > div {
+  gap: 14px;
+}
+#shared-feed-app .coalition-calendar-page .calendar-timezone {
+  color: var(--subtle);
+}
+#shared-feed-app .coalition-calendar-page .day-agenda {
+  min-width: 0;
+  border-left: 1px solid var(--line);
+  background: color-mix(in srgb, var(--background) 16%, var(--surface));
+}
+#shared-feed-app .coalition-calendar-page .day-agenda > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 20px;
+  border-bottom: 1px solid var(--line);
+}
+#shared-feed-app .coalition-calendar-page .day-agenda h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+#shared-feed-app .coalition-calendar-page .day-agenda header p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+#shared-feed-app .coalition-calendar-page .day-events {
+  display: grid;
+  gap: 0;
+}
+#shared-feed-app .coalition-calendar-page .day-event,
+#shared-feed-app .coalition-calendar-page .event-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 9px;
+  width: 100%;
+  min-width: 0;
+  padding: 20px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+#shared-feed-app .coalition-calendar-page .day-event:hover,
+#shared-feed-app .coalition-calendar-page .event-card:hover,
+#shared-feed-app .coalition-calendar-page .agenda-row:hover {
+  background: color-mix(in srgb, var(--primary-soft) 20%, var(--surface));
+}
+#shared-feed-app .coalition-calendar-page .day-event strong,
+#shared-feed-app .coalition-calendar-page .event-card strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+#shared-feed-app .coalition-calendar-page .day-event > span,
+#shared-feed-app .coalition-calendar-page .day-event > small,
+#shared-feed-app .coalition-calendar-page .event-card > span,
+#shared-feed-app .coalition-calendar-page .event-card > small {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+#shared-feed-app .coalition-calendar-page .event-kind,
+#shared-feed-app .coalition-calendar-page .event-meta,
+#shared-feed-app .coalition-calendar-page .event-location,
+#shared-feed-app .coalition-calendar-page .event-heading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+#shared-feed-app .coalition-calendar-page .event-meta {
+  flex-wrap: wrap;
+}
+#shared-feed-app .coalition-calendar-page .event-kind {
+  font-size: 10px;
+  font-weight: 550;
+  color: var(--muted);
+}
+#shared-feed-app .coalition-calendar-page .event-location svg {
+  width: 13px;
+  height: 13px;
+}
+#shared-feed-app .coalition-calendar-page .day-empty,
+#shared-feed-app .coalition-calendar-page .calendar-empty {
+  padding: 36px 24px;
+  color: var(--muted);
+  text-align: center;
+}
+#shared-feed-app .coalition-calendar-page .day-empty p,
+#shared-feed-app .coalition-calendar-page .calendar-empty p {
+  font-size: 12px;
+  line-height: 1.7;
+}
+#shared-feed-app .coalition-calendar-page .day-empty .secondary-button {
+  margin-top: 10px;
+}
+#shared-feed-app .coalition-calendar-page .week-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  min-width: 0;
+  border-top: 1px solid var(--line);
+}
+#shared-feed-app .coalition-calendar-page .calendar-layout .week-grid {
+  border-top: 0;
+}
+#shared-feed-app .coalition-calendar-page .week-day {
+  min-width: 0;
+  min-height: 420px;
+  border-right: 1px solid var(--line);
+}
+#shared-feed-app .coalition-calendar-page .week-day:last-child {
+  border-right: 0;
+}
+#shared-feed-app .coalition-calendar-page .week-day > header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 14px 6px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+}
+#shared-feed-app .coalition-calendar-page .week-day .event-card {
+  gap: 9px;
+  padding: 14px 10px;
+}
+#shared-feed-app .coalition-calendar-page .week-day .event-card strong {
+  font-size: 11px;
+  line-height: 1.6;
+}
+#shared-feed-app .coalition-calendar-page .week-day .event-card > span,
+#shared-feed-app .coalition-calendar-page .week-day .event-card > small {
+  font-size: 10px;
+}
+#shared-feed-app .coalition-calendar-page .week-day .event-kind {
+  flex-wrap: wrap;
+  gap: 5px;
+}
+#shared-feed-app .coalition-calendar-page .week-empty {
+  margin: 0;
+  padding: 22px 8px;
+  color: var(--subtle);
+  font-size: 11px;
+  text-align: center;
+}
+#shared-feed-app .coalition-calendar-page .agenda-list {
+  min-width: 0;
+  border-top: 1px solid var(--line);
+}
+#shared-feed-app .coalition-calendar-page .agenda-date {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0;
+  padding: 14px 26px;
+  background: color-mix(in srgb, var(--background) 55%, var(--surface));
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 550;
+  letter-spacing: 0;
+}
+#shared-feed-app .coalition-calendar-page .agenda-date.today {
+  color: var(--primary);
+}
+#shared-feed-app .coalition-calendar-page .agenda-row {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr) minmax(120px, 0.65fr) 18px;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  padding: 22px 26px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+#shared-feed-app .coalition-calendar-page .agenda-row:last-child {
+  border-bottom: 0;
+}
+#shared-feed-app .coalition-calendar-page .agenda-row > * {
+  min-width: 0;
+}
+#shared-feed-app .coalition-calendar-page .agenda-row strong {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+#shared-feed-app .coalition-calendar-page .agenda-row small,
+#shared-feed-app .coalition-calendar-page .agenda-row .event-location,
+#shared-feed-app .coalition-calendar-page .agenda-row .event-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+#shared-feed-app .coalition-calendar-page .agenda-time {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+#shared-feed-app .coalition-calendar-page .agenda-time small {
+  color: var(--subtle);
+}
+#shared-feed-app .coalition-calendar-page .calendar-detail-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+#shared-feed-app .coalition-calendar-page .calendar-detail-meta > div {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+#shared-feed-app .coalition-calendar-page .calendar-detail-meta span {
+  color: var(--muted);
+  font-size: 11px;
+}
+#shared-feed-app .coalition-calendar-page .calendar-detail-meta strong {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 550;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+#shared-feed-app .coalition-calendar-page .connection-card,
+#shared-feed-app .coalition-calendar-page .event-connection {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  width: 100%;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--background);
+  color: var(--text);
+  text-align: left;
+}
+#shared-feed-app .coalition-calendar-page .connection-card > div,
+#shared-feed-app .coalition-calendar-page .connection-card > span,
+#shared-feed-app .coalition-calendar-page .event-connection > div {
+  min-width: 0;
+}
+#shared-feed-app .coalition-calendar-page .connection-card strong,
+#shared-feed-app .coalition-calendar-page .event-connection strong {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+}
+#shared-feed-app .coalition-calendar-page .connection-card small,
+#shared-feed-app .coalition-calendar-page .event-connection small {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+#shared-feed-app .coalition-calendar-page button.connection-card:hover,
+#shared-feed-app .coalition-calendar-page button.event-connection:hover {
+  border-color: var(--border);
+  background: var(--raised);
+}
+#shared-feed-app .coalition-calendar-page .event-section-title {
+  margin: 0 0 12px;
+  font-size: 14px;
+  font-weight: 650;
+}
+#shared-feed-app .coalition-calendar-page .calendar-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--muted);
+  font-size: 12px;
+}
+#shared-feed-app .coalition-calendar-page .calendar-checkbox input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--primary);
+}
+#shared-feed-app .coalition-calendar-page .calendar-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+#shared-feed-app .coalition-calendar-page .calendar-notice p {
+  margin: 0;
+}
+@media (max-width: 1200px) {
+  #shared-feed-app .coalition-calendar-page .calendar-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  #shared-feed-app .coalition-calendar-page .day-agenda {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+  #shared-feed-app .coalition-calendar-page .day-events {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  #shared-feed-app .coalition-calendar-page .day-event:nth-child(odd) {
+    border-right: 1px solid var(--line);
+  }
+  #shared-feed-app .coalition-calendar-page .day-empty {
+    grid-column: 1 / -1;
+  }
+  #shared-feed-app .coalition-calendar-page .day-cell {
+    min-height: 112px;
+  }
+}
+@media (max-width: 1000px) {
+  #shared-feed-app .coalition-calendar-page .calendar-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  #shared-feed-app .coalition-calendar-page .calendar-filters > :first-child {
+    grid-column: 1 / -1;
+  }
+  #shared-feed-app .coalition-calendar-page .agenda-row {
+    grid-template-columns: 100px minmax(0, 1fr) 18px;
+  }
+  #shared-feed-app .coalition-calendar-page .agenda-row > .event-location {
+    grid-column: 2;
+    margin: -8px 0 0;
+  }
+  #shared-feed-app .coalition-calendar-page .agenda-row > svg:last-child {
+    grid-column: 3;
+    grid-row: 1;
+  }
+}
+@media (max-width: 760px) {
+  #shared-feed-app .coalition-calendar-page .calendar-page,
+  #shared-feed-app .coalition-calendar-page .calendar-stack {
+    gap: 20px;
+  }
+  #shared-feed-app .coalition-calendar-page .calendar-toolbar {
+    align-items: flex-start;
+    gap: 16px;
+    padding: 20px 18px;
+  }
+  #shared-feed-app .coalition-calendar-page .month-nav {
+    width: 100%;
+    gap: 6px;
+  }
+  #shared-feed-app .coalition-calendar-page .month-nav h2 {
+    flex: 1 1 auto;
+    margin-right: 0;
+    font-size: 17px;
+  }
+  #shared-feed-app .coalition-calendar-page .month-nav .icon-button {
+    width: 30px;
+    height: 34px;
+  }
+  #shared-feed-app .coalition-calendar-page .month-nav .secondary-button {
+    padding: 6px 9px;
+    min-height: 34px;
+    font-size: 11px;
+  }
+  #shared-feed-app .coalition-calendar-page .view-switch {
+    width: 100%;
+  }
+  #shared-feed-app .coalition-calendar-page .view-switch button {
+    flex: 1 1 0;
+    min-height: 34px;
+  }
+  #shared-feed-app .coalition-calendar-page .calendar-filters {
+    gap: 12px;
+    padding: 0 18px 18px;
+  }
+  #shared-feed-app .coalition-calendar-page .calendar-filter-summary {
+    padding: 0 18px 16px;
+    font-size: 11px;
+  }
+  #shared-feed-app .coalition-calendar-page .weekday-label {
+    padding: 12px 1px;
+    font-size: 10px;
+  }
+  #shared-feed-app .coalition-calendar-page .day-cell {
+    align-items: center;
+    min-height: 84px;
+    gap: 4px;
+    padding: 7px 2px;
+  }
+  #shared-feed-app .coalition-calendar-page .day-number {
+    align-self: center;
+    width: 28px;
+    height: 28px;
+    font-size: 11px;
+  }
+  #shared-feed-app .coalition-calendar-page .calendar-event {
+    justify-content: center;
+    gap: 3px;
+    width: auto;
+    min-width: 22px;
+    max-width: 100%;
+    min-height: 12px;
+    padding: 2px 5px;
+    border-radius: 5px;
+  }
+  #shared-feed-app .coalition-calendar-page .calendar-event .event-title,
+  #shared-feed-app .coalition-calendar-page .calendar-event time,
+  #shared-feed-app .coalition-calendar-page .calendar-event .event-time,
+  #shared-feed-app
+    .coalition-calendar-page
+    .calendar-event
+    > span:not(.type-dot) {
+    display: none;
+  }
+  #shared-feed-app .coalition-calendar-page .calendar-event .type-dot {
+    width: 5px;
+    height: 5px;
+  }
+  #shared-feed-app .coalition-calendar-page .more-events {
+    align-self: center;
+    padding: 0;
+    font-size: 9px;
+    line-height: 1.5;
+  }
+  #shared-feed-app .coalition-calendar-page .calendar-legend {
+    justify-content: flex-start;
+    gap: 10px;
+    padding: 14px 18px;
+    font-size: 10px;
+  }
+  #shared-feed-app .coalition-calendar-page .calendar-legend > div {
+    gap: 10px 12px;
+  }
+  #shared-feed-app .coalition-calendar-page .calendar-timezone {
+    width: 100%;
+  }
+  #shared-feed-app .coalition-calendar-page .day-agenda > header {
+    padding: 18px;
+  }
+  #shared-feed-app .coalition-calendar-page .day-events {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  #shared-feed-app .coalition-calendar-page .day-event,
+  #shared-feed-app .coalition-calendar-page .day-event:nth-child(odd) {
+    padding: 18px;
+    border-right: 0;
+  }
+  #shared-feed-app .coalition-calendar-page .week-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  #shared-feed-app .coalition-calendar-page .week-day {
+    min-height: 0;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  #shared-feed-app .coalition-calendar-page .week-day > header {
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 10px;
+    padding: 12px 18px;
+    background: color-mix(in srgb, var(--background) 50%, var(--surface));
+  }
+  #shared-feed-app .coalition-calendar-page .week-day .event-card {
+    gap: 9px;
+    padding: 18px;
+  }
+  #shared-feed-app .coalition-calendar-page .week-day .event-card strong {
+    font-size: 13px;
+  }
+  #shared-feed-app .coalition-calendar-page .week-day .event-card > span,
+  #shared-feed-app .coalition-calendar-page .week-day .event-card > small {
+    font-size: 11px;
+  }
+  #shared-feed-app .coalition-calendar-page .week-empty {
+    padding: 16px 18px;
+    text-align: left;
+  }
+  #shared-feed-app .coalition-calendar-page .agenda-date {
+    padding: 13px 18px;
+    font-size: 11px;
+  }
+  #shared-feed-app .coalition-calendar-page .agenda-row {
+    grid-template-columns: 69px minmax(0, 1fr) 14px;
+    gap: 10px;
+    padding: 20px 18px;
+  }
+  #shared-feed-app .coalition-calendar-page .agenda-row strong {
+    font-size: 12px;
+    line-height: 1.6;
+  }
+  #shared-feed-app .coalition-calendar-page .agenda-row small,
+  #shared-feed-app .coalition-calendar-page .agenda-time {
+    font-size: 10px;
+  }
+  #shared-feed-app .coalition-calendar-page .agenda-row > .event-location {
+    font-size: 10px;
+  }
+  #shared-feed-app .coalition-calendar-page .calendar-detail-meta {
+    gap: 18px 14px;
+  }
+  #shared-feed-app .coalition-calendar-page .calendar-detail-meta strong {
+    font-size: 12px;
+  }
+}
+@media (max-width: 360px) {
+  #shared-feed-app .coalition-calendar-page .calendar-toolbar,
+  #shared-feed-app .coalition-calendar-page .day-agenda > header,
+  #shared-feed-app .coalition-calendar-page .day-event {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+  #shared-feed-app .coalition-calendar-page .month-nav {
+    gap: 4px;
+  }
+  #shared-feed-app .coalition-calendar-page .month-nav h2 {
+    width: 100%;
+    margin-bottom: 7px;
+  }
+  #shared-feed-app .coalition-calendar-page .calendar-filters {
+    grid-template-columns: minmax(0, 1fr);
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+  #shared-feed-app .coalition-calendar-page .calendar-filters > :first-child {
+    grid-column: auto;
+  }
+  #shared-feed-app .coalition-calendar-page .day-cell {
+    min-height: 78px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  #shared-feed-app .coalition-calendar-page *,
+  #shared-feed-app .coalition-calendar-page *::before,
+  #shared-feed-app .coalition-calendar-page *::after {
+    scroll-behavior: auto !important;
+  }
+}
+#shared-feed-app .coalition-calendar-page .calendar-view-content {
+  display: grid;
+  gap: 24px;
+  min-width: 0;
+}
+#shared-feed-app .coalition-calendar-page .date-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+#shared-feed-app
+  .coalition-calendar-page
+  .date-controls
+  [data-cal-action="previous"]
+  svg {
+  transform: rotate(90deg);
+}
+#shared-feed-app
+  .coalition-calendar-page
+  .date-controls
+  [data-cal-action="next"]
+  svg {
+  transform: rotate(-90deg);
+}
+#shared-feed-app .coalition-calendar-page .month-grid {
+  grid-template-rows: 44px;
+  grid-auto-rows: minmax(112px, auto);
+  align-self: start;
+}
+#shared-feed-app .coalition-calendar-page .day-cell {
+  min-height: 112px;
+  gap: 4px;
+  padding: 6px 5px 8px;
+}
+#shared-feed-app .coalition-calendar-page .day-cell .day-number {
+  width: 28px;
+  height: 28px;
+}
+#shared-feed-app .coalition-calendar-page .day-chips {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  min-width: 0;
+}
+#shared-feed-app .coalition-calendar-page .calendar-event {
+  padding: 2px 4px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+#shared-feed-app .coalition-calendar-page .mobile-dots {
+  display: none;
+}
+#shared-feed-app .coalition-calendar-page .calendar-event .event-time {
+  flex: 0 0 auto;
+  max-width: none;
+}
+#shared-feed-app .coalition-calendar-page .calendar-event .event-title {
+  flex: 1 1 auto;
+}
+#shared-feed-app .coalition-calendar-page .pending-mark {
+  color: var(--warning);
+}
+#shared-feed-app
+  .coalition-calendar-page
+  .calendar-event.is-cancelled
+  .event-title,
+#shared-feed-app .coalition-calendar-page .day-event.is-cancelled strong,
+#shared-feed-app .coalition-calendar-page .event-card.is-cancelled strong,
+#shared-feed-app
+  .coalition-calendar-page
+  .agenda-row.is-cancelled
+  .agenda-item
+  strong {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+#shared-feed-app .coalition-calendar-page .calendar-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  justify-self: start;
+  align-self: flex-start;
+  gap: 5px;
+  max-width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--raised);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.45;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+#shared-feed-app .coalition-calendar-page .calendar-badge[data-tone="primary"] {
+  border-color: color-mix(in srgb, var(--primary) 30%, var(--line));
+  background: color-mix(in srgb, var(--primary-soft) 50%, var(--surface));
+  color: var(--primary);
+}
+#shared-feed-app .coalition-calendar-page .calendar-badge[data-tone="success"] {
+  border-color: color-mix(in srgb, var(--success) 30%, var(--line));
+  background: color-mix(in srgb, var(--success-soft) 55%, var(--surface));
+  color: var(--success);
+}
+#shared-feed-app .coalition-calendar-page .calendar-badge[data-tone="warning"] {
+  border-color: color-mix(in srgb, var(--warning) 30%, var(--line));
+  background: color-mix(in srgb, var(--warning-soft) 55%, var(--surface));
+  color: var(--warning);
+}
+#shared-feed-app .coalition-calendar-page .day-agenda > header {
+  display: grid;
+  justify-content: start;
+  gap: 3px;
+}
+#shared-feed-app .coalition-calendar-page .day-agenda > header .eyebrow {
+  margin: 0 0 4px;
+  color: var(--primary);
+  font-size: 11px;
+}
+#shared-feed-app .coalition-calendar-page .day-agenda > .secondary-button {
+  margin: 18px 20px 20px;
+  max-width: calc(100% - 40px);
+  font-size: 11px;
+}
+#shared-feed-app .coalition-calendar-page .event-card-type,
+#shared-feed-app
+  .coalition-calendar-page
+  .day-event
+  > span:not(.calendar-badge),
+#shared-feed-app
+  .coalition-calendar-page
+  .event-card
+  > span:not(.calendar-badge) {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+#shared-feed-app .coalition-calendar-page .day-event > span > svg,
+#shared-feed-app .coalition-calendar-page .event-card > span > svg {
+  width: 13px;
+  height: 13px;
+}
+#shared-feed-app .coalition-calendar-page .day-event .calendar-badge,
+#shared-feed-app .coalition-calendar-page .event-card .calendar-badge {
+  font-size: 10px;
+}
+#shared-feed-app .coalition-calendar-page .quiet-day {
+  margin: 0;
+  padding: 26px 20px;
+  color: var(--subtle);
+  font-size: 12px;
+  line-height: 1.75;
+}
+#shared-feed-app .coalition-calendar-page .overlap-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 16px 20px 0;
+  padding: 13px;
+  border: 1px solid color-mix(in srgb, var(--warning) 22%, var(--line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--warning-soft) 24%, var(--surface));
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.7;
+}
+#shared-feed-app .coalition-calendar-page .overlap-note svg {
+  width: 15px;
+  height: 15px;
+  margin-top: 2px;
+  color: var(--warning);
+}
+#shared-feed-app .coalition-calendar-page .calendar-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  padding: 17px 26px;
+  border-top: 1px solid var(--line);
+}
+#shared-feed-app .coalition-calendar-page .calendar-footer .calendar-legend {
+  justify-content: flex-start;
+  padding: 0;
+}
+#shared-feed-app .coalition-calendar-page .calendar-footer > span {
+  color: var(--subtle);
+  font-size: 10px;
+}
+#shared-feed-app .coalition-calendar-page .calendar-handoffs {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 20px;
+  padding: 23px 26px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--surface);
+}
+#shared-feed-app .coalition-calendar-page .calendar-handoffs h3 {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 620;
+  letter-spacing: -0.02em;
+}
+#shared-feed-app .coalition-calendar-page .calendar-handoffs p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+#shared-feed-app .coalition-calendar-page .calendar-handoffs > div:last-child {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+#shared-feed-app .coalition-calendar-page .calendar-handoffs .secondary-button {
+  min-height: 40px;
+  padding: 9px 12px;
+  font-size: 11px;
+}
+#shared-feed-app
+  .coalition-calendar-page
+  .calendar-handoffs
+  .secondary-button
+  svg {
+  width: 14px;
+  height: 14px;
+}
+#shared-feed-app .coalition-calendar-page .agenda-row {
+  grid-template-columns: 100px minmax(0, 1fr) 150px 98px 18px;
+}
+#shared-feed-app .coalition-calendar-page .agenda-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+#shared-feed-app .coalition-calendar-page .agenda-item > .type-dot {
+  margin-top: 7px;
+}
+#shared-feed-app .coalition-calendar-page .agenda-item > span {
+  min-width: 0;
+}
+#shared-feed-app .coalition-calendar-page .agenda-item strong,
+#shared-feed-app .coalition-calendar-page .agenda-item small {
+  overflow-wrap: anywhere;
+}
+#shared-feed-app .coalition-calendar-page .agenda-type {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+#shared-feed-app .coalition-calendar-page .agenda-row > .calendar-badge {
+  align-self: center;
+}
+#shared-feed-app .coalition-calendar-page .agenda-date > strong {
+  font-weight: 550;
+}
+#shared-feed-app
+  .coalition-calendar-page
+  .agenda-date
+  > span:last-child:not(.calendar-badge) {
+  margin-left: auto;
+  color: var(--subtle);
+  font-size: 11px;
+}
+#shared-feed-app .coalition-calendar-page .week-day > header strong {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+#shared-feed-app .coalition-calendar-page .week-day.today > header {
+  background: color-mix(in srgb, var(--primary-soft) 35%, var(--surface));
+}
+#shared-feed-app .coalition-calendar-page .week-day.today > header strong {
+  color: var(--primary);
+}
+#shared-feed-app .coalition-calendar-page .week-day > header small {
+  color: var(--subtle);
+  font-size: 10px;
+}
+#shared-feed-app .coalition-calendar-page .week-day > .text-button {
+  width: 100%;
+  min-height: 40px;
+  padding: 10px 5px;
+  font-size: 10px;
+}
+#shared-feed-app .coalition-calendar-page .week-day > .text-button svg {
+  width: 13px;
+  height: 13px;
+}
+#shared-feed-app .coalition-calendar-page .week-day .quiet-day {
+  padding: 22px 10px;
+  font-size: 11px;
+  text-align: center;
+}
+#shared-feed-app .coalition-calendar-page .connections-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+  padding: 2px 26px 26px;
+}
+#shared-feed-app .coalition-calendar-page .connections-grid .connection-card {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  align-items: start;
+  gap: 16px 12px;
+  padding: 20px;
+  border-radius: 16px;
+}
+#shared-feed-app .coalition-calendar-page .connection-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--primary);
+  font-size: 18px;
+  font-weight: 650;
+}
+#shared-feed-app .coalition-calendar-page .connection-card h3 {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.025em;
+}
+#shared-feed-app .coalition-calendar-page .connection-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.65;
+}
+#shared-feed-app
+  .coalition-calendar-page
+  .connections-grid
+  .connection-card
+  > .calendar-badge,
+#shared-feed-app .coalition-calendar-page .connection-description,
+#shared-feed-app .coalition-calendar-page .connection-capabilities,
+#shared-feed-app .coalition-calendar-page .connection-card > footer {
+  grid-column: 1 / -1;
+}
+#shared-feed-app .coalition-calendar-page .connection-capabilities {
+  display: grid;
+  gap: 9px;
+  padding: 14px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+#shared-feed-app .coalition-calendar-page .connection-capabilities > span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+#shared-feed-app .coalition-calendar-page .connection-capabilities svg {
+  width: 15px;
+  height: 15px;
+  color: var(--primary);
+}
+#shared-feed-app .coalition-calendar-page .connection-card > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--primary);
+}
+#shared-feed-app .coalition-calendar-page .connection-card > footer small {
+  margin: 0;
+  font-size: 10px;
+}
+#shared-feed-app .coalition-calendar-page .connections-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 20px 26px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+}
+#shared-feed-app .coalition-calendar-page .connections-note svg {
+  margin-top: 2px;
+  width: 15px;
+  height: 15px;
+}
+#shared-feed-app .coalition-calendar-page .connections-note p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.7;
+}
+#shared-feed-app .coalition-calendar-page .privacy-note,
+#shared-feed-app .coalition-calendar-page .form-help {
+  margin: 0;
+  color: var(--subtle);
+  font-size: 11px;
+  line-height: 1.7;
+}
+#shared-feed-app .coalition-calendar-page .advanced-content {
+  display: grid;
+  gap: 22px;
+  min-width: 0;
+}
+#shared-feed-app .coalition-calendar-page .destination-options {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+#shared-feed-app .coalition-calendar-page .destination-options legend {
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 550;
+}
+#shared-feed-app .coalition-calendar-page .destination-options p {
+  margin: 6px 0 0;
+  color: var(--subtle);
+  font-size: 11px;
+  line-height: 1.7;
+}
+#shared-feed-app .coalition-calendar-page .calendar-item-form .check-item {
+  padding: 5px 0;
+  min-height: 36px;
+  border: 0;
+  font-size: 12px;
+}
+#shared-feed-app
+  .coalition-calendar-page
+  .calendar-item-form
+  .check-item
+  input:checked
+  + span {
+  color: var(--text);
+  text-decoration: none;
+}
+#shared-feed-app .coalition-calendar-page .form-error {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, var(--line));
+  border-radius: 10px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.6;
+}
+#shared-feed-app
+  .coalition-calendar-page
+  .calendar-item-form
+  .dialog-footer
+  > small {
+  margin-right: auto;
+  color: var(--subtle);
+  font-size: 10px;
+  line-height: 1.5;
+}
+#shared-feed-app .coalition-calendar-page .calendar-loading {
+  padding: 40px 26px 26px;
+  border-top: 1px solid var(--line);
+  text-align: center;
+}
+#shared-feed-app .coalition-calendar-page .calendar-loading h3 {
+  margin: 14px 0 5px;
+  font-size: 17px;
+  font-weight: 600;
+}
+#shared-feed-app .coalition-calendar-page .calendar-loading p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+#shared-feed-app .coalition-calendar-page .loading-ring {
+  display: inline-block;
+  width: 24px;
+  height: 24px;
+  border: 2px solid var(--line);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: coalition-calendar-spin 1.4s linear infinite;
+}
+#shared-feed-app .coalition-calendar-page .skeleton-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 28px;
+}
+#shared-feed-app .coalition-calendar-page .skeleton-grid span {
+  min-height: 75px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--raised) 60%, var(--surface));
+}
+@keyframes coalition-calendar-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (max-width: 1200px) {
+  #shared-feed-app .coalition-calendar-page .connections-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  #shared-feed-app .coalition-calendar-page .day-events > .quiet-day {
+    grid-column: 1 / -1;
+  }
+}
+@media (max-width: 1000px) {
+  #shared-feed-app .coalition-calendar-page .agenda-row {
+    grid-template-columns: 90px minmax(0, 1fr) 90px 16px;
+    grid-template-areas:
+      "time item badge arrow"
+      "time type badge arrow";
+    gap: 7px 14px;
+  }
+  #shared-feed-app .coalition-calendar-page .agenda-row > .agenda-time {
+    grid-area: time;
+  }
+  #shared-feed-app .coalition-calendar-page .agenda-row > .agenda-item {
+    grid-area: item;
+  }
+  #shared-feed-app .coalition-calendar-page .agenda-row > .agenda-type {
+    grid-area: type;
+    padding-left: 16px;
+  }
+  #shared-feed-app .coalition-calendar-page .agenda-row > .calendar-badge {
+    grid-area: badge;
+  }
+  #shared-feed-app .coalition-calendar-page .agenda-row > svg:last-child {
+    grid-area: arrow;
+  }
+}
+@media (max-width: 760px) {
+  #shared-feed-app .coalition-calendar-page .calendar-view-content {
+    gap: 20px;
+  }
+  #shared-feed-app .coalition-calendar-page .month-nav {
+    align-items: center;
+  }
+  #shared-feed-app .coalition-calendar-page .month-nav h2 {
+    flex: 1 1 120px;
+    min-width: 0;
+  }
+  #shared-feed-app .coalition-calendar-page .date-controls {
+    gap: 4px;
+  }
+  #shared-feed-app .coalition-calendar-page .month-grid {
+    grid-template-rows: 38px;
+    grid-auto-rows: minmax(72px, 1fr);
+  }
+  #shared-feed-app .coalition-calendar-page .day-cell {
+    min-height: 72px;
+  }
+  #shared-feed-app .coalition-calendar-page .day-chips {
+    display: none;
+  }
+  #shared-feed-app .coalition-calendar-page .mobile-dots {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 3px;
+    min-height: 8px;
+    max-width: 28px;
+  }
+  #shared-feed-app .coalition-calendar-page .mobile-dots .type-dot {
+    width: 4px;
+    height: 4px;
+  }
+  #shared-feed-app .coalition-calendar-page .more-events {
+    font-size: 8px;
+  }
+  #shared-feed-app .coalition-calendar-page .day-agenda > .secondary-button {
+    margin: 16px 18px 18px;
+    max-width: calc(100% - 36px);
+  }
+  #shared-feed-app .coalition-calendar-page .calendar-footer {
+    padding: 16px 18px;
+  }
+  #shared-feed-app .coalition-calendar-page .calendar-footer .calendar-legend {
+    gap: 9px 14px;
+  }
+  #shared-feed-app .coalition-calendar-page .calendar-handoffs {
+    padding: 20px;
+    gap: 16px;
+  }
+  #shared-feed-app
+    .coalition-calendar-page
+    .calendar-handoffs
+    > div:last-child {
+    width: 100%;
+  }
+  #shared-feed-app
+    .coalition-calendar-page
+    .calendar-handoffs
+    .secondary-button {
+    flex: 1 1 auto;
+  }
+  #shared-feed-app .coalition-calendar-page .agenda-row {
+    grid-template-columns: 65px minmax(0, 1fr) 14px;
+    grid-template-areas:
+      "time item arrow"
+      "time type arrow"
+      ". badge arrow";
+    gap: 7px 10px;
+    padding: 20px 18px;
+  }
+  #shared-feed-app .coalition-calendar-page .agenda-row > .calendar-badge {
+    margin-left: 16px;
+  }
+  #shared-feed-app .coalition-calendar-page .agenda-type {
+    font-size: 10px;
+  }
+  #shared-feed-app .coalition-calendar-page .agenda-time {
+    align-self: start;
+    padding-top: 2px;
+  }
+  #shared-feed-app .coalition-calendar-page .agenda-date {
+    flex-wrap: wrap;
+    gap: 7px;
+  }
+  #shared-feed-app
+    .coalition-calendar-page
+    .agenda-date
+    > span:last-child:not(.calendar-badge) {
+    font-size: 10px;
+  }
+  #shared-feed-app .coalition-calendar-page .week-day > header strong {
+    font-size: 13px;
+  }
+  #shared-feed-app .coalition-calendar-page .week-day > header small {
+    margin-left: auto;
+  }
+  #shared-feed-app .coalition-calendar-page .week-day > .text-button {
+    justify-content: flex-start;
+    padding: 10px 18px;
+    font-size: 11px;
+  }
+  #shared-feed-app .coalition-calendar-page .week-day .quiet-day {
+    padding: 16px 18px;
+    text-align: left;
+  }
+  #shared-feed-app .coalition-calendar-page .connections-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+    padding: 0 20px 20px;
+  }
+  #shared-feed-app .coalition-calendar-page .connections-grid .connection-card {
+    padding: 18px;
+  }
+  #shared-feed-app .coalition-calendar-page .connections-note {
+    padding: 20px;
+  }
+  #shared-feed-app .coalition-calendar-page .connections-note p {
+    font-size: 11px;
+  }
+  #shared-feed-app .coalition-calendar-page .calendar-loading {
+    padding: 32px 18px 18px;
+  }
+  #shared-feed-app .coalition-calendar-page .skeleton-grid {
+    gap: 5px;
+  }
+  #shared-feed-app .coalition-calendar-page .skeleton-grid span {
+    min-height: 46px;
+    border-radius: 6px;
+  }
+  #shared-feed-app .coalition-calendar-page .calendar-item-form .dialog-footer {
+    flex-wrap: wrap;
+  }
+  #shared-feed-app
+    .coalition-calendar-page
+    .calendar-item-form
+    .dialog-footer
+    > small {
+    width: 100%;
+  }
+}
+@media (max-width: 360px) {
+  #shared-feed-app .coalition-calendar-page .month-nav h2 {
+    flex-basis: 100%;
+  }
+  #shared-feed-app .coalition-calendar-page .agenda-row {
+    grid-template-columns: 56px minmax(0, 1fr) 12px;
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  #shared-feed-app .coalition-calendar-page .loading-ring {
+    animation: none;
+  }
+}
+#shared-feed-app .coalition-calendar-page .page-heading {
+  gap: 16px;
+  min-height: 58px;
+}
+#shared-feed-app .coalition-calendar-page .page-heading h1 {
+  font-size: 30px;
+}
+#shared-feed-app .coalition-calendar-page .calendar-subtitle {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+#shared-feed-app .coalition-calendar-page .heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+#shared-feed-app .coalition-calendar-page .calendar-page {
+  gap: 12px;
+}
+#shared-feed-app .coalition-calendar-page .view-tabs {
+  gap: 24px;
+}
+#shared-feed-app .coalition-calendar-page .view-tabs button {
+  min-height: 38px;
+  padding: 5px 0 10px;
+}
+#shared-feed-app .coalition-calendar-page .calendar-toolbar {
+  padding: 12px 18px;
+  gap: 10px;
+}
+#shared-feed-app .coalition-calendar-page .calendar-filters {
+  padding: 0 18px 10px;
+  gap: 10px;
+}
+#shared-feed-app .coalition-calendar-page .calendar-filters .field {
+  gap: 0;
+}
+#shared-feed-app .coalition-calendar-page .calendar-filters .field > span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+#shared-feed-app .coalition-calendar-page .calendar-filters .field input,
+#shared-feed-app .coalition-calendar-page .calendar-filters .field select {
+  min-height: 38px;
+  padding-top: 7px;
+  padding-bottom: 7px;
+}
+#shared-feed-app
+  .coalition-calendar-page
+  .calendar-filters
+  .field
+  input:not([type="checkbox"]):not([type="radio"]) {
+  min-height: 38px;
+  padding-top: 7px;
+  padding-bottom: 7px;
+}
+#shared-feed-app .coalition-calendar-page .calendar-filters .search-field svg {
+  bottom: 10px;
+}
+#shared-feed-app .coalition-calendar-page .calendar-panel > .filter-summary {
+  min-height: 28px;
+  padding: 0 18px 7px;
+  font-size: 11px;
+}
+#shared-feed-app
+  .coalition-calendar-page
+  .calendar-panel
+  > .filter-summary
+  .text-button {
+  min-height: 26px;
+  padding: 3px 0;
+  font-size: 11px;
+}
+#shared-feed-app .coalition-calendar-page .calendar-footer {
+  min-height: 36px;
+  padding: 6px 18px;
+  gap: 10px;
+}
+#shared-feed-app .coalition-calendar-page .calendar-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+#shared-feed-app
+  .coalition-calendar-page
+  .calendar-footer-actions
+  .secondary-button {
+  min-height: 26px;
+  padding: 2px 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--primary);
+  font-size: 11px;
+}
+#shared-feed-app .coalition-calendar-page .calendar-footer-actions > span {
+  color: var(--subtle);
+  font-size: 10px;
+  white-space: nowrap;
+}
+#shared-feed-app
+  .coalition-calendar-page[data-calendar-condition="denied"]
+  .calendar-footer-actions
+  button {
+  display: none;
+}
+#shared-feed-app .coalition-calendar-page .calendar-handoffs {
+  display: none;
+}
+#shared-feed-app .coalition-calendar-page .mobile-filter-toggle {
+  display: none;
+}
+#shared-feed-app
+  .coalition-calendar-page[data-calendar-view="month"]
+  .page-heading {
+  flex: 0 0 auto;
+}
+#shared-feed-app
+  .coalition-calendar-page[data-calendar-view="month"]
+  .calendar-page {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+#shared-feed-app
+  .coalition-calendar-page[data-calendar-view="month"]
+  .view-tabs {
+  flex: 0 0 auto;
+}
+#shared-feed-app
+  .coalition-calendar-page[data-calendar-view="month"]
+  .calendar-view-content {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  gap: 0;
+}
+#shared-feed-app
+  .coalition-calendar-page[data-calendar-view="month"]
+  .calendar-panel {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  border-radius: 18px;
+  overflow: hidden;
+}
+#shared-feed-app
+  .coalition-calendar-page[data-calendar-view="month"]
+  .calendar-toolbar,
+#shared-feed-app
+  .coalition-calendar-page[data-calendar-view="month"]
+  .calendar-filters,
+#shared-feed-app
+  .coalition-calendar-page[data-calendar-view="month"]
+  .filter-summary,
+#shared-feed-app
+  .coalition-calendar-page[data-calendar-view="month"]
+  .calendar-footer {
+  flex: 0 0 auto;
+}
+#shared-feed-app
+  .coalition-calendar-page[data-calendar-view="month"]
+  #calendar-results {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+#shared-feed-app
+  .coalition-calendar-page[data-calendar-view="month"]
+  .calendar-layout {
+  display: block;
+  height: 100%;
+  min-height: 0;
+}
+#shared-feed-app
+  .coalition-calendar-page[data-calendar-view="month"]
+  .calendar-layout
+  > .day-agenda {
+  display: none;
+}
+@media (min-width: 761px) {
+  #shared-feed-app
+    .coalition-calendar-page[data-calendar-view="month"]
+    .calendar-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 280px;
+    grid-template-rows: minmax(0, 1fr);
+  }
+  #shared-feed-app
+    .coalition-calendar-page[data-calendar-view="month"]
+    .calendar-layout
+    > .day-agenda {
+    display: block;
+    height: 100%;
+    min-height: 0;
+    min-width: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    border-top: 0;
+    border-left: 1px solid var(--line);
+  }
+  #shared-feed-app
+    .coalition-calendar-page[data-calendar-view="month"]
+    .calendar-layout
+    > .day-agenda
+    .day-events {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  #shared-feed-app
+    .coalition-calendar-page[data-calendar-view="month"]
+    .calendar-layout
+    > .day-agenda
+    .day-event {
+    border-right: 0;
+  }
+}
+#shared-feed-app
+  .coalition-calendar-page[data-calendar-view="month"]
+  .month-grid {
+  height: 100%;
+  min-height: 0;
+  align-self: stretch;
+  grid-auto-rows: auto;
+}
+#shared-feed-app
+  .coalition-calendar-page[data-calendar-view="month"]
+  .month-grid[data-weeks="4"] {
+  grid-template-rows: 28px repeat(4, minmax(0, 1fr));
+}
+#shared-feed-app
+  .coalition-calendar-page[data-calendar-view="month"]
+  .month-grid[data-weeks="5"] {
+  grid-template-rows: 28px repeat(5, minmax(0, 1fr));
+}
+#shared-feed-app
+  .coalition-calendar-page[data-calendar-view="month"]
+  .month-grid[data-weeks="6"] {
+  grid-template-rows: 28px repeat(6, minmax(0, 1fr));
+}
+#shared-feed-app
+  .coalition-calendar-page[data-calendar-view="month"]
+  .weekday-label {
+  padding: 6px 8px;
+  line-height: 16px;
+}
+#shared-feed-app
+  .coalition-calendar-page[data-calendar-view="month"]
+  .day-cell {
+  min-height: 0;
+  padding: 5px 7px;
+  gap: 3px;
+  overflow: hidden;
+}
+#shared-feed-app
+  .coalition-calendar-page[data-calendar-view="month"]
+  .day-number {
+  width: 24px;
+  height: 24px;
+  font-size: 12px;
+}
+#shared-feed-app
+  .coalition-calendar-page[data-calendar-view="month"]
+  .day-chips {
+  gap: 3px;
+  min-height: 0;
+}
+#shared-feed-app
+  .coalition-calendar-page[data-calendar-view="month"]
+  .calendar-event {
+  min-height: 22px;
+  padding: 2px 5px;
+  font-size: 12px;
+  line-height: 16px;
+}
+#shared-feed-app
+  .coalition-calendar-page[data-calendar-view="month"]
+  .event-time {
+  font-size: 10px;
+}
+#shared-feed-app
+  .coalition-calendar-page[data-calendar-view="month"]
+  .more-events {
+  position: absolute;
+  top: 6px;
+  right: 7px;
+  min-height: 22px;
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--raised);
+  color: var(--primary);
+  font-size: 10px;
+}
+#shared-feed-app
+  .coalition-calendar-page[data-calendar-view="month"]
+  .calendar-loading,
+#shared-feed-app
+  .coalition-calendar-page[data-calendar-view="month"]
+  #calendar-results
+  > .empty-state {
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+}
+#shared-feed-app
+  .coalition-calendar-page[data-calendar-view="month"]
+  .calendar-loading {
+  padding: 24px;
+}
+#shared-feed-app
+  .coalition-calendar-page[data-calendar-view="month"]
+  .skeleton-grid
+  span {
+  min-height: 28px;
+}
+#shared-feed-app .coalition-calendar-page .selected-day-body .day-agenda {
+  border: 0;
+  background: transparent;
+}
+#shared-feed-app
+  .coalition-calendar-page
+  .selected-day-body
+  .day-agenda
+  > header {
+  padding: 0 0 16px;
+}
+#shared-feed-app .coalition-calendar-page .selected-day-body .day-events {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+#shared-feed-app .coalition-calendar-page .selected-day-body .day-event {
+  width: 100%;
+  padding: 18px 0;
+}
+#shared-feed-app
+  .coalition-calendar-page
+  .selected-day-body
+  .day-agenda
+  > .secondary-button {
+  margin: 16px 0 0;
+}
+@media (max-width: 1120px) {
+  #shared-feed-app .coalition-calendar-page .calendar-footer .calendar-legend {
+    gap: 10px;
+    font-size: 10px;
+  }
+  #shared-feed-app .coalition-calendar-page .calendar-footer-actions {
+    gap: 10px;
+  }
+  #shared-feed-app .coalition-calendar-page .calendar-footer-actions > span {
+    display: none;
+  }
+}
+@media (max-height: 800px) and (min-width: 761px) {
+  #shared-feed-app .coalition-calendar-page .page-heading {
+    min-height: 48px;
+  }
+  #shared-feed-app .coalition-calendar-page .page-heading h1 {
+    font-size: 28px;
+  }
+  #shared-feed-app .coalition-calendar-page .calendar-subtitle {
+    margin-top: 3px;
+    font-size: 11px;
+  }
+  #shared-feed-app .coalition-calendar-page .calendar-page {
+    gap: 8px;
+  }
+  #shared-feed-app .coalition-calendar-page .calendar-toolbar {
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+}
+@media (max-width: 760px) {
+  #shared-feed-app .coalition-calendar-page .page-heading {
+    min-height: 48px;
+    gap: 8px;
+  }
+  #shared-feed-app .coalition-calendar-page .page-heading h1 {
+    font-size: 25px;
+  }
+  #shared-feed-app .coalition-calendar-page .calendar-subtitle {
+    max-width: 48vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 10px;
+  }
+  #shared-feed-app .coalition-calendar-page .heading-actions {
+    gap: 6px;
+  }
+  #shared-feed-app .coalition-calendar-page .heading-actions .role-pill {
+    display: none;
+  }
+  #shared-feed-app .coalition-calendar-page .calendar-new-item {
+    min-height: 34px;
+    padding: 6px 8px;
+    font-size: 10px;
+    max-width: 128px;
+  }
+  #shared-feed-app .coalition-calendar-page .calendar-new-item svg {
+    width: 14px;
+    height: 14px;
+  }
+  #shared-feed-app .coalition-calendar-page .new-item-label {
+    font-size: 0;
+  }
+  #shared-feed-app .coalition-calendar-page .new-item-label::after {
+    content: "New item";
+    font-size: 11px;
+  }
+  #shared-feed-app .coalition-calendar-page .calendar-page {
+    gap: 8px;
+  }
+  #shared-feed-app .coalition-calendar-page .view-tabs button {
+    min-height: 32px;
+    padding-bottom: 6px;
+    font-size: 12px;
+  }
+  #shared-feed-app .coalition-calendar-page .calendar-toolbar {
+    padding: 10px 12px;
+    gap: 8px;
+  }
+  #shared-feed-app .coalition-calendar-page .month-nav {
+    justify-content: space-between;
+    width: 100%;
+    gap: 4px;
+  }
+  #shared-feed-app .coalition-calendar-page .month-nav h2 {
+    flex: 0 1 auto;
+    width: auto;
+    margin: 0;
+    font-size: 16px;
+  }
+  #shared-feed-app .coalition-calendar-page .date-controls {
+    gap: 3px;
+  }
+  #shared-feed-app .coalition-calendar-page .month-nav .icon-button {
+    width: 27px;
+    height: 30px;
+  }
+  #shared-feed-app .coalition-calendar-page .month-nav .secondary-button {
+    min-height: 30px;
+    padding: 4px 7px;
+    font-size: 10px;
+  }
+  #shared-feed-app .coalition-calendar-page .view-switch {
+    width: 100%;
+  }
+  #shared-feed-app .coalition-calendar-page .view-switch button {
+    flex: 1;
+    min-height: 28px;
+    padding: 4px 8px;
+  }
+  #shared-feed-app .coalition-calendar-page .calendar-filters {
+    grid-template-columns: minmax(0, 1fr) auto;
+    padding: 0 12px 6px;
+    gap: 7px;
+  }
+  #shared-feed-app
+    .coalition-calendar-page
+    .calendar-filters
+    .field:not(.search-field) {
+    display: none;
+  }
+  #shared-feed-app .coalition-calendar-page .calendar-filters .search-field {
+    grid-column: 1;
+  }
+  #shared-feed-app .coalition-calendar-page .mobile-filter-toggle {
+    display: inline-flex;
+    min-height: 34px;
+    padding: 5px 9px;
+    font-size: 11px;
+    grid-column: 2;
+    grid-row: 1;
+  }
+  #shared-feed-app .coalition-calendar-page .calendar-filters .field input,
+  #shared-feed-app .coalition-calendar-page .calendar-filters .field select {
+    min-height: 34px;
+    padding-top: 5px;
+    padding-bottom: 5px;
+    font-size: 11px;
+  }
+  #shared-feed-app
+    .coalition-calendar-page
+    .calendar-filters
+    .field
+    input:not([type="checkbox"]):not([type="radio"]) {
+    min-height: 34px;
+    padding-top: 5px;
+    padding-bottom: 5px;
+    font-size: 11px;
+  }
+  #shared-feed-app
+    .coalition-calendar-page
+    .calendar-filters
+    .search-field
+    svg {
+    bottom: 8px;
+    width: 16px;
+    height: 16px;
+  }
+  #shared-feed-app
+    .coalition-calendar-page.calendar-filters-open
+    .calendar-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  #shared-feed-app
+    .coalition-calendar-page.calendar-filters-open
+    .calendar-filters
+    .field:not(.search-field) {
+    display: flex;
+  }
+  #shared-feed-app .coalition-calendar-page .calendar-panel > .filter-summary {
+    min-height: 24px;
+    padding: 0 12px 4px;
+    font-size: 10px;
+  }
+  #shared-feed-app
+    .coalition-calendar-page
+    .calendar-panel
+    > .filter-summary
+    .text-button {
+    min-height: 20px;
+    font-size: 10px;
+  }
+  #shared-feed-app
+    .coalition-calendar-page[data-calendar-view="month"]
+    .calendar-panel {
+    border-radius: 14px;
+  }
+  #shared-feed-app
+    .coalition-calendar-page[data-calendar-view="month"]
+    .month-grid[data-weeks="4"] {
+    grid-template-rows: 24px repeat(4, minmax(0, 1fr));
+  }
+  #shared-feed-app
+    .coalition-calendar-page[data-calendar-view="month"]
+    .month-grid[data-weeks="5"] {
+    grid-template-rows: 24px repeat(5, minmax(0, 1fr));
+  }
+  #shared-feed-app
+    .coalition-calendar-page[data-calendar-view="month"]
+    .month-grid[data-weeks="6"] {
+    grid-template-rows: 24px repeat(6, minmax(0, 1fr));
+  }
+  #shared-feed-app
+    .coalition-calendar-page[data-calendar-view="month"]
+    .weekday-label {
+    padding: 4px 0;
+    font-size: 10px;
+  }
+  #shared-feed-app
+    .coalition-calendar-page[data-calendar-view="month"]
+    .day-cell {
+    align-items: center;
+    padding: 4px 1px;
+    gap: 2px;
+  }
+  #shared-feed-app
+    .coalition-calendar-page[data-calendar-view="month"]
+    .day-number {
+    align-self: center;
+    width: 25px;
+    height: 25px;
+    font-size: 12px;
+  }
+  #shared-feed-app
+    .coalition-calendar-page[data-calendar-view="month"]
+    .day-chips {
+    display: none;
+  }
+  #shared-feed-app
+    .coalition-calendar-page[data-calendar-view="month"]
+    .mobile-dots {
+    display: flex;
+    max-width: 28px;
+    min-height: 5px;
+  }
+  #shared-feed-app .coalition-calendar-page .calendar-footer {
+    padding: 4px 10px;
+    min-height: 30px;
+  }
+  #shared-feed-app
+    .coalition-calendar-page[data-calendar-view="month"]
+    .calendar-footer
+    .calendar-legend {
+    display: none;
+  }
+  #shared-feed-app .coalition-calendar-page .calendar-footer-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+  #shared-feed-app
+    .coalition-calendar-page
+    .calendar-footer-actions
+    .secondary-button {
+    font-size: 10px;
+  }
+  #shared-feed-app .coalition-calendar-page .calendar-footer-actions > span {
+    display: inline;
+    font-size: 9px;
+  }
+}
+@media (max-width: 760px) and (max-height: 700px) {
+  #shared-feed-app
+    .coalition-calendar-page[data-calendar-view="month"]
+    .day-cell {
+    padding-top: 2px;
+    padding-bottom: 2px;
+    gap: 0;
+  }
+  #shared-feed-app
+    .coalition-calendar-page[data-calendar-view="month"]
+    .day-number {
+    width: 22px;
+    height: 22px;
+  }
+  #shared-feed-app
+    .coalition-calendar-page[data-calendar-view="month"]
+    .mobile-dots {
+    min-height: 4px;
+  }
+}
+@media (max-width: 760px) {
+  #shared-feed-app .coalition-calendar-page .calendar-filters {
+    position: relative;
+    z-index: 8;
+  }
+  #shared-feed-app
+    .coalition-calendar-page.calendar-filters-open
+    .calendar-filters {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  #shared-feed-app
+    .coalition-calendar-page.calendar-filters-open
+    .calendar-filters::after {
+    content: "";
+    position: absolute;
+    z-index: 1;
+    top: calc(100% + 4px);
+    left: 12px;
+    right: 12px;
+    height: 54px;
+    border: 1px solid var(--border);
+    border-radius: 11px;
+    background: var(--surface);
+    box-shadow: 0 10px 28px rgb(0 0 0 / 20%);
+  }
+  #shared-feed-app
+    .coalition-calendar-page.calendar-filters-open
+    .calendar-filters
+    .field:not(.search-field) {
+    position: absolute;
+    z-index: 2;
+    top: calc(100% + 14px);
+    width: calc(50% - 24px);
+  }
+  #shared-feed-app
+    .coalition-calendar-page.calendar-filters-open
+    .calendar-filters
+    .field:nth-child(2) {
+    left: 20px;
+  }
+  #shared-feed-app
+    .coalition-calendar-page.calendar-filters-open
+    .calendar-filters
+    .field:nth-child(3) {
+    right: 20px;
+  }
+}
+/* Calendar shell sizing mirrors the approved full-width viewport review. */
+#shared-feed-app .shared-coalition-workspace--calendar {
+  min-height: 100dvh;
+}
+#shared-feed-app .shared-coalition-workspace--calendar .shared-page__content {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 18px 24px 20px;
+  gap: 14px;
+}
+#shared-feed-app
+  .shared-coalition-workspace--calendar:has(
+    .coalition-calendar-page[data-calendar-view="month"]
+  ) {
+  height: 100dvh;
+  min-height: 0;
+}
+#shared-feed-app
+  .shared-coalition-workspace--calendar:has(
+    .coalition-calendar-page[data-calendar-view="month"]
+  )
+  .coalition-ui-layout {
+  height: calc(100dvh - var(--coalition-navigation-header-height, 76px));
+  min-height: 0;
+}
+#shared-feed-app
+  .shared-coalition-workspace--calendar:has(
+    .coalition-calendar-page[data-calendar-view="month"]
+  )
+  .shared-page__content {
+  height: 100%;
+  min-height: 0;
+}
+#shared-feed-app .coalition-calendar-page .calendar-new-item {
+  flex-shrink: 0;
+}
+#shared-feed-app .coalition-calendar-page .calendar-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+}
+#shared-feed-app .coalition-calendar-page .calendar-warning {
+  padding: 10px 18px;
+  color: var(--warning);
+  font-size: 12px;
+}
+#shared-feed-app .coalition-calendar-page .calendar-error {
+  color: var(--danger);
+}
+@media (max-width: 1120px) {
+  #shared-feed-app .shared-coalition-workspace--calendar .shared-page__content {
+    padding: 16px 18px;
+  }
+}
+@media (max-height: 800px) and (min-width: 761px) {
+  #shared-feed-app .shared-coalition-workspace--calendar .shared-page__content {
+    padding-top: 12px;
+    padding-bottom: 12px;
+    gap: 10px;
+  }
+  #shared-feed-app .coalition-calendar-page {
+    gap: 10px;
+  }
+}
+@media (max-width: 760px) {
+  #shared-feed-app .shared-coalition-workspace--calendar .shared-page__content {
+    padding: 10px 12px 12px;
+    gap: 10px;
+  }
+  #shared-feed-app .coalition-calendar-page {
+    gap: 10px;
+  }
+  #shared-feed-app
+    .shared-coalition-workspace--calendar
+    .coalition-ui-mobile-nav {
+    flex: 0 0 auto;
+    margin: 0;
+    padding: 0;
+  }
+  #shared-feed-app
+    .shared-coalition-workspace--calendar
+    .coalition-ui-mobile-nav
+    > summary {
+    padding: 9px 12px;
+    font-size: 11px;
+  }
+  #shared-feed-app
+    .shared-coalition-workspace--calendar:has(
+      .coalition-calendar-page[data-calendar-view="month"]
+    )
+    .coalition-ui-mobile-nav[open] {
+    position: fixed;
+    top: 74px;
+    left: 12px;
+    right: 12px;
+    width: auto;
+    max-height: calc(100dvh - 90px);
+    overflow-y: auto;
+  }
+}
