@@ -20,6 +20,7 @@ import {
   calendarWriteTargets,
   calendarPermissions,
   calendarCreateBody,
+  calendarMatchesBody,
 } from "./coalitionCalendarModel.js";
 
 /** Persistent organization-scoped Calendar; every request is fenced by actor,
@@ -65,6 +66,7 @@ export function createCoalitionCalendar({
     saveUncertain: false,
     notice: "",
     opener: null,
+    confirmedItems: new Map(),
   });
   let state = fresh(),
     today = "";
@@ -475,12 +477,12 @@ export function createCoalitionCalendar({
     el.innerHTML = html;
     if (!el.open) el.showModal();
   }
-  function showItem(id) {
+  function showItem(id, { uncertainMatch = false } = {}) {
     const e = state.items.find((e) => e.id === id);
     if (!e) return;
     openDialog(
       "#detail-dialog",
-      `${header(e.title, "detail-title")}<div class="dialog-body"><div class="detail-badges">${badge(types[e.type], "primary")}${badge(statuses[e.status], e.status === "pending_approval" ? "warning" : "neutral")}</div>${e.status === "canceled" ? '<div class="note-box">This item has been cancelled.</div>' : ""}<dl class="detail-meta"><div><dt>Date</dt><dd>${fullDate(e.start)}</dd></div><div><dt>Time · ${esc(zoneLabel())}</dt><dd>${duration(e)}${e.start.slice(0, 10) !== e.end.slice(0, 10) ? `<br />Ends ${fullDate(e.allDay ? lastDay(e) : e.end)}` : ""}</dd></div><div class="full-width"><dt>Location</dt><dd>${esc(e.location || "No location added")}</dd></div><div><dt>Source</dt><dd>${esc(sourceLabel(e))}</dd></div><div><dt>Calendar display</dt><dd>${e.privacy === "busy_only" ? "Busy only" : "Show details"}</dd></div></dl><section class="detail-section"><h3>About this item</h3><p>${esc(e.description || "No description added.")}</p></section>${e.externalWriteTargets?.length ? `<section class="detail-section"><h3>Calendar destinations</h3><p>${e.externalWriteTargets.map((target) => esc(targetLabel(target))).join("<br />")}</p><small>${e.syncState?.providerWriteStatus === "pending" ? "Update requested; connected-calendar delivery is not yet confirmed." : ["failed", "partial_failure"].includes(e.syncState?.providerWriteStatus) ? "A connected-calendar update needs attention." : "Connected-calendar updates are processed separately."}</small></section>` : ""}${e.labels.length ? `<section class="detail-section"><h3>Labels</h3><div class="detail-badges">${e.labels.map((x) => badge(x)).join("")}</div></section>` : ""}${e.status === "pending_approval" ? '<div class="note-box"><strong>Time awaiting confirmation</strong><p>Check with the organizer before treating this as a confirmed plan.</p></div>' : ""}${e.privacy === "busy_only" ? '<p class="privacy-note">Busy only controls how this item is displayed when shared. Authorized organization calendar viewers can still see its details.</p>' : ""}${e.type === "volunteer_shift" && current()?.fieldAccess ? `<section class="detail-section"><h3>Ready for the field</h3><p>Find your territory and team assignments in Field work. Field event participation and rides are managed separately.</p>${btn("Open Field work " + icon("arrow"), "destination", 'data-destination="Field work"')}</section>` : ""}</div><footer class="dialog-footer">${btn("Done", "close")}</footer>`,
+      `${header(e.title, "detail-title")}<div class="dialog-body">${uncertainMatch ? '<div class="note-box" role="status"><strong>A matching calendar item is visible</strong><p>This item matches your draft. Verify its details before adding another item; the interrupted save could not be confirmed.</p></div>' : ""}<div class="detail-badges">${badge(types[e.type], "primary")}${badge(statuses[e.status], e.status === "pending_approval" ? "warning" : "neutral")}</div>${e.status === "canceled" ? '<div class="note-box">This item has been cancelled.</div>' : ""}<dl class="detail-meta"><div><dt>Date</dt><dd>${fullDate(e.start)}</dd></div><div><dt>Time · ${esc(zoneLabel())}</dt><dd>${duration(e)}${e.start.slice(0, 10) !== e.end.slice(0, 10) ? `<br />Ends ${fullDate(e.allDay ? lastDay(e) : e.end)}` : ""}</dd></div><div class="full-width"><dt>Location</dt><dd>${esc(e.location || "No location added")}</dd></div><div><dt>Source</dt><dd>${esc(sourceLabel(e))}</dd></div><div><dt>Calendar display</dt><dd>${e.privacy === "busy_only" ? "Busy only" : "Show details"}</dd></div></dl><section class="detail-section"><h3>About this item</h3><p>${esc(e.description || "No description added.")}</p></section>${e.externalWriteTargets?.length ? `<section class="detail-section"><h3>Calendar destinations</h3><p>${e.externalWriteTargets.map((target) => esc(targetLabel(target))).join("<br />")}</p><small>${e.syncState?.providerWriteStatus === "pending" ? "Update requested; connected-calendar delivery is not yet confirmed." : ["failed", "partial_failure"].includes(e.syncState?.providerWriteStatus) ? "A connected-calendar update needs attention." : "Connected-calendar updates are processed separately."}</small></section>` : ""}${e.labels.length ? `<section class="detail-section"><h3>Labels</h3><div class="detail-badges">${e.labels.map((x) => badge(x)).join("")}</div></section>` : ""}${e.status === "pending_approval" ? '<div class="note-box"><strong>Time awaiting confirmation</strong><p>Check with the organizer before treating this as a confirmed plan.</p></div>' : ""}${e.privacy === "busy_only" ? '<p class="privacy-note">Busy only controls how this item is displayed when shared. Authorized organization calendar viewers can still see its details.</p>' : ""}${e.type === "volunteer_shift" && current()?.fieldAccess ? `<section class="detail-section"><h3>Ready for the field</h3><p>Find your territory and team assignments in Field work. Field event participation and rides are managed separately.</p>${btn("Open Field work " + icon("arrow"), "destination", 'data-destination="Field work"')}</section>` : ""}</div><footer class="dialog-footer">${btn("Done", "close")}</footer>`,
     );
   }
   function showConnection(id) {
@@ -648,7 +650,7 @@ export function createCoalitionCalendar({
       );
     return result;
   }
-  function queryRange() {
+  function queryRange(includeBody = null) {
     let [from, to] = range();
     if (state.view === "month") {
       from = addDays(from, -((date(from).getUTCDay() + 6) % 7));
@@ -656,14 +658,32 @@ export function createCoalitionCalendar({
     }
     // Include the floating UTC dates used by all-day provider events as well as
     // every local-clock interval, including zones with unusual midnight offsets.
-    return {
+    const bounds = {
       from: Date.parse(`${from}T00:00:00Z`) - 86400000,
       to: Date.parse(`${addDays(to, 1)}T00:00:00Z`) + 86400000,
     };
+    if (includeBody) {
+      bounds.from = Math.min(bounds.from, includeBody.startAt);
+      bounds.to = Math.max(bounds.to, includeBody.endAt);
+    }
+    return bounds;
   }
-  async function readItems(sequence) {
-    const bounds = queryRange(),
-      items = new Map(),
+  function mergeConfirmed(items, bounds) {
+    const merged = new Map(items.map((item) => [item.id, item]));
+    for (const [id, item] of state.confirmedItems) {
+      if (merged.has(id)) state.confirmedItems.delete(id);
+      else if (
+        item.startAt < bounds.to &&
+        (item.endAt > item.startAt
+          ? item.endAt > bounds.from
+          : item.startAt >= bounds.from)
+      )
+        merged.set(id, item);
+    }
+    return [...merged.values()].sort((a, b) => a.startAt - b.startAt);
+  }
+  async function readItems(sequence, bounds) {
+    const items = new Map(),
       seen = new Set();
     let cursor = "",
       pages = 0,
@@ -724,7 +744,7 @@ export function createCoalitionCalendar({
     const payload = await call(endpoint("/connections"));
     return rows(payload, ["connections"]).map(calendarConnection);
   }
-  async function load({ refresh = false } = {}) {
+  async function load({ refresh = false, includeBody = null } = {}) {
     if (!sync() || !canView()) {
       render();
       return;
@@ -732,14 +752,15 @@ export function createCoalitionCalendar({
     if (!refresh && state.loaded) return;
     if (!refresh && flight) return flight;
     const ticket = generation,
-      sequence = ++loadSequence;
+      sequence = ++loadSequence,
+      bounds = queryRange(includeBody);
     state.condition = "loading";
     state.error = "";
     state.limited = "";
     render();
     const task = (async () => {
       const [itemsResult, connectionsResult] = await Promise.allSettled([
-        readItems(sequence),
+        readItems(sequence, bounds),
         readConnections(),
       ]);
       try {
@@ -749,7 +770,7 @@ export function createCoalitionCalendar({
       }
       if (sequence !== loadSequence) return;
       if (itemsResult.status === "fulfilled") {
-        state.items = itemsResult.value.items;
+        state.items = mergeConfirmed(itemsResult.value.items, bounds);
         state.limited = itemsResult.value.limited;
         state.loaded = true;
         onItems(state.items, current().coalitionId);
@@ -765,6 +786,17 @@ export function createCoalitionCalendar({
         )
           ? "denied"
           : "error";
+        if (state.condition === "denied") state.confirmedItems.clear();
+        else if (state.confirmedItems.size) {
+          state.items = mergeConfirmed([], bounds);
+          if (state.items.length) {
+            state.condition = "ready";
+            state.loaded = true;
+            state.limited =
+              "Your item was created, but the rest of this date range could not be refreshed. Refresh to try again.";
+            onItems(state.items, current().coalitionId);
+          }
+        }
       }
       if (connectionsResult.status === "fulfilled") {
         state.connections = connectionsResult.value;
@@ -900,7 +932,9 @@ export function createCoalitionCalendar({
     setPending(true);
     try {
       if (body.externalWriteTargets.length) {
-        state.connections = await readConnections();
+        const connections = await readConnections();
+        guard(ticket, true);
+        state.connections = connections;
         state.connectionsError = "";
         body = calendarCreateBody(data, state.zone, writeTargets());
       }
@@ -913,13 +947,7 @@ export function createCoalitionCalendar({
           new Error("The saved item could not be confirmed."),
           { status: 502 },
         );
-      state.items = [
-        item,
-        ...state.items.filter((entry) => entry.id !== item.id),
-      ].sort((a, b) => a.startAt - b.startAt);
-      state.loaded = true;
-      onItems(state.items, current().coalitionId);
-      state.condition = "ready";
+      state.confirmedItems.set(item.id, item);
       state.selected = item.start.slice(0, 10);
       state.anchor = state.selected;
       state.query = "";
@@ -927,11 +955,18 @@ export function createCoalitionCalendar({
       state.status = "all";
       state.from = "";
       state.to = "";
+      await load({ refresh: true, includeBody: body });
+      guard(ticket);
       setPending(false);
       closeDialog();
+      if (state.condition === "denied") return;
       render();
       showItem(item.id);
-      toast("Calendar item created.");
+      toast(
+        state.limited
+          ? "Calendar item created. Refresh the schedule to see all available items."
+          : "Calendar item created.",
+      );
     } catch (error) {
       if (error.stale) return;
       setPending(false);
@@ -954,24 +989,53 @@ export function createCoalitionCalendar({
   }
   async function checkSave() {
     const body = state.pendingBody;
-    if (!body) return;
-    await load({ refresh: true });
-    const found = state.items.find(
-      (item) =>
-        item.title === body.title &&
-        item.startAt === body.startAt &&
-        item.endAt === body.endAt,
+    if (!body || state.pending || !eventCurrent()) return;
+    const ticket = generation;
+    const submitted = calendarItem(
+      { ...body, calendarItemId: "pending-save" },
+      state.zone,
     );
-    if (found) {
-      state.saveUncertain = false;
-      closeDialog();
-      showItem(found.id);
-      toast("The calendar item was saved.");
-    } else
+    if (!submitted) return;
+    state.selected = submitted.start.slice(0, 10);
+    state.anchor = state.selected;
+    state.from = "";
+    state.to = "";
+    setPending(true);
+    try {
+      // The destination view and the whole submitted span must both be covered.
+      await load({ refresh: true, includeBody: body });
+      guard(ticket);
+      setPending(false);
+      const submit = q('#item-form [type="submit"]');
+      if (submit) submit.disabled = true;
+      if (state.condition === "denied") {
+        closeDialog();
+        return;
+      }
+      const found = state.items.find((item) =>
+        calendarMatchesBody(item, body, current().userId),
+      );
+      if (found) {
+        closeDialog();
+        showItem(found.id, { uncertainMatch: true });
+        toast(
+          "A matching item is visible. Verify its details before adding another.",
+        );
+      } else
+        showFormError(
+          "The save could not be confirmed yet. Your draft is preserved. Check again before adding another item.",
+          true,
+        );
+    } catch (error) {
+      if (error.stale) return;
+      setPending(false);
+      const submit = q('#item-form [type="submit"]');
+      if (submit) submit.disabled = true;
       showFormError(
-        "The save could not be confirmed yet. Your draft is preserved. Check again before adding another item.",
+        "The calendar could not be checked. Your draft is preserved. Check again before adding another item.",
         true,
       );
+    }
   }
   function eventCurrent() {
     if (!state.key || identity() !== state.key || !canView()) {

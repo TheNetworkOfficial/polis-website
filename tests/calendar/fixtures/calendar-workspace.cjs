@@ -140,6 +140,7 @@ async function mockCalendarWorkspace(
     connectionFailures: 0,
     createFailures: 0,
     persistBeforeCreateFailure: false,
+    omitCreatedFromReads: 0,
     itemStatus: 503,
     connectionStatus: 503,
     createStatus: 503,
@@ -381,7 +382,17 @@ async function mockCalendarWorkspace(
             },
           });
         }
-        const visible = sourceItems.filter((item) =>
+        let indexedItems = sourceItems;
+        if (data.omitCreatedFromReads > 0) {
+          data.omitCreatedFromReads--;
+          row.omittedCreatedIds = sourceItems
+            .filter((item) => item.calendarItemId.startsWith("created-"))
+            .map((item) => item.calendarItemId);
+          indexedItems = sourceItems.filter(
+            (item) => !item.calendarItemId.startsWith("created-"),
+          );
+        }
+        const visible = indexedItems.filter((item) =>
           overlap
             ? item.startAt < to && item.endAt > from
             : item.startAt >= from && item.startAt <= to,
@@ -398,7 +409,7 @@ async function mockCalendarWorkspace(
                 nextCursor: null,
                 pageBudget: {
                   evaluatedLimit: 500,
-                  evaluatedCount: sourceItems.length,
+                  evaluatedCount: indexedItems.length,
                   returnedCount: visible.length,
                 },
               }

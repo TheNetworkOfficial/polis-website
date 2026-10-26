@@ -244,3 +244,58 @@ test("busy-only sharing is retained while invalid privacy never promises hidden 
     "&lt;img src=x onerror=&quot;bad&quot;&gt;",
   );
 });
+
+test("interrupted-save inspection matches every known submitted field", () => {
+  const body = model.calendarCreateBody(
+    form({
+      description: "Bring the agenda",
+      location: "Community hall",
+      labels: "Team,Planning",
+    }),
+    zone,
+    [],
+  );
+  const normalize = (changes = {}) =>
+    model.calendarItem(
+      {
+        ...body,
+        calendarItemId: "existing",
+        createdByUserId: "alex",
+        ...changes,
+      },
+      zone,
+    );
+  assert.equal(model.calendarMatchesBody(normalize(), body, "alex"), true);
+  for (const changes of [
+    { title: "Another title" },
+    { itemType: "volunteer_shift" },
+    { status: "canceled" },
+    { privacy: "busy_only" },
+    { description: "Different agenda" },
+    { locationName: "Another venue" },
+    { timeZone: "UTC" },
+    { allDay: true },
+    { startAt: body.startAt + 60000 },
+    { endAt: body.endAt + 60000 },
+    { labels: ["Other"] },
+    {
+      externalWriteTargets: [
+        { provider: "google", calendarId: "another", mode: "write" },
+      ],
+    },
+    { createdByUserId: "another-actor" },
+  ])
+    assert.equal(
+      model.calendarMatchesBody(normalize(changes), body, "alex"),
+      false,
+      JSON.stringify(changes),
+    );
+  assert.equal(
+    model.calendarMatchesBody(
+      normalize({ labels: ["Planning", "Team"] }),
+      body,
+      "alex",
+    ),
+    true,
+  );
+});

@@ -285,3 +285,56 @@ export function calendarCreateBody(form, zone, targets) {
     }),
   };
 }
+
+/** A matching record is evidence for inspection, not a correlation/idempotency
+ * receipt for an interrupted POST. Compare every known submitted value so an
+ * unrelated meeting with the same title and time is never treated as a match. */
+export function calendarMatchesBody(item, body, actorId = "") {
+  const strings = [
+    [item.title, body.title],
+    [item.type, body.itemType],
+    [item.status, body.status],
+    [item.privacy, body.privacy],
+    [item.description, body.description],
+    [item.location, body.locationName],
+    [item.raw?.timeZone, body.timeZone],
+  ];
+  if (
+    strings.some(
+      ([actual, expected]) => calendarText(actual) !== calendarText(expected),
+    )
+  )
+    return false;
+  if (
+    item.startAt !== body.startAt ||
+    item.endAt !== body.endAt ||
+    item.allDay !== body.allDay
+  )
+    return false;
+  if (
+    actorId &&
+    item.raw?.createdByUserId &&
+    item.raw.createdByUserId !== actorId
+  )
+    return false;
+  const labels = (value) =>
+    [...new Set(calendarRows(value).map(calendarText).filter(Boolean))].sort();
+  const targets = (value) =>
+    [
+      ...new Set(
+        calendarRows(value).map((target) =>
+          JSON.stringify([
+            calendarText(target.provider).toLowerCase(),
+            calendarText(target.calendarId || target.id),
+            calendarText(target.mode) || "write",
+          ]),
+        ),
+      ),
+    ].sort();
+  return (
+    JSON.stringify(labels(item.labels)) ===
+      JSON.stringify(labels(body.labels)) &&
+    JSON.stringify(targets(item.externalWriteTargets)) ===
+      JSON.stringify(targets(body.externalWriteTargets))
+  );
+}

@@ -322,7 +322,16 @@ for (const role of ["admin", "manager", "promotion"]) {
     await action(page, "refresh").click();
     await expect(
       app(page).locator('.calendar-event[data-id="created-1"]'),
-    ).toBeVisible();
+    ).toHaveCount(1);
+    await app(page).locator('.day-number[data-day="2026-10-27"]').click();
+    await app(page)
+      .locator(
+        '.calendar-layout > .day-agenda [data-cal-action="item"][data-id="created-1"]',
+      )
+      .click();
+    await expect(dialog(page)).toContainText(
+      "Community planning <script>sample</script>",
+    );
     await finish(page, fixture);
   });
 }
@@ -451,6 +460,9 @@ test("Calendar an uncertain save is checked before another POST and recovers the
   );
   await action(page, "check-save").click();
   await expect(dialog(page)).toContainText("Save result needs checking");
+  await expect(dialog(page)).toContainText(
+    "A matching calendar item is visible",
+  );
   expect(fixture.writes).toHaveLength(1);
   await finish(page, fixture);
 });
@@ -905,5 +917,193 @@ test("Calendar an exhausted read budget never claims an incompletely loaded cale
   expect(cursors.size).toBe(20);
   expect(cursors.has("page:19")).toBe(true);
   expect(cursors.has("page:20")).toBe(false);
+  await finish(page, fixture);
+});
+
+function coversSubmittedInterval(requests, body) {
+  return requests.some((row) => {
+    if (row.method !== "GET" || !row.path.endsWith("/calendar/items"))
+      return false;
+    const query = new URLSearchParams(row.query);
+    const parse = (name) =>
+      /^\d+$/u.test(query.get(name) || "")
+        ? Number(query.get(name))
+        : Date.parse(query.get(name));
+    return (
+      query.get("overlap") === "true" &&
+      parse("from") <= body.startAt &&
+      parse("to") >= body.endAt
+    );
+  });
+}
+
+test("Calendar successful future month and week saves reload the complete destination schedule", async ({
+  page,
+}) => {
+  const fixture = await enter(page);
+  const periods = [
+    {
+      view: "month",
+      day: "2026-12-10",
+      title: "December planning",
+      existing: "Existing December meeting",
+    },
+    {
+      view: "week",
+      day: "2027-02-14",
+      title: "February planning",
+      existing: "Existing February meeting",
+    },
+  ];
+  for (const period of periods) {
+    fixture.items.push({
+      ...fixture.items[0],
+      calendarItemId: `existing-${period.day}`,
+      title: period.existing,
+      startAt: Date.parse(`${period.day}T18:00:00Z`),
+      endAt: Date.parse(`${period.day}T19:00:00Z`),
+      startAtIso: `${period.day}T18:00:00.000Z`,
+      endAtIso: `${period.day}T19:00:00.000Z`,
+    });
+    if (period.view === "week") await view(page, "week");
+    await openCreate(page);
+    await field(page, "title").fill(period.title);
+    await field(page, "start").fill(`${period.day}T11:30`);
+    await field(page, "end").fill(`${period.day}T12:30`);
+    const readOffset = fixture.requests.length,
+      writeOffset = fixture.writes.length;
+    if (period.view === "month") fixture.omitCreatedFromReads = 1;
+    await dialog(page, "create")
+      .getByRole("button", { name: "Add calendar item", exact: true })
+      .click();
+    await expect.poll(() => fixture.writes.length).toBe(writeOffset + 1);
+    const body = fixture.writes.at(-1).body;
+    expect(body.startAt).toBe(Date.parse(`${period.day}T18:30:00Z`));
+    expect(body.endAt).toBe(Date.parse(`${period.day}T19:30:00Z`));
+    await expect
+      .poll(() =>
+        coversSubmittedInterval(fixture.requests.slice(readOffset), body),
+      )
+      .toBe(true);
+    await expect(dialog(page)).toContainText(period.title);
+    if (period.view === "month")
+      expect(
+        fixture.requests
+          .slice(readOffset)
+          .some((row) => row.omittedCreatedIds?.includes("created-1")),
+      ).toBe(true);
+    await page.keyboard.press("Escape");
+    await expect(app(page)).toContainText(period.existing);
+    await expect(app(page)).toContainText(period.title);
+    if (period.view === "month") {
+      await app(page).locator(`.day-number[data-day="${period.day}"]`).click();
+      const rail = app(page).locator(".calendar-layout > .day-agenda");
+      await expect(rail).toContainText(period.existing);
+      await expect(rail).toContainText(period.title);
+      await expect(rail.locator(".overlap-note")).toBeVisible();
+    } else {
+      await expect(app(page).locator(".week-grid")).toContainText(
+        period.existing,
+      );
+      await expect(app(page).locator(".week-grid")).toContainText(period.title);
+    }
+  }
+  expect(fixture.writes).toHaveLength(2);
+  await finish(page, fixture);
+});
+
+test("Calendar uncertain future multi-day saves reconcile their complete submitted interval without a duplicate POST", async ({
+  page,
+}) => {
+  const fixture = await enter(page);
+  fixture.createFailures = 1;
+  fixture.createStatus = 503;
+  fixture.persistBeforeCreateFailure = true;
+  await openCreate(page);
+  await field(page, "title").fill("Future multi-day save check");
+  await field(page, "allDay").check();
+  await field(page, "start").fill("2026-12-10");
+  await field(page, "end").fill("2027-02-12");
+  await dialog(page, "create")
+    .getByRole("button", { name: "Add calendar item", exact: true })
+    .click();
+  await expect(action(page, "check-save")).toBeVisible();
+  expect(fixture.writes).toHaveLength(1);
+  const body = fixture.writes[0].body,
+    readOffset = fixture.requests.length;
+  expect(body.endAt).toBe(Date.parse("2027-02-13T00:00:00Z"));
+  await action(page, "check-save").click();
+  await expect
+    .poll(() =>
+      coversSubmittedInterval(fixture.requests.slice(readOffset), body),
+    )
+    .toBe(true);
+  await expect(dialog(page)).toContainText("Future multi-day save check");
+  await expect(dialog(page)).toContainText(
+    "A matching calendar item is visible",
+  );
+  await expect(dialog(page, "create")).toHaveCount(0);
+  expect(fixture.writes).toHaveLength(1);
+  await finish(page, fixture);
+});
+
+test("Calendar late reconciliation from a previous actor cannot change the current actor's new draft", async ({
+  page,
+}) => {
+  const fixture = await enter(page);
+  fixture.createFailures = 1;
+  fixture.createStatus = 503;
+  fixture.persistBeforeCreateFailure = true;
+  await openCreate(page);
+  await field(page, "title").fill("Alex uncertain future item");
+  await field(page, "start").fill("2026-12-10T11:30");
+  await field(page, "end").fill("2026-12-10T12:30");
+  await dialog(page, "create")
+    .getByRole("button", { name: "Add calendar item", exact: true })
+    .click();
+  await expect(action(page, "check-save")).toBeVisible();
+  let release;
+  fixture.nextReadGate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const reads = fixture.requests.filter((row) =>
+    row.path.endsWith("/calendar/items"),
+  ).length;
+  await action(page, "check-save").click();
+  await expect
+    .poll(
+      () =>
+        fixture.requests.filter((row) => row.path.endsWith("/calendar/items"))
+          .length,
+    )
+    .toBeGreaterThan(reads);
+  fixture.actor = "riley";
+  await page.evaluate(() => {
+    const key = "sharedFeedSession.v1",
+      session = JSON.parse(sessionStorage.getItem(key));
+    const token = `e30.${btoa(JSON.stringify({ sub: "riley", name: "Riley Chen" }))}.rotated`;
+    sessionStorage.setItem(
+      key,
+      JSON.stringify({ ...session, accessToken: token, idToken: token }),
+    );
+    window.dispatchEvent(new Event("focus"));
+  });
+  await expect
+    .poll(
+      () =>
+        fixture.requests.filter((row) => row.path.endsWith("/calendar/items"))
+          .length,
+    )
+    .toBeGreaterThan(reads + 1);
+  await expect(dialog(page, "create")).toHaveCount(0);
+  await openCreate(page);
+  await field(page, "title").fill("Riley current draft");
+  release();
+  await page.waitForLoadState("networkidle");
+  await expect(field(page, "title")).toHaveValue("Riley current draft");
+  await expect(dialog(page, "create").locator("#form-error")).toBeHidden();
+  await expect(dialog(page)).toHaveCount(0);
+  await expect(app(page)).not.toContainText("Alex uncertain future item");
+  expect(fixture.writes).toHaveLength(1);
   await finish(page, fixture);
 });
