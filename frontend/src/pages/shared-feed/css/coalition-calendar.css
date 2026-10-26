@@ -56,15 +56,79 @@
   color: inherit;
   font-weight: inherit;
 }
+#shared-feed-app
+  .coalition-calendar-page
+  .field
+  :is(input, select, textarea):focus-visible {
+  border-color: var(--line) !important;
+}
+#shared-feed-app
+  .coalition-calendar-page
+  :is(button, a, input, select, textarea, summary):focus-visible {
+  outline: 3px solid var(--primary) !important;
+  outline-offset: 3px !important;
+}
+#shared-feed-app
+  .coalition-calendar-page
+  :is(.icon-button, .day-number, .calendar-event, .text-button):focus-visible,
+#shared-feed-app .coalition-calendar-page .view-switch button:focus-visible {
+  border-color: transparent !important;
+}
+#shared-feed-app
+  .coalition-calendar-page
+  :is(.secondary-button, .more-events, .connection-card):focus-visible,
+#shared-feed-app .coalition-calendar-page .month-nav .icon-button:focus-visible,
+#shared-feed-app
+  .coalition-calendar-page
+  .view-switch
+  button[aria-pressed="true"]:focus-visible {
+  border-color: var(--line) !important;
+}
+#shared-feed-app .coalition-calendar-page .view-tabs button:focus-visible {
+  border-color: currentColor !important;
+  border-bottom-color: transparent !important;
+}
+#shared-feed-app
+  .coalition-calendar-page
+  .view-tabs
+  button[aria-selected="true"]:focus-visible {
+  border-bottom-color: var(--primary) !important;
+}
+#shared-feed-app
+  .coalition-calendar-page
+  :is(.day-event, .event-card, .agenda-row):focus-visible {
+  border-color: currentColor !important;
+  border-bottom-color: var(--line) !important;
+}
+#shared-feed-app
+  .coalition-calendar-page
+  .primary-button:hover:not(:disabled):focus-visible {
+  border-color: var(--primary-strong) !important;
+}
+#shared-feed-app
+  .coalition-calendar-page
+  :is(
+    .secondary-button:hover:not(:disabled),
+    .calendar-event:hover
+  ):focus-visible {
+  border-color: var(--border) !important;
+}
+#shared-feed-app .coalition-calendar-page .check-item input[type="checkbox"] {
+  background: transparent;
+  color: initial;
+  border-color: initial;
+}
 html[data-polis-theme-resolved="dark"]
   #shared-feed-app
   .coalition-calendar-page {
   --danger: #ef8798;
+  color-scheme: dark;
 }
 html[data-polis-theme-resolved="light"]
   #shared-feed-app
   .coalition-calendar-page {
   --meeting-color: #8455c4;
+  color-scheme: light;
 }
 #shared-feed-app .coalition-calendar-page *,
 #shared-feed-app .coalition-calendar-page *::before,
