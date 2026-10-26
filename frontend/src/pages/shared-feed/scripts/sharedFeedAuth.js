@@ -396,10 +396,16 @@ function requireAccessToken(session, feature = "This feature") {
 }
 
 export function getSharedFeedAuthCapabilities(config = {}) {
+  const providers = Array.isArray(config.supportedIdentityProviders)
+    ? config.supportedIdentityProviders
+    : normalizeString(config.supportedIdentityProviders).split(/[\s,]+/);
   return {
     direct: hasDirectSignUpConfig(config),
     password: hasPasswordSignInConfig(config),
     hosted: hasHostedSignInConfig(config),
+    google:
+      hasHostedSignInConfig(config) &&
+      providers.some((provider) => normalizeString(provider) === "Google"),
   };
 }
 
@@ -650,11 +656,21 @@ export function consumeSharedFeedPostAuthPath() {
 
 async function startHostedAuth(
   config = {},
-  { mode = "login", postAuthPath = "" } = {},
+  { mode = "login", postAuthPath = "", identityProvider = "" } = {},
 ) {
   if (!hasHostedSignInConfig(config)) {
     throw new SharedFeedAuthError("Hosted sign-in is not configured.", {
       errorCode: "auth_not_configured",
+    });
+  }
+
+  const provider = normalizeString(identityProvider);
+  if (
+    provider &&
+    (provider !== "Google" || !getSharedFeedAuthCapabilities(config).google)
+  ) {
+    throw new SharedFeedAuthError("This sign-in option is unavailable.", {
+      errorCode: "identity_provider_unavailable",
     });
   }
 
@@ -677,8 +693,14 @@ async function startHostedAuth(
     code_challenge: challenge,
   });
 
+  if (provider) {
+    params.set("identity_provider", provider);
+    params.set("prompt", "select_account");
+  }
+
   const hostedUiBaseUrl = resolveHostedUiBaseUrl(config);
-  const route = mode === "signup" ? "/signup" : "/oauth2/authorize";
+  const route =
+    mode === "signup" && !provider ? "/signup" : "/oauth2/authorize";
   window.location.assign(`${hostedUiBaseUrl}${route}?${params.toString()}`);
 }
 
@@ -753,6 +775,16 @@ export async function signInSharedFeedWithPassword(
         email: normalizedIdentifier.includes("@") ? normalizedIdentifier : "",
       },
     });
+  }
+
+  if (
+    normalizeString(payload?.ChallengeName) &&
+    !payload?.AuthenticationResult
+  ) {
+    throw new SharedFeedAuthError(
+      "Your account needs an additional verification step. Choose More sign-in options to continue.",
+      { errorCode: "additional_verification_required" },
+    );
   }
 
   const session = buildSessionFromTokens(payload?.AuthenticationResult || {});

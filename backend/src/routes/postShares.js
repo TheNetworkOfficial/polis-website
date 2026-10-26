@@ -871,6 +871,9 @@ function getSharedRuntimeBase(req, { requestUrl, canonicalUrl } = {}) {
       enablePasswordFlow: normalizeString(
         process.env.COGNITO_ENABLE_PASSWORD_FLOW,
       ),
+      supportedIdentityProviders:
+        normalizeString(process.env.COGNITO_SUPPORTED_IDENTITY_PROVIDERS) ||
+        "COGNITO",
       redirectUri:
         normalizeString(process.env.COGNITO_REDIRECT_URI) || resolvedRequestUrl,
     },

@@ -21,6 +21,7 @@ const authEnv = {
   COGNITO_DOMAIN: "polis.auth.us-west-2.amazoncognito.com",
   COGNITO_SCOPES: "openid email profile",
   COGNITO_ENABLE_PASSWORD_FLOW: "true",
+  COGNITO_SUPPORTED_IDENTITY_PROVIDERS: "COGNITO,Google",
   COGNITO_REDIRECT_URI: "https://polisapp.io/auth",
   SESSION_SECRET: "must-never-be-public",
 };
@@ -54,6 +55,7 @@ test("static fallback receives configured browser sign-in without changing updat
       domain: authEnv.COGNITO_DOMAIN,
       scopes: authEnv.COGNITO_SCOPES,
       enablePasswordFlow: "true",
+      supportedIdentityProviders: "COGNITO,Google",
       redirectUri: "https://polisapp.io/auth",
     },
   });
@@ -82,6 +84,11 @@ test("ordinary HTML remains unchanged and default redirect preserves request que
   assert.equal(
     readRuntime(hydrateFrontendAuthRuntime(html, req, {})).auth.redirectUri,
     "https://polisapp.io/organizations/tester-org?returnTo=%2Ffeed",
+  );
+  assert.equal(
+    readRuntime(hydrateFrontendAuthRuntime(html, req, {})).auth
+      .supportedIdentityProviders,
+    "COGNITO",
   );
 });
 
