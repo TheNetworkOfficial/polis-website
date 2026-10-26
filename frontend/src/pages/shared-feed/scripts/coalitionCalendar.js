@@ -316,7 +316,7 @@ export function createCoalitionCalendar({
     const blocked = blocking();
     $("#result-count").textContent = blocked
       ? ""
-      : `${currentItems().length} items ${state.view === "agenda" ? "in this date range" : `in this ${state.view === "week" ? "week" : "month"}`}`;
+      : `${currentItems().length} ${state.limited ? "loaded items" : "items"} ${state.view === "agenda" ? "in this date range" : `in this ${state.view === "week" ? "week" : "month"}`}`;
     if (state.view === "agenda" && range()[1] < range()[0]) {
       $("#calendar-results").innerHTML = empty(
         "Check your date range",
@@ -342,8 +342,12 @@ export function createCoalitionCalendar({
       (state.query || state.type !== "all" || state.status !== "all")
     ) {
       $("#calendar-results").innerHTML = empty(
-        "No matching calendar items",
-        "Try another search or clear the filters to see the full schedule.",
+        state.limited
+          ? "No matching loaded calendar items"
+          : "No matching calendar items",
+        state.limited
+          ? "Calendar results may be incomplete. Refresh or choose a smaller date range."
+          : "Try another search or clear the filters to see the full schedule.",
         btn("Clear filters", "clear-filters"),
       );
       return;
@@ -429,14 +433,14 @@ export function createCoalitionCalendar({
   }
   function renderDay() {
     const items = onDay(state.selected);
-    return `<aside class="day-agenda" aria-label="Selected day"><header><span class="eyebrow">${state.selected === today ? "Today" : fmt(state.selected, { weekday: "long" })}</span><h3>${fmt(state.selected, { month: "long", day: "numeric" })}</h3><p>${items.length} ${items.length === 1 ? "item" : "items"} on the schedule</p></header><div class="day-events">${items.length ? items.map((e) => eventCard(e)).join("") : '<p class="quiet-day">Nothing scheduled. A little room for what comes next.</p>'}</div>${overlap(items) ? `<div class="overlap-note">${icon("info")}<span>Some times overlap. Check the details before making plans.</span></div>` : ""}${canManage() ? btn(icon("plus") + " Add to this day", "new-item", `data-day="${state.selected}"`) : ""}</aside>`;
+    return `<aside class="day-agenda" aria-label="Selected day"><header><span class="eyebrow">${state.selected === today ? "Today" : fmt(state.selected, { weekday: "long" })}</span><h3>${fmt(state.selected, { month: "long", day: "numeric" })}</h3><p>${items.length} ${state.limited ? (items.length === 1 ? "loaded item" : "loaded items") : items.length === 1 ? "item" : "items"} on the schedule</p></header><div class="day-events">${items.length ? items.map((e) => eventCard(e)).join("") : `<p class="quiet-day">${state.limited ? "No loaded items for this day. Calendar results may be incomplete." : "Nothing scheduled. A little room for what comes next."}</p>`}</div>${overlap(items) ? `<div class="overlap-note">${icon("info")}<span>Some times overlap. Check the details before making plans.</span></div>` : ""}${canManage() ? btn(icon("plus") + " Add to this day", "new-item", `data-day="${state.selected}"`) : ""}</aside>`;
   }
   function renderWeek() {
     const [first] = range();
     return `<div class="week-grid">${Array.from({ length: 7 }, (_, i) => {
       const day = addDays(first, i),
         items = onDay(day);
-      return `<section class="week-day${day === today ? " today" : ""}"><header><span>${fmt(day, { weekday: "short" })}</span><strong>${fmt(day, { month: "short", day: "numeric" })}</strong><small>${items.length} ${items.length === 1 ? "item" : "items"}</small></header>${items.map((e) => eventCard(e, "event-card")).join("") || '<p class="quiet-day">No items</p>'}${canManage() ? `<button type="button" class="text-button" data-cal-action="new-item" data-day="${day}" aria-label="Add item on ${fullDate(day)}">${icon("plus")} Add item</button>` : ""}</section>`;
+      return `<section class="week-day${day === today ? " today" : ""}"><header><span>${fmt(day, { weekday: "short" })}</span><strong>${fmt(day, { month: "short", day: "numeric" })}</strong><small>${items.length} ${state.limited ? (items.length === 1 ? "loaded item" : "loaded items") : items.length === 1 ? "item" : "items"}</small></header>${items.map((e) => eventCard(e, "event-card")).join("") || `<p class="quiet-day">${state.limited ? "No loaded items" : "No items"}</p>`}${canManage() ? `<button type="button" class="text-button" data-cal-action="new-item" data-day="${day}" aria-label="Add item on ${fullDate(day)}">${icon("plus")} Add item</button>` : ""}</section>`;
     }).join("")}</div>`;
   }
   function renderAgenda() {
@@ -445,11 +449,15 @@ export function createCoalitionCalendar({
     );
     if (!groups.size)
       return empty(
-        "Nothing scheduled this month",
-        "Use the arrows to explore another month, or return to today.",
+        state.limited
+          ? "No loaded items in this date range"
+          : "Nothing scheduled this month",
+        state.limited
+          ? "Calendar results may be incomplete. Refresh or choose a smaller date range."
+          : "Use the arrows to explore another month, or return to today.",
         btn("Go to today", "today"),
       );
-    return `<div class="agenda-list">${[...groups].map(([day, items]) => `<section class="agenda-group"><header class="agenda-date${day === today ? " today" : ""}"><strong>${fmt(day, { weekday: "short", month: "short", day: "numeric" })}</strong>${day === today ? badge("Today", "primary") : ""}<span>${items.length} ${items.length === 1 ? "item" : "items"}</span></header>${items.map((e) => `<button type="button" class="agenda-row${e.status === "canceled" ? " is-cancelled" : ""}" data-cal-action="item" data-id="${esc(e.id)}"><span class="agenda-time">${e.allDay ? "All day" : time(e.start)}<small>${e.allDay ? "" : time(e.end)}</small></span><span class="agenda-item">${dot(e)}<span><strong>${esc(e.title)}</strong><small>${esc(e.location || "No location added")}${e.start.slice(0, 10) !== lastDay(e) ? ` · ${fmt(e.start, { month: "short", day: "numeric" })}–${fmt(lastDay(e), { month: "short", day: "numeric" })}` : ""}</small></span></span><span class="agenda-type">${esc(types[e.type])}</span>${badge(statuses[e.status], e.status === "pending_approval" ? "warning" : e.status === "confirmed" ? "success" : "neutral")}${icon("arrow")}</button>`).join("")}</section>`).join("")}</div>`;
+    return `<div class="agenda-list">${[...groups].map(([day, items]) => `<section class="agenda-group"><header class="agenda-date${day === today ? " today" : ""}"><strong>${fmt(day, { weekday: "short", month: "short", day: "numeric" })}</strong>${day === today ? badge("Today", "primary") : ""}<span>${items.length} ${state.limited ? (items.length === 1 ? "loaded item" : "loaded items") : items.length === 1 ? "item" : "items"}</span></header>${items.map((e) => `<button type="button" class="agenda-row${e.status === "canceled" ? " is-cancelled" : ""}" data-cal-action="item" data-id="${esc(e.id)}"><span class="agenda-time">${e.allDay ? "All day" : time(e.start)}<small>${e.allDay ? "" : time(e.end)}</small></span><span class="agenda-item">${dot(e)}<span><strong>${esc(e.title)}</strong><small>${esc(e.location || "No location added")}${e.start.slice(0, 10) !== lastDay(e) ? ` · ${fmt(e.start, { month: "short", day: "numeric" })}–${fmt(lastDay(e), { month: "short", day: "numeric" })}` : ""}</small></span></span><span class="agenda-type">${esc(types[e.type])}</span>${badge(statuses[e.status], e.status === "pending_approval" ? "warning" : e.status === "confirmed" ? "success" : "neutral")}${icon("arrow")}</button>`).join("")}</section>`).join("")}</div>`;
   }
   function renderConnections() {
     const blocked = blocking();
@@ -745,7 +753,8 @@ export function createCoalitionCalendar({
         state.limited = itemsResult.value.limited;
         state.loaded = true;
         onItems(state.items, current().coalitionId);
-        state.condition = state.items.length ? "ready" : "empty";
+        state.condition =
+          state.items.length || state.limited ? "ready" : "empty";
       } else {
         state.items = [];
         state.loaded = false;

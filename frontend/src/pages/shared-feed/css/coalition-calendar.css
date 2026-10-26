@@ -45,6 +45,9 @@
 #shared-feed-app .coalition-calendar-page h4 {
   font-family: inherit;
 }
+#shared-feed-app .coalition-calendar-page .calendar-subtitle {
+  line-height: 1.5;
+}
 html[data-polis-theme-resolved="dark"]
   #shared-feed-app
   .coalition-calendar-page {

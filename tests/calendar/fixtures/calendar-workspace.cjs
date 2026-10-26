@@ -149,6 +149,7 @@ async function mockCalendarWorkspace(
     nextReadGate: null,
     nextWriteGate: null,
     pages: null,
+    pageEvaluatedCount: null,
     legacyList: false,
   };
   const coalition = {
@@ -375,7 +376,7 @@ async function mockCalendarWorkspace(
                 : null,
             pageBudget: {
               evaluatedLimit: 500,
-              evaluatedCount: items.length,
+              evaluatedCount: data.pageEvaluatedCount ?? items.length,
               returnedCount: items.length,
             },
           });

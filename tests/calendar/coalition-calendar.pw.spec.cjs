@@ -875,3 +875,35 @@ test("Calendar service compatibility errors recover after the complete overlap c
   await ready(page);
   await finish(page, fixture);
 });
+
+test("Calendar an exhausted read budget never claims an incompletely loaded calendar is empty", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const fixture = await mockCalendarWorkspace(page);
+  fixture.pages = Array.from({ length: 21 }, () => []);
+  fixture.pageEvaluatedCount = 500;
+  await page.goto(`${BASE_URL}${COALITION_PATH}/calendar`);
+  await expect(app(page).locator(".calendar-limit-notice")).toBeVisible();
+  await expect(app(page).locator(".calendar-limit-notice")).toContainText(
+    /loading limit|incomplete/iu,
+  );
+  await expect(app(page)).not.toContainText("A clear calendar");
+  await expect(app(page).locator("#result-count")).toContainText(/loaded/iu);
+  await monthFits(page, 5);
+  const rail = app(page).locator(".calendar-layout > .day-agenda");
+  await expect(rail).toContainText(/incomplete|may be missing|not complete/iu);
+  await expect(rail).not.toContainText("Nothing scheduled");
+  const reads = fixture.requests.filter((row) =>
+    row.path.endsWith("/calendar/items"),
+  );
+  const cursors = new Set(
+    reads.map(
+      (row) => new URLSearchParams(row.query).get("cursor") || "page:0",
+    ),
+  );
+  expect(cursors.size).toBe(20);
+  expect(cursors.has("page:19")).toBe(true);
+  expect(cursors.has("page:20")).toBe(false);
+  await finish(page, fixture);
+});
