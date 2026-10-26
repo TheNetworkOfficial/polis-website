@@ -389,14 +389,18 @@ async function mockFiles(page, overrides = {}) {
     }
     return route.fulfill({
       status: 200,
-      headers: { etag: `"part-etag-${partNumber}"` },
+      headers: {
+        etag: `"part-etag-${partNumber}"`,
+        "access-control-expose-headers": "ETag",
+      },
       body: "",
     });
   });
   await page.route("**/api/files/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
-    const path = url.pathname;
+    // Production API Gateway URLs include a stage before the resource path.
+    const path = url.pathname.slice(url.pathname.indexOf("/api/"));
     const method = request.method();
     const body = request.postDataJSON?.() || {};
     const idempotencyKey = request.headers()["idempotency-key"] || "";

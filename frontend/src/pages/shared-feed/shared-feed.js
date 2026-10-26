@@ -14,6 +14,13 @@ import "./css/polis-auth.css";
 import "./css/coalition-people.css";
 import "./css/coalition-missions.css";
 import "./css/coalition-field-work.css";
+import {
+  workspaceNavigationScope,
+  withWorkspaceNavigationScope,
+  workspaceDashboardPath,
+  workspaceFilesPath,
+  renderWorkspaceNavigationFrame,
+} from "./scripts/workspaceNavigation.js";
 import { createCoalitionFieldWork } from "./scripts/coalitionFieldWork.js";
 import {
   canonicalCoalitionFieldWorkPath,
@@ -511,6 +518,187 @@ function currentOrganizationWorkspaceContext() {
       : "",
     section: route.routeParams.organizationSection || "publishing",
   };
+}
+
+let workspaceNavigationAccess = { key: "", loading: false, loaded: false };
+let workspaceNavigationGeneration = 0;
+
+function currentWorkspaceNavigationScope() {
+  if (getCurrentRoute().routeKey === ROUTE_KEY_AUTH) return null;
+  return workspaceNavigationScope(
+    window.location.pathname,
+    window.location.search,
+  );
+}
+
+function workspaceNavigationKey() {
+  const scope = currentWorkspaceNavigationScope();
+  const session = state.auth.session;
+  const actor = session ? getAuthenticatedUser(session)?.userId : "";
+  return scope && actor
+    ? `${actor}:${session.idToken || session.accessToken || ""}:${scope.scopeType}:${scope.scopeId}`
+    : "";
+}
+
+/** Presentation context is reauthorized independently of each tool's own access. */
+async function loadWorkspaceNavigation({ refresh = false } = {}) {
+  const key = workspaceNavigationKey();
+  if (!key) {
+    if (workspaceNavigationAccess.key) workspaceNavigationGeneration++;
+    workspaceNavigationAccess = { key: "", loading: false, loaded: false };
+    return;
+  }
+  if (
+    workspaceNavigationAccess.key === key &&
+    (workspaceNavigationAccess.loading ||
+      (workspaceNavigationAccess.loaded && !refresh))
+  )
+    return;
+  const scope = currentWorkspaceNavigationScope();
+  const version = ++workspaceNavigationGeneration;
+  const entry = {
+    key,
+    actor: getAuthenticatedUser(state.auth.session)?.userId || "",
+    loading: true,
+    loaded: false,
+    error: "",
+    scope,
+  };
+  workspaceNavigationAccess = entry;
+  const current = () =>
+    version === workspaceNavigationGeneration &&
+    key === workspaceNavigationKey();
+  try {
+    if (scope.scopeType === "coalition") {
+      const payload = await fetchJson(
+        `/api/coalitions/${encodeURIComponent(scope.scopeId)}`,
+        { auth: true },
+      );
+      if (!current()) return;
+      if (
+        !payload?.membership ||
+        !["active", "approved"].includes(
+          normalizeString(
+            payload.membership.status || payload.membership.state,
+          ).toLowerCase(),
+        )
+      )
+        throw new Error(
+          "Your current membership does not include this workspace.",
+        );
+      const detail = normalizeCoalitionDetail(payload);
+      if (
+        detail.coalition.coalitionId !== scope.scopeId ||
+        !detail.membership.isActive ||
+        detail.membership.isPending
+      )
+        throw new Error(
+          "Your current membership does not include this workspace.",
+        );
+      entry.coalition = detail.coalition;
+      entry.membership = detail.membership;
+    } else {
+      const [accessPayload, profilePayload] = await Promise.all([
+        fetchJson("/api/candidateDashboard/candidates", { auth: true }),
+        fetchJson("/api/profile/me", { auth: true }),
+      ]);
+      if (!current()) return;
+      const profile = normalizeProfile(
+        profilePayload.profile || profilePayload,
+      );
+      const access =
+        readArrayPayload(accessPayload, [
+          "items",
+          "candidates",
+          "campaigns",
+          "access",
+        ])
+          .map(normalizeCandidateDashboardAccess)
+          .find((item) => item.candidateId === scope.scopeId) ||
+        (scope.scopeId === state.auth.user?.userId
+          ? createCandidateDashboardOwnerAccess(profile)
+          : null);
+      if (!access)
+        throw new Error("Your current access does not include this campaign.");
+      entry.access = access;
+      entry.name = access.profile.displayName;
+    }
+  } catch (error) {
+    if (!current()) return;
+    entry.error = settingsErrorMessage(
+      error,
+      "Workspace navigation could not be loaded.",
+    );
+  } finally {
+    if (current()) {
+      entry.loading = false;
+      entry.loaded = true;
+      scheduleRender();
+    }
+  }
+}
+
+function currentWorkspaceNavigationAccess() {
+  return workspaceNavigationAccess.key &&
+    workspaceNavigationAccess.key === workspaceNavigationKey()
+    ? workspaceNavigationAccess
+    : null;
+}
+
+function isWorkspaceToolPresentationRoute() {
+  return (
+    Boolean(currentWorkspaceNavigationScope()) &&
+    ![ROUTE_KEY_COALITION_DETAIL, ROUTE_KEY_COALITION_SECTION].includes(
+      getCurrentRoute().routeKey,
+    )
+  );
+}
+
+function renderWorkspaceToolFrame(content) {
+  const scope = currentWorkspaceNavigationScope();
+  const entry = currentWorkspaceNavigationAccess();
+  const coalition = entry?.coalition;
+  let activeKey =
+    scope?.scopeType === "candidate" &&
+    getCurrentRoute().routeParams?.candidateId
+      ? candidateDashboardSectionForRoute(getCurrentRoute())
+      : "";
+  const path = window.location.pathname;
+  if (path.includes("/texting")) activeKey = "texting";
+  else if (path.includes("/governance")) activeKey = "governance";
+  else if (path.includes("/work/ballot-chaser")) activeKey = "ballot-chaser";
+  else if (path.includes("/people") || path.includes("/more/roles"))
+    activeKey = "members";
+  else if (path.startsWith("/messages/servers/")) activeKey = "rooms";
+  const navItems = entry?.access
+    ? CANDIDATE_DASHBOARD_SECTION_CONFIG.map((section) => ({
+        key: section.key,
+        label: section.key === "overview" ? "Home" : section.label,
+        icon: section.icon,
+        href: candidateDashboardSectionPath(scope.scopeId, section.key),
+        enabled: canOpenCandidateDashboardSection(section, entry.access),
+      }))
+    : [];
+  return renderWorkspaceNavigationFrame({
+    scope,
+    name: coalition?.name || entry?.name || "Organization workspace",
+    navItems,
+    activeKey,
+    navHtml:
+      coalition && entry.membership
+        ? renderCoalitionTabs(coalition, entry.membership, activeKey)
+        : "",
+    identityHtml: coalition ? renderCoalitionAvatar(coalition) : "",
+    logoUrl: resolveSharedAssetUrl(polisLogoUrl),
+    icon: renderIcon,
+    extraClass: "organization-workspace-tool",
+    topbarHtml: renderCoalitionWorkspaceTopbar(),
+    sidebarFooterHtml:
+      '<button class="coalition-ui-all coalition-ui-app" type="button" data-action="open-app-shell">Open app</button>',
+    content: entry?.error
+      ? `<div class="shared-page__error">${escapeHtml(entry.error)}<button class="shared-feed-chip" type="button" data-action="workspace-navigation-retry">Retry workspace</button></div>`
+      : content,
+  });
 }
 
 function currentOrganizationDashboardContext() {
@@ -3534,6 +3722,22 @@ function parseRouteFromLocation(pathname = window.location.pathname) {
     /^\/workspace\/(coalition|candidate)\/([^/]+)(?:\/(.*))?$/u,
   );
   if (organizationRoute) {
+    if (
+      !organizationRoute[3] ||
+      ["home", "dashboard", "overview"].includes(organizationRoute[3])
+    ) {
+      const target = workspaceDashboardPath({
+        scopeType: organizationRoute[1],
+        scopeId: decodeRouteSegment(organizationRoute[2]),
+      });
+      if (pathname === window.location.pathname)
+        window.history.replaceState(
+          {},
+          document.title,
+          `${target}${window.location.search}`,
+        );
+      return parseRouteFromLocation(target);
+    }
     const section = organizationRoute[3] || "work/publishing";
     const composer = section.match(
       /^work\/publishing\/(new|drafts\/([^/]+))$/u,
@@ -7089,17 +7293,32 @@ function renderCurrentTextingPage() {
   });
 }
 
-function navigateTo(path, { replace = false } = {}) {
+function navigateTo(path, { replace = false, exitWorkspace = false } = {}) {
   const normalizedPath = normalizeString(path);
   if (!normalizedPath) {
     return;
   }
   if (state.ui.authModal) closeAuthModal();
-  const nextUrl = normalizedPath.startsWith("http")
+  const destination = normalizedPath.startsWith("http")
     ? normalizedPath
     : normalizedPath.startsWith("/")
       ? normalizedPath
       : `/${normalizedPath}`;
+  const nextUrl = exitWorkspace
+    ? destination
+    : withWorkspaceNavigationScope(
+        destination,
+        currentWorkspaceNavigationScope(),
+        window.location.origin,
+      );
+  if (exitWorkspace) {
+    workspaceNavigationGeneration++;
+    workspaceNavigationAccess = { key: "", loading: false, loaded: false };
+  }
+  if (new URL(nextUrl, window.location.origin).pathname.startsWith("/files")) {
+    window.location.assign(nextUrl);
+    return;
+  }
   if (nextUrl === getCurrentPathWithQuery()) {
     return;
   }
@@ -63651,6 +63870,7 @@ async function loadCurrentRoute({ refresh = false } = {}) {
   if (!(await requireAuthForRoute(route))) {
     return;
   }
+  await loadWorkspaceNavigation({ refresh });
 
   if (getRouteSection(route) !== "messages") {
     if (state.pages.messaging.conversation.item?.conversationId) {
@@ -65949,6 +66169,7 @@ function getTopChromeTitle(route = state.route) {
 }
 
 function isCoalitionPresentationRoute() {
+  if (currentWorkspaceNavigationScope()) return true;
   const route = getCurrentRoute();
   if (
     [ROUTE_KEY_MESSAGES_ROOT, ROUTE_KEY_MESSAGES_WILDCARD].includes(
@@ -65969,6 +66190,8 @@ function isCoalitionPresentationRoute() {
 
 function renderCoalitionWorkspaceTopbar() {
   const route = getCurrentRoute();
+  const navigationScope = currentWorkspaceNavigationScope();
+  const navigationAccess = currentWorkspaceNavigationAccess();
   const roomScope = [
     ROUTE_KEY_MESSAGES_ROOT,
     ROUTE_KEY_MESSAGES_WILDCARD,
@@ -65976,9 +66199,11 @@ function renderCoalitionWorkspaceTopbar() {
     ? parseMessagingSubroute(route)
     : null;
   const coalitionId =
-    roomScope?.scopeType === "coalition"
-      ? roomScope.scopeId
-      : decodeRouteSegment(route.routeParams?.coalitionId || "");
+    navigationScope?.scopeType === "coalition"
+      ? navigationScope.scopeId
+      : roomScope?.scopeType === "coalition"
+        ? roomScope.scopeId
+        : decodeRouteSegment(route.routeParams?.coalitionId || "");
   const loaded = state.pages.coalitions.detail.coalition;
   const coalition =
     loaded?.coalitionId === coalitionId
@@ -65991,13 +66216,14 @@ function renderCoalitionWorkspaceTopbar() {
     )
     .join("");
   return `<header class="coalition-ui-topbar">
-    <a class="coalition-ui-brand" href="/feed" data-action="navigate" data-route="/feed"><img src="${escapeHtml(resolveSharedAssetUrl(polisLogoUrl))}" alt="" width="40" height="40" /><span>Polis</span></a>
-    <button class="coalition-ui-switcher" data-action="navigate" data-route="/coalitions" aria-label="Choose coalition">${escapeHtml(coalition?.name || (roomScope?.scopeType === "coalition" ? findMessagingServer("coalition", coalitionId)?.title : "") || "Coalitions")} <span aria-hidden="true">⌄</span></button>
+    <a class="coalition-ui-brand" href="${escapeHtml(navigationScope ? workspaceDashboardPath(navigationScope) : "/coalitions")}" data-action="navigate" data-route="${escapeHtml(navigationScope ? workspaceDashboardPath(navigationScope) : "/coalitions")}"><img src="${escapeHtml(resolveSharedAssetUrl(polisLogoUrl))}" alt="" width="40" height="40" /><span>Polis</span></a>
+    <button class="coalition-ui-switcher" data-action="navigate" data-route="${navigationScope?.scopeType === "candidate" ? "/candidate-dashboard" : "/coalitions"}" aria-label="Choose ${navigationScope?.scopeType === "candidate" ? "campaign" : "coalition"}">${escapeHtml(navigationAccess?.coalition?.name || navigationAccess?.name || coalition?.name || (roomScope?.scopeType === "coalition" ? findMessagingServer("coalition", coalitionId)?.title : "") || (navigationScope?.scopeType === "candidate" ? "Campaigns" : "Coalitions"))} <span aria-hidden="true">⌄</span></button>
     <div class="coalition-ui-topbar__actions">${actions}</div>
   </header>`;
 }
 
 function renderTopChrome() {
+  if (isWorkspaceToolPresentationRoute()) return "";
   if (isCoalitionPresentationRoute()) return renderCoalitionWorkspaceTopbar();
   const actions = getTopActions()
     .map(
@@ -87421,13 +87647,10 @@ function coalitionSectionPath(coalitionId, sectionKey = "") {
   return `/coalitions/${encodedId}/${encodedSection}`;
 }
 
-function coalitionEntryPath(coalition, membership) {
+function coalitionEntryPath(coalition) {
   const coalitionId = normalizeString(coalition?.coalitionId);
   if (!coalitionId) {
     return "/coalitions";
-  }
-  if (membership?.isActive && membership?.isLeader) {
-    return coalitionSectionPath(coalitionId, "members");
   }
   return coalitionSectionPath(coalitionId);
 }
@@ -87436,7 +87659,7 @@ function coalitionEntryLabel(membership) {
   if (membership?.isPending) {
     return "Pending approval";
   }
-  return membership?.isLeader ? "Manage people" : "Open coalition";
+  return "Open workspace";
 }
 
 function coalitionRouteParts(route = state.route) {
@@ -88620,12 +88843,15 @@ function renderCoalitionTabs(coalition, membership, activeSection) {
       )
     : null;
   const filesRoute = workspace?.filesWorkspaceId
-    ? `/files?workspace=${encodeURIComponent(workspace.filesWorkspaceId)}`
+    ? workspaceFilesPath(workspace.filesWorkspaceId, {
+        scopeType: "coalition",
+        scopeId: coalition.coalitionId,
+      })
     : "";
   return `<nav class="shared-coalition-tabs" aria-label="Coalition sections">${items}
-    ${filesRoute ? `<a class="shared-coalition-tab" href="${escapeHtml(filesRoute)}" data-route="${escapeHtml(filesRoute)}"><span>${renderIcon("file")}</span><strong>Files</strong></a>` : ""}
-    ${active ? `<button class="shared-coalition-tab coalition-ui-texting-link" type="button" data-action="navigate" data-route="${escapeHtml(textingRoute(coalition.coalitionId))}"><span>${renderIcon("messages")}</span><strong>Texting</strong></button>` : ""}
-    ${active && coalitionHasAnyPermission(membership, ["contact_book_view"]) ? `<button class="shared-coalition-tab" type="button" data-action="navigate" data-route="/workspace/coalition/${encodeURIComponent(coalition.coalitionId)}/work/ballot-chaser"><span>${renderIcon("election")}</span><strong>Ballot Chaser</strong></button>` : ""}
+    ${filesRoute ? `<a class="shared-coalition-tab${activeSection === "files" ? " is-active" : ""}" href="${escapeHtml(filesRoute)}" data-route="${escapeHtml(filesRoute)}"><span>${renderIcon("file")}</span><strong>Files</strong></a>` : ""}
+    ${active ? `<button class="shared-coalition-tab coalition-ui-texting-link${activeSection === "texting" ? " is-active" : ""}" type="button" data-action="navigate" data-route="${escapeHtml(textingRoute(coalition.coalitionId))}"><span>${renderIcon("messages")}</span><strong>Texting</strong></button>` : ""}
+    ${active && coalitionHasAnyPermission(membership, ["contact_book_view"]) ? `<button class="shared-coalition-tab${activeSection === "ballot-chaser" ? " is-active" : ""}" type="button" data-action="navigate" data-route="/workspace/coalition/${encodeURIComponent(coalition.coalitionId)}/work/ballot-chaser"><span>${renderIcon("election")}</span><strong>Ballot Chaser</strong></button>` : ""}
     ${active && membership.isLeader ? `<button class="shared-coalition-tab${administration ? " is-active" : ""}" type="button" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, "admin/edit"))}"><span>${renderIcon("settings")}</span><strong>Administration</strong></button>` : ""}
   </nav>`;
 }
@@ -96770,23 +96996,19 @@ function renderCoalitionDetailPage() {
   if (!coalition || !membership) {
     return `<section class="${workspaceClasses}">${renderTopChrome()}<div class="shared-page__content"><div class="shared-page__error">Coalition unavailable.</div></div></section>`;
   }
-  return `<section class="${workspaceClasses}">
-    ${renderTopChrome()}
-    <div class="coalition-ui-layout">
-      <aside class="coalition-ui-sidebar">
-        <div class="coalition-ui-sidebar__identity">${renderCoalitionAvatar(coalition)}<strong>${escapeHtml(coalition.name)}</strong></div>
-        ${renderCoalitionTabs(coalition, membership, activeSection)}
-        <button class="coalition-ui-all" data-action="navigate" data-route="/coalitions">All coalitions</button>
-        <button class="coalition-ui-all coalition-ui-app" data-action="open-app-shell">Open app</button>
-      </aside>
-      <div class="shared-page__content coalition-ui-content">
-        <details class="coalition-ui-mobile-nav"><summary>Coalition menu</summary>${renderCoalitionTabs(coalition, membership, activeSection)}<button class="coalition-ui-all" data-action="open-app-shell">Open app</button></details>
-        ${isOverviewSection && membership.isActive && !membership.isPending ? "" : renderCoalitionHero(coalition, membership)}
-        ${detail.error ? `<div class="shared-page__error">${escapeHtml(detail.error)}</div>` : ""}
-        ${renderCoalitionSection(detail, coalition, membership, activeSection)}
-      </div>
-    </div>
-  </section>`;
+  return renderWorkspaceNavigationFrame({
+    scope: { scopeType: "coalition", scopeId: coalitionId },
+    name: coalition.name,
+    extraClass: workspaceClasses,
+    topbarHtml: renderTopChrome(),
+    navHtml: renderCoalitionTabs(coalition, membership, activeSection),
+    identityHtml: renderCoalitionAvatar(coalition),
+    sidebarFooterHtml:
+      '<button class="coalition-ui-all coalition-ui-app" type="button" data-action="open-app-shell">Open app</button>',
+    content: `${isOverviewSection && membership.isActive && !membership.isPending ? "" : renderCoalitionHero(coalition, membership)}
+      ${detail.error ? `<div class="shared-page__error">${escapeHtml(detail.error)}</div>` : ""}
+      ${renderCoalitionSection(detail, coalition, membership, activeSection)}`,
+  });
 }
 
 function renderMissionsAuthGate() {
@@ -128834,6 +129056,25 @@ function renderApp() {
   if (!root) {
     return;
   }
+  if (
+    workspaceNavigationAccess.key &&
+    workspaceNavigationAccess.key !== workspaceNavigationKey()
+  ) {
+    const previous = workspaceNavigationAccess;
+    const nextScope = currentWorkspaceNavigationScope();
+    const actor = state.auth.session
+      ? getAuthenticatedUser(state.auth.session)?.userId || ""
+      : "";
+    workspaceNavigationGeneration++;
+    workspaceNavigationAccess = { key: "", loading: false, loaded: false };
+    if (
+      actor &&
+      actor === previous.actor &&
+      nextScope?.scopeType === previous.scope?.scopeType &&
+      nextScope?.scopeId === previous.scope?.scopeId
+    )
+      void loadWorkspaceNavigation();
+  }
 
   syncDocumentTitle();
   ensureActiveIndexInBounds();
@@ -128845,25 +129086,30 @@ function renderApp() {
   const petitionAddressFocusSnapshot = snapshotPetitionAddressFocusState();
   syncActiveSettingsHomeLocationDraftBeforeRender();
   const publicPetitionRoute = isPublicPetitionRoute();
+  const workspaceToolPresentation = isWorkspaceToolPresentationRoute();
   const textingPresentation =
     Boolean(currentTextingContext()) || isTextingAuthRoute();
   const textingIdentity = state.auth.session
     ? getAuthenticatedUser(state.auth.session)?.userId || ""
     : "";
   const textingFocus = snapshotTextingFocus(root, textingIdentity);
+  const pageStage = renderRouteStage();
+  const routeStage = workspaceToolPresentation
+    ? renderWorkspaceToolFrame(pageStage)
+    : pageStage;
   const shell =
     getCurrentRoute().routeKey === ROUTE_KEY_AUTH
-      ? `<div class="shared-feed-shell shared-feed-shell--texting">${renderRouteStage()}</div>${renderToast()}`
-      : textingPresentation
-        ? `<div class="shared-feed-shell shared-feed-shell--texting">${renderRouteStage()}</div>${renderAuthModal()}${renderConfirmationPanel()}${renderToast()}`
-        : publicPetitionRoute
+      ? `<div class="shared-feed-shell shared-feed-shell--texting">${routeStage}</div>${renderToast()}`
+      : textingPresentation && !workspaceToolPresentation
+        ? `<div class="shared-feed-shell shared-feed-shell--texting">${routeStage}</div>${renderAuthModal()}${renderConfirmationPanel()}${renderToast()}`
+        : publicPetitionRoute && !workspaceToolPresentation
           ? `<div class="shared-feed-shell shared-feed-shell--public">
-        ${renderRouteStage()}
+        ${routeStage}
       </div>
       ${renderToast()}`
           : `<div class="shared-feed-shell${isCoalitionPresentationRoute() ? " shared-feed-shell--coalition polis-coalition-ui" : ""}">
         ${isCoalitionPresentationRoute() ? "" : renderRail()}
-        ${renderRouteStage()}
+        ${routeStage}
       </div>
       ${renderCommentsPanel()}
       ${renderLikersPanel()}
@@ -129834,6 +130080,16 @@ async function handleRootClick(event) {
     return;
   }
   const action = target.getAttribute("data-action");
+  if (action === "workspace-navigation-retry") {
+    event.preventDefault();
+    void loadWorkspaceNavigation({ refresh: true });
+    return;
+  }
+  if (action === "workspace-exit") {
+    event.preventDefault();
+    navigateTo("/feed", { exitWorkspace: true });
+    return;
+  }
   if (handleApprovedCoalitionMissionAction(action || "", target)) {
     event.preventDefault();
     return;
@@ -138069,6 +138325,31 @@ function attachGlobalListeners() {
   window.addEventListener("focus", refreshTextingOnResume);
   window.addEventListener("focus", () =>
     organizationDashboardPage.resume().catch(() => {}),
+  );
+  root?.addEventListener(
+    "click",
+    (event) => {
+      const scope = currentWorkspaceNavigationScope();
+      const link = event.target.closest?.("a[href]");
+      if (
+        !scope ||
+        !link ||
+        link.download ||
+        link.getAttribute("href")?.startsWith("#") ||
+        link.dataset.action === "workspace-exit"
+      )
+        return;
+      const url = new URL(link.href, window.location.origin);
+      if (url.origin !== window.location.origin) return;
+      const path = withWorkspaceNavigationScope(
+        url.href,
+        scope,
+        window.location.origin,
+      );
+      link.href = path;
+      if (link.hasAttribute("data-route")) link.dataset.route = path;
+    },
+    true,
   );
   root?.addEventListener("click", handleRootClick);
   root?.addEventListener("keydown", handleRootKeydown);

@@ -2,6 +2,7 @@
 
 import "../../styles.css";
 import "./css/files.css";
+import "../shared-feed/css/coalition-workspace.css";
 import polisLogoUrl from "../../assets/images/polis/Polis.png";
 import {
   completeHostedSignIn,
@@ -22,6 +23,15 @@ import {
   isFilesWorkspaceAccessible,
 } from "./scripts/filesEntitlements.js";
 import { checksumBlob } from "./scripts/sha256.js";
+import {
+  renderWorkspaceNavigationFrame,
+  workspaceNavigationScope,
+  withWorkspaceNavigationScope,
+} from "../shared-feed/scripts/workspaceNavigation.js";
+import {
+  filesNavigationPath,
+  filesOrganizationNavigation,
+} from "./scripts/filesWorkspaceNavigation.js";
 
 const root = document.getElementById("files-app");
 const STORED_WORKSPACE_KEY = "polisFilesWorkspace.v1";
@@ -70,6 +80,8 @@ const state = {
   workspaces: [],
   workspace: null,
   workspaceDescriptor: null,
+  organizationNavigation: null,
+  organizationNavigationScope: null,
   route: parseRoute(),
   layout: readStorage(STORED_LAYOUT_KEY) === "grid" ? "grid" : "list",
   search: "",
@@ -126,6 +138,51 @@ let shareSearchTimer = null;
 let editionMaterializationTimer = null;
 let editionMaterializationGeneration = 0;
 let routeLoadGeneration = 0;
+let workspaceSelectionGeneration = 0;
+
+function filesNavigationContext() {
+  return {
+    filesWorkspaceId: state.workspaceDescriptor?.filesWorkspaceId,
+    scope: state.organizationNavigationScope,
+    origin: window.location.origin,
+  };
+}
+
+function currentOrganizationNavigation() {
+  const navigation = state.organizationNavigation;
+  const principal = principalOf();
+  return navigation &&
+    navigation.actorId === getAuthenticatedUser(state.session)?.userId &&
+    navigation.scope.scopeId === principal.id &&
+    ["organization", "coalition"].includes(principal.type)
+    ? navigation
+    : null;
+}
+
+/** Read membership independently of Files grants, and discard late identities. */
+async function loadOrganizationNavigation(scope, selection, actorId) {
+  state.organizationNavigation = null;
+  if (!scope || scope.scopeType !== "coalition") return;
+  try {
+    const payload = await api.request(
+      `/api/coalitions/${encodeURIComponent(scope.scopeId)}`,
+    );
+    if (
+      selection !== workspaceSelectionGeneration ||
+      actorId !== getAuthenticatedUser(state.session)?.userId
+    )
+      return;
+    state.organizationNavigation = filesOrganizationNavigation({
+      scope,
+      descriptor: state.workspaceDescriptor,
+      payload,
+      actorId,
+    });
+  } catch {
+    // Files grants and organization membership are separate. A missing grant
+    // cannot restore a former organization's sidebar or its private identity.
+  }
+}
 
 function readStorage(key) {
   try {
@@ -788,6 +845,25 @@ async function bootstrap() {
 }
 
 async function selectWorkspace(descriptor, { preserveRoute = false } = {}) {
+  const selection = ++workspaceSelectionGeneration;
+  const actorId = getAuthenticatedUser(state.session)?.userId;
+  const requestedScope = workspaceNavigationScope(
+    window.location.pathname,
+    window.location.search,
+  );
+  const principal = principalOf(descriptor);
+  const selectedScope = ["organization", "coalition"].includes(principal.type)
+    ? { scopeType: "coalition", scopeId: principal.id }
+    : null;
+  state.organizationNavigation = null;
+  state.organizationNavigationScope =
+    requestedScope &&
+    selectedScope &&
+    (!preserveRoute ||
+      (requestedScope.scopeType === selectedScope.scopeType &&
+        requestedScope.scopeId === selectedScope.scopeId))
+      ? selectedScope
+      : null;
   purgePreviewEntries();
   clearEditionMaterialization();
   state.previewAccessDenied = false;
@@ -799,10 +875,14 @@ async function selectWorkspace(descriptor, { preserveRoute = false } = {}) {
   state.postDraft.open = false;
   state.postDraft.description = "";
   render();
-  const principal = principalOf(descriptor);
   if (!principal.type || !principal.id)
     throw new FilesApiError("This workspace is missing its owner.");
   const payload = await api.getWorkspace(principal.type, principal.id);
+  if (
+    selection !== workspaceSelectionGeneration ||
+    actorId !== getAuthenticatedUser(state.session)?.userId
+  )
+    return;
   state.workspace = normalizeWorkspacePayload(payload);
   state.workspaceDescriptor = {
     ...descriptor,
@@ -833,6 +913,16 @@ async function selectWorkspace(descriptor, { preserveRoute = false } = {}) {
     render();
     return;
   }
+  await loadOrganizationNavigation(
+    state.organizationNavigationScope,
+    selection,
+    actorId,
+  );
+  if (
+    selection !== workspaceSelectionGeneration ||
+    actorId !== getAuthenticatedUser(state.session)?.userId
+  )
+    return;
   state.status = "ready";
   const setup = activeWorkspaceSetup(state.workspace, descriptor);
   if (!setup.initialized) {
@@ -840,7 +930,11 @@ async function selectWorkspace(descriptor, { preserveRoute = false } = {}) {
     return;
   }
   if (!preserveRoute) {
-    window.history.pushState({}, "", "/files");
+    window.history.pushState(
+      {},
+      "",
+      filesNavigationPath("/files", filesNavigationContext()),
+    );
     state.route = parseRoute();
   }
   const resumeMaterialization = resumeWorkspaceEditionMaterialization();
@@ -1346,7 +1440,11 @@ function transitionRoute(nextRoute) {
 }
 
 function navigate(path) {
-  window.history.pushState({}, "", path);
+  window.history.pushState(
+    {},
+    "",
+    filesNavigationPath(path, filesNavigationContext()),
+  );
   transitionRoute(parseRoute());
   loadRoute();
 }
@@ -1442,7 +1540,7 @@ function renderSidebar() {
     </div>
     <div class="files-sidebar__footer">
       <button data-action="open-settings">${icon("settings")}<span>Files settings</span></button>
-      <a href="/feed">← Back to Polis</a>
+      <a href="/feed" data-action="workspace-exit">← Back to Polis</a>
     </div>
   </aside>`;
 }
@@ -2819,7 +2917,29 @@ function renderApp() {
         : state.route.key === "home"
           ? renderHome()
           : renderView();
-  return `<div class="files-shell">${renderSidebar()}<div class="files-main">${renderHeader()}<main class="files-content" id="files-content">${renderHostReferencesPanel()}${mainContent}</main></div>${renderMobileNav()}${renderModal()}${renderPostDrawer()}${state.toast ? `<div class="files-toast files-toast--${escapeHtml(state.toast.tone)}" role="status">${state.toast.tone === "success" ? icon("check") : icon("file")}<span>${escapeHtml(state.toast.message)}</span></div>` : ""}${state.busyAction ? '<div class="files-busy" role="status"><span></span><span class="sr-only">Working…</span></div>' : ""}</div>`;
+  const content = `<div class="files-shell">${renderSidebar()}<div class="files-main">${renderHeader()}<main class="files-content" id="files-content">${renderHostReferencesPanel()}${mainContent}</main></div>${renderMobileNav()}${renderModal()}${renderPostDrawer()}${state.toast ? `<div class="files-toast files-toast--${escapeHtml(state.toast.tone)}" role="status">${state.toast.tone === "success" ? icon("check") : icon("file")}<span>${escapeHtml(state.toast.message)}</span></div>` : ""}${state.busyAction ? '<div class="files-busy" role="status"><span></span><span class="sr-only">Working…</span></div>' : ""}</div>`;
+  const navigation = currentOrganizationNavigation();
+  if (navigation) {
+    const preference = readStorage("prefs.themeMode");
+    document.documentElement.dataset.polisThemeResolved =
+      preference === "light" ||
+      (preference !== "dark" &&
+        window.matchMedia?.("(prefers-color-scheme: light)")?.matches)
+        ? "light"
+        : "dark";
+  }
+  return navigation
+    ? `<div class="shared-feed-shell polis-coalition-ui">${renderWorkspaceNavigationFrame(
+        {
+          ...navigation,
+          activeKey: "files",
+          logoUrl: polisLogoUrl,
+          extraClass:
+            "organization-workspace-tool organization-workspace-tool--files",
+          content,
+        },
+      )}</div>`
+    : content;
 }
 
 function render({ preserveLayers = false } = {}) {
@@ -3003,6 +3123,24 @@ async function withBusy(
 }
 
 async function handleClick(event) {
+  const workspaceAction = event.target.closest(
+    '.organization-workspace-tool [data-action="navigate"], .organization-workspace-tool [data-action="workspace-exit"]',
+  );
+  if (
+    workspaceAction &&
+    !event.ctrlKey &&
+    !event.metaKey &&
+    !event.shiftKey &&
+    !event.altKey
+  ) {
+    event.preventDefault();
+    const destination =
+      workspaceAction.dataset.action === "workspace-exit"
+        ? "/feed"
+        : workspaceAction.dataset.route;
+    if (destination) window.location.assign(destination);
+    return;
+  }
   const nav = event.target.closest("[data-nav]");
   if (nav) {
     event.preventDefault();
@@ -4863,7 +5001,14 @@ async function submitPostDraft(data) {
     return;
   }
   const postPath = safePostPath(result.postPath, result.postId);
-  if (postPath) window.location.assign(postPath);
+  if (postPath)
+    window.location.assign(
+      withWorkspaceNavigationScope(
+        postPath,
+        currentOrganizationNavigation()?.scope,
+        window.location.origin,
+      ),
+    );
 }
 
 async function actOnSuggestion(id, action) {
@@ -5992,6 +6137,33 @@ function handleKeydown(event) {
   }
 }
 
+root?.addEventListener(
+  "click",
+  (event) => {
+    const navigation = currentOrganizationNavigation();
+    const link = event.target.closest?.("a[href]");
+    if (
+      !navigation ||
+      !link ||
+      link.download ||
+      link.dataset.action === "workspace-exit" ||
+      link.getAttribute("href")?.startsWith("#")
+    )
+      return;
+    const url = new URL(link.href, window.location.origin);
+    if (url.origin !== window.location.origin) return;
+    const path = /^\/files(?:\/|$)/u.test(url.pathname)
+      ? filesNavigationPath(link.href, filesNavigationContext())
+      : withWorkspaceNavigationScope(
+          link.href,
+          navigation.scope,
+          window.location.origin,
+        );
+    link.href = path;
+    if (link.hasAttribute("data-route")) link.dataset.route = path;
+  },
+  true,
+);
 root?.addEventListener("click", handleClick);
 root?.addEventListener("keydown", handleKeydown);
 root?.addEventListener("change", handleChange);
@@ -6002,6 +6174,40 @@ root?.addEventListener("dragleave", handleDragLeave);
 root?.addEventListener("drop", handleDrop);
 window.addEventListener("popstate", () => {
   transitionRoute(parseRoute());
+  const query = new URLSearchParams(window.location.search);
+  const requestedWorkspace = query.get("workspace");
+  const scope = workspaceNavigationScope(
+    window.location.pathname,
+    window.location.search,
+  );
+  if (
+    (requestedWorkspace &&
+      requestedWorkspace !== state.workspaceDescriptor?.filesWorkspaceId) ||
+    scope?.scopeType !== state.organizationNavigationScope?.scopeType ||
+    scope?.scopeId !== state.organizationNavigationScope?.scopeId
+  ) {
+    const descriptor = state.workspaces.find(
+      (item) =>
+        item.filesWorkspaceId ===
+        (requestedWorkspace || state.workspaceDescriptor?.filesWorkspaceId),
+    );
+    if (descriptor) {
+      void selectWorkspace(descriptor, { preserveRoute: true }).catch(
+        (error) => {
+          state.status = "error";
+          state.error =
+            error?.message || "Files could not open this workspace.";
+          render();
+        },
+      );
+    } else {
+      state.organizationNavigation = null;
+      state.organizationNavigationScope = null;
+      state.status = "forbidden";
+      render();
+    }
+    return;
+  }
   loadRoute();
 });
 
