@@ -6,9 +6,12 @@ import { createPolicyAcceptanceController } from "./scripts/policyAcceptance.js"
 import "./css/texting-workspace.css";
 import "./css/coalition-workspace.css";
 import "./css/coalition-features.css";
+import { createCoalitionPeopleInteractions } from "./scripts/coalitionPeoplePresentation.js";
+const coalitionPeopleInteractions = createCoalitionPeopleInteractions();
 import "./css/coalition-rooms.css";
 import "./css/organization-publishing.css";
 import "./css/polis-auth.css";
+import "./css/coalition-people.css";
 import {
   renderPolisAuthLayout,
   renderPolisAuthPassword,
@@ -24697,7 +24700,7 @@ async function inviteCoalitionMember(formData) {
     ? coalitionRoleDefaultPermissions(catalog, roleKey)
     : coalitionSelectedPermissionsFromForm(formData);
   if (!coalitionId || (!username && !userId)) {
-    showToast("Select a Polis account or enter a direct user id.");
+    showToast("Choose a Polis account before sending an invitation.");
     return false;
   }
   const workspace = coalitionWorkspace();
@@ -88717,12 +88720,15 @@ function coalitionRoleDefaultPermissions(catalog, roleKey) {
 }
 
 function coalitionAccessDisplayName(person = {}) {
+  const userId = normalizeString(person.userId);
+  const displayName = [person.displayName, person.name]
+    .map(normalizeString)
+    .find((value) => value && value !== userId);
   return (
-    normalizeString(person.displayName) ||
+    displayName ||
     (person.username
       ? `@${normalizeString(person.username).replace(/^@/u, "")}`
       : "") ||
-    normalizeString(person.userId) ||
     "Member"
   );
 }
@@ -89163,7 +89169,7 @@ function renderCoalitionAccessRequestRow(
       ${renderCoalitionAccessAvatar(request)}
       <div>
         <strong>${escapeHtml(coalitionAccessDisplayName(request))}</strong>
-        <span>${escapeHtml(request.username ? `@${request.username.replace(/^@/u, "")}` : request.userId)}</span>
+        <span>${escapeHtml(request.username ? `@${request.username.replace(/^@/u, "")}` : "Username unavailable")}</span>
       </div>
     </div>
     ${renderCoalitionRolePill(
@@ -89207,7 +89213,7 @@ function renderCoalitionAccessInvitations(resource, catalog, canManage) {
                   ${renderCoalitionAccessAvatar(invite)}
                   <div>
                     <strong>${escapeHtml(coalitionAccessDisplayName(invite))}</strong>
-                    <span>${escapeHtml(invite.username ? `@${invite.username.replace(/^@/u, "")}` : invite.userId)}</span>
+                    <span>${escapeHtml(invite.username ? `@${invite.username.replace(/^@/u, "")}` : "Username unavailable")}</span>
                   </div>
                 </div>
                 ${renderCoalitionRolePill(
@@ -89270,83 +89276,48 @@ function renderCoalitionMemberFilterControls(
   const filters = coalitionMemberFilters(resource);
   const roleOptions = coalitionMemberRoleFilterOptions(catalog, detail.members);
   return `<div class="shared-campaign-staff-roster-controls">
-    <label class="shared-campaign-staff-filter-field">
-      <span>Search members</span>
-      <input data-coalition-member-filter="query" value="${escapeHtml(filters.query)}" placeholder="Name, username, role, or feature" autocomplete="off" />
-    </label>
-    <label class="shared-campaign-staff-filter-field">
-      <span>Role</span>
-      <select data-coalition-member-filter="role">
-        <option value="all"${selectedAttr(filters.role === "all")}>All roles</option>
-        ${roleOptions
-          .map(
-            (role) =>
-              `<option value="${escapeHtml(role.roleKey)}"${selectedAttr(role.roleKey === filters.role)}>${escapeHtml(role.label)}</option>`,
-          )
-          .join("")}
-      </select>
-    </label>
-    <label class="shared-campaign-staff-filter-field">
-      <span>Sort</span>
-      <select data-coalition-member-filter="sort">
-        <option value="name"${selectedAttr(filters.sort === "name")}>Name</option>
-        <option value="role"${selectedAttr(filters.sort === "role")}>Role</option>
-        <option value="joined"${selectedAttr(filters.sort === "joined")}>Joined</option>
-      </select>
-    </label>
-    <div class="shared-campaign-staff-filter-summary">
-      <span data-coalition-member-filter-summary>Showing ${escapeHtml(formatCount(visibleCount))} of ${escapeHtml(formatCount(orderedMembers.length))} members</span>
-      <button class="shared-feed-chip" type="button" data-action="coalition-member-filters-clear"${disabledAttr(!coalitionMemberFiltersActive(filters))}>Clear filters</button>
-    </div>
+    <label class="shared-campaign-staff-filter-field coalition-people__search"><span>Find a member</span><div>${renderIcon("search")}<input type="search" data-coalition-member-filter="query" value="${escapeHtml(filters.query)}" placeholder="Search name, username, or access" autocomplete="off" /></div></label>
+    <label class="shared-campaign-staff-filter-field"><span>Role</span><select data-coalition-member-filter="role"><option value="all"${selectedAttr(filters.role === "all")}>All roles</option>${roleOptions.map((role) => `<option value="${escapeHtml(role.roleKey)}"${selectedAttr(role.roleKey === filters.role)}>${escapeHtml(role.label)}</option>`).join("")}</select></label>
+    <label class="shared-campaign-staff-filter-field"><span>Sort by</span><select data-coalition-member-filter="sort"><option value="name"${selectedAttr(filters.sort === "name")}>Name</option><option value="role"${selectedAttr(filters.sort === "role")}>Role</option><option value="joined"${selectedAttr(filters.sort === "joined")}>Recently joined</option></select></label>
+    <div class="shared-campaign-staff-filter-summary"><span data-coalition-member-filter-summary aria-live="polite">Showing ${escapeHtml(formatCount(visibleCount))} of ${escapeHtml(formatCount(orderedMembers.length))} members</span><button class="shared-feed-chip" type="button" data-action="coalition-member-filters-clear"${disabledAttr(!coalitionMemberFiltersActive(filters))}>Clear filters</button></div>
   </div>`;
 }
 
 function renderCoalitionMemberAccessCard(member, resource, catalog, canManage) {
   const pendingSave = resource.actionPendingKey === `member:${member.userId}`;
   const role = coalitionCatalogRole(catalog, member.roleKey);
-  const filters = coalitionMemberFilters(resource);
-  const matches = coalitionMemberMatchesFilters(member, filters, catalog);
-  return `<article class="shared-campaign-staff-card" data-coalition-member-card data-member-role-key="${escapeHtml(member.roleKey)}" data-member-search="${escapeHtml(coalitionMemberSearchText(member, catalog))}"${matches ? "" : " hidden"}>
-    <form data-route-form="coalition-member-access">
-      <input type="hidden" name="expectedAccess" value="${escapeHtml(JSON.stringify({ roleKey: member.roleKey, permissions: member.permissions }))}" />
-      <input type="hidden" name="expectedRevision" value="${escapeHtml(catalog.mutationRevision)}" />
-      <input type="hidden" name="userId" value="${escapeHtml(member.userId)}" />
-      <div class="shared-campaign-staff-card__top">
-        <div class="shared-campaign-staff-person">
-          ${renderCoalitionAccessAvatar(member)}
-          <div>
-            <strong>${escapeHtml(coalitionAccessDisplayName(member))}</strong>
-            <span>${escapeHtml(member.username ? `@${member.username.replace(/^@/u, "")}` : member.userId)}</span>
-          </div>
-        </div>
-        <label class="shared-campaign-staff-role-select">
-          <span>Role</span>
-          <select name="roleKey"${disabledAttr(!canManage || pendingSave)}>
-            ${renderCoalitionRoleOptions(catalog, member.roleKey)}
-          </select>
-        </label>
-      </div>
-      <div class="shared-campaign-staff-card__summary">
-        ${renderCoalitionRolePill(
-          role,
-          `${role.category}${member.joinedAt ? ` - joined ${formatAbsoluteDateTime(member.joinedAt)}` : ""}`,
-        )}
-        ${renderCoalitionPermissionChips(member.permissions)}
-      </div>
-      <details class="shared-campaign-staff-details">
-        <summary>Adjust feature access</summary>
-        ${renderCoalitionPermissionCheckboxes(catalog, member.permissions, {
-          disabled: !canManage || pendingSave,
-        })}
-      </details>
-      ${
-        canManage
-          ? `<div class="shared-campaign-staff-actions">
-              <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(pendingSave)}>${pendingSave ? "Saving..." : "Save access"}</button>
-            </div>`
-          : ""
-      }
-    </form>
+  const matches = coalitionMemberMatchesFilters(
+    member,
+    coalitionMemberFilters(resource),
+    catalog,
+  );
+  const permissions = normalizeCoalitionPermissionsForWrite(member.permissions);
+  const joined = member.joinedAt ? new Date(Number(member.joinedAt)) : null;
+  const joinedLabel =
+    joined && Number.isFinite(joined.getTime())
+      ? joined.toLocaleDateString(undefined, {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+        })
+      : "Not available";
+  return `<article class="shared-campaign-staff-card coalition-people__member" data-coalition-member-card data-member-role-key="${escapeHtml(member.roleKey)}" data-member-search="${escapeHtml(coalitionMemberSearchText(member, catalog))}"${matches ? "" : " hidden"}>
+    <details class="coalition-people__member-details" data-people-disclosure="member:${escapeHtml(member.userId)}">
+      <summary class="coalition-people__row" aria-label="${escapeHtml(`${canManage ? "Manage" : "View"} access for ${coalitionAccessDisplayName(member)}`)}">
+        <span class="shared-campaign-staff-person">${renderCoalitionAccessAvatar(member)}<span><strong>${escapeHtml(coalitionAccessDisplayName(member))}${member.userId === state.auth.user?.userId ? '<small class="coalition-people__you">You</small>' : ""}</strong><span>${escapeHtml(member.username ? `@${member.username.replace(/^@/u, "")}` : "Username unavailable")}</span></span></span>
+        <span class="coalition-people__role">${escapeHtml(role.label)}</span>
+        <time class="coalition-people__joined"${joined && Number.isFinite(joined.getTime()) ? ` datetime="${escapeHtml(joined.toISOString())}"` : ""}>${escapeHtml(joinedLabel)}</time>
+        <span class="coalition-people__access"><span>${escapeHtml(permissions.length ? `${formatCount(permissions.length)} ${permissions.length === 1 ? "area" : "areas"}` : "No feature access")}</span>${renderIcon("arrowRight")}</span>
+      </summary>
+      <div class="coalition-people__editor"><form data-route-form="coalition-member-access">
+        <input type="hidden" name="expectedAccess" value="${escapeHtml(JSON.stringify({ roleKey: member.roleKey, permissions: member.permissions }))}" />
+        <input type="hidden" name="expectedRevision" value="${escapeHtml(catalog.mutationRevision)}" />
+        <input type="hidden" name="userId" value="${escapeHtml(member.userId)}" />
+        <div class="coalition-people__editor-head"><div><h3>${canManage ? "Manage access" : "Member access"}</h3><p>${canManage ? "Choose a role and the areas this person can use." : "This member's assigned role and feature access."}</p></div><label class="shared-campaign-staff-role-select"><span>Role</span><select name="roleKey"${disabledAttr(!canManage || pendingSave)}>${renderCoalitionRoleOptions(catalog, member.roleKey)}</select></label></div>
+        ${renderCoalitionPermissionCheckboxes(catalog, member.permissions, { disabled: !canManage || pendingSave })}
+        ${canManage ? `<div class="shared-campaign-staff-actions"><button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(pendingSave)}>${pendingSave ? "Saving..." : "Save access"}</button></div>` : ""}
+      </form></div>
+    </details>
   </article>`;
 }
 
@@ -89361,40 +89332,9 @@ function renderCoalitionAccessRoster(detail, resource, catalog, canManage) {
     coalitionMemberMatchesFilters(member, filters, catalog),
   ).length;
   return `<article class="shared-campaign-panel shared-campaign-staff-roster">
-    <div class="shared-campaign-panel__header">
-      <div>
-        <h2>Active members</h2>
-        <p>Manage coalition roles and the web-app areas each member can open.</p>
-      </div>
-      <button class="shared-feed-chip" type="button" data-action="coalition-access-refresh"${disabledAttr(resource.loading)}>Refresh</button>
-    </div>
-    ${
-      resource.loading && !detail.members.length
-        ? '<div class="shared-page__loading">Loading members...</div>'
-        : ""
-    }
-    ${
-      detail.members.length
-        ? `${renderCoalitionMemberFilterControls(
-            detail,
-            resource,
-            catalog,
-            orderedMembers,
-            visibleCount,
-          )}
-          <div class="shared-campaign-staff-card-grid">${orderedMembers
-            .map((member) =>
-              renderCoalitionMemberAccessCard(
-                member,
-                resource,
-                catalog,
-                canManage,
-              ),
-            )
-            .join("")}</div>
-          <div class="shared-page__empty" data-coalition-member-empty="filtered"${visibleCount ? " hidden" : ""}>No members match those filters. Try clearing search or choosing another role.</div>`
-        : '<div class="shared-page__empty">No active coalition members loaded.</div>'
-    }
+    <div class="shared-campaign-panel__header"><div><h2>Your team</h2><p>${canManage ? "Open a member to review their role and access." : "Find people and view their coalition access."}</p></div><button class="shared-feed-chip" type="button" data-action="coalition-access-refresh"${disabledAttr(resource.loading)}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7" /></svg><span>${resource.loading ? "Refreshing..." : "Refresh"}</span></button></div>
+    ${resource.loading && !detail.members.length ? '<div class="shared-page__loading" role="status">Loading members...</div>' : ""}
+    ${detail.members.length ? `${renderCoalitionMemberFilterControls(detail, resource, catalog, orderedMembers, visibleCount)}<div class="coalition-people__table-head" aria-hidden="true"><span>Person</span><span>Role</span><span>Joined</span><span>Feature access</span></div><div class="shared-campaign-staff-card-grid">${orderedMembers.map((member) => renderCoalitionMemberAccessCard(member, resource, catalog, canManage)).join("")}</div><div class="shared-page__empty" data-coalition-member-empty="filtered"${visibleCount ? " hidden" : ""}><strong>No matching members</strong><p>Try another name or clear your filters.</p></div>` : !resource.loading ? '<div class="shared-page__empty coalition-people__empty"><strong>Your team starts here</strong><p>Members will appear here after they accept an invitation or their join request is approved.</p></div>' : ""}
   </article>`;
 }
 
@@ -89406,7 +89346,7 @@ function renderCoalitionAccessRoleCard(role, resource, catalog, canManage) {
   const replacementRoles = coalitionAssignableRoles(catalog).filter(
     (candidate) => candidate.roleKey !== role.roleKey,
   );
-  return `<details class="shared-campaign-staff-role-card">
+  return `<details data-people-disclosure="role:${escapeHtml(role.roleKey)}" class="shared-campaign-staff-role-card">
     <summary>
       <span class="shared-campaign-staff-role-swatch" style="${role.color ? `background:${escapeHtml(role.color)};` : ""}"></span>
       <strong>${escapeHtml(role.label)}</strong>
@@ -89551,39 +89491,23 @@ function renderCoalitionMembers(detail, coalition, membership) {
   const pendingInviteCount = resource.invitations.filter(
     (invite) => invite.isPending,
   ).length;
-  return `<div class="shared-coalition-section shared-coalition-access shared-campaign-staff">
-    <div class="shared-coalition-metrics">
-      ${renderCoalitionMetric("Active members", formatCount(detail.members.length), "cyan")}
-      ${renderCoalitionMetric("Join requests", formatCount(pendingRequestCount))}
-      ${renderCoalitionMetric("Invitations", formatCount(pendingInviteCount))}
-      ${renderCoalitionMetric("Access presets", formatCount(catalog.roles.length))}
-    </div>
-    ${
-      resource.error
-        ? `<div class="shared-page__error">${escapeHtml(resource.error)}</div>`
-        : ""
-    }
-    ${
-      !canManageMembers && !canManageRequests && !canManageRoles
-        ? '<div class="shared-page__hint shared-page__banner">This role can inspect coalition members and access presets. Ask an admin for member, join-request, or access-preset management to make changes.</div>'
-        : ""
-    }
-    <div class="shared-campaign-staff-grid">
-      <div class="shared-campaign-staff-main">
-        ${renderCoalitionAccessRoster(
-          detail,
-          resource,
-          catalog,
-          canManageMembers || canManageRoles,
-        )}
-        ${renderCoalitionAccessRequests(resource, catalog, canManageRequests)}
-        ${renderCoalitionAccessInvitations(resource, catalog, canManageMembers)}
-      </div>
-      <div class="shared-campaign-staff-side">
-        ${renderCoalitionInviteForm(resource, catalog, canManageMembers)}
-        ${renderCoalitionAccessRoles(resource, catalog, canManageRoles)}
-      </div>
-    </div>
+  const contextKey = `${state.auth.user?.userId || ""}:${coalition.coalitionId}`;
+  const tabs = [
+    ["members", "Members", detail.members.length],
+    ["requests", "Join requests", pendingRequestCount],
+    ["invitations", "Invitations", pendingInviteCount],
+    ["roles", "Roles & access", catalog.roles.length],
+  ];
+  return `<div class="shared-coalition-section shared-coalition-access shared-campaign-staff coalition-people" data-people-context="${escapeHtml(contextKey)}" data-people-revision="${escapeHtml(catalog.mutationRevision)}">
+    <div class="coalition-people__intro"><p>Your team, connected. Manage people and the access they need.</p>${canManageMembers ? '<button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="coalition-people-invite"><span aria-hidden="true">+</span> Invite person</button>' : ""}</div>
+    ${resource.error ? `<div class="shared-page__error" role="alert">${escapeHtml(resource.error)}</div>` : ""}
+    ${!canManageMembers && !canManageRequests && !canManageRoles ? '<div class="shared-page__hint coalition-people__readonly">You can view people and access. An administrator can make changes.</div>' : ""}
+    <nav class="coalition-people__tabs" role="tablist" aria-label="People sections">${tabs.map(([key, label, count]) => `<button type="button" id="coalition-people-tab-${key}" role="tab" aria-controls="coalition-people-panel-${key}" aria-selected="${key === "members"}" tabindex="${key === "members" ? "0" : "-1"}" data-action="coalition-people-tab" data-people-tab="${key}">${escapeHtml(label)}<span>${escapeHtml(formatCount(count))}</span></button>`).join("")}</nav>
+    <section class="coalition-people__panel" role="tabpanel" id="coalition-people-panel-members" aria-labelledby="coalition-people-tab-members" data-people-panel="members">${renderCoalitionAccessRoster(detail, resource, catalog, canManageMembers || canManageRoles)}</section>
+    <section class="coalition-people__panel" role="tabpanel" id="coalition-people-panel-requests" aria-labelledby="coalition-people-tab-requests" data-people-panel="requests" hidden>${renderCoalitionAccessRequests(resource, catalog, canManageRequests)}</section>
+    <section class="coalition-people__panel" role="tabpanel" id="coalition-people-panel-invitations" aria-labelledby="coalition-people-tab-invitations" data-people-panel="invitations" hidden>${renderCoalitionAccessInvitations(resource, catalog, canManageMembers)}</section>
+    <section class="coalition-people__panel" role="tabpanel" id="coalition-people-panel-roles" aria-labelledby="coalition-people-tab-roles" data-people-panel="roles" hidden>${renderCoalitionAccessRoles(resource, catalog, canManageRoles)}</section>
+    ${canManageMembers ? `<dialog class="coalition-people__invite-dialog" data-people-invite-dialog aria-labelledby="coalition-people-invite-title"><div class="coalition-people__dialog-head"><div><h2 id="coalition-people-invite-title">Invite someone to your team</h2><p>Find their Polis account and choose their access.</p></div><button class="shared-feed-chip" type="button" data-action="coalition-people-invite-close" aria-label="Close invitation">${renderIcon("close")}</button></div>${resource.error ? `<div class="shared-page__error" role="alert">${escapeHtml(resource.error)}</div>` : ""}${renderCoalitionInviteForm(resource, catalog, canManageMembers)}</dialog>` : ""}
   </div>`;
 }
 
@@ -127839,6 +127763,7 @@ function renderApp() {
 
   syncDocumentTitle();
   ensureActiveIndexInBounds();
+  const peopleSnapshot = coalitionPeopleInteractions.beforeRender(root);
   const authSnapshot = polisAuthInteractions.beforeRender(root);
   const playbackSnapshot = snapshotPlaybackState();
   const scrollSnapshot = snapshotFeedScrollState();
@@ -127894,6 +127819,7 @@ function renderApp() {
   focusComposerIfNeeded();
   syncMessagingRouteHighlightAfterRender();
   polisAuthInteractions.afterRender(root, authSnapshot);
+  coalitionPeopleInteractions.afterRender(root, peopleSnapshot);
 }
 
 function bindElectionCounters() {
@@ -128830,6 +128756,10 @@ async function handleRootClick(event) {
     return;
   }
   const action = target.getAttribute("data-action");
+  if (coalitionPeopleInteractions.handleAction(action, target, root)) {
+    event.preventDefault();
+    return;
+  }
   if (
     (action === "territory-builder-return" &&
       !currentTerritoryAccessAllowed()) ||
@@ -135988,9 +135918,27 @@ function handleCommentSubmit(event) {
       return;
     }
     if (formKind === "coalition-invite") {
+      const submittedPeopleContext = routeForm.closest("[data-people-context]")
+        ?.dataset.peopleContext;
       inviteCoalitionMember(formData)
         .then((sent) => {
-          if (sent) routeForm.reset();
+          if (!sent) return;
+          routeForm.reset();
+          const surface = root.querySelector("[data-people-context]");
+          if (
+            submittedPeopleContext &&
+            surface?.dataset.peopleContext === submittedPeopleContext
+          ) {
+            const close = surface.querySelector(
+              '[data-action="coalition-people-invite-close"]',
+            );
+            if (close)
+              coalitionPeopleInteractions.handleAction(
+                "coalition-people-invite-close",
+                close,
+                root,
+              );
+          }
         })
         .catch(() => {});
       return;
