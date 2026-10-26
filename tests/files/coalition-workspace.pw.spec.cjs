@@ -6,7 +6,10 @@ const COALITION_PATH = `/coalitions/${COALITION_ID}`;
 const TEXTING_PATH = `/organizations/${COALITION_ID}/texting`;
 const FILES_WORKSPACE_ID = `files:v1:organization:${COALITION_ID}`;
 
-async function mockCoalitionWorkspace(page, { role = "admin" } = {}) {
+async function mockCoalitionWorkspace(
+  page,
+  { role = "admin", longMembers = false, multiple = false } = {},
+) {
   const token = `e30.${Buffer.from(
     JSON.stringify({
       sub: "coalition-review-user",
@@ -47,6 +50,7 @@ async function mockCoalitionWorkspace(page, { role = "admin" } = {}) {
   );
 
   const writes = [];
+  const reads = [];
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   const admin = role === "admin";
@@ -66,6 +70,13 @@ async function mockCoalitionWorkspace(page, { role = "admin" } = {}) {
     { roleKey: "admin", label: "Admin", enabled: true, system: true },
     { roleKey: "member", label: "Member", enabled: true, system: true },
   ];
+  const organizations = [coalition];
+  if (multiple)
+    organizations.push({
+      ...coalition,
+      coalitionId: "another-demo-organization",
+      name: "River County Team",
+    });
 
   // Files has its own compiled API origin; keep those requests in this local
   // fixture as well as the shared shell's runtime-configured API requests.
@@ -73,6 +84,21 @@ async function mockCoalitionWorkspace(page, { role = "admin" } = {}) {
     const request = route.request();
     const pathname = new URL(request.url()).pathname;
     const path = pathname.slice(pathname.indexOf("/api/"));
+    if (request.method() === "GET") {
+      let credentialVersion = "";
+      try {
+        const token = (request.headers().authorization || "").replace(
+          /^Bearer /u,
+          "",
+        );
+        credentialVersion =
+          JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString())
+            .credentialVersion || "";
+      } catch {
+        // Discovery requests can have no signed-in actor; record no credential.
+      }
+      reads.push({ path, credentialVersion });
+    }
     const respond = (body, status = 200) =>
       route.fulfill({
         status,
@@ -96,26 +122,61 @@ async function mockCoalitionWorkspace(page, { role = "admin" } = {}) {
     if (path === "/api/me/policy-acceptance")
       return respond({ ok: true, accepted: true });
     if (path === "/api/coalitions")
-      return respond({ items: [{ coalition, membership }] });
+      return respond({
+        items: organizations.map((item) => ({ coalition: item, membership })),
+      });
+    if (path === "/api/me/organization-workspaces")
+      return respond({
+        workspaces: organizations.map((item) => ({
+          scopeType: "coalition",
+          scopeId: item.coalitionId,
+          name: item.name,
+          isAdmin: admin,
+          role,
+          permissions: [],
+          filesWorkspaceId: `files:v1:organization:${item.coalitionId}`,
+          dashboardPreferences: {
+            status: "ready",
+            revision: 1,
+            preference: {
+              schemaVersion: 1,
+              revision: 1,
+              order: [],
+              hidden: [],
+            },
+          },
+        })),
+      });
     if (path === "/api/files/workspaces")
       return respond({
         workspaces: ["another-demo-organization", COALITION_ID].map((id) => ({
           filesWorkspaceId: `files:v1:organization:${id}`,
-          principal: { type: "organization", sourceType: "organization", id },
+          principal: {
+            type: "organization",
+            sourceType: "organization",
+            id,
+            displayName:
+              organizations.find((item) => item.coalitionId === id)?.name ||
+              "Other files workspace",
+          },
           entitlement: "organization_files",
           featureFlags: { filesEnabled: true },
           permissions: ["files_view"],
         })),
       });
-    if (path === `/api/files/workspaces/organization/${COALITION_ID}`)
+    const filesOrganization = organizations.find(
+      (item) =>
+        path === `/api/files/workspaces/organization/${item.coalitionId}`,
+    );
+    if (filesOrganization)
       return respond({
         workspace: {
-          filesWorkspaceId: FILES_WORKSPACE_ID,
+          filesWorkspaceId: `files:v1:organization:${filesOrganization.coalitionId}`,
           principal: {
             type: "organization",
             sourceType: "organization",
-            id: COALITION_ID,
-            displayName: coalition.name,
+            id: filesOrganization.coalitionId,
+            displayName: filesOrganization.name,
           },
           entitlement: "organization_files",
           featureFlags: { filesEnabled: true },
@@ -126,26 +187,37 @@ async function mockCoalitionWorkspace(page, { role = "admin" } = {}) {
           settings: { version: 1 },
         },
       });
-    if (path === `/api/coalitions/${COALITION_ID}`)
-      return respond({ coalition, membership });
+    const selectedOrganization = organizations.find(
+      (item) => path === `/api/coalitions/${item.coalitionId}`,
+    );
+    if (selectedOrganization)
+      return respond({ coalition: selectedOrganization, membership });
     if (path === `/api/coalitions/${COALITION_ID}/members`)
       return respond({
-        members: [
-          {
-            userId: "coalition-review-user",
-            displayName: "Alex Morgan",
-            username: "alex-demo",
-            roleKey: role,
-            permissions: [],
-          },
-          {
-            userId: "coalition-review-second-user",
-            displayName: "Jordan Reed",
-            username: "jordan-demo",
-            roleKey: "member",
-            permissions: [],
-          },
-        ],
+        members: longMembers
+          ? Array.from({ length: 80 }, (_, index) => ({
+              userId: `coalition-review-person-${index}`,
+              displayName: `Volunteer ${String(index + 1).padStart(2, "0")}`,
+              username: `volunteer-${index}`,
+              roleKey: "member",
+              permissions: [],
+            }))
+          : [
+              {
+                userId: "coalition-review-user",
+                displayName: "Alex Morgan",
+                username: "alex-demo",
+                roleKey: role,
+                permissions: [],
+              },
+              {
+                userId: "coalition-review-second-user",
+                displayName: "Jordan Reed",
+                username: "jordan-demo",
+                roleKey: "member",
+                permissions: [],
+              },
+            ],
       });
     if (path === `/api/coalitions/${COALITION_ID}/access/catalog`)
       return respond({ roles, canManage: admin });
@@ -188,7 +260,7 @@ async function mockCoalitionWorkspace(page, { role = "admin" } = {}) {
       });
     return respond({ ok: true, items: [], audiences: [], workspaces: [] });
   });
-  return { writes, errors };
+  return { writes, errors, reads };
 }
 
 test("coalition navigation preserves the existing Texting Hub and scoped Files destination", async ({
@@ -200,7 +272,11 @@ test("coalition navigation preserves the existing Texting Hub and scoped Files d
   await page.goto(`${BASE_URL}/coalitions`);
   await expect(page.locator(".polis-coalition-ui")).toBeVisible();
   await page.getByRole("button", { name: "Workspace", exact: true }).click();
-  await expect(page).toHaveURL(`${BASE_URL}${COALITION_PATH}/members`);
+  await expect(page).toHaveURL(`${BASE_URL}${COALITION_PATH}`);
+  await expect(page.locator(".organization-dashboard")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Customize", exact: true }),
+  ).toBeEnabled();
 
   const navigation = page.locator(".coalition-ui-sidebar");
   await expect(navigation).toBeVisible();
@@ -245,7 +321,7 @@ test("coalition navigation preserves the existing Texting Hub and scoped Files d
   await expect(
     page.getByRole("heading", { name: "Team files", exact: true }),
   ).toBeVisible();
-  await expect(page.locator(".polis-coalition-ui")).toHaveCount(0);
+  await expect(page.locator(".coalition-ui-sidebar")).toBeVisible();
   await page.goto(`${BASE_URL}${COALITION_PATH}`);
   await expect(navigation).toBeVisible();
 
@@ -278,13 +354,451 @@ test("coalition navigation preserves the existing Texting Hub and scoped Files d
   await navigation.locator(`[data-route="${TEXTING_PATH}"]`).click();
   await expect(page).toHaveURL(`${BASE_URL}${TEXTING_PATH}`);
   await expect(page.locator(".texting-workspace")).toBeVisible();
-  await expect(page.locator(".pt-brand img")).toBeVisible();
-  await expect(page.locator(".polis-coalition-ui")).toHaveCount(0);
+  await expect(page.locator(".coalition-ui-brand img")).toBeVisible();
+  await expect(page.locator(".coalition-ui-sidebar")).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "Good conversations start here." }),
   ).toBeVisible();
   expect(writes).toEqual([]);
   expect(errors).toEqual([]);
+});
+
+for (const role of ["admin", "member"])
+  for (const width of [1440, 390]) {
+    test(`workspace entry opens the authorized dashboard for ${role} at ${width}px`, async ({
+      page,
+    }) => {
+      const fixture = await mockCoalitionWorkspace(page, { role });
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto(`${BASE_URL}/coalitions`);
+      await page
+        .getByRole("button", { name: "Workspace", exact: true })
+        .click();
+      await expect(page).toHaveURL(`${BASE_URL}${COALITION_PATH}`);
+      await expect(page.locator(".organization-dashboard")).toBeVisible();
+      await expect(
+        page.getByRole("button", { name: "Customize", exact: true }),
+      ).toBeEnabled();
+      await expect(page.locator(".coalition-people")).toHaveCount(0);
+      const navigation = page.locator(
+        width < 700 ? ".coalition-ui-mobile-nav" : ".coalition-ui-sidebar",
+      );
+      if (width < 700) await navigation.locator("summary").click();
+      await expect(
+        navigation.getByRole("button", { name: "Home", exact: true }),
+      ).toHaveAttribute("aria-current", "page");
+      await navigation
+        .getByRole("button", { name: "People", exact: true })
+        .click();
+      await expect(page.locator(".coalition-people")).toBeVisible();
+      await page.goBack();
+      await expect(page).toHaveURL(`${BASE_URL}${COALITION_PATH}`);
+      await expect(page.locator(".organization-dashboard")).toBeVisible();
+      await page.reload();
+      await expect(page.locator(".organization-dashboard")).toBeVisible();
+      await expect(page.locator(".coalition-people")).toHaveCount(0);
+      expect(fixture.writes).toEqual([]);
+      expect(fixture.errors).toEqual([]);
+    });
+  }
+
+for (const width of [1440, 390]) {
+  test(`organization navigation remains reachable at the bottom of a long page at ${width}px`, async ({
+    page,
+  }, testInfo) => {
+    const fixture = await mockCoalitionWorkspace(page, { longMembers: true });
+    await page.setViewportSize({ width, height: 700 });
+    await page.goto(`${BASE_URL}${COALITION_PATH}/members`);
+    await expect(page.locator("[data-coalition-member-card]")).toHaveCount(80);
+    await page.evaluate(() =>
+      window.scrollTo(0, document.documentElement.scrollHeight),
+    );
+    const navigation = page.locator(
+      width < 700 ? ".coalition-ui-mobile-nav" : ".coalition-ui-sidebar",
+    );
+    await expect(navigation).toBeVisible();
+    const geometry = await navigation.evaluate((element) => {
+      const box = element.getBoundingClientRect();
+      return {
+        top: box.top,
+        bottom: box.bottom,
+        viewportHeight: innerHeight,
+        pageScroll: scrollY,
+        ownHeight: element.clientHeight,
+        ownContentHeight: element.scrollHeight,
+        overflowY: getComputedStyle(element).overflowY,
+      };
+    });
+    expect(geometry.pageScroll).toBeGreaterThan(500);
+    expect(geometry.top).toBeGreaterThanOrEqual(0);
+    expect(geometry.top).toBeLessThan(geometry.viewportHeight - 40);
+    expect(geometry.bottom).toBeLessThanOrEqual(geometry.viewportHeight + 1);
+    if (width >= 700) {
+      expect(geometry.ownContentHeight).toBeGreaterThan(geometry.ownHeight);
+      expect(["auto", "scroll"]).toContain(geometry.overflowY);
+    } else await navigation.locator("summary").click();
+    const administration = navigation.getByRole("button", {
+      name: "Administration",
+      exact: true,
+    });
+    await administration.scrollIntoViewIfNeeded();
+    const pagePositionBeforeSwitch = await page.evaluate(() => scrollY);
+    expect(pagePositionBeforeSwitch).toBeGreaterThan(500);
+    await page.screenshot({
+      path: testInfo.outputPath(`navigation-at-page-bottom-${width}.png`),
+      animations: "disabled",
+    });
+    await administration.click();
+    await expect(page).toHaveURL(`${BASE_URL}${COALITION_PATH}/admin/edit`);
+    await expect(page.locator(".coalition-ui-heading h1")).toHaveText(
+      "Administration",
+    );
+    expect(fixture.writes).toEqual([]);
+    expect(fixture.errors).toEqual([]);
+  });
+}
+
+for (const role of ["admin", "member"]) {
+  test(`scoped shared tools keep organization navigation until ${role} explicitly exits`, async ({
+    page,
+  }) => {
+    const fixture = await mockCoalitionWorkspace(page, { role });
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    const routes = [
+      "/organizations/coalition-ui-demo/texting",
+      "/workspace/coalition/coalition-ui-demo/work/ballot-chaser",
+      "/workspace/coalition/coalition-ui-demo/people/contacts",
+      "/workspace/coalition/coalition-ui-demo/work/publishing",
+      "/workspace/coalition/coalition-ui-demo/more/social-connections",
+      "/workspace/coalition/coalition-ui-demo/work/publishing/new",
+    ];
+    for (const route of routes) {
+      await page.goto(`${BASE_URL}${route}`);
+      const sidebar = page.locator(".coalition-ui-sidebar");
+      await expect(sidebar).toBeVisible();
+      await expect(
+        sidebar.locator(".coalition-ui-sidebar__identity"),
+      ).toContainText("Civic Action Team");
+      await expect(
+        sidebar.getByRole("button", { name: "Home", exact: true }),
+      ).toHaveAttribute("data-route", COALITION_PATH);
+      await page.reload();
+      await expect(sidebar).toBeVisible();
+      await expect(page.locator(".coalition-ui-brand")).toHaveAttribute(
+        "data-route",
+        COALITION_PATH,
+      );
+    }
+    await page.locator(".coalition-ui-brand").click();
+    await expect(page).toHaveURL(`${BASE_URL}${COALITION_PATH}`);
+    await expect(page.locator(".organization-dashboard")).toBeVisible();
+    await page
+      .locator(".coalition-ui-sidebar")
+      .getByRole("button", { name: "Exit workspace", exact: true })
+      .click();
+    await expect(page).toHaveURL(`${BASE_URL}/feed`);
+    await expect(page.locator(".coalition-ui-sidebar")).toHaveCount(0);
+    await page.reload();
+    await expect(page.locator(".coalition-ui-sidebar")).toHaveCount(0);
+    expect(fixture.writes).toEqual([]);
+    expect(fixture.errors).toEqual([]);
+  });
+}
+
+test("Files preserves the selected organization on internal views, refresh and workspace changes", async ({
+  page,
+}) => {
+  const fixture = await mockCoalitionWorkspace(page, { multiple: true });
+  await page.goto(`${BASE_URL}${COALITION_PATH}`);
+  await page
+    .locator(".coalition-ui-sidebar")
+    .getByRole("link", { name: "Files", exact: true })
+    .click();
+  await expect(page.locator(".files-shell")).toBeVisible();
+  await expect(page.locator(".coalition-ui-sidebar__identity")).toContainText(
+    "Civic Action Team",
+  );
+  await page
+    .locator(".files-sidebar")
+    .getByRole("button", { name: "Recent", exact: true })
+    .click();
+  await expect(page).toHaveURL(/\/files\/recent\?/);
+  const query = new URL(page.url()).searchParams;
+  expect(query.get("workspace")).toBe(FILES_WORKSPACE_ID);
+  expect(query.get("organizationScopeType")).toBe("coalition");
+  expect(query.get("organizationScopeId")).toBe(COALITION_ID);
+  await page.reload();
+  await expect(page.locator(".coalition-ui-sidebar__identity")).toContainText(
+    "Civic Action Team",
+  );
+  await page
+    .getByRole("combobox", { name: "Files workspace" })
+    .selectOption({ label: "River County Team" });
+  await expect(page.locator(".coalition-ui-sidebar__identity")).toContainText(
+    "River County Team",
+  );
+  await expect(
+    page
+      .locator(".coalition-ui-sidebar")
+      .getByRole("link", { name: "Home", exact: true }),
+  ).toHaveAttribute("data-route", "/coalitions/another-demo-organization");
+  await page.goBack();
+  await expect(page.locator(".coalition-ui-sidebar__identity")).toContainText(
+    "Civic Action Team",
+  );
+  expect(new URL(page.url()).searchParams.get("workspace")).toBe(
+    FILES_WORKSPACE_ID,
+  );
+  await page.goForward();
+  await expect(page.locator(".coalition-ui-sidebar__identity")).toContainText(
+    "River County Team",
+  );
+  await page.reload();
+  await expect(page.locator(".coalition-ui-sidebar__identity")).toContainText(
+    "River County Team",
+  );
+  await page
+    .locator(".coalition-ui-sidebar")
+    .getByRole("button", { name: "Exit workspace", exact: true })
+    .click();
+  await expect(page).toHaveURL(`${BASE_URL}/feed`);
+  await expect(page.locator(".coalition-ui-sidebar")).toHaveCount(0);
+  expect(fixture.writes).toEqual([]);
+  expect(fixture.errors).toEqual([]);
+});
+
+test("standalone Files does not inherit an old organization mode or trust mismatched scope hints", async ({
+  page,
+}) => {
+  const fixture = await mockCoalitionWorkspace(page);
+  const files = `${BASE_URL}/files?workspace=${encodeURIComponent(FILES_WORKSPACE_ID)}`;
+  await page.goto(
+    `${files}&organizationScopeType=coalition&organizationScopeId=${COALITION_ID}`,
+  );
+  await expect(page.locator(".coalition-ui-sidebar")).toBeVisible();
+  await page.goto(files);
+  await expect(page.locator(".files-shell")).toBeVisible();
+  await expect(page.locator(".coalition-ui-sidebar")).toHaveCount(0);
+  await page.goto(
+    `${files}&organizationScopeType=coalition&organizationScopeId=another-demo-organization`,
+  );
+  await expect(page.locator(".files-shell")).toBeVisible();
+  await expect(page.locator(".coalition-ui-sidebar")).toHaveCount(0);
+  expect(fixture.writes).toEqual([]);
+  expect(fixture.errors).toEqual([]);
+});
+
+for (const width of [320, 390]) {
+  test(`mobile Files organization menu keeps Administration and Exit clickable at ${width}px`, async ({
+    page,
+  }, testInfo) => {
+    const fixture = await mockCoalitionWorkspace(page);
+    await page.setViewportSize({ width, height: 844 });
+    await page.goto(
+      `${BASE_URL}/files?workspace=${encodeURIComponent(FILES_WORKSPACE_ID)}&organizationScopeType=coalition&organizationScopeId=${COALITION_ID}`,
+    );
+    await expect(page.locator(".files-shell")).toBeVisible();
+    const menu = page.locator(".coalition-ui-mobile-nav");
+    await menu.locator("summary").click();
+    const administration = menu.getByRole("link", {
+      name: "Administration",
+      exact: true,
+    });
+    await administration.scrollIntoViewIfNeeded();
+    const hitCenter = (locator) =>
+      locator.evaluate((element) => {
+        const box = element.getBoundingClientRect();
+        return element.contains(
+          document.elementFromPoint(
+            box.x + box.width / 2,
+            box.y + box.height / 2,
+          ),
+        );
+      });
+    expect(await hitCenter(administration)).toBe(true);
+    await administration.click();
+    await expect(page).toHaveURL(`${BASE_URL}${COALITION_PATH}/admin/edit`);
+    await expect(page.locator(".coalition-ui-heading h1")).toHaveText(
+      "Administration",
+    );
+    await menu.locator("summary").click();
+    await menu.getByRole("link", { name: "Files", exact: true }).click();
+    await expect(page.locator(".files-shell")).toBeVisible();
+    await menu.locator("summary").click();
+    const exit = menu.getByRole("button", {
+      name: "Exit workspace",
+      exact: true,
+    });
+    await exit.scrollIntoViewIfNeeded();
+    expect(await hitCenter(exit)).toBe(true);
+    await page.screenshot({
+      path: testInfo.outputPath(`mobile-files-exit-pointer-${width}.png`),
+      animations: "disabled",
+    });
+    await exit.click();
+    await expect(page).toHaveURL(`${BASE_URL}/feed`);
+    await expect(page.locator(".coalition-ui-mobile-nav")).toHaveCount(0);
+    await expect(page.locator(".coalition-ui-sidebar")).toHaveCount(0);
+    expect(fixture.writes).toEqual([]);
+    expect(fixture.errors).toEqual([]);
+  });
+}
+
+test("same-user credential refresh keeps the authorized organization tabs without leaving Texting", async ({
+  page,
+}) => {
+  const fixture = await mockCoalitionWorkspace(page);
+  await page.goto(`${BASE_URL}${TEXTING_PATH}`);
+  await expect(page.locator(".texting-workspace")).toBeVisible();
+  const people = page
+    .locator(".coalition-ui-sidebar")
+    .locator(`[data-route="${COALITION_PATH}/members"]`);
+  await expect(people).toBeVisible();
+  await page.waitForLoadState("networkidle");
+  const workspaceReads = () =>
+    fixture.reads.filter(
+      (item) =>
+        item.path.includes("/text-banking/") &&
+        item.path.endsWith("/workspace"),
+    ).length;
+  const previousReads = workspaceReads();
+  await page.evaluate(() => {
+    const key = "sharedFeedSession.v1";
+    const session = JSON.parse(sessionStorage.getItem(key));
+    const parts = session.idToken.split(".");
+    const claims = JSON.parse(atob(parts[1]));
+    claims.credentialVersion = "refreshed-organization-navigation";
+    const token = `${parts[0]}.${btoa(JSON.stringify(claims))}.refreshed`;
+    sessionStorage.setItem(
+      key,
+      JSON.stringify({ ...session, idToken: token, accessToken: token }),
+    );
+    window.dispatchEvent(new Event("focus"));
+  });
+  await expect.poll(workspaceReads).toBeGreaterThan(previousReads);
+  await expect
+    .poll(() =>
+      fixture.reads.some(
+        (item) =>
+          item.path.includes("/text-banking/") &&
+          item.path.endsWith("/workspace") &&
+          item.credentialVersion === "refreshed-organization-navigation",
+      ),
+    )
+    .toBe(true);
+  await page.waitForLoadState("networkidle");
+  await expect(people).toBeVisible();
+  await expect(page.locator(".coalition-ui-sidebar__identity")).toContainText(
+    "Civic Action Team",
+  );
+  await expect(page).toHaveURL(`${BASE_URL}${TEXTING_PATH}`);
+  expect(fixture.writes).toEqual([]);
+  expect(fixture.errors).toEqual([]);
+});
+
+test("a transient workspace navigation read can retry without switching to consumer navigation", async ({
+  page,
+}) => {
+  const fixture = await mockCoalitionWorkspace(page);
+  let navigationReads = 0;
+  await page.route(`**/api/coalitions/${COALITION_ID}`, async (route) => {
+    navigationReads++;
+    if (navigationReads === 1)
+      return route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "temporarily_unavailable" }),
+      });
+    return route.fallback();
+  });
+  await page.goto(`${BASE_URL}${TEXTING_PATH}`);
+  await expect(page.locator(".coalition-ui-sidebar")).toBeVisible();
+  await page
+    .getByRole("button", { name: "Retry workspace", exact: true })
+    .click();
+  await expect(page.locator(".coalition-ui-sidebar__identity")).toContainText(
+    "Civic Action Team",
+  );
+  await expect(
+    page
+      .locator(".coalition-ui-sidebar")
+      .locator(`[data-route="${COALITION_PATH}/members"]`),
+  ).toBeVisible();
+  await expect(page.locator(".texting-workspace")).toBeVisible();
+  expect(navigationReads).toBeGreaterThanOrEqual(2);
+  await expect(page).toHaveURL(`${BASE_URL}${TEXTING_PATH}`);
+  expect(fixture.writes).toEqual([]);
+  expect(fixture.errors).toEqual([]);
+});
+
+test("public organization metadata without active membership cannot restore private workspace tabs", async ({
+  page,
+}) => {
+  const fixture = await mockCoalitionWorkspace(page);
+  await page.route(`**/api/coalitions/${COALITION_ID}`, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        coalition: { coalitionId: COALITION_ID, name: "Civic Action Team" },
+        membership: null,
+      }),
+    }),
+  );
+  await page.goto(`${BASE_URL}${TEXTING_PATH}`);
+  await expect(
+    page.getByRole("button", { name: "Retry workspace", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.locator(".coalition-ui-sidebar .shared-coalition-tab"),
+  ).toHaveCount(0);
+  await expect(page.locator(".texting-workspace")).toHaveCount(0);
+  await page
+    .locator(".coalition-ui-sidebar")
+    .getByRole("button", { name: "Exit workspace", exact: true })
+    .click();
+  await expect(page).toHaveURL(`${BASE_URL}/feed`);
+  await expect(page.locator(".coalition-ui-sidebar")).toHaveCount(0);
+  expect(fixture.writes).toEqual([]);
+  expect(fixture.errors).toEqual([]);
+});
+
+test("workspace root aliases open the dashboard and top actions retain its navigation context", async ({
+  page,
+}) => {
+  const fixture = await mockCoalitionWorkspace(page);
+  for (const suffix of ["", "/home", "/dashboard", "/overview"]) {
+    await page.goto(`${BASE_URL}/workspace/coalition/${COALITION_ID}${suffix}`);
+    await expect(page).toHaveURL(`${BASE_URL}${COALITION_PATH}`);
+    await expect(page.locator(".organization-dashboard")).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Customize", exact: true }),
+    ).toBeEnabled();
+  }
+  for (const action of ["Search", "Notifications"]) {
+    await page
+      .locator(".coalition-ui-topbar")
+      .getByRole("button", { name: action, exact: true })
+      .click();
+    await expect(page.locator(".coalition-ui-sidebar__identity")).toContainText(
+      "Civic Action Team",
+    );
+    const url = new URL(page.url());
+    expect(url.searchParams.get("organizationScopeType")).toBe("coalition");
+    expect(url.searchParams.get("organizationScopeId")).toBe(COALITION_ID);
+    await page.reload();
+    await expect(page.locator(".coalition-ui-sidebar__identity")).toContainText(
+      "Civic Action Team",
+    );
+  }
+  await page
+    .locator(".coalition-ui-sidebar")
+    .getByRole("button", { name: "Exit workspace", exact: true })
+    .click();
+  await expect(page).toHaveURL(`${BASE_URL}/feed`);
+  await expect(page.locator(".coalition-ui-sidebar")).toHaveCount(0);
+  expect(fixture.writes).toEqual([]);
+  expect(fixture.errors).toEqual([]);
 });
 
 test("member access stays read-only and coalition pages fit a mobile viewport", async ({
@@ -374,7 +888,11 @@ for (const viewport of [
     // Start at the actual coalition card, rather than bypassing its entry route.
     await page.goto(`${BASE_URL}/coalitions`);
     await page.getByRole("button", { name: "Workspace", exact: true }).click();
-    await expect(page).toHaveURL(`${BASE_URL}${COALITION_PATH}/members`);
+    await expect(page).toHaveURL(`${BASE_URL}${COALITION_PATH}`);
+    await expect(page.locator(".organization-dashboard")).toBeVisible();
+    await (await openNavigation())
+      .getByRole("button", { name: "People", exact: true })
+      .click();
     await expectCleanPeople();
     const approvedTop = await page
       .locator(".coalition-people")
