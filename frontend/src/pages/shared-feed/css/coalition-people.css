@@ -236,6 +236,7 @@
   width: 18px;
   height: 18px;
   color: var(--coalition-muted);
+  fill: currentColor;
   transform: translateY(-50%);
   pointer-events: none;
 }
@@ -467,6 +468,7 @@
   height: 17px;
   flex: 0 0 auto;
   color: var(--coalition-muted);
+  fill: currentColor;
   transition: transform 160ms ease;
 }
 
