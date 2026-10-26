@@ -1,36 +1,40 @@
 const { test, expect } = require("@playwright/test");
+const BASE_URL = process.env.POLIS_TEST_BASE_URL || "http://127.0.0.1:9000";
 
 test("mission metadata and bounded lifecycle updates retain evidence and hide paused work controls", async ({
   page,
 }) => {
-  await page.addInitScript(() => {
-    const token = `e30.${btoa(JSON.stringify({ sub: "manager", name: "Alex Rivera" }))}.test`;
-    sessionStorage.setItem(
-      "sharedFeedSession.v1",
-      JSON.stringify({
-        accessToken: token,
-        idToken: token,
-        expiresAt: Date.now() + 3600000,
-      }),
-    );
-    let config;
-    Object.defineProperty(window, "__POLIS_WEB_APP__", {
-      configurable: true,
-      get: () => config,
-      set: (value) => {
-        config = {
-          ...value,
-          apiBaseUrl: "http://127.0.0.1:9000",
-          auth: {
-            ...value.auth,
-            region: "us-west-2",
-            clientId: "test",
-            enablePasswordFlow: "true",
-          },
-        };
-      },
-    });
-  });
+  await page.addInitScript(
+    ({ baseUrl }) => {
+      const token = `e30.${btoa(JSON.stringify({ sub: "manager", name: "Alex Rivera" }))}.test`;
+      sessionStorage.setItem(
+        "sharedFeedSession.v1",
+        JSON.stringify({
+          accessToken: token,
+          idToken: token,
+          expiresAt: Date.now() + 3600000,
+        }),
+      );
+      let config;
+      Object.defineProperty(window, "__POLIS_WEB_APP__", {
+        configurable: true,
+        get: () => config,
+        set: (value) => {
+          config = {
+            ...value,
+            apiBaseUrl: baseUrl,
+            auth: {
+              ...value.auth,
+              region: "us-west-2",
+              clientId: "test",
+              enablePasswordFlow: "true",
+            },
+          };
+        },
+      });
+    },
+    { baseUrl: BASE_URL },
+  );
   let mission = {
     missionId: "mission-1",
     scopeType: "coalition",
@@ -71,6 +75,37 @@ test("mission metadata and bounded lifecycle updates retain evidence and hide pa
           username: "alex",
         },
       });
+    if (path === "/api/me/policy-acceptance")
+      return reply({ ok: true, accepted: true });
+    const coalition = {
+      coalitionId: "org-1",
+      name: "Cedar Valley Coalition",
+      coalitionType: "simple",
+    };
+    const membership = { roleKey: "admin", status: "active", permissions: [] };
+    if (path === "/api/coalitions")
+      return reply({ items: [{ coalition, membership }] });
+    if (path === "/api/coalitions/org-1")
+      return reply({ coalition, membership });
+    if (path === "/api/coalitions/org-1/members")
+      return reply({
+        items: [
+          {
+            userId: "manager",
+            displayName: "Alex Rivera",
+            roleKey: "admin",
+            permissions: [],
+          },
+        ],
+      });
+    if (path === "/api/coalitions/org-1/access/catalog")
+      return reply({
+        roles: [
+          { roleKey: "admin", label: "Admin", enabled: true, system: true },
+        ],
+        canManage: true,
+      });
+    if (path === "/api/missions") return reply({ items: [mission] });
     if (path === "/api/missions/mission-1" && request.method() === "PATCH") {
       const body = request.postDataJSON();
       mutations.push(body);
