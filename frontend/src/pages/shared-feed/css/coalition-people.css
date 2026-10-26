@@ -1210,3 +1210,12 @@
   input[type="search"] {
   padding-left: 40px;
 }
+/* The external directory keeps its records separate from app membership. */
+#shared-feed-app .coalition-people__directory-link {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  color: var(--polis-text-muted);
+  font-size: 12px;
+}

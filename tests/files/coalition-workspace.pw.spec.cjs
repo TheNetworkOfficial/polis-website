@@ -67,9 +67,12 @@ async function mockCoalitionWorkspace(page, { role = "admin" } = {}) {
     { roleKey: "member", label: "Member", enabled: true, system: true },
   ];
 
-  await page.route(`${BASE_URL}/api/**`, async (route) => {
+  // Files has its own compiled API origin; keep those requests in this local
+  // fixture as well as the shared shell's runtime-configured API requests.
+  await page.route("**/api/**", async (route) => {
     const request = route.request();
-    const path = new URL(request.url()).pathname;
+    const pathname = new URL(request.url()).pathname;
+    const path = pathname.slice(pathname.indexOf("/api/"));
     const respond = (body, status = 200) =>
       route.fulfill({
         status,
@@ -437,6 +440,7 @@ test("coalition rooms retain the live composer in a channel workspace without ch
   await page.routeWebSocket("**", (socket) => socket.close());
   const roomId = "field-room-demo";
   const messageWrites = [];
+  const proofRequests = [];
   const room = {
     conversationId: roomId,
     title: "field-team",
@@ -458,6 +462,29 @@ test("coalition rooms retain the live composer in a channel workspace without ch
         contentType: "application/json",
         body: JSON.stringify(body),
       });
+    if (path === "/api/messaging/bootstrap")
+      return respond({
+        ok: true,
+        config: { capabilities: { rooms: true, deviceRequestProofV1: true } },
+        settings: {},
+        deviceProofContext: {
+          rootPresent: false,
+          trustEpoch: 1,
+          trustSetVersion: 1,
+        },
+      });
+    // Exercise the production browser's device registration and signing rather
+    // than bypassing the proof transport to make the room fixture initialize.
+    const headers = request.headers();
+    expect(headers.authorization).toMatch(/^Bearer /);
+    expect(headers["x-messaging-device-proof-version"]).toBe("1");
+    expect(headers["x-messaging-device-proof-purpose"]).toBe(
+      `${request.method().toLowerCase()}:${path}`,
+    );
+    expect(headers["x-messaging-device-proof-signature"]).toMatch(
+      /^[A-Za-z0-9_-]+$/,
+    );
+    proofRequests.push(path);
     if (request.method() !== "GET") {
       if (path.endsWith("/devices/register") || path.endsWith("/read"))
         return respond({ ok: true });
@@ -538,7 +565,7 @@ test("coalition rooms retain the live composer in a channel workspace without ch
   await page.goto(`${BASE_URL}${COALITION_PATH}/rooms`);
   await expect(page.locator(".shared-coalition-room-browser")).toBeVisible();
   const channel = page
-    .locator(".shared-coalition-room-channel")
+    .locator(".shared-coalition-room-entry__open")
     .filter({ hasText: "field-team" });
   await expect(channel).toHaveCount(1);
   await channel.click();
@@ -607,6 +634,10 @@ test("coalition rooms retain the live composer in a channel workspace without ch
   await page.goto(`${BASE_URL}/messages?restore=0`);
   await expect(page.locator(".shared-messaging-workspace")).toBeVisible();
   await expect(page.locator(".shared-coalition-chat")).toHaveCount(0);
+  expect(proofRequests).toContain("/api/messaging/devices/register");
+  expect(proofRequests.some((path) => path.endsWith("/server-directory"))).toBe(
+    true,
+  );
   expect(messageWrites).toEqual([]);
   expect(errors).toEqual([]);
 });

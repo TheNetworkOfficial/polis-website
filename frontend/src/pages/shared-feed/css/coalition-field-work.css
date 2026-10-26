@@ -1,0 +1,2680 @@
+/* Approved Field Work presentation, isolated from every legacy workspace. */
+#shared-feed-app .polis-field-work {
+  --background: var(--polis-background);
+  --surface: var(--polis-surface);
+  --raised: var(--polis-surface-raised);
+  --border: var(--polis-border);
+  --primary: var(--polis-primary);
+  --primary-strong: var(--polis-primary-strong);
+  --primary-soft: var(--polis-primary-container);
+  --on-primary: var(--polis-on-primary);
+  --text: var(--polis-text);
+  --muted: var(--polis-text-muted);
+  --subtle: var(--polis-text-subtle);
+  --success: var(--polis-success);
+  --success-soft: var(--polis-success-container);
+  --warning: var(--polis-warning);
+  --warning-soft: var(--polis-tertiary-container);
+  --danger: var(--polis-danger);
+  --danger-soft: var(--polis-danger-container);
+  --line: color-mix(in srgb, var(--polis-border) 62%, transparent);
+  display: grid;
+  gap: 24px;
+  min-width: 0;
+  color: var(--polis-text);
+  font:
+    14px/1.5 "Polis Texting Inter",
+    Inter,
+    "Segoe UI",
+    sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+html[data-polis-theme-resolved="dark"] #shared-feed-app .polis-field-work {
+  --danger: #ef8798;
+}
+#shared-feed-app .polis-field-work [data-fw-main] {
+  display: grid;
+  gap: 24px;
+  min-width: 0;
+}
+#shared-feed-app .polis-field-work > .page-intro,
+#shared-feed-app .polis-field-work [data-fw-main] > .page-intro {
+  margin-top: -12px;
+}
+#shared-feed-app .polis-field-work dialog:not([open]) {
+  display: none;
+}
+#shared-feed-app .polis-field-work *,
+#shared-feed-app .polis-field-work *::before,
+#shared-feed-app .polis-field-work *::after {
+  box-sizing: border-box;
+}
+
+#shared-feed-app .polis-field-work [hidden] {
+  display: none !important;
+}
+
+#shared-feed-app .polis-field-work button,
+#shared-feed-app .polis-field-work input,
+#shared-feed-app .polis-field-work select,
+#shared-feed-app .polis-field-work textarea {
+  font: inherit;
+}
+
+#shared-feed-app .polis-field-work button,
+#shared-feed-app .polis-field-work summary {
+  -webkit-tap-highlight-color: transparent;
+}
+
+#shared-feed-app .polis-field-work button,
+#shared-feed-app .polis-field-work a,
+#shared-feed-app .polis-field-work summary {
+  touch-action: manipulation;
+}
+
+#shared-feed-app .polis-field-work button {
+  cursor: pointer;
+}
+
+#shared-feed-app .polis-field-work button:disabled {
+  cursor: not-allowed;
+}
+
+#shared-feed-app .polis-field-work button:focus-visible,
+#shared-feed-app .polis-field-work a:focus-visible,
+#shared-feed-app .polis-field-work input:focus-visible,
+#shared-feed-app .polis-field-work select:focus-visible,
+#shared-feed-app .polis-field-work textarea:focus-visible,
+#shared-feed-app .polis-field-work summary:focus-visible {
+  outline: 3px solid var(--primary);
+  outline-offset: 3px;
+}
+
+#shared-feed-app .polis-field-work svg {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vertical-align: middle;
+}
+
+#shared-feed-app .polis-field-work a {
+  color: var(--primary);
+}
+
+#shared-feed-app .polis-field-work h1,
+#shared-feed-app .polis-field-work h2,
+#shared-feed-app .polis-field-work h3,
+#shared-feed-app .polis-field-work h4,
+#shared-feed-app .polis-field-work p {
+  margin-top: 0;
+}
+
+#shared-feed-app .polis-field-work h1,
+#shared-feed-app .polis-field-work h2,
+#shared-feed-app .polis-field-work h3,
+#shared-feed-app .polis-field-work h4 {
+  color: var(--text);
+  letter-spacing: -0.035em;
+}
+
+#shared-feed-app .polis-field-work .icon-button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  padding: 8px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--muted);
+}
+
+#shared-feed-app .polis-field-work .icon-button:hover {
+  background: var(--raised);
+  color: var(--text);
+}
+
+#shared-feed-app .polis-field-work .icon-button svg {
+  width: 22px;
+  height: 22px;
+}
+
+#shared-feed-app .polis-field-work .eyebrow {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+#shared-feed-app .polis-field-work h1 {
+  margin: 0;
+  font-size: clamp(27px, 3vw, 36px);
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+#shared-feed-app .polis-field-work .role-pill {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 7px 12px;
+  border: 1px solid var(--shell-line);
+  border-radius: 50px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+#shared-feed-app .polis-field-work .page-intro {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  min-width: 0;
+  margin-top: -12px;
+}
+
+#shared-feed-app .polis-field-work .page-intro p {
+  max-width: 65ch;
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.7;
+}
+
+#shared-feed-app .polis-field-work .primary-button,
+#shared-feed-app .polis-field-work .secondary-button,
+#shared-feed-app .polis-field-work .danger-button,
+#shared-feed-app .polis-field-work .text-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 11px 15px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+  text-align: center;
+  text-decoration: none;
+  white-space: normal;
+}
+
+#shared-feed-app .polis-field-work .primary-button {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--on-primary);
+}
+
+#shared-feed-app .polis-field-work .primary-button:hover:not(:disabled) {
+  border-color: var(--primary-strong);
+  background: var(--primary-strong);
+}
+
+#shared-feed-app .polis-field-work .secondary-button:hover:not(:disabled) {
+  border-color: var(--border);
+  background: var(--raised);
+}
+
+#shared-feed-app .polis-field-work .text-button {
+  border-color: transparent;
+  background: transparent;
+  color: var(--primary);
+}
+
+#shared-feed-app .polis-field-work .text-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--primary-soft) 35%, transparent);
+}
+
+#shared-feed-app .polis-field-work .danger-button {
+  border-color: color-mix(in srgb, var(--danger) 35%, var(--line));
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+#shared-feed-app .polis-field-work .primary-button:disabled,
+#shared-feed-app .polis-field-work .secondary-button:disabled,
+#shared-feed-app .polis-field-work .danger-button:disabled {
+  border-color: var(--line);
+  background: var(--raised);
+  color: var(--subtle);
+}
+
+#shared-feed-app .polis-field-work .page-intro > button,
+#shared-feed-app .polis-field-work .page-intro > .primary-button {
+  flex-shrink: 0;
+}
+
+#shared-feed-app .polis-field-work .view-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 24px;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-bottom: 1px solid var(--line);
+  scrollbar-width: none;
+}
+
+#shared-feed-app .polis-field-work .view-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+#shared-feed-app .polis-field-work .view-tabs button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-width: 0;
+  min-height: 52px;
+  margin: 0 0 -1px;
+  padding: 10px 0 16px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 550;
+  line-height: 1.5;
+  text-align: center;
+  white-space: nowrap;
+}
+
+#shared-feed-app .polis-field-work .view-tabs button:hover {
+  color: var(--primary);
+}
+
+#shared-feed-app .polis-field-work .view-tabs button[aria-selected="true"] {
+  border-bottom-color: var(--primary);
+  color: var(--primary);
+  font-weight: 650;
+}
+
+#shared-feed-app .polis-field-work .count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  min-height: 22px;
+  padding: 1px 6px;
+  border-radius: 7px;
+  background: var(--raised);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+}
+
+#shared-feed-app
+  .polis-field-work
+  .view-tabs
+  button[aria-selected="true"]
+  .count {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+#shared-feed-app .polis-field-work .panel {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: var(--surface);
+}
+
+#shared-feed-app .polis-field-work .panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  min-width: 0;
+  padding: 24px 26px 20px;
+}
+
+#shared-feed-app .polis-field-work .panel-title,
+#shared-feed-app .polis-field-work .panel-header h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: 17px;
+  font-weight: 620;
+  line-height: 1.4;
+  letter-spacing: -0.025em;
+}
+
+#shared-feed-app .polis-field-work .panel-header p {
+  max-width: 68ch;
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.65;
+}
+
+#shared-feed-app .polis-field-work .panel-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: 0;
+}
+
+#shared-feed-app .polis-field-work .filters {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(130px, 0.7fr) minmax(
+      130px,
+      0.7fr
+    );
+  align-items: end;
+  gap: 14px 16px;
+  min-width: 0;
+  padding: 0 26px 20px;
+}
+
+#shared-feed-app .polis-field-work .field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 550;
+  line-height: 1.5;
+}
+
+#shared-feed-app
+  .polis-field-work
+  .field
+  input:not([type="checkbox"]):not([type="radio"]),
+#shared-feed-app .polis-field-work .field select,
+#shared-feed-app .polis-field-work .field textarea {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 46px;
+  margin: 0;
+  padding: 11px 13px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 450;
+  line-height: 1.5;
+}
+
+#shared-feed-app .polis-field-work .filters .field input,
+#shared-feed-app .polis-field-work .filters .field select {
+  background: var(--background);
+}
+
+#shared-feed-app .polis-field-work input::placeholder,
+#shared-feed-app .polis-field-work textarea::placeholder {
+  color: var(--subtle);
+  opacity: 1;
+}
+
+#shared-feed-app .polis-field-work .field textarea {
+  min-height: 108px;
+  resize: vertical;
+}
+
+#shared-feed-app .polis-field-work .field small,
+#shared-feed-app .polis-field-work .field .help-text {
+  color: var(--subtle);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.6;
+}
+
+#shared-feed-app .polis-field-work .search-field,
+#shared-feed-app .polis-field-work .search-field > div,
+#shared-feed-app .polis-field-work .search-input {
+  position: relative;
+  min-width: 0;
+}
+
+#shared-feed-app .polis-field-work .search-input {
+  display: block;
+  width: 100%;
+}
+
+#shared-feed-app .polis-field-work .search-field svg {
+  position: absolute;
+  z-index: 1;
+  bottom: 14px;
+  left: 13px;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+#shared-feed-app
+  .polis-field-work
+  .search-field
+  input:not([type="checkbox"]):not([type="radio"]) {
+  padding-left: 40px;
+}
+
+#shared-feed-app .polis-field-work .filter-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  min-height: 36px;
+  padding: 0 26px 20px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 450;
+  line-height: 1.6;
+}
+
+#shared-feed-app .polis-field-work .filter-summary .text-button {
+  min-height: 36px;
+  padding: 6px 0 6px 12px;
+  font-size: 12px;
+  font-weight: 550;
+}
+
+#shared-feed-app .polis-field-work .segmented,
+#shared-feed-app .polis-field-work .view-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--background);
+}
+
+#shared-feed-app .polis-field-work .segmented button,
+#shared-feed-app .polis-field-work .view-toggle button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 34px;
+  min-height: 32px;
+  padding: 6px 9px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 550;
+}
+
+#shared-feed-app .polis-field-work .segmented button[aria-pressed="true"],
+#shared-feed-app .polis-field-work .view-toggle button[aria-pressed="true"] {
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--primary);
+}
+
+#shared-feed-app .polis-field-work .status-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  justify-self: start;
+  gap: 6px;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--background);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 550;
+  line-height: 1.45;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+#shared-feed-app .polis-field-work .status-badge[data-status="active"] {
+  border-color: color-mix(in srgb, var(--primary) 24%, transparent);
+  background: color-mix(in srgb, var(--primary-soft) 55%, var(--surface));
+  color: var(--primary);
+}
+
+#shared-feed-app .polis-field-work .status-badge[data-status="submitted"],
+#shared-feed-app .polis-field-work .status-badge[data-status="changes"] {
+  border-color: color-mix(in srgb, var(--warning) 24%, transparent);
+  background: color-mix(in srgb, var(--warning-soft) 55%, var(--surface));
+  color: var(--warning);
+}
+
+#shared-feed-app .polis-field-work .status-badge[data-status="blocked"] {
+  border-color: color-mix(in srgb, var(--danger) 24%, transparent);
+  background: color-mix(in srgb, var(--danger-soft) 60%, var(--surface));
+  color: var(--danger);
+}
+
+#shared-feed-app .polis-field-work .status-badge[data-status="completed"] {
+  border-color: color-mix(in srgb, var(--success) 24%, transparent);
+  background: color-mix(in srgb, var(--success-soft) 65%, var(--surface));
+  color: var(--success);
+}
+
+#shared-feed-app .polis-field-work .person {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 450;
+  line-height: 1.5;
+}
+
+#shared-feed-app .polis-field-work .person > span:not(.avatar) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+#shared-feed-app .polis-field-work .person small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+#shared-feed-app .polis-field-work .avatar {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+#shared-feed-app .polis-field-work .overdue {
+  color: var(--danger);
+}
+
+#shared-feed-app .polis-field-work .progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 450;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+#shared-feed-app .polis-field-work .progress > svg {
+  width: 15px;
+  height: 15px;
+}
+
+#shared-feed-app .polis-field-work .progress strong {
+  font-weight: 550;
+}
+
+#shared-feed-app .polis-field-work .progress-track,
+#shared-feed-app .polis-field-work .progress .track {
+  width: 100%;
+  max-width: 90px;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--raised);
+}
+
+#shared-feed-app .polis-field-work .progress-track > span,
+#shared-feed-app .polis-field-work .progress .track > span,
+#shared-feed-app .polis-field-work .progress .bar {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--primary);
+}
+
+#shared-feed-app .polis-field-work .progress progress {
+  width: 100%;
+  max-width: 90px;
+  height: 4px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 8px;
+  background: var(--raised);
+  accent-color: var(--primary);
+}
+
+#shared-feed-app .polis-field-work .progress progress::-webkit-progress-bar {
+  border-radius: 8px;
+  background: var(--raised);
+}
+
+#shared-feed-app .polis-field-work .progress progress::-webkit-progress-value {
+  border-radius: 8px;
+  background: var(--primary);
+}
+
+#shared-feed-app .polis-field-work .row-chevron {
+  justify-self: end;
+  width: 17px;
+  height: 17px;
+  color: var(--muted);
+  transition: transform 140ms ease;
+}
+
+#shared-feed-app .polis-field-work .empty-state {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 10px;
+  min-height: 220px;
+  padding: 40px 24px;
+  color: var(--muted);
+  text-align: center;
+}
+
+#shared-feed-app .polis-field-work .empty-state h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 620;
+}
+
+#shared-feed-app .polis-field-work .empty-state p {
+  max-width: 46ch;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+#shared-feed-app .polis-field-work .empty-state > svg {
+  width: 36px;
+  height: 36px;
+  margin-bottom: 4px;
+  color: var(--subtle);
+}
+
+#shared-feed-app .polis-field-work .people-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  min-width: 0;
+  padding: 0 26px 26px;
+}
+
+#shared-feed-app .polis-field-work dialog.drawer,
+#shared-feed-app .polis-field-work dialog.create-dialog {
+  padding: 0;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 24px 80px rgb(0 0 0 / 25%);
+}
+
+#shared-feed-app .polis-field-work dialog.drawer::backdrop,
+#shared-feed-app .polis-field-work dialog.create-dialog::backdrop {
+  background: rgb(3 9 20 / 55%);
+  backdrop-filter: blur(3px);
+}
+
+#shared-feed-app .polis-field-work dialog.drawer {
+  position: fixed;
+  inset: 0 0 0 auto;
+  width: min(540px, 100vw);
+  max-width: 100vw;
+  height: 100dvh;
+  max-height: 100dvh;
+  margin: 0;
+  border-top: 0;
+  border-right: 0;
+  border-bottom: 0;
+  border-radius: 0;
+}
+
+#shared-feed-app .polis-field-work dialog.drawer[open],
+#shared-feed-app .polis-field-work dialog.create-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+#shared-feed-app .polis-field-work .dialog-header {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  min-width: 0;
+  padding: 24px 26px;
+  border-bottom: 1px solid var(--line);
+}
+
+#shared-feed-app .polis-field-work .dialog-header > div {
+  min-width: 0;
+}
+
+#shared-feed-app .polis-field-work .dialog-header h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: 24px;
+  font-weight: 650;
+  line-height: 1.3;
+  letter-spacing: -0.035em;
+  overflow-wrap: anywhere;
+}
+
+#shared-feed-app .polis-field-work .dialog-header p {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+#shared-feed-app .polis-field-work .dialog-header .icon-button {
+  margin-top: -4px;
+  margin-right: -6px;
+}
+
+#shared-feed-app .polis-field-work .dialog-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 24px;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 24px 26px;
+  overscroll-behavior: contain;
+}
+
+#shared-feed-app .polis-field-work .dialog-body > p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+#shared-feed-app .polis-field-work .dialog-footer {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 18px 26px;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+
+#shared-feed-app .polis-field-work .dialog-footer > small {
+  margin-right: auto;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+#shared-feed-app .polis-field-work .detail-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+
+#shared-feed-app .polis-field-work .detail-meta > div {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-width: 0;
+  padding: 13px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--background);
+}
+
+#shared-feed-app .polis-field-work .detail-meta dt,
+#shared-feed-app .polis-field-work .detail-meta label,
+#shared-feed-app .polis-field-work .detail-meta small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 450;
+  line-height: 1.5;
+}
+
+#shared-feed-app .polis-field-work .detail-meta dd,
+#shared-feed-app .polis-field-work .detail-meta strong {
+  min-width: 0;
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 550;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+#shared-feed-app .polis-field-work .detail-section {
+  min-width: 0;
+}
+
+#shared-feed-app .polis-field-work .detail-section h3 {
+  margin: 0 0 12px;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 620;
+  line-height: 1.4;
+  letter-spacing: -0.025em;
+}
+
+#shared-feed-app .polis-field-work .detail-section p {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.75;
+}
+
+#shared-feed-app .polis-field-work .detail-section p:last-child {
+  margin-bottom: 0;
+}
+
+#shared-feed-app .polis-field-work .checklist {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+#shared-feed-app .polis-field-work .check-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 46px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+#shared-feed-app .polis-field-work .check-item:last-child {
+  border-bottom: 0;
+}
+
+#shared-feed-app .polis-field-work input[type="checkbox"],
+#shared-feed-app .polis-field-work input[type="radio"] {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--primary);
+}
+
+#shared-feed-app .polis-field-work .check-item input:checked + span,
+#shared-feed-app .polis-field-work .check-item.done > span {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+#shared-feed-app .polis-field-work .dialog-tabs {
+  display: flex;
+  gap: 22px;
+  min-width: 0;
+  border-bottom: 1px solid var(--line);
+}
+
+#shared-feed-app .polis-field-work .dialog-tabs button {
+  min-height: 42px;
+  margin: 0 0 -1px;
+  padding: 0 0 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 550;
+}
+
+#shared-feed-app .polis-field-work .dialog-tabs button[aria-selected="true"] {
+  border-bottom-color: var(--primary);
+  color: var(--primary);
+  font-weight: 650;
+}
+
+#shared-feed-app .polis-field-work .note-box {
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--primary);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--primary-soft) 20%, var(--surface));
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+#shared-feed-app .polis-field-work .note-box strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+#shared-feed-app .polis-field-work .note-box p {
+  margin: 5px 0 0;
+}
+
+#shared-feed-app .polis-field-work dialog.create-dialog {
+  width: min(700px, calc(100vw - 32px));
+  max-width: calc(100vw - 32px);
+  max-height: calc(100dvh - 48px);
+  margin: auto;
+  overflow: hidden;
+  border-radius: 24px;
+}
+
+#shared-feed-app .polis-field-work .create-dialog > form {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+#shared-feed-app .polis-field-work .form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  min-width: 0;
+}
+
+#shared-feed-app .polis-field-work .full-width {
+  grid-column: 1 / -1;
+}
+
+#shared-feed-app .polis-field-work .dialog-body.form-grid {
+  display: grid;
+  align-content: start;
+}
+
+#shared-feed-app .polis-field-work .advanced-settings {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--background);
+}
+
+#shared-feed-app .polis-field-work .advanced-settings > summary {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 550;
+  cursor: pointer;
+}
+
+#shared-feed-app .polis-field-work .advanced-settings[open] > summary {
+  margin-bottom: 18px;
+}
+
+#shared-feed-app .polis-field-work .advanced-settings .field input,
+#shared-feed-app .polis-field-work .advanced-settings .field select {
+  background: var(--surface);
+}
+
+#shared-feed-app .polis-field-work .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  padding: 0;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
+  border: 0;
+}
+
+#shared-feed-app .polis-field-work .toast {
+  position: fixed;
+  z-index: 1200;
+  bottom: 24px;
+  left: 50%;
+  width: max-content;
+  max-width: min(500px, calc(100vw - 32px));
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 10px 32px rgb(3 9 20 / 16%);
+  font-size: 13px;
+  line-height: 1.65;
+  text-align: center;
+  transform: translateX(-50%);
+}
+
+#shared-feed-app .polis-field-work .section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+#shared-feed-app .polis-field-work .section-heading h3 {
+  margin-bottom: 0;
+}
+
+#shared-feed-app .polis-field-work .section-heading > span {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+#shared-feed-app .polis-field-work .dialog-body > h2 {
+  margin: 0 0 -10px;
+  color: var(--text);
+  font-size: 24px;
+  font-weight: 650;
+  line-height: 1.3;
+  letter-spacing: -0.035em;
+}
+
+#shared-feed-app .polis-field-work .drawer .dialog-header {
+  align-items: center;
+}
+
+#shared-feed-app .polis-field-work .drawer .dialog-header > .eyebrow {
+  margin: 0;
+}
+
+#shared-feed-app .polis-field-work .detail-badges {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+#shared-feed-app
+  .polis-field-work
+  .detail-meta
+  > div
+  > span:first-child:not(.person) {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 450;
+}
+
+#shared-feed-app .polis-field-work .note-box.warning {
+  border-left-color: var(--warning);
+  background: color-mix(in srgb, var(--warning-soft) 24%, var(--surface));
+}
+
+#shared-feed-app .polis-field-work .note-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+#shared-feed-app .polis-field-work .footer-note {
+  width: 100%;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.65;
+  text-align: center;
+}
+
+#shared-feed-app .polis-field-work .advanced-settings > p {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+#shared-feed-app .polis-field-work .advanced-settings > .field + .field {
+  margin-top: 16px;
+}
+
+@media (max-width: 1280px) {
+  #shared-feed-app .polis-field-work .people-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  #shared-feed-app .polis-field-work .role-pill {
+    min-height: 30px;
+    padding: 6px 9px;
+    font-size: 11px;
+  }
+
+  #shared-feed-app .polis-field-work .page-intro {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+    margin-top: -10px;
+  }
+
+  #shared-feed-app .polis-field-work .page-intro > button,
+  #shared-feed-app .polis-field-work .page-intro > .primary-button {
+    width: 100%;
+  }
+
+  #shared-feed-app .polis-field-work .view-tabs {
+    gap: 20px;
+    scroll-snap-type: x proximity;
+  }
+
+  #shared-feed-app .polis-field-work .view-tabs button {
+    gap: 6px;
+    padding-bottom: 12px;
+    font-size: 12px;
+    scroll-snap-align: start;
+  }
+
+  #shared-feed-app .polis-field-work .count {
+    min-width: 20px;
+    min-height: 19px;
+    padding: 0 5px;
+    font-size: 10px;
+  }
+
+  #shared-feed-app .polis-field-work .panel {
+    border-radius: 20px;
+  }
+
+  #shared-feed-app .polis-field-work .panel-header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 16px;
+    padding: 20px;
+  }
+
+  #shared-feed-app .polis-field-work .panel-toolbar {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  #shared-feed-app .polis-field-work .filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px 12px;
+    padding: 0 20px 16px;
+  }
+
+  #shared-feed-app .polis-field-work .filters > :first-child {
+    grid-column: 1 / -1;
+  }
+
+  #shared-feed-app
+    .polis-field-work
+    .field
+    input:not([type="checkbox"]):not([type="radio"]),
+  #shared-feed-app .polis-field-work .field select,
+  #shared-feed-app .polis-field-work .field textarea {
+    font-size: 16px;
+  }
+
+  #shared-feed-app .polis-field-work .filter-summary {
+    align-items: flex-start;
+    gap: 8px;
+    padding: 0 20px 16px;
+    font-size: 11px;
+  }
+
+  #shared-feed-app .polis-field-work .filter-summary .text-button {
+    font-size: 11px;
+  }
+
+  #shared-feed-app .polis-field-work .people-grid {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 0 20px 20px;
+  }
+
+  #shared-feed-app .polis-field-work dialog.drawer {
+    width: 100vw;
+    border-left: 0;
+  }
+
+  #shared-feed-app .polis-field-work .dialog-header {
+    gap: 12px;
+    padding: 22px 20px;
+  }
+
+  #shared-feed-app .polis-field-work .dialog-header h2 {
+    font-size: 22px;
+  }
+
+  #shared-feed-app .polis-field-work .dialog-body > h2 {
+    font-size: 22px;
+  }
+
+  #shared-feed-app .polis-field-work .dialog-body {
+    gap: 22px;
+    padding: 22px 20px;
+  }
+
+  #shared-feed-app .polis-field-work .dialog-footer {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 16px 20px;
+  }
+
+  #shared-feed-app .polis-field-work .dialog-footer > button {
+    flex: 1 1 auto;
+  }
+
+  #shared-feed-app .polis-field-work .dialog-footer > small {
+    width: 100%;
+  }
+
+  #shared-feed-app .polis-field-work .detail-meta {
+    gap: 10px;
+  }
+
+  #shared-feed-app .polis-field-work .detail-meta > div {
+    padding: 12px;
+  }
+
+  #shared-feed-app .polis-field-work dialog.create-dialog {
+    width: calc(100vw - 24px);
+    max-width: calc(100vw - 24px);
+    max-height: calc(100dvh - 24px);
+    border-radius: 20px;
+  }
+
+  #shared-feed-app .polis-field-work .form-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #shared-feed-app .polis-field-work *,
+  #shared-feed-app .polis-field-work *::before,
+  #shared-feed-app .polis-field-work *::after {
+    scroll-behavior: auto !important;
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+@media (max-width: 760px) {
+  #shared-feed-app .polis-field-work {
+    gap: 20px;
+  }
+}
+
+#shared-feed-app .polis-field-work .note-box.danger {
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--line));
+  background: color-mix(in srgb, var(--danger-soft) 45%, var(--surface));
+  color: var(--danger);
+}
+
+#shared-feed-app .polis-field-work .drawer .shared-form {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+#shared-feed-app .polis-field-work .drawer form label,
+#shared-feed-app .polis-field-work .drawer .shared-form > label {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+#shared-feed-app .polis-field-work .drawer form input:not([type="hidden"]),
+#shared-feed-app .polis-field-work .drawer form select,
+#shared-feed-app .polis-field-work .drawer form textarea {
+  width: 100%;
+  min-width: 0;
+  min-height: 46px;
+  margin: 0;
+  padding: 11px 13px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+#shared-feed-app .polis-field-work .drawer form textarea {
+  resize: vertical;
+}
+
+#shared-feed-app .polis-field-work .drawer .shared-feed-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  max-width: 100%;
+  margin: 0;
+  padding: 11px 15px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+  text-align: center;
+  white-space: normal;
+}
+
+#shared-feed-app .polis-field-work .drawer .shared-feed-chip--primary {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--on-primary);
+}
+
+#shared-feed-app .polis-field-work .drawer .shared-feed-chip:disabled {
+  border-color: var(--line);
+  background: var(--raised);
+  color: var(--subtle);
+}
+
+@media (max-width: 760px) {
+  #shared-feed-app .polis-field-work .drawer form input:not([type="hidden"]),
+  #shared-feed-app .polis-field-work .drawer form select,
+  #shared-feed-app .polis-field-work .drawer form textarea {
+    font-size: 16px;
+  }
+}
+
+/* Geographic work, territories, and assignments use the approved mockup layout. */
+#shared-feed-app .polis-field-work .field-page {
+  display: grid;
+  gap: 24px;
+  min-width: 0;
+}
+#shared-feed-app .polis-field-work .field-page > .page-intro {
+  margin-top: -12px;
+}
+#shared-feed-app .polis-field-work .field-toolbar {
+  display: grid;
+  grid-template-columns:
+    minmax(220px, 1.7fr) minmax(150px, 0.8fr) minmax(130px, 0.7fr)
+    auto;
+  align-items: end;
+  gap: 14px 16px;
+  padding: 0 26px 22px;
+  min-width: 0;
+}
+#shared-feed-app .polis-field-work .field-toolbar .field input,
+#shared-feed-app .polis-field-work .field-toolbar .field select {
+  background: var(--background);
+}
+#shared-feed-app .polis-field-work .field-toolbar .view-toggle,
+#shared-feed-app .polis-field-work .field-toolbar .segmented-control {
+  align-self: end;
+}
+#shared-feed-app .polis-field-work .field-toolbar-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 0 26px 22px;
+  color: var(--muted);
+  font-size: 12px;
+}
+#shared-feed-app .polis-field-work .field-context {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  padding: 16px 26px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.65;
+}
+#shared-feed-app .polis-field-work .field-context p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.65;
+}
+#shared-feed-app .polis-field-work .field-context strong {
+  color: var(--text);
+  font-weight: 550;
+}
+#shared-feed-app .polis-field-work .field-context svg {
+  width: 16px;
+  height: 16px;
+}
+#shared-feed-app .polis-field-work .field-context .note-actions {
+  margin: 0;
+}
+#shared-feed-app .polis-field-work .field-muted {
+  color: var(--muted);
+}
+#shared-feed-app .polis-field-work .field-subtle {
+  color: var(--subtle);
+}
+#shared-feed-app .polis-field-work .field-stack {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+}
+
+#shared-feed-app .polis-field-work .map-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  min-width: 0;
+  border-top: 1px solid var(--line);
+}
+#shared-feed-app .polis-field-work .field-map {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  isolation: isolate;
+  background: color-mix(in srgb, var(--background) 78%, var(--surface));
+}
+#shared-feed-app .polis-field-work .map-surface {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  height: 640px;
+  overflow: hidden;
+}
+
+#shared-feed-app .polis-field-work [data-fw-map-mount],
+#shared-feed-app .polis-field-work .field-map-canvas,
+#shared-feed-app .polis-field-work .field-builder-canvas {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+#shared-feed-app .polis-field-work .field-map-canvas,
+#shared-feed-app .polis-field-work .field-builder-canvas {
+  background: var(--background);
+  font: inherit;
+}
+
+#shared-feed-app .polis-field-work .maplibregl-canvas {
+  outline-offset: -3px;
+}
+
+#shared-feed-app .polis-field-work .maplibregl-ctrl-attrib {
+  border-radius: 5px 0 0;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.65;
+}
+
+#shared-feed-app .polis-field-work .maplibregl-ctrl-attrib a {
+  color: var(--muted);
+}
+
+#shared-feed-app .polis-field-work .maplibregl-ctrl-attrib a:hover {
+  color: var(--text);
+}
+
+#shared-feed-app .polis-field-work .field-voter-marker {
+  width: 14px;
+  height: 14px;
+  min-width: 14px;
+  min-height: 14px;
+  margin: 0;
+  padding: 0;
+  border: 2px solid var(--surface);
+  border-radius: 50%;
+  background: var(--primary);
+  box-shadow: 0 1px 5px rgb(3 9 20 / 24%);
+  cursor: pointer;
+}
+
+#shared-feed-app
+  .polis-field-work
+  .field-voter-marker[data-status="remaining"] {
+  background: var(--danger);
+}
+
+#shared-feed-app .polis-field-work .field-voter-marker[data-status="reserved"] {
+  background: var(--success);
+}
+
+#shared-feed-app .polis-field-work .field-voter-marker:hover,
+#shared-feed-app .polis-field-work .field-voter-marker.is-selected,
+#shared-feed-app .polis-field-work .field-voter-marker[aria-pressed="true"] {
+  border-color: var(--text);
+}
+
+#shared-feed-app .polis-field-work .field-cluster-marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  min-height: 34px;
+  margin: 0;
+  padding: 0;
+  border: 2px solid var(--surface);
+  border-radius: 50%;
+  background: var(--primary-soft);
+  color: var(--primary);
+  box-shadow: 0 1px 7px rgb(3 9 20 / 18%);
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+#shared-feed-app .polis-field-work .field-boundary-handle {
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  min-height: 16px;
+  margin: 0;
+  padding: 0;
+  border: 3px solid var(--surface);
+  border-radius: 50%;
+  background: var(--primary);
+  box-shadow: 0 0 0 1px var(--primary);
+  cursor: grab;
+  touch-action: none;
+}
+
+#shared-feed-app .polis-field-work .field-boundary-handle:active {
+  cursor: grabbing;
+}
+
+#shared-feed-app .polis-field-work .field-territory-label {
+  max-width: 180px;
+  overflow: hidden;
+  padding: 2px 5px;
+  border: 0;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--surface) 85%, transparent);
+  color: var(--primary);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.5;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+#shared-feed-app .polis-field-work .field-map-message {
+  position: absolute;
+  z-index: 3;
+  top: 18px;
+  left: 18px;
+  display: grid;
+  gap: 10px;
+  max-width: min(370px, calc(100% - 96px));
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--muted);
+  box-shadow: 0 4px 16px rgb(3 9 20 / 8%);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+#shared-feed-app .polis-field-work .field-map-message p {
+  margin: 0;
+}
+
+#shared-feed-app .polis-field-work .field-map-message strong {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+#shared-feed-app .polis-field-work .field-map-retry {
+  justify-self: start;
+}
+#shared-feed-app .polis-field-work .map-surface > svg,
+#shared-feed-app .polis-field-work .field-map > svg,
+#shared-feed-app .polis-field-work .field-builder-map > svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  fill: none;
+  stroke: none;
+}
+#shared-feed-app .polis-field-work .field-map .map-land,
+#shared-feed-app .polis-field-work .field-builder-map .map-land,
+#shared-feed-app .polis-field-work .territory-mini-map .map-land {
+  fill: color-mix(in srgb, var(--surface) 45%, var(--background));
+}
+#shared-feed-app .polis-field-work .field-map .map-water,
+#shared-feed-app .polis-field-work .field-builder-map .map-water,
+#shared-feed-app .polis-field-work .territory-mini-map .map-water {
+  fill: color-mix(in srgb, var(--primary-soft) 65%, var(--background));
+  stroke: color-mix(in srgb, var(--primary) 16%, transparent);
+  stroke-width: 1;
+}
+#shared-feed-app .polis-field-work .field-map .map-park,
+#shared-feed-app .polis-field-work .field-builder-map .map-park,
+#shared-feed-app .polis-field-work .territory-mini-map .map-park {
+  fill: color-mix(in srgb, var(--success-soft) 60%, var(--background));
+  stroke: none;
+}
+#shared-feed-app .polis-field-work .field-map .map-block,
+#shared-feed-app .polis-field-work .field-builder-map .map-block,
+#shared-feed-app .polis-field-work .territory-mini-map .map-block {
+  fill: color-mix(in srgb, var(--border) 12%, var(--background));
+  stroke: color-mix(in srgb, var(--line) 40%, transparent);
+  stroke-width: 1;
+}
+#shared-feed-app .polis-field-work .field-map .map-road,
+#shared-feed-app .polis-field-work .field-builder-map .map-road,
+#shared-feed-app .polis-field-work .territory-mini-map .map-road {
+  fill: none;
+  stroke: color-mix(in srgb, var(--border) 68%, var(--background));
+  stroke-width: 11;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+#shared-feed-app .polis-field-work .field-map .map-street,
+#shared-feed-app .polis-field-work .field-builder-map .map-street,
+#shared-feed-app .polis-field-work .territory-mini-map .map-street {
+  fill: none;
+  stroke: color-mix(in srgb, var(--surface) 82%, var(--border));
+  stroke-width: 5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+#shared-feed-app .polis-field-work .field-map .map-street-outline,
+#shared-feed-app .polis-field-work .field-builder-map .map-street-outline,
+#shared-feed-app .polis-field-work .territory-mini-map .map-street-outline {
+  fill: none;
+  stroke: color-mix(in srgb, var(--line) 80%, var(--background));
+  stroke-width: 8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+#shared-feed-app .polis-field-work .field-map .map-road-center,
+#shared-feed-app .polis-field-work .field-builder-map .map-road-center,
+#shared-feed-app .polis-field-work .territory-mini-map .map-road-center {
+  fill: none;
+  stroke: color-mix(in srgb, var(--surface) 85%, var(--border));
+  stroke-width: 7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+#shared-feed-app .polis-field-work .field-map .map-label,
+#shared-feed-app .polis-field-work .field-builder-map .map-label,
+#shared-feed-app .polis-field-work .territory-mini-map .map-label {
+  fill: var(--muted);
+  stroke: none;
+  font-size: 12px;
+  font-weight: 450;
+  letter-spacing: 0.025em;
+  paint-order: stroke;
+}
+#shared-feed-app .polis-field-work .field-map .map-place-label,
+#shared-feed-app .polis-field-work .field-builder-map .map-place-label,
+#shared-feed-app .polis-field-work .territory-mini-map .map-place-label {
+  fill: var(--subtle);
+  stroke: none;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+#shared-feed-app .polis-field-work .field-map .map-territory-label,
+#shared-feed-app .polis-field-work .field-builder-map .map-territory-label,
+#shared-feed-app .polis-field-work .territory-mini-map .map-territory-label {
+  fill: var(--primary);
+  stroke: none;
+  font-size: 14px;
+  font-weight: 650;
+}
+#shared-feed-app .polis-field-work .territory-shape {
+  fill: color-mix(in srgb, var(--primary) 10%, transparent);
+  stroke: color-mix(in srgb, var(--primary) 65%, var(--border));
+  stroke-width: 2;
+  stroke-dasharray: 6 4;
+  vector-effect: non-scaling-stroke;
+  transition:
+    fill 0.15s,
+    stroke 0.15s;
+  cursor: pointer;
+}
+#shared-feed-app .polis-field-work .territory-shape:hover {
+  fill: color-mix(in srgb, var(--primary) 18%, transparent);
+}
+#shared-feed-app .polis-field-work .territory-shape.is-selected,
+#shared-feed-app .polis-field-work .territory-shape[aria-pressed="true"] {
+  fill: color-mix(in srgb, var(--primary) 19%, transparent);
+  stroke: var(--primary);
+  stroke-width: 3;
+  stroke-dasharray: none;
+}
+#shared-feed-app .polis-field-work .territory-shape.is-assigned {
+  fill: color-mix(in srgb, var(--success) 10%, transparent);
+  stroke: color-mix(in srgb, var(--success) 65%, var(--border));
+}
+#shared-feed-app .polis-field-work .territory-shape.is-outside {
+  fill: color-mix(in srgb, var(--subtle) 5%, transparent);
+  stroke: var(--subtle);
+  opacity: 0.45;
+  cursor: default;
+}
+#shared-feed-app .polis-field-work .voter-pin {
+  fill: var(--primary);
+  stroke: var(--surface);
+  stroke-width: 2;
+  cursor: pointer;
+  vector-effect: non-scaling-stroke;
+}
+#shared-feed-app .polis-field-work .voter-pin:hover,
+#shared-feed-app .polis-field-work .voter-pin.is-selected {
+  stroke: var(--text);
+  stroke-width: 3;
+}
+#shared-feed-app .polis-field-work .voter-pin[data-status="reserved"] {
+  fill: var(--success);
+}
+#shared-feed-app .polis-field-work .voter-pin[data-status="remaining"] {
+  fill: var(--danger);
+}
+#shared-feed-app .polis-field-work .voter-pin.is-outside {
+  fill: var(--subtle);
+  opacity: 0.5;
+  cursor: default;
+}
+#shared-feed-app .polis-field-work .map-controls {
+  position: absolute;
+  z-index: 2;
+  top: 18px;
+  right: 18px;
+  display: grid;
+  gap: 6px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 4px 16px rgb(3 9 20 / 8%);
+}
+#shared-feed-app .polis-field-work .map-controls button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  padding: 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+}
+#shared-feed-app .polis-field-work .map-controls button:hover {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+#shared-feed-app .polis-field-work .map-controls svg {
+  width: 18px;
+  height: 18px;
+}
+#shared-feed-app .polis-field-work .map-legend {
+  position: absolute;
+  z-index: 2;
+  bottom: 18px;
+  left: 18px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  max-width: calc(100% - 36px);
+  padding: 10px 13px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 11px;
+}
+#shared-feed-app .polis-field-work .map-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+#shared-feed-app .polis-field-work .map-legend i,
+#shared-feed-app .polis-field-work .map-key-dot {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--primary);
+}
+#shared-feed-app .polis-field-work .map-legend [data-status="reserved"],
+#shared-feed-app .polis-field-work .map-key-dot[data-status="reserved"] {
+  background: var(--success);
+}
+#shared-feed-app .polis-field-work .map-legend [data-status="remaining"],
+#shared-feed-app .polis-field-work .map-key-dot[data-status="remaining"] {
+  background: var(--danger);
+}
+#shared-feed-app .polis-field-work .map-attribution {
+  position: absolute;
+  right: 12px;
+  bottom: 8px;
+  color: var(--subtle);
+  font-size: 9px;
+  pointer-events: none;
+}
+#shared-feed-app .polis-field-work .map-side-list {
+  min-width: 0;
+  max-height: 640px;
+  overflow-y: auto;
+  border-left: 1px solid var(--line);
+  background: var(--surface);
+  overscroll-behavior: contain;
+}
+#shared-feed-app .polis-field-work .map-side-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 20px;
+  border-bottom: 1px solid var(--line);
+}
+#shared-feed-app .polis-field-work .map-side-heading h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+#shared-feed-app .polis-field-work .map-side-heading p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+#shared-feed-app .polis-field-work .map-record {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+  min-height: 96px;
+  margin: 0;
+  padding: 18px 20px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+#shared-feed-app .polis-field-work .map-record:last-child {
+  border-bottom: 0;
+}
+#shared-feed-app .polis-field-work .map-record:hover,
+#shared-feed-app .polis-field-work .map-record.is-selected,
+#shared-feed-app .polis-field-work .map-record[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--primary-soft) 50%, var(--surface));
+}
+#shared-feed-app .polis-field-work .map-record.is-selected,
+#shared-feed-app .polis-field-work .map-record[aria-pressed="true"] {
+  box-shadow: inset 3px 0 var(--primary);
+}
+#shared-feed-app .polis-field-work .map-record > div,
+#shared-feed-app .polis-field-work .map-record .map-record-copy {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+#shared-feed-app .polis-field-work .map-record h3,
+#shared-feed-app .polis-field-work .map-record strong {
+  display: block;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+#shared-feed-app .polis-field-work .map-record p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.65;
+}
+#shared-feed-app .polis-field-work .map-record small {
+  display: block;
+  margin-top: 7px;
+  color: var(--subtle);
+  font-size: 11px;
+}
+#shared-feed-app .polis-field-work .map-record > svg {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  color: var(--subtle);
+}
+#shared-feed-app .polis-field-work .map-record .field-status {
+  margin-top: 9px;
+}
+#shared-feed-app .polis-field-work .map-record .map-key-dot {
+  margin-top: 6px;
+}
+
+#shared-feed-app .polis-field-work .field-table {
+  width: 100%;
+  min-width: 0;
+  border-collapse: collapse;
+  table-layout: fixed;
+  text-align: left;
+}
+#shared-feed-app .polis-field-work .field-table th {
+  padding: 13px 26px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--background) 74%, var(--surface));
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+#shared-feed-app .polis-field-work .field-table td {
+  padding: 20px 26px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+#shared-feed-app .polis-field-work .field-table tr:last-child td {
+  border-bottom: 0;
+}
+#shared-feed-app .polis-field-work .field-table th:first-child,
+#shared-feed-app .polis-field-work .field-table td:first-child {
+  width: 32%;
+}
+#shared-feed-app .polis-field-work .field-table th:last-child,
+#shared-feed-app .polis-field-work .field-table td:last-child {
+  width: 46px;
+  padding-left: 0;
+}
+#shared-feed-app .polis-field-work .field-table tr[data-action],
+#shared-feed-app .polis-field-work .field-table tr[tabindex] {
+  cursor: pointer;
+}
+#shared-feed-app .polis-field-work .field-table tbody tr:hover,
+#shared-feed-app .polis-field-work .field-table tr.is-selected {
+  background: color-mix(in srgb, var(--primary-soft) 35%, var(--surface));
+}
+#shared-feed-app .polis-field-work .field-table strong {
+  display: block;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+#shared-feed-app .polis-field-work .field-table small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 11px;
+}
+#shared-feed-app .polis-field-work .field-table button.text-button {
+  display: grid;
+  justify-content: start;
+  justify-items: start;
+  gap: 0;
+  text-align: left;
+}
+#shared-feed-app .polis-field-work .territory-grid,
+#shared-feed-app .polis-field-work .assignment-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  padding: 0 26px 26px;
+}
+#shared-feed-app .polis-field-work .territory-card,
+#shared-feed-app .polis-field-work .assignment-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface);
+}
+#shared-feed-app .polis-field-work .territory-card:hover,
+#shared-feed-app .polis-field-work .assignment-card:hover {
+  border-color: color-mix(in srgb, var(--primary) 55%, var(--border));
+}
+#shared-feed-app .polis-field-work .territory-card h3,
+#shared-feed-app .polis-field-work .assignment-card h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 620;
+  line-height: 1.5;
+  letter-spacing: -0.02em;
+}
+#shared-feed-app .polis-field-work .territory-card p,
+#shared-feed-app .polis-field-work .assignment-card p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.65;
+}
+#shared-feed-app .polis-field-work .territory-card-header,
+#shared-feed-app .polis-field-work .assignment-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+#shared-feed-app .polis-field-work .territory-card-header > div,
+#shared-feed-app .polis-field-work .assignment-card-header > div {
+  min-width: 0;
+}
+#shared-feed-app .polis-field-work .territory-card footer,
+#shared-feed-app .polis-field-work .assignment-card footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding-top: 14px;
+  margin-top: auto;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+}
+#shared-feed-app .polis-field-work .territory-card-meta,
+#shared-feed-app .polis-field-work .assignment-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  color: var(--muted);
+  font-size: 12px;
+}
+#shared-feed-app .polis-field-work .territory-progress {
+  height: 5px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: var(--background);
+}
+#shared-feed-app .polis-field-work .territory-progress > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--primary);
+}
+#shared-feed-app .polis-field-work .territory-mini-map {
+  height: 150px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--background);
+}
+#shared-feed-app .polis-field-work .territory-mini-map > svg {
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: none;
+}
+#shared-feed-app .polis-field-work .territory-mini-map > .field-mini-map,
+#shared-feed-app .polis-field-work .field-mini-map > svg {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+#shared-feed-app .polis-field-work .territory-mini-map > .field-mini-map {
+  position: relative;
+}
+#shared-feed-app .polis-field-work .field-mini-map-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+#shared-feed-app .polis-field-work .field-mini-map > svg {
+  display: block;
+  fill: none;
+  stroke: none;
+}
+#shared-feed-app .polis-field-work .field-mini-map .maplibregl-ctrl-attrib {
+  max-width: 100%;
+  padding: 0 3px;
+  font-size: 8px;
+  line-height: 1.5;
+}
+#shared-feed-app .polis-field-work .field-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--background);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 550;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+#shared-feed-app .polis-field-work .field-status.is-active,
+#shared-feed-app .polis-field-work .field-status[data-status="active"],
+#shared-feed-app .polis-field-work .field-status[data-status="assigned"],
+#shared-feed-app .polis-field-work .field-status[data-status="published"] {
+  border-color: color-mix(in srgb, var(--primary) 30%, transparent);
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+#shared-feed-app .polis-field-work .field-status.is-good,
+#shared-feed-app .polis-field-work .field-status[data-status="complete"],
+#shared-feed-app .polis-field-work .field-status[data-status="completed"],
+#shared-feed-app .polis-field-work .field-status[data-status="ready"] {
+  border-color: color-mix(in srgb, var(--success) 30%, transparent);
+  background: var(--success-soft);
+  color: var(--success);
+}
+#shared-feed-app .polis-field-work .field-status.is-warning,
+#shared-feed-app .polis-field-work .field-status[data-status="needs-attention"],
+#shared-feed-app .polis-field-work .field-status[data-status="draft"],
+#shared-feed-app .polis-field-work .field-status[data-status="unassigned"] {
+  border-color: color-mix(in srgb, var(--warning) 35%, transparent);
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+#shared-feed-app .polis-field-work .field-status.is-danger,
+#shared-feed-app .polis-field-work .field-status[data-status="blocked"],
+#shared-feed-app .polis-field-work .field-status[data-status="outside"],
+#shared-feed-app .polis-field-work .field-status[data-status="error"] {
+  border-color: color-mix(in srgb, var(--danger) 30%, transparent);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+#shared-feed-app .polis-field-work .field-detail-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+#shared-feed-app .polis-field-work .field-detail-meta > div {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--background);
+}
+#shared-feed-app .polis-field-work .field-detail-meta span {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+}
+#shared-feed-app .polis-field-work .field-detail-meta strong {
+  display: block;
+  margin-top: 6px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 550;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+#shared-feed-app .polis-field-work .field-note {
+  padding: 15px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--background);
+}
+#shared-feed-app .polis-field-work .field-note p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
+#shared-feed-app .polis-field-work .field-note > strong {
+  font-size: 12px;
+  font-weight: 600;
+}
+#shared-feed-app .polis-field-work .field-note small {
+  display: block;
+  margin-top: 9px;
+  color: var(--subtle);
+  font-size: 11px;
+}
+#shared-feed-app .polis-field-work .field-section {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+#shared-feed-app .polis-field-work .field-section h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+#shared-feed-app .polis-field-work .field-section p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
+#shared-feed-app .polis-field-work .field-section .field + .field {
+  margin-top: 0;
+}
+#shared-feed-app .polis-field-work .assignment-people {
+  display: grid;
+  gap: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+#shared-feed-app .polis-field-work .assignment-people label {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px;
+  border-bottom: 1px solid var(--line);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+#shared-feed-app .polis-field-work .assignment-people label:last-child {
+  border-bottom: 0;
+}
+#shared-feed-app .polis-field-work .assignment-people label:has(input:checked) {
+  background: var(--primary-soft);
+}
+#shared-feed-app .polis-field-work .assignment-people label > span {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+#shared-feed-app .polis-field-work .assignment-people label small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+}
+#shared-feed-app .polis-field-work .assignment-people input {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--primary);
+}
+#shared-feed-app .polis-field-work .assignment-people label > .avatar {
+  flex: 0 0 auto;
+}
+#shared-feed-app .polis-field-work .field-builder-map {
+  position: relative;
+  flex: 0 0 auto;
+  height: 360px;
+  min-width: 0;
+  min-height: 360px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--background);
+}
+#shared-feed-app .polis-field-work .builder-stepper {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+#shared-feed-app .polis-field-work .builder-stepper > * {
+  display: flex;
+  flex: 1 1 0;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--subtle);
+  font-size: 11px;
+}
+#shared-feed-app .polis-field-work .builder-stepper em,
+#shared-feed-app .polis-field-work .builder-stepper .step-number {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--background);
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+}
+#shared-feed-app .polis-field-work .builder-stepper .is-active {
+  color: var(--primary);
+  font-weight: 600;
+}
+#shared-feed-app .polis-field-work .builder-stepper .is-active em,
+#shared-feed-app .polis-field-work .builder-stepper .is-active .step-number {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+#shared-feed-app .polis-field-work .builder-stepper .is-complete em,
+#shared-feed-app .polis-field-work .builder-stepper .is-complete .step-number {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--on-primary);
+}
+#shared-feed-app .polis-field-work .builder-selection {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+#shared-feed-app .polis-field-work .builder-selection > label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 15px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--text);
+  font-size: 13px;
+}
+#shared-feed-app
+  .polis-field-work
+  .builder-selection
+  > label:has(input:checked) {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+#shared-feed-app .polis-field-work .builder-selection input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--primary);
+}
+#shared-feed-app .polis-field-work .field-page .empty-state {
+  min-height: 280px;
+}
+#shared-feed-app .polis-field-work .field-page .empty-state p {
+  max-width: 45ch;
+}
+#shared-feed-app .polis-field-work .field-inline-notice {
+  margin: 0 26px 22px;
+}
+#shared-feed-app .polis-field-work .field-error-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+}
+#shared-feed-app .polis-field-work .field-summary-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+#shared-feed-app .polis-field-work .field-summary-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.65;
+}
+#shared-feed-app .polis-field-work .field-summary-list svg {
+  width: 16px;
+  height: 16px;
+  margin-top: 3px;
+  color: var(--primary);
+}
+#shared-feed-app .polis-field-work .field-hand-off {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--background);
+}
+#shared-feed-app .polis-field-work .field-hand-off strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+}
+#shared-feed-app .polis-field-work .field-hand-off p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+@media (max-width: 1250px) {
+  #shared-feed-app .polis-field-work .field-toolbar {
+    grid-template-columns: minmax(180px, 1.5fr) minmax(130px, 0.8fr) minmax(
+        130px,
+        0.7fr
+      );
+  }
+  #shared-feed-app .polis-field-work .field-toolbar .view-toggle,
+  #shared-feed-app .polis-field-work .field-toolbar .segmented-control {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+  #shared-feed-app .polis-field-work .map-layout {
+    grid-template-columns: minmax(0, 1fr) 285px;
+  }
+}
+@media (max-width: 1050px) {
+  #shared-feed-app .polis-field-work .map-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  #shared-feed-app .polis-field-work .map-side-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    max-height: none;
+    border-top: 1px solid var(--line);
+    border-left: 0;
+  }
+  #shared-feed-app .polis-field-work .map-side-heading {
+    grid-column: 1 / -1;
+  }
+  #shared-feed-app .polis-field-work .map-side-list .map-record {
+    border-right: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+  }
+  #shared-feed-app
+    .polis-field-work
+    .map-side-list
+    .map-record:nth-child(2n + 1) {
+    border-right: 0;
+  }
+  #shared-feed-app .polis-field-work .map-surface {
+    height: 500px;
+  }
+}
+@media (max-width: 760px) {
+  #shared-feed-app .polis-field-work .field-toolbar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px 12px;
+    padding: 0 20px 20px;
+  }
+  #shared-feed-app .polis-field-work .field-toolbar > :first-child {
+    grid-column: 1 / -1;
+  }
+  #shared-feed-app .polis-field-work .field-toolbar .field input,
+  #shared-feed-app .polis-field-work .field-toolbar .field select {
+    min-height: 46px;
+    font-size: 16px;
+  }
+  #shared-feed-app .polis-field-work .field-toolbar .view-toggle,
+  #shared-feed-app .polis-field-work .field-toolbar .segmented-control {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+  #shared-feed-app .polis-field-work .field-toolbar-summary {
+    padding: 0 20px 20px;
+  }
+  #shared-feed-app .polis-field-work .field-context {
+    align-items: flex-start;
+    padding: 16px 20px;
+  }
+  #shared-feed-app .polis-field-work .map-surface {
+    height: 380px;
+  }
+  #shared-feed-app .polis-field-work .map-controls {
+    top: 12px;
+    right: 12px;
+  }
+  #shared-feed-app .polis-field-work .map-legend {
+    left: 12px;
+    bottom: 18px;
+    gap: 8px 12px;
+    max-width: calc(100% - 24px);
+    padding: 9px 11px;
+    font-size: 10px;
+  }
+  #shared-feed-app .polis-field-work .map-side-list {
+    display: block;
+    max-height: 430px;
+  }
+  #shared-feed-app .polis-field-work .map-side-heading {
+    position: sticky;
+    z-index: 1;
+    top: 0;
+    background: var(--surface);
+  }
+  #shared-feed-app .polis-field-work .map-side-list .map-record {
+    min-height: 90px;
+    border-right: 0;
+    padding: 16px 20px;
+  }
+  #shared-feed-app .polis-field-work .map-side-heading {
+    padding: 18px 20px;
+  }
+  #shared-feed-app .polis-field-work .field-table,
+  #shared-feed-app .polis-field-work .field-table tbody,
+  #shared-feed-app .polis-field-work .field-table tr,
+  #shared-feed-app .polis-field-work .field-table td {
+    display: block;
+    width: 100%;
+  }
+  #shared-feed-app .polis-field-work .field-table thead {
+    display: none;
+  }
+  #shared-feed-app .polis-field-work .field-table tbody tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+    gap: 12px 14px;
+    padding: 20px;
+    border-top: 1px solid var(--line);
+  }
+  #shared-feed-app .polis-field-work .field-table th:first-child,
+  #shared-feed-app .polis-field-work .field-table td:first-child {
+    width: auto;
+  }
+  #shared-feed-app .polis-field-work .field-table td {
+    padding: 0;
+    border: 0;
+  }
+  #shared-feed-app .polis-field-work .field-table td:first-child {
+    grid-column: 1 / -1;
+  }
+  #shared-feed-app .polis-field-work .field-table th:last-child,
+  #shared-feed-app .polis-field-work .field-table td:last-child {
+    width: auto;
+    padding: 0;
+    justify-self: end;
+  }
+  #shared-feed-app .polis-field-work .field-table td[data-label]::before {
+    display: block;
+    margin-bottom: 4px;
+    color: var(--subtle);
+    font-size: 10px;
+    content: attr(data-label);
+  }
+  #shared-feed-app .polis-field-work .territory-grid,
+  #shared-feed-app .polis-field-work .assignment-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+    padding: 0 20px 20px;
+  }
+  #shared-feed-app .polis-field-work .territory-card,
+  #shared-feed-app .polis-field-work .assignment-card {
+    padding: 18px;
+  }
+  #shared-feed-app .polis-field-work .field-detail-meta {
+    gap: 10px;
+  }
+  #shared-feed-app .polis-field-work .field-detail-meta > div {
+    padding: 12px;
+  }
+  #shared-feed-app .polis-field-work .field-hand-off {
+    flex-direction: column;
+    gap: 12px;
+  }
+  #shared-feed-app .polis-field-work .field-builder-map {
+    height: 300px;
+    min-height: 300px;
+  }
+  #shared-feed-app .polis-field-work .builder-stepper {
+    gap: 8px;
+  }
+  #shared-feed-app .polis-field-work .builder-stepper > * {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 7px;
+    font-size: 10px;
+  }
+  #shared-feed-app .polis-field-work .builder-selection {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  #shared-feed-app .polis-field-work .field-inline-notice {
+    margin: 0 20px 20px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  #shared-feed-app .polis-field-work .territory-shape {
+    transition: none;
+  }
+}

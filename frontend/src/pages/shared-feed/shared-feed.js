@@ -13,6 +13,12 @@ import "./css/organization-publishing.css";
 import "./css/polis-auth.css";
 import "./css/coalition-people.css";
 import "./css/coalition-missions.css";
+import "./css/coalition-field-work.css";
+import { createCoalitionFieldWork } from "./scripts/coalitionFieldWork.js";
+import {
+  canonicalCoalitionFieldWorkPath,
+  coalitionFieldToolOwner,
+} from "./scripts/coalitionFieldWorkRoutes.js";
 import {
   renderCoalitionMissionsPresentation,
   renderCoalitionMissionResults,
@@ -263,6 +269,65 @@ const territoryBuilder = createTerritoryBuilder({
     );
   },
 });
+/** The approved page owns its state and DOM; unrelated shell renders keep it mounted. */
+const coalitionFieldWork = createCoalitionFieldWork({
+  context: currentCoalitionFieldWorkContext,
+  request: textingRequest,
+  loadMapLibre: ensureMapLibreLoader,
+  mapStyle: getMapStyle,
+  navigate: navigateTo,
+  openApp: (path) => {
+    const url = buildDeepLinkOpenUrl(path);
+    if (url) window.location.assign(url);
+  },
+  onContextInvalidated: scheduleRender,
+  onBuilderOpen: () =>
+    navigateTo(
+      coalitionSectionPath(
+        currentCoalitionDetailId(),
+        "voter-map/territories/admin",
+      ),
+    ),
+});
+
+function currentCoalitionFieldWorkContext() {
+  const route = getCurrentRoute();
+  if (coalitionSectionForRoute(route) !== "voter-map") return null;
+  const coalitionId = decodeRouteSegment(route.routeParams.coalitionId);
+  const detail = state.pages.coalitions.detail;
+  const item = findCoalitionListItem(coalitionId);
+  const matching = detail.coalition?.coalitionId === coalitionId;
+  const coalition = (matching ? detail.coalition : null) || item?.coalition;
+  const membership = (matching ? detail.membership : null) || item?.membership;
+  if (!coalition || !membership || !state.auth.session) return null;
+  const section = coalitionRouteKeywordParts(route).slice(1).join("/");
+  const query = readCurrentSearchParams();
+  return {
+    userId: getAuthenticatedUser(state.auth.session)?.userId || "",
+    sessionKey:
+      state.auth.session.idToken || state.auth.session.accessToken || "",
+    coalitionId,
+    name: coalition.name,
+    membership,
+    enabled: coalition.voterMapEnabled === true,
+    access: matching ? detail.voterMapAccess?.raw : null,
+    view:
+      section === "territories/admin" || section === "territory-admin"
+        ? "builder"
+        : ["territories", "assignments", "my-areas"].includes(section)
+          ? section === "my-areas"
+            ? "mine"
+            : section
+          : "map",
+    layout: section === "connected" ? "list" : "map",
+    dataAction: section === "add" ? "add" : "",
+    recordId:
+      section === "notes"
+        ? normalizeString(query.get("recordId") || query.get("voterId"))
+        : "",
+  };
+}
+
 const textingBalancePage = createTextingBalancePage({
   request: textingRequest,
   context: () => {
@@ -2949,7 +3014,7 @@ const COALITION_VOTER_MAP_SECTION_CONFIG = [
   },
   {
     key: "cta",
-    path: "voter-map/cta",
+    path: "calendar/field-events",
     label: "CTA",
     icon: "send",
     description:
@@ -2957,7 +3022,7 @@ const COALITION_VOTER_MAP_SECTION_CONFIG = [
   },
   {
     key: "cta/transport",
-    path: "voter-map/cta/transport",
+    path: "calendar/field-events/transport",
     label: "Transport",
     icon: "map",
     description:
@@ -2965,7 +3030,7 @@ const COALITION_VOTER_MAP_SECTION_CONFIG = [
   },
   {
     key: "members",
-    path: "voter-map/members",
+    path: "members/directory",
     label: "Members",
     icon: "team",
     description:
@@ -27378,7 +27443,10 @@ function coalitionCtaWorkspace() {
 }
 
 function coalitionCtaTransportRoute(coalitionId, eventId) {
-  const base = coalitionSectionPath(coalitionId, "voter-map/cta/transport");
+  const base = coalitionSectionPath(
+    coalitionId,
+    "calendar/field-events/transport",
+  );
   const normalizedEventId = normalizeString(eventId);
   return normalizedEventId
     ? `${base}?eventId=${encodeURIComponent(normalizedEventId)}`
@@ -27478,17 +27546,49 @@ function coalitionCtaTransportPickupPayload(formData) {
   if (!groupId) {
     throw new Error("Pickup group is missing.");
   }
-  const lat = Number(normalizeString(formData.get("lat")));
-  const lng = Number(normalizeString(formData.get("lng")));
+  const latitude = normalizeString(formData.get("lat"));
+  const longitude = normalizeString(formData.get("lng"));
+  const hasCoordinates = Boolean(latitude || longitude);
+  const lat = latitude ? Number(latitude) : null;
+  const lng = longitude ? Number(longitude) : null;
+  if (
+    hasCoordinates &&
+    (!latitude ||
+      !longitude ||
+      !Number.isFinite(lat) ||
+      !Number.isFinite(lng) ||
+      Math.abs(lat) > 90 ||
+      Math.abs(lng) > 180)
+  ) {
+    throw new Error(
+      "Enter both valid pickup coordinates, or leave both blank.",
+    );
+  }
   return {
     groupId,
     pickupLocation: {
       name: normalizeString(formData.get("name")),
       address: normalizeString(formData.get("address")),
-      ...(Number.isFinite(lat) ? { lat } : {}),
-      ...(Number.isFinite(lng) ? { lng } : {}),
+      ...(hasCoordinates ? { lat, lng } : {}),
     },
   };
+}
+
+/** A response for a former account or coalition cannot replace the current tool. */
+function captureCoalitionFieldToolRequest(coalitionId) {
+  const session = state.auth.session;
+  const credential = session?.idToken || session?.accessToken || "";
+  const userId = session ? getAuthenticatedUser(session)?.userId || "" : "";
+  const workspace = coalitionVoterMapWorkspace();
+  return () =>
+    currentCoalitionDetailId() === coalitionId &&
+    coalitionVoterMapWorkspace() === workspace &&
+    credential ===
+      (state.auth.session?.idToken || state.auth.session?.accessToken || "") &&
+    userId ===
+      (state.auth.session
+        ? getAuthenticatedUser(state.auth.session)?.userId || ""
+        : "");
 }
 
 async function loadCoalitionCtaEvents(coalitionId, { refresh = false } = {}) {
@@ -27500,18 +27600,28 @@ async function loadCoalitionCtaEvents(coalitionId, { refresh = false } = {}) {
   if (cta.loaded && !refresh) {
     return;
   }
+  const isCurrent = captureCoalitionFieldToolRequest(normalizedCoalitionId);
   cta.loading = true;
   cta.error = "";
   scheduleRender();
   try {
-    let payload;
-    try {
+    const items = new Map();
+    const cursors = new Set();
+    let cursor = "";
+    let pages = 0;
+    do {
+      if (!isCurrent()) return;
+      if (++pages > 100)
+        throw new Error(
+          "The event list is too large to finish loading. Please try again later.",
+        );
       const eventsPayload = await fetchJson(
-        "/api/events?status=all&includePast=true&limit=100",
+        `/api/events?status=all&includePast=true&limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
         { auth: true },
       );
-      const items = readArrayPayload(eventsPayload, ["items", "events"]).filter(
-        (item) => {
+      if (!isCurrent()) return;
+      readArrayPayload(eventsPayload, ["items", "events"])
+        .filter((item) => {
           const hostCoalitionId = normalizeString(
             item.hostCoalitionId || item.host_coalition_id,
           );
@@ -27521,29 +27631,33 @@ async function loadCoalitionCtaEvents(coalitionId, { refresh = false } = {}) {
             hostCoalitionId === normalizedCoalitionId &&
             (eventType === "cta" || Boolean(ctaType))
           );
-        },
+        })
+        .forEach((item) => {
+          const key = normalizeString(item.eventId || item.id);
+          if (key) items.set(key, item);
+        });
+      cursor = normalizeString(
+        eventsPayload.nextCursor || eventsPayload.cursor,
       );
-      payload = { items };
-    } catch {
-      payload = await fetchJson(
-        `/api/coalitions/${encodeURIComponent(normalizedCoalitionId)}/cta/events`,
-        { auth: true },
-      );
-    }
-    cta.events = readArrayPayload(payload, [
-      "items",
-      "events",
-      "ctaEvents",
-    ]).map(normalizeCoalitionCtaEvent);
+      if (cursor && cursors.has(cursor))
+        throw new Error(
+          "Event loading stopped because the server repeated a page. Please retry.",
+        );
+      if (cursor) cursors.add(cursor);
+    } while (cursor);
+    if (!isCurrent()) return;
+    cta.events = [...items.values()].map(normalizeCoalitionCtaEvent);
     cta.loaded = true;
   } catch (error) {
+    if (!isCurrent()) return;
+    cta.loaded = false;
     cta.error = settingsErrorMessage(
       error,
       "Coalition CTA events could not be loaded.",
     );
   } finally {
     cta.loading = false;
-    scheduleRender();
+    if (isCurrent()) scheduleRender();
   }
 }
 
@@ -31217,6 +31331,7 @@ async function loadCoalitionDirectory(coalitionId, { refresh = false } = {}) {
   if (directory.loaded && !refresh) {
     return;
   }
+  const isCurrent = captureCoalitionFieldToolRequest(normalizedCoalitionId);
   if (refresh) {
     directory.members = [];
     directory.loaded = false;
@@ -31238,12 +31353,8 @@ async function loadCoalitionDirectory(coalitionId, { refresh = false } = {}) {
         { auth: true },
       ),
     ]);
-    if (
-      catalogResult.status === "rejected" &&
-      membersResult.status === "rejected"
-    ) {
-      throw membersResult.reason || catalogResult.reason;
-    }
+    if (!isCurrent()) return;
+    if (membersResult.status === "rejected") throw membersResult.reason;
     if (catalogResult.status === "fulfilled") {
       directory.catalog = normalizeCoalitionDirectoryCatalog(
         catalogResult.value,
@@ -31260,13 +31371,15 @@ async function loadCoalitionDirectory(coalitionId, { refresh = false } = {}) {
     }
     directory.loaded = true;
   } catch (error) {
+    if (!isCurrent()) return;
+    directory.loaded = false;
     directory.error = settingsErrorMessage(
       error,
       "Coalition member directory could not be loaded.",
     );
   } finally {
     directory.loading = false;
-    scheduleRender();
+    if (isCurrent()) scheduleRender();
   }
 }
 
@@ -36766,6 +36879,14 @@ async function loadCoalitionDetail(coalitionId, { refresh = false } = {}) {
 
 async function loadCoalitionsPage({ refresh = false } = {}) {
   const route = getCurrentRoute();
+  const canonicalFieldPath = canonicalCoalitionFieldWorkPath(
+    window.location.pathname,
+    window.location.search,
+  );
+  if (canonicalFieldPath) {
+    navigateTo(canonicalFieldPath, { replace: true });
+    return;
+  }
   await loadCoalitionsList({ refresh });
   const coalitionId = decodeRouteSegment(route.routeParams.coalitionId);
   if (coalitionId) {
@@ -36788,57 +36909,24 @@ async function loadCoalitionsPage({ refresh = false } = {}) {
     if (activeSection === "rooms") {
       await loadCoalitionRooms(coalitionId, { refresh });
     }
-    if (activeSection === "calendar") {
+    const movedFieldTool = coalitionFieldToolOwner(
+      coalitionRouteKeywordParts(route),
+    );
+    if (activeSection === "calendar" && !movedFieldTool) {
       await loadCoalitionCalendar(coalitionId, { refresh });
     }
+    if (movedFieldTool === "members")
+      await loadCoalitionDirectory(coalitionId, { refresh });
+    if (movedFieldTool === "scripts")
+      await loadCoalitionVoterMapOutreachTemplates(coalitionId, { refresh });
+    if (movedFieldTool === "cta" || movedFieldTool === "cta/transport") {
+      await loadCoalitionCtaEvents(coalitionId, { refresh });
+      const eventId = coalitionCtaTransportRouteEventId(route);
+      if (movedFieldTool === "cta/transport" && eventId)
+        await loadCoalitionCtaTransportAdmin(eventId, { refresh });
+    }
     if (activeSection === "voter-map") {
-      const voterMapSection = coalitionVoterMapSectionForRoute(route);
-      if (voterMapSection === "connected" || voterMapSection === "add") {
-        await loadCoalitionVoterRecords(coalitionId, { refresh });
-      }
-      if (voterMapSection === "map") {
-        await loadCoalitionDirectoryMapMembers(coalitionId, { refresh });
-      }
-      if (voterMapSection === "members") {
-        await loadCoalitionDirectory(coalitionId, { refresh });
-      }
-      if (voterMapSection === "territories/admin") {
-        if (!territoryAuthoringAllowed("coalition", coalitionId))
-          await refreshCoalitionVoterMapAccess();
-        const voterMapAccess =
-          state.pages.coalitions.detail.voterMapWorkspace?.access ||
-          state.pages.coalitions.detail.voterMapAccess ||
-          normalizeCoalitionVoterMapAccess({});
-        const canManageTerritories =
-          territoryAuthoringAllowed("coalition", coalitionId) &&
-          (voterMapAccess.canManageTerritories === true ||
-            state.pages.coalitions.detail.membership?.isAdmin);
-        if (canManageTerritories) {
-          await loadCoalitionTerritoryAssignments(coalitionId, { refresh });
-        }
-      }
-      if (voterMapSection === "scripts") {
-        await loadCoalitionVoterMapOutreachTemplates(coalitionId, { refresh });
-      }
-      if (voterMapSection === "notes") {
-        const recordId = voterMapNotesRecordIdFromRoute();
-        if (recordId) {
-          await loadCoalitionVoterMapNotes(coalitionId, {
-            recordId,
-            voterName: voterMapNotesVoterNameFromRoute(),
-            refresh,
-          });
-        }
-      }
-      if (voterMapSection === "cta" || voterMapSection === "cta/transport") {
-        await loadCoalitionCtaEvents(coalitionId, { refresh });
-      }
-      if (voterMapSection === "cta/transport") {
-        const eventId = coalitionCtaTransportRouteEventId(route);
-        if (eventId) {
-          await loadCoalitionCtaTransportAdmin(eventId, { refresh });
-        }
-      }
+      await coalitionFieldWork.load({ refresh });
     }
     const governanceRoute = coalitionGovernanceRouteForRoute(route);
     if (governanceRoute.key === "vote-results" && governanceRoute.voteId) {
@@ -87308,6 +87396,7 @@ function coalitionSectionForRoute(route = state.route) {
   if (section === "admin") {
     return "members";
   }
+  if (section === "field-work") return "voter-map";
   if (section === "constitution" || section === "voting") {
     return "governance";
   }
@@ -87364,9 +87453,9 @@ function coalitionVoterMapSectionForRoute(route = state.route) {
     return "menu";
   }
   const section = parts.slice(1).join("/") || "menu";
-  if (section === "territories" || section === "territory-admin") {
-    return "territories/admin";
-  }
+  if (["territories", "assignments", "my-areas"].includes(section))
+    return section;
+  if (section === "territory-admin") return "territories/admin";
   if (
     section === "outreach" ||
     section === "outreach-scripts" ||
@@ -87943,7 +88032,10 @@ function coalitionsRootActionItems(items = []) {
           {
             label: "CTA transport",
             icon: "map",
-            route: coalitionSectionPath(coalitionId, "voter-map/cta/transport"),
+            route: coalitionSectionPath(
+              coalitionId,
+              "calendar/field-events/transport",
+            ),
           },
         ];
         if (item.membership.isAdmin) {
@@ -88122,7 +88214,10 @@ function coalitionsRootCoverageGroups() {
           icon: "send",
           sectionKey: "voter-map",
           route: (item) =>
-            coalitionSectionPath(item.coalition.coalitionId, "voter-map/cta"),
+            coalitionSectionPath(
+              item.coalition.coalitionId,
+              "calendar/field-events",
+            ),
         },
         {
           key: "transport",
@@ -88135,7 +88230,7 @@ function coalitionsRootCoverageGroups() {
           route: (item) =>
             coalitionSectionPath(
               item.coalition.coalitionId,
-              "voter-map/cta/transport",
+              "calendar/field-events/transport",
             ),
         },
         {
@@ -88147,7 +88242,7 @@ function coalitionsRootCoverageGroups() {
           route: (item) =>
             coalitionSectionPath(
               item.coalition.coalitionId,
-              "voter-map/members",
+              "members/directory",
             ),
         },
         {
@@ -88807,6 +88902,7 @@ function renderCoalitionAdminSection(detail, coalition, membership) {
       ${renderCoalitionMetric("Profile", canManageCoalitionProfile(membership) ? "Editable" : "View")}
     </div>
     ${renderCoalitionAdminNav(coalition, profileRoute ? "profile" : "access")}
+    ${membership.isAdmin && coalition.voterMapEnabled ? `<div class="shared-card__actions"><button type="button" class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, "admin/edit/outreach"))}">Outreach templates</button></div>` : ""}
     ${
       profileRoute
         ? renderCoalitionProfileEditPanel(detail, coalition, membership)
@@ -89645,6 +89741,7 @@ function renderCoalitionMembers(detail, coalition, membership) {
     <section class="coalition-people__panel" role="tabpanel" id="coalition-people-panel-requests" aria-labelledby="coalition-people-tab-requests" data-people-panel="requests" hidden>${renderCoalitionAccessRequests(resource, catalog, canManageRequests)}</section>
     <section class="coalition-people__panel" role="tabpanel" id="coalition-people-panel-invitations" aria-labelledby="coalition-people-tab-invitations" data-people-panel="invitations" hidden>${renderCoalitionAccessInvitations(resource, catalog, canManageMembers)}</section>
     <section class="coalition-people__panel" role="tabpanel" id="coalition-people-panel-roles" aria-labelledby="coalition-people-tab-roles" data-people-panel="roles" hidden>${renderCoalitionAccessRoles(resource, catalog, canManageRoles)}</section>
+    ${coalition.voterMapEnabled && membership.canAccessVoterMap ? `<div class="coalition-people__directory-link"><button type="button" class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, "members/directory"))}">Directory contacts</button><span>Manage external contacts separately from Polis membership.</span></div>` : ""}
     ${canManageMembers ? `<dialog class="coalition-people__invite-dialog" data-people-invite-dialog aria-labelledby="coalition-people-invite-title"><div class="coalition-people__dialog-head"><div><h2 id="coalition-people-invite-title">Invite someone to your team</h2><p>Find their Polis account and choose their access.</p></div><button class="shared-feed-chip" type="button" data-action="coalition-people-invite-close" aria-label="Close invitation">${renderIcon("close")}</button></div>${resource.error ? `<div class="shared-page__error" role="alert">${escapeHtml(resource.error)}</div>` : ""}${renderCoalitionInviteForm(resource, catalog, canManageMembers)}</dialog>` : ""}
   </div>`;
 }
@@ -91078,7 +91175,7 @@ function renderCoalitionCalendar(detail, coalition, membership) {
           <h2>Coalition calendar</h2>
           <p>Find meetings, shifts and shared availability.</p>
         </div>
-        <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, "missions"))}">Missions</button>
+        <div class="shared-card__actions">${coalition.voterMapEnabled && membership.canAccessVoterMap ? `<button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, "calendar/field-events"))}">Field events &amp; transport</button>` : ""}<button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, "missions"))}">Missions</button></div>
       </div>
       ${renderCoalitionCalendarFilters(resource)}
     </article>
@@ -91860,7 +91957,7 @@ function renderCoalitionVoterMapMemberSummary(member) {
         : ""
     }
     <div class="shared-card__actions">
-      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(member.coalitionId || currentCoalitionDetailId(), "voter-map/members"))}">Open directory</button>
+      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(member.coalitionId || currentCoalitionDetailId(), "members/directory"))}">Open directory</button>
     </div>
   </article>`;
 }
@@ -91955,7 +92052,7 @@ function renderCoalitionVoterMapMapPanel(coalition, access, workspace) {
         </div>
         <div class="shared-card__actions">
           <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, "missions"))}">Missions</button>
-          <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, "voter-map/members"))}">Directory</button>
+          <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, "members/directory"))}">Directory</button>
         </div>
       </div>
       ${renderCoalitionVoterMapViewportForm(map)}
@@ -92329,7 +92426,7 @@ function renderCoalitionVoterMapConnectedPanel(coalition, detail, access) {
           </div>
           <div class="shared-card__actions">
             <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, "voter-map/add"))}">Add voters</button>
-            <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, "voter-map/cta"))}">CTA events</button>
+            <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, "calendar/field-events"))}">CTA events</button>
             ${territoryAuthoringAllowed("coalition", coalition.coalitionId) ? `<button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, "voter-map/territories/admin"))}">Territories</button>` : ""}
           </div>
         </article>
@@ -92440,7 +92537,7 @@ function renderCoalitionVoterMapCtaCommand(
       </div>
     </div>
     <div class="shared-coalition-cta-command-grid">
-      <button class="shared-coalition-cta-command-card${activeSection === "cta" ? " is-active" : ""}" type="button" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, "voter-map/cta"))}">
+      <button class="shared-coalition-cta-command-card${activeSection === "cta" ? " is-active" : ""}" type="button" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, "calendar/field-events"))}">
         <span>${renderIcon("send")}</span>
         <strong>${escapeHtml(formatCount(events.length))}</strong>
         <em>CTA events</em>
@@ -92890,8 +92987,8 @@ function renderCoalitionDirectoryWorkflow(coalition, directory, canManage) {
     <a href="#coalition-directory-manual">
       ${renderIcon("create")}
       <span>
-        <strong>Add member</strong>
-        <small>${escapeHtml(canManage ? "Manual member record" : "Admin access required")}</small>
+        <strong>Add contact</strong>
+        <small>${escapeHtml(canManage ? "Manual contact record" : "Admin access required")}</small>
       </span>
     </a>
     <a href="#coalition-directory-import">
@@ -92912,7 +93009,7 @@ function renderCoalitionDirectoryFilters(directory) {
   return `<form class="shared-campaign-registry-filters shared-coalition-directory-filters" data-route-form="coalition-directory-filters">
     <div class="shared-campaign-registry-filters__header">
       <div>
-        <strong>Find coalition members</strong>
+        <strong>Find directory contacts</strong>
         <span>Search, match role context, isolate linked accounts, and find the people with the right field capabilities.</span>
       </div>
       <div class="shared-campaign-registry-filter-actions">
@@ -93427,7 +93524,7 @@ function renderCoalitionDirectoryControlsPanel(
     <div class="shared-card__actions">
       <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, "members"))}">Access roles</button>
       <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, "voter-map/connected"))}">Voter records</button>
-      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, "voter-map/cta"))}">CTA events</button>
+      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, "calendar/field-events"))}">CTA events</button>
     </div>
   </article>`;
 }
@@ -93448,7 +93545,7 @@ function renderCoalitionVoterMapMembersPanel(
   const capabilityCount = coalitionDirectoryCapabilities(directory).length;
   return `<div class="shared-coalition-directory shared-campaign-registry">
     <div class="shared-campaign-metrics">
-      ${renderCoalitionMetric("Directory members", formatCount(directory.members.length), "cyan")}
+      ${renderCoalitionMetric("Directory contacts", formatCount(directory.members.length), "cyan")}
       ${renderCoalitionMetric("Linked Polis", formatCount(linkedCount))}
       ${renderCoalitionMetric("Categories", formatCount(categories.length))}
       ${renderCoalitionMetric("Capabilities", formatCount(capabilityCount))}
@@ -93540,72 +93637,48 @@ function renderCoalitionVoterMapBody(
   return renderCoalitionVoterMapMenu(coalition, membership, access, workspace);
 }
 
-function renderCoalitionVoterMap(coalition, membership, detail) {
+function renderCoalitionVoterMap() {
+  return coalitionFieldWork.markup();
+}
+
+/** Moved tools retain their original stores, writes and authorization checks. */
+function renderCoalitionOwnedFieldTool(kind, detail, coalition, membership) {
+  if (
+    !membership.isActive ||
+    !coalition.voterMapEnabled ||
+    !membership.canAccessVoterMap
+  ) {
+    return `<div class="shared-page__empty">Your coalition access does not include this tool.</div>`;
+  }
   const workspace =
     detail.voterMapWorkspace || createCoalitionVoterMapWorkspaceState();
   const access =
     workspace.access ||
     detail.voterMapAccess ||
     normalizeCoalitionVoterMapAccess({});
-  const hasAccess = coalition.voterMapEnabled && membership.canAccessVoterMap;
-  const activeSection = coalitionVoterMapSectionForRoute();
-  const territoryCount = access.territories.length;
-  const resultCount = workspace.result?.districts.length || 0;
-  const ctaEvents = workspace.cta?.events || [];
-  const transportCount = ctaEvents.filter(
-    (event) => event.transportEnabled,
-  ).length;
-  const activeCtaSection =
-    activeSection === "cta" || activeSection === "cta/transport";
-  if (!coalition.voterMapEnabled) {
-    return `<div class="shared-page__empty">Voter map is not enabled for this coalition.</div>`;
-  }
-  if (!membership.canAccessVoterMap) {
-    return `<div class="shared-page__empty">This coalition role does not include voter map access.</div>`;
-  }
-  if (activeSection === "territories/admin") {
-    return `<div class="shared-coalition-section shared-coalition-voter-map">${renderCoalitionSubrouteNav(coalition, COALITION_VOTER_MAP_SECTION_CONFIG, activeSection, "Coalition voter map routes")}${renderCoalitionVoterMapBody(activeSection, coalition, membership, detail, access, workspace)}</div>`;
-  }
-  return `<div class="shared-coalition-section shared-coalition-voter-map">
-    <div class="shared-coalition-metrics">
-      ${renderCoalitionMetric("Access", hasAccess ? "Enabled" : "Blocked", hasAccess ? "cyan" : "")}
-      ${renderCoalitionMetric("Territories", formatCount(territoryCount))}
-      ${renderCoalitionMetric(
-        activeCtaSection ? "CTA events" : "District hits",
-        formatCount(activeCtaSection ? ctaEvents.length : resultCount),
-      )}
-      ${renderCoalitionMetric("Transport", transportCount ? formatCount(transportCount) : access.canManageCta ? "Manage" : "View")}
-    </div>
-    ${workspace.error ? `<div class="shared-page__error">${escapeHtml(workspace.error)}</div>` : ""}
-    <article class="shared-coalition-panel shared-coalition-voter-map-hero">
-      <div class="shared-coalition-panel__header">
-        <div>
-          <h2>Voter Map</h2>
-          <p>Verify coalition voter-map access, review territory coverage, search districts, create CTA events, and manage transportation from the browser.</p>
-        </div>
-        <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, "missions"))}">Missions</button>
-      </div>
-      <div class="shared-coalition-map-preview">
-        <span>${renderIcon("map")} ${escapeHtml(humanizeLabel(access.scope))}</span>
-        <span>${renderIcon("team")} ${escapeHtml(access.canManageTerritories ? "Territory admin" : "Territory access")}</span>
-        <span>${renderIcon("comment")} ${escapeHtml(access.canManageCta ? "CTA management" : "CTA readout")}</span>
-        ${access.activeUnitSetId ? `<span>${escapeHtml(access.activeUnitSetId)}</span>` : ""}
-      </div>
-    </article>
-    ${renderCoalitionSubrouteNav(
-      coalition,
-      COALITION_VOTER_MAP_SECTION_CONFIG,
-      activeSection,
-      "Coalition voter map routes",
-    )}
-    ${renderCoalitionVoterMapBody(
-      activeSection,
-      coalition,
-      membership,
-      detail,
-      access,
-      workspace,
-    )}
+  const owner =
+    kind === "members"
+      ? "People"
+      : kind === "scripts"
+        ? "Administration"
+        : "Calendar";
+  const title =
+    kind === "members"
+      ? "Directory contacts"
+      : kind === "scripts"
+        ? "Outreach templates"
+        : kind === "cta/transport"
+          ? "Event transportation"
+          : "Field events";
+  const back =
+    kind === "members"
+      ? "members"
+      : kind === "scripts"
+        ? "admin/edit"
+        : "calendar";
+  return `<div class="shared-coalition-section coalition-owned-field-tool" data-field-tool-owner="${escapeHtml(owner)}">
+    <div class="coalition-people__intro"><p>${escapeHtml(title)}${kind === "members" ? " are separate from Polis membership and access." : " are managed here; Field work stays focused on the map and territories."}</p><button type="button" class="shared-feed-chip" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, back))}">Back to ${escapeHtml(owner)}</button></div>
+    ${renderCoalitionVoterMapBody(kind, coalition, membership, detail, access, workspace)}
   </div>`;
 }
 
@@ -96614,6 +96687,14 @@ function renderCoalitionAmplify(detail, coalition, membership) {
 }
 
 function renderCoalitionSection(detail, coalition, membership, activeSection) {
+  const movedFieldTool = coalitionFieldToolOwner(coalitionRouteKeywordParts());
+  if (movedFieldTool)
+    return renderCoalitionOwnedFieldTool(
+      movedFieldTool,
+      detail,
+      coalition,
+      membership,
+    );
   const section =
     COALITION_SECTION_CONFIG.find((item) => item.key === activeSection) ||
     COALITION_SECTION_CONFIG[0];
@@ -128795,8 +128876,10 @@ function renderApp() {
       ${renderAuthModal()}
       ${renderCandidateDonationFlowModal()}
       ${renderToast()}`;
+  coalitionFieldWork.beforeRender();
   root.innerHTML = shell;
   territoryBuilder.mount(root);
+  coalitionFieldWork.mount(root);
   organizationDashboardPage.mount(root);
   restoreFeedScrollState(scrollSnapshot);
   restorePetitionAddressFocusState(petitionAddressFocusSnapshot);
