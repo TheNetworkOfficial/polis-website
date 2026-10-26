@@ -206,7 +206,13 @@ test("Calendar search, type/status filters, week and agenda dates show authorita
   await app(page)
     .locator("[data-cal-search]")
     .fill("nothing matches this phrase");
-  await expect(app(page)).toContainText("No matching");
+  await expect(app(page).locator(".month-grid")).toBeVisible();
+  await expect(app(page).locator(".day-cell")).toHaveCount(35);
+  await expect(app(page).locator(".calendar-event")).toHaveCount(0);
+  await expect(app(page).locator("#result-count")).toContainText("0 items");
+  await expect(
+    app(page).locator(".calendar-layout > .day-agenda"),
+  ).toContainText("Nothing scheduled");
   await action(page, "clear-filters").first().click();
   await app(page).locator("[data-cal-type]").selectOption("volunteer_shift");
   await expect(app(page).locator(".calendar-event")).toHaveCount(4);
@@ -1111,3 +1117,262 @@ test("Calendar late reconciliation from a previous actor cannot change the curre
   expect(fixture.writes).toHaveLength(1);
   await finish(page, fixture);
 });
+
+async function emptyMonth(page, weeks) {
+  const geometry = await monthFits(page, weeks);
+  await expect(app(page).locator(".weekday-label")).toHaveCount(7);
+  await expect(app(page).locator(".day-number")).toHaveCount(weeks * 7);
+  await expect(app(page).locator(".calendar-event")).toHaveCount(0);
+  await expect(
+    app(page).locator("#calendar-results > .empty-state"),
+  ).toHaveCount(0);
+  await expect(app(page).locator("#result-count")).toContainText("0 items");
+  return {
+    weeks,
+    days: geometry.cells.length,
+    weekdayLabels: 7,
+    items: 0,
+    viewport: { width: geometry.width, height: geometry.height },
+    page: { width: geometry.scrollWidth, height: geometry.scrollHeight },
+    footerBottom: geometry.footer.bottom,
+    rail: geometry.rail,
+  };
+}
+
+async function selectedEmptyDay(page, day, mobile, canManage) {
+  await app(page).locator(`.day-number[data-day="${day}"]`).click();
+  const selected = mobile
+    ? dialog(page).locator(".selected-day-body .day-agenda")
+    : app(page).locator(".calendar-layout > .day-agenda");
+  await expect(selected).toBeVisible();
+  await expect(selected).toContainText("October 28");
+  await expect(selected).toContainText("0 items on the schedule");
+  await expect(selected).toContainText("Nothing scheduled");
+  await expect(selected.locator(".day-event")).toHaveCount(0);
+  await expect(selected.locator('[data-cal-action="new-item"]')).toHaveCount(
+    canManage ? 1 : 0,
+  );
+  return selected;
+}
+
+async function editFilters(page, mobile, edit) {
+  if (mobile) await action(page, "toggle-filters").click();
+  await edit();
+  if (mobile)
+    await app(page)
+      .getByRole("heading", { name: "Calendar", exact: true })
+      .click();
+}
+
+for (const role of ["admin", "member"]) {
+  for (const size of [
+    { width: 1366, height: 768 },
+    { width: 390, height: 844 },
+  ]) {
+    const mobile = size.width <= 760;
+    test(`Calendar empty schedule keeps real dates and actions for ${role} at ${size.width}px`, async ({
+      page,
+    }, testInfo) => {
+      await page.setViewportSize(size);
+      const fixture = await mockCalendarWorkspace(page, { role, items: [] });
+      await page.goto(`${BASE_URL}${COALITION_PATH}/calendar`);
+      const observations = [
+        { month: "October 2026", ...(await emptyMonth(page, 5)) },
+      ];
+      await expect(action(page, "new-item", ":visible")).toHaveCount(
+        role === "admin" ? (mobile ? 1 : 2) : 0,
+      );
+      if (!mobile) {
+        const rail = app(page).locator(".calendar-layout > .day-agenda");
+        await expect(rail).toBeVisible();
+        await expect(rail).toContainText("Nothing scheduled");
+        expect(Math.abs(observations[0].rail.width - 280)).toBeLessThanOrEqual(
+          1,
+        );
+      }
+      await page.screenshot({
+        path: testInfo.outputPath(
+          `empty-calendar-${role}-${size.width}-five-week.png`,
+        ),
+        animations: "disabled",
+      });
+      await action(page, "next").click();
+      observations.push({
+        month: "November 2026",
+        ...(await emptyMonth(page, 6)),
+      });
+      for (const month of ["December 2026", "January 2027", "February 2027"]) {
+        await action(page, "next").click();
+        await expect(app(page).locator("#range-title")).toContainText(month);
+        await expect(app(page).locator(".month-grid")).toBeVisible();
+      }
+      observations.push({
+        month: "February 2027",
+        ...(await emptyMonth(page, 4)),
+      });
+      await page.screenshot({
+        path: testInfo.outputPath(
+          `empty-calendar-${role}-${size.width}-four-week.png`,
+        ),
+        animations: "disabled",
+      });
+      await action(page, "previous").click();
+      await expect(app(page).locator("#range-title")).toContainText(
+        "January 2027",
+      );
+      await action(page, "today").first().click();
+      await emptyMonth(page, 5);
+      await expect(
+        app(page).locator('.day-number[data-day="2026-10-26"]'),
+      ).toHaveAttribute("aria-current", "date");
+      await selectedEmptyDay(page, "2026-10-28", mobile, role === "admin");
+      if (mobile) {
+        await page.keyboard.press("Escape");
+        await expect(dialog(page)).toHaveCount(0);
+      }
+      await view(page, "week");
+      await expect(app(page).locator(".week-day")).toHaveCount(7);
+      await expect(app(page).locator(".week-day .quiet-day")).toHaveCount(7);
+      await expect(app(page).locator(".week-day .event-card")).toHaveCount(0);
+      await expect(app(page).locator(".week-day").first()).toContainText(
+        "Oct 26",
+      );
+      await expect(app(page).locator(".week-day").last()).toContainText(
+        "Nov 1",
+      );
+      await expect(
+        app(page).locator('.week-day [data-cal-action="new-item"]'),
+      ).toHaveCount(role === "admin" ? 7 : 0);
+      await action(page, "next").click();
+      await expect(app(page).locator(".week-day").first()).toContainText(
+        "Nov 2",
+      );
+      await action(page, "today").first().click();
+      await expect(app(page).locator(".week-day").first()).toContainText(
+        "Oct 26",
+      );
+      await view(page, "agenda");
+      await expect(app(page).locator("#calendar-results")).toContainText(
+        "Nothing scheduled",
+      );
+      await expect(app(page).locator(".agenda-row")).toHaveCount(0);
+      await expect(
+        app(page).locator(".agenda-date-range summary"),
+      ).toBeVisible();
+      await view(page, "month");
+      await emptyMonth(page, 5);
+      const selected = await selectedEmptyDay(
+        page,
+        "2026-10-28",
+        mobile,
+        role === "admin",
+      );
+      if (role === "admin") {
+        await selected.locator('[data-cal-action="new-item"]').click();
+        await expect(field(page, "start")).toHaveValue(/^2026-10-28T/u);
+        await field(page, "title").fill("First item in the empty calendar");
+        await field(page, "start").fill("2026-10-28T09:00");
+        await field(page, "end").fill("2026-10-28T10:00");
+        await dialog(page, "create")
+          .getByRole("button", { name: "Add calendar item", exact: true })
+          .click();
+        await expect(dialog(page)).toContainText(
+          "First item in the empty calendar",
+        );
+        expect(fixture.writes).toHaveLength(1);
+        expect(fixture.writes[0].body.startAt).toBe(
+          Date.parse("2026-10-28T15:00:00Z"),
+        );
+        await page.keyboard.press("Escape");
+        await expect(dialog(page)).toHaveCount(0);
+        await action(page, "refresh").click();
+        await expect(app(page).locator(".calendar-event")).toHaveCount(1);
+        await expect(app(page).locator("#result-count")).toContainText(
+          "1 items",
+        );
+      } else {
+        expect(fixture.writes).toHaveLength(0);
+      }
+      await testInfo.attach("empty-calendar-layout", {
+        body: Buffer.from(
+          JSON.stringify({
+            role,
+            mobile,
+            observations,
+            weekDays: 7,
+            selectedEmptyDay: "2026-10-28",
+            selectedDayPresentation: mobile ? "drawer" : "rail",
+            selectedDayVisible: true,
+            agendaRows: 0,
+          }),
+        ),
+        contentType: "application/json",
+      });
+      await finish(page, fixture);
+    });
+
+    test(`Calendar zero matches preserves date grids for ${role} at ${size.width}px`, async ({
+      page,
+    }, testInfo) => {
+      await page.setViewportSize(size);
+      const fixture = await enter(page, { role });
+      await editFilters(page, mobile, () =>
+        app(page)
+          .locator("[data-cal-search]")
+          .fill("no item matches this search"),
+      );
+      const observations = [
+        { state: "search-zero", ...(await emptyMonth(page, 5)) },
+      ];
+      await selectedEmptyDay(page, "2026-10-28", mobile, role === "admin");
+      if (mobile) await page.keyboard.press("Escape");
+      await view(page, "week");
+      await expect(app(page).locator(".week-day")).toHaveCount(7);
+      await expect(app(page).locator(".week-day .quiet-day")).toHaveCount(7);
+      await expect(app(page).locator(".event-card")).toHaveCount(0);
+      await view(page, "agenda");
+      await expect(app(page).locator("#calendar-results")).toContainText(
+        "No matching calendar items",
+      );
+      await expect(app(page).locator(".agenda-row")).toHaveCount(0);
+      await action(page, "clear-filters").first().click();
+      await expect(app(page).locator(".agenda-row")).not.toHaveCount(0);
+      await view(page, "month");
+      await expect(app(page).locator(".calendar-event")).not.toHaveCount(0);
+      await editFilters(page, mobile, async () => {
+        await app(page)
+          .locator("[data-cal-type]")
+          .selectOption("public_booking");
+        await app(page).locator("[data-cal-status]").selectOption("confirmed");
+      });
+      observations.push({
+        state: "type-status-zero",
+        ...(await emptyMonth(page, 5)),
+      });
+      await page.screenshot({
+        path: testInfo.outputPath(
+          `zero-matches-calendar-${role}-${size.width}.png`,
+        ),
+        animations: "disabled",
+      });
+      await action(page, "clear-filters").first().click();
+      await expect(app(page).locator(".calendar-event")).not.toHaveCount(0);
+      expect(fixture.writes).toHaveLength(0);
+      await testInfo.attach("filtered-calendar-layout", {
+        body: Buffer.from(
+          JSON.stringify({
+            role,
+            mobile,
+            observations,
+            weekDays: 7,
+            selectedDayPresentation: mobile ? "drawer" : "rail",
+            selectedDayVisible: true,
+            restoredItems: true,
+          }),
+        ),
+        contentType: "application/json",
+      });
+      await finish(page, fixture);
+    });
+  }
+}
