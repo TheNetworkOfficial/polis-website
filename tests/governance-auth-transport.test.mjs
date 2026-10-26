@@ -33,6 +33,11 @@ function transport(
     window: {},
     getApiBaseUrl: () => "https://api.polis.test",
     buildAuthorizedHeaders,
+    // Session renewal has separate behavioral coverage; these cases isolate
+    // the existing Governance bearer/header contract after successful renewal.
+    requestSession: {
+      prepare: async () => ({ session, assertCurrent: () => {} }),
+    },
     normalizeString: (value) => String(value || "").trim(),
     fetch: async (url, options) => {
       requests.push({ url, ...options });

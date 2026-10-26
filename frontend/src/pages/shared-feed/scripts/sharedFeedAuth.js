@@ -10,6 +10,8 @@ const OAUTH_STATE_STORAGE_KEY = "sharedFeedOauthState.v1";
 const OAUTH_VERIFIER_STORAGE_KEY = "sharedFeedOauthVerifier.v1";
 const POST_AUTH_PATH_STORAGE_KEY = "sharedFeedPostAuthPath.v1";
 const SESSION_REFRESH_LEEWAY_MS = 60 * 1000;
+let sessionGeneration = 0;
+const pendingSessionRefreshes = new Map();
 const GOVERNANCE_PASSKEY_REGISTRATION_BEGIN_PATH =
   "/api/governance/passkeys/v1/registration/begin";
 const GOVERNANCE_PASSKEY_REGISTRATION_COMPLETE_PATH =
@@ -189,13 +191,15 @@ function buildSessionFromTokens(tokens = {}, { refreshToken = "" } = {}) {
   };
 }
 
-function persistSession(session) {
+function persistSession(session, { replace = true } = {}) {
+  if (replace) sessionGeneration++;
   const serialized = JSON.stringify(session);
   writeStoredValue("sessionStorage", SESSION_STORAGE_KEY, serialized);
   writeStoredValue("localStorage", LOCAL_STORAGE_KEY, serialized);
 }
 
 function clearStoredSessionOnly() {
+  sessionGeneration++;
   removeStoredValue("sessionStorage", SESSION_STORAGE_KEY);
   removeStoredValue("localStorage", LOCAL_STORAGE_KEY);
 }
@@ -260,7 +264,38 @@ function isSessionValid(session, leewayMs = SESSION_REFRESH_LEEWAY_MS) {
   );
 }
 
-function getStoredSession({ allowExpired = false } = {}) {
+function refreshSessionActor(session) {
+  const idActor = normalizeString(decodeJwtClaims(session?.idToken)?.sub);
+  const accessActor = normalizeString(
+    decodeJwtClaims(session?.accessToken)?.sub,
+  );
+  return idActor && idActor === accessActor ? idActor : "";
+}
+
+function sameSessionOwner(session, expected) {
+  if (!session || !expected) return false;
+  if (
+    session.idToken === expected.idToken &&
+    session.accessToken === expected.accessToken
+  )
+    return true;
+  const actor = refreshSessionActor(expected);
+  return Boolean(
+    actor &&
+      refreshSessionActor(session) === actor &&
+      expected.refreshToken &&
+      session.refreshToken === expected.refreshToken,
+  );
+}
+
+function storedSessionFingerprint() {
+  return JSON.stringify([
+    readStoredValue("sessionStorage", SESSION_STORAGE_KEY),
+    readStoredValue("localStorage", LOCAL_STORAGE_KEY),
+  ]);
+}
+
+function getStoredSession({ allowExpired = false, expectedSession } = {}) {
   const candidates = [
     parseStoredSession(readStoredValue("sessionStorage", SESSION_STORAGE_KEY)),
     parseStoredSession(readStoredValue("localStorage", LOCAL_STORAGE_KEY)),
@@ -269,6 +304,12 @@ function getStoredSession({ allowExpired = false } = {}) {
   if (!candidates.length) {
     return null;
   }
+
+  if (
+    expectedSession !== undefined &&
+    candidates.some((session) => !sameSessionOwner(session, expectedSession))
+  )
+    return null;
 
   const session = candidates.sort(
     (left, right) =>
@@ -280,7 +321,7 @@ function getStoredSession({ allowExpired = false } = {}) {
     return null;
   }
 
-  persistSession(session);
+  persistSession(session, { replace: false });
   return session;
 }
 
@@ -476,7 +517,6 @@ async function refreshSharedFeedSession(config = {}, session) {
       refreshToken: session.refreshToken,
     },
   );
-  persistSession(refreshedSession);
   return refreshedSession;
 }
 
@@ -1502,9 +1542,12 @@ export function getStoredSharedFeedSession() {
 
 export async function restoreSharedFeedSession(
   config = {},
-  { clearOnFailure = true } = {},
+  { clearOnFailure = true, expectedSession, throwOnFailure = false } = {},
 ) {
-  const storedSession = getStoredSession({ allowExpired: true });
+  const storedSession = getStoredSession({
+    allowExpired: true,
+    expectedSession,
+  });
   if (!storedSession) {
     return null;
   }
@@ -1513,13 +1556,48 @@ export async function restoreSharedFeedSession(
     return storedSession;
   }
 
+  const generation = sessionGeneration;
+  const fingerprint = storedSessionFingerprint();
+  const unchanged = () =>
+    sessionGeneration === generation &&
+    storedSessionFingerprint() === fingerprint;
+  const key = JSON.stringify([
+    getCognitoIdpEndpoint(config),
+    resolveCognitoClientId(config),
+    generation,
+    fingerprint,
+  ]);
+  let pending = pendingSessionRefreshes.get(key);
+  if (!pending) {
+    // One renewal is shared by simultaneous requests. Persistence belongs to
+    // this guarded boundary, so logout or a newer sign-in always wins.
+    pending = refreshSharedFeedSession(config, storedSession).then(
+      (session) => {
+        if (!session || !unchanged()) return null;
+        const actor = refreshSessionActor(storedSession);
+        if (!actor || refreshSessionActor(session) !== actor)
+          throw new SharedFeedAuthError(
+            "Your session could not be refreshed. Please sign in again.",
+            { statusCode: 401, errorCode: "session_refresh_identity_changed" },
+          );
+        persistSession(session);
+        return session;
+      },
+    );
+    pendingSessionRefreshes.set(key, pending);
+  }
+
   try {
-    return await refreshSharedFeedSession(config, storedSession);
-  } catch {
-    if (clearOnFailure) {
+    return await pending;
+  } catch (error) {
+    if (clearOnFailure && unchanged()) {
       clearStoredSessionOnly();
     }
+    if (throwOnFailure) throw error;
     return null;
+  } finally {
+    if (pendingSessionRefreshes.get(key) === pending)
+      pendingSessionRefreshes.delete(key);
   }
 }
 

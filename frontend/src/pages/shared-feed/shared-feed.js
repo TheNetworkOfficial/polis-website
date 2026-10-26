@@ -77,6 +77,7 @@ import {
   startHostedSignUp,
   verifySharedFeedTotpSetup,
 } from "./scripts/sharedFeedAuth.js";
+import { createSharedFeedSessionGuard } from "./scripts/sharedFeedSessionRequest.js";
 import {
   createMessagingBrowserDevice,
   createMessagingSocketClient,
@@ -10152,6 +10153,22 @@ function ensureActiveIndexInBounds() {
   );
 }
 
+const requestSession = createSharedFeedSessionGuard({
+  getSession: () => state.auth.session,
+  restoreSession: (expectedSession) =>
+    restoreSharedFeedSession(state.auth.config, {
+      clearOnFailure: false,
+      throwOnFailure: true,
+      expectedSession,
+    }),
+  saveSession: (session) => {
+    state.auth.session = session;
+    state.auth.user = getAuthenticatedUser(session);
+  },
+  userId: (session) => getAuthenticatedUser(session)?.userId || "",
+  contextKey: getCurrentPathWithQuery,
+});
+
 const policyAcceptance = createPolicyAcceptanceController({
   request: fetchJsonRaw,
   getUserId: () => getAuthenticatedUser(state.auth.session)?.userId || "",
@@ -10179,6 +10196,10 @@ async function fetchJsonRaw(
     throw new Error("video_backend_base_url_missing");
   }
 
+  // Unload queue-release requests must dispatch synchronously using the valid
+  // session already checked by their exit guard, without awaiting renewal.
+  const authorization =
+    auth && !keepalive ? await requestSession.prepare({ signal }) : null;
   const nextHeaders = {
     Accept: "application/json",
     ...headers,
@@ -10187,7 +10208,7 @@ async function fetchJsonRaw(
     Object.assign(
       nextHeaders,
       buildAuthorizedHeaders(
-        state.auth.session,
+        authorization?.session || state.auth.session,
         {},
         {
           includeAccessToken,
@@ -10202,7 +10223,9 @@ async function fetchJsonRaw(
     nextHeaders["Content-Type"] = "application/json";
   }
 
+  authorization?.assertCurrent();
   if (typeof beforeDispatch === "function") beforeDispatch();
+  authorization?.assertCurrent();
   const response = await fetch(`${baseUrl}${path}`, {
     method,
     signal,

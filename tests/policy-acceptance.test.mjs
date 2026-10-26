@@ -126,6 +126,6 @@ test("direct login and hosted/restored sessions invoke the shared review; writes
   );
   assert.match(
     integration,
-    /response\.status === 428 && payload\?\.error === "policy_acceptance_required"/,
+    /response\.status === 428 &&\s*payload\?\.error === "policy_acceptance_required"/,
   );
 });
