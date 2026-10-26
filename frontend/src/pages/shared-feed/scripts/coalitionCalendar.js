@@ -330,16 +330,8 @@ export function createCoalitionCalendar({
       $("#calendar-results").innerHTML = blocked;
       return;
     }
-    const noItems = state.condition === "empty";
-    if (noItems) {
-      $("#calendar-results").innerHTML = empty(
-        "A clear calendar. A new beginning.",
-        "Add your first event, shift, or reminder to bring the team’s plans together.",
-        canManage() ? btn("New calendar item", "new-item", "", true) : "",
-      );
-      return;
-    }
     if (
+      state.view === "agenda" &&
       !currentItems().length &&
       (state.query || state.type !== "all" || state.status !== "all")
     ) {
