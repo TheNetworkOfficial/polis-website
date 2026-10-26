@@ -90,6 +90,8 @@ async function mockCoalitionWorkspace(page, { role = "admin" } = {}) {
           username: "alex-demo",
         },
       });
+    if (path === "/api/me/policy-acceptance")
+      return respond({ ok: true, accepted: true });
     if (path === "/api/coalitions")
       return respond({ items: [{ coalition, membership }] });
     if (path === "/api/files/workspaces")
@@ -195,12 +197,15 @@ test("coalition navigation preserves the existing Texting Hub and scoped Files d
   await page.goto(`${BASE_URL}/coalitions`);
   await expect(page.locator(".polis-coalition-ui")).toBeVisible();
   await page.getByRole("button", { name: "Workspace", exact: true }).click();
-  await expect(page).toHaveURL(`${BASE_URL}${COALITION_PATH}/admin`);
+  await expect(page).toHaveURL(`${BASE_URL}${COALITION_PATH}/members`);
 
   const navigation = page.locator(".coalition-ui-sidebar");
   await expect(navigation).toBeVisible();
   await navigation.getByRole("button", { name: "Home", exact: true }).click();
-  await expect(page.locator(".coalition-ui-heading h1")).toHaveText("Home");
+  await expect(page).toHaveURL(`${BASE_URL}${COALITION_PATH}`);
+  await expect(
+    navigation.getByRole("button", { name: "Home", exact: true }),
+  ).toHaveAttribute("aria-current", "page");
   await page.screenshot({
     path: testInfo.outputPath("coalition-home-desktop.png"),
     fullPage: true,
@@ -218,9 +223,13 @@ test("coalition navigation preserves the existing Texting Hub and scoped Files d
   });
   await navigation.locator(`[data-route="${COALITION_PATH}/members"]`).click();
   await expect(page).toHaveURL(`${BASE_URL}${COALITION_PATH}/members`);
+  await page
+    .getByRole("button", { name: "Invite person", exact: true })
+    .click();
   await expect(
     page.locator('[data-route-form="coalition-invite"] input[name="username"]'),
   ).toBeEnabled();
+  await page.keyboard.press("Escape");
 
   const files = navigation.locator('[data-route^="/files?"]');
   await expect(files).toHaveCount(1);
@@ -283,10 +292,17 @@ test("member access stays read-only and coalition pages fit a mobile viewport", 
   });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`${BASE_URL}${COALITION_PATH}/members`);
-  const invite = page.locator('[data-route-form="coalition-invite"]');
-  await expect(invite.locator('input[name="username"]')).toBeDisabled();
-  await expect(invite.locator('select[name="roleKey"]')).toBeDisabled();
-  await expect(invite.locator('button[type="submit"]')).toBeDisabled();
+  await expect(page.locator(".coalition-people")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Invite person", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.locator('[data-route-form="coalition-invite"]'),
+  ).toHaveCount(0);
+  const member = page.locator("[data-coalition-member-card]").first();
+  await member.locator("summary").click();
+  await expect(member.locator('select[name="roleKey"]')).toBeDisabled();
+  await expect(member.locator('button[type="submit"]')).toHaveCount(0);
   await expect(
     page.locator('[data-route-form="coalition-role-create"]'),
   ).toHaveCount(0);
@@ -313,6 +329,106 @@ test("member access stays read-only and coalition pages fit a mobile viewport", 
   expect(writes).toEqual([]);
   expect(errors).toEqual([]);
 });
+
+for (const viewport of [
+  { width: 1440, height: 1050 },
+  { width: 390, height: 844 },
+]) {
+  test(`coalition navigation opens the approved People layout from every entry at ${viewport.width}px`, async ({
+    page,
+  }, testInfo) => {
+    testInfo.setTimeout(60000);
+    const { writes, errors } = await mockCoalitionWorkspace(page);
+    await page.setViewportSize(viewport);
+
+    const expectCleanPeople = async () => {
+      await expect(page.locator(".coalition-ui-heading h1")).toHaveText(
+        "People",
+      );
+      await expect(page.locator(".coalition-people")).toBeVisible();
+      await expect(page.locator("[data-coalition-member-card]")).toHaveCount(2);
+      await expect(page.locator("[data-people-tab]")).toHaveCount(4);
+      await expect(page.locator(".shared-coalition-admin")).toHaveCount(0);
+      await expect(
+        page.getByRole("heading", { name: "Admin center", exact: true }),
+      ).toHaveCount(0);
+    };
+    const navigation = () =>
+      page.locator(
+        viewport.width < 700
+          ? ".coalition-ui-mobile-nav"
+          : ".coalition-ui-sidebar",
+      );
+    const openNavigation = async () => {
+      if (
+        viewport.width < 700 &&
+        (await navigation().getAttribute("open")) === null
+      )
+        await navigation().locator("summary").click();
+      return navigation();
+    };
+
+    // Start at the actual coalition card, rather than bypassing its entry route.
+    await page.goto(`${BASE_URL}/coalitions`);
+    await page.getByRole("button", { name: "Workspace", exact: true }).click();
+    await expect(page).toHaveURL(`${BASE_URL}${COALITION_PATH}/members`);
+    await expectCleanPeople();
+    const approvedTop = await page
+      .locator(".coalition-people")
+      .evaluate((element) => element.getBoundingClientRect().top);
+
+    // Old bookmarks and the canonical URL must display the same whole page.
+    for (const route of ["admin", "members"]) {
+      await page.goto(`${BASE_URL}${COALITION_PATH}/${route}`);
+      await expectCleanPeople();
+      const top = await page
+        .locator(".coalition-people")
+        .evaluate((element) => element.getBoundingClientRect().top);
+      expect(Math.abs(top - approvedTop)).toBeLessThanOrEqual(2);
+    }
+
+    await (await openNavigation())
+      .getByRole("button", { name: "Home", exact: true })
+      .click();
+    await (await openNavigation())
+      .getByRole("button", { name: "People", exact: true })
+      .click();
+    await expect(page).toHaveURL(`${BASE_URL}${COALITION_PATH}/members`);
+    await expectCleanPeople();
+
+    await (await openNavigation())
+      .getByRole("button", { name: "Administration", exact: true })
+      .click();
+    await expect(page).toHaveURL(`${BASE_URL}${COALITION_PATH}/admin/edit`);
+    await expect(page.locator(".coalition-ui-heading h1")).toHaveText(
+      "Administration",
+    );
+    await expect(
+      page.locator('[data-route-form="coalition-profile-edit"]'),
+    ).toBeVisible();
+    const adminNavigation = await openNavigation();
+    await expect(
+      adminNavigation.getByRole("button", {
+        name: "Administration",
+        exact: true,
+      }),
+    ).toHaveClass(/is-active/);
+    await expect(
+      adminNavigation.getByRole("button", { name: "People", exact: true }),
+    ).not.toHaveClass(/is-active/);
+    await adminNavigation
+      .getByRole("button", { name: "People", exact: true })
+      .click();
+    await expectCleanPeople();
+    await page.screenshot({
+      path: testInfo.outputPath(`people-navigation-${viewport.width}.png`),
+      fullPage: true,
+      animations: "disabled",
+    });
+    expect(writes).toEqual([]);
+    expect(errors).toEqual([]);
+  });
+}
 
 test("coalition rooms retain the live composer in a channel workspace without changing private messages", async ({
   page,

@@ -6595,8 +6595,8 @@ function getCoalitionDocumentTitle(route = state.route) {
   if (parts[0] === "admin" && parts[1] === "edit") {
     return "Edit Coalition";
   }
-  if (parts[0] === "admin") {
-    return "Coalition Admin";
+  if (parts[0] === "admin" || parts[0] === "members") {
+    return "Coalition People";
   }
   if (parts[0] === "amplify" && parts[1] === "create") {
     return "Create Amplify Request";
@@ -87200,7 +87200,7 @@ function coalitionEntryPath(coalition, membership) {
     return "/coalitions";
   }
   if (membership?.isActive && membership?.isLeader) {
-    return coalitionSectionPath(coalitionId, "admin");
+    return coalitionSectionPath(coalitionId, "members");
   }
   return coalitionSectionPath(coalitionId);
 }
@@ -87209,7 +87209,7 @@ function coalitionEntryLabel(membership) {
   if (membership?.isPending) {
     return "Pending approval";
   }
-  return membership?.isLeader ? "Admin view" : "Open coalition";
+  return membership?.isLeader ? "Manage people" : "Open coalition";
 }
 
 function coalitionRouteParts(route = state.route) {
@@ -87402,10 +87402,8 @@ function coalitionFeatureStatus(section, coalition, membership) {
   };
 }
 
-function coalitionMembersCommandPath(coalitionId, membership) {
-  return membership?.isLeader || membership?.isAdmin
-    ? coalitionSectionPath(coalitionId, "admin")
-    : coalitionSectionPath(coalitionId, "members");
+function coalitionMembersCommandPath(coalitionId) {
+  return coalitionSectionPath(coalitionId, "members");
 }
 
 function coalitionFeatureHighlights(coalition, membership, limit = 5) {
@@ -88340,6 +88338,7 @@ function renderCoalitionsRootPage() {
 
 function renderCoalitionHero(coalition, membership) {
   const activeSection = coalitionSectionForRoute(getCurrentRoute());
+  const administration = isCoalitionAdminEditRoute();
   const labels = {
     overview: "Home",
     members: "People",
@@ -88351,7 +88350,7 @@ function renderCoalitionHero(coalition, membership) {
   );
   return `<header class="coalition-ui-heading">
     <div><span class="coalition-ui-eyebrow">${escapeHtml(coalition.name)}</span>
-      <h1>${escapeHtml(labels[activeSection] || section?.label || "Coalition")}</h1>
+      <h1>${escapeHtml(administration ? labels.admin : labels[activeSection] || section?.label || "Coalition")}</h1>
       ${activeSection === "overview" && coalition.description ? `<p>${escapeHtml(coalition.description)}</p>` : ""}
     </div>
     <span class="coalition-ui-membership">${escapeHtml(membership.isPending ? "Pending approval" : membership.roleLabel)}</span>
@@ -88359,13 +88358,14 @@ function renderCoalitionHero(coalition, membership) {
 }
 
 function renderCoalitionTabs(coalition, membership, activeSection) {
+  const administration = isCoalitionAdminEditRoute();
   const labels = {
     overview: "Home",
     members: "People",
     "voter-map": "Field work",
   };
   const items = COALITION_SECTION_CONFIG.map((section) => {
-    const active = section.key === activeSection;
+    const active = section.key === activeSection && !administration;
     const enabled = canOpenCoalitionSection(section, coalition, membership);
     const status = coalitionFeatureStatus(section, coalition, membership);
     const actionAttrs = enabled
@@ -88393,7 +88393,7 @@ function renderCoalitionTabs(coalition, membership, activeSection) {
     ${filesRoute ? `<a class="shared-coalition-tab" href="${escapeHtml(filesRoute)}" data-route="${escapeHtml(filesRoute)}"><span>${renderIcon("file")}</span><strong>Files</strong></a>` : ""}
     ${active ? `<button class="shared-coalition-tab coalition-ui-texting-link" type="button" data-action="navigate" data-route="${escapeHtml(textingRoute(coalition.coalitionId))}"><span>${renderIcon("messages")}</span><strong>Texting</strong></button>` : ""}
     ${active && coalitionHasAnyPermission(membership, ["contact_book_view"]) ? `<button class="shared-coalition-tab" type="button" data-action="navigate" data-route="/workspace/coalition/${encodeURIComponent(coalition.coalitionId)}/work/ballot-chaser"><span>${renderIcon("election")}</span><strong>Ballot Chaser</strong></button>` : ""}
-    ${active && membership.isLeader ? `<button class="shared-coalition-tab${activeSection === "admin" ? " is-active" : ""}" type="button" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, "admin"))}"><span>${renderIcon("settings")}</span><strong>Administration</strong></button>` : ""}
+    ${active && membership.isLeader ? `<button class="shared-coalition-tab${administration ? " is-active" : ""}" type="button" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, "admin/edit"))}"><span>${renderIcon("settings")}</span><strong>Administration</strong></button>` : ""}
   </nav>`;
 }
 
@@ -88518,7 +88518,7 @@ function renderCoalitionAdminNav(coalition, activeKey) {
   const items = [
     {
       key: "access",
-      path: "admin",
+      path: "members",
       label: "Access",
       icon: "team",
       description: "Members, requests, invitations, and role defaults.",
@@ -95631,7 +95631,7 @@ function renderCoalitionSection(detail, coalition, membership, activeSection) {
     return renderCoalitionOverview(detail, coalition, membership);
   }
   if (section.key === "members") {
-    if (coalitionRouteKeywordParts()[0] === "admin") {
+    if (isCoalitionAdminEditRoute()) {
       return renderCoalitionAdminSection(detail, coalition, membership);
     }
     return renderCoalitionMembers(detail, coalition, membership);
