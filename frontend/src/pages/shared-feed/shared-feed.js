@@ -14,6 +14,7 @@ import "./css/polis-auth.css";
 import "./css/coalition-people.css";
 import "./css/coalition-missions.css";
 import "./css/coalition-field-work.css";
+import "./css/coalition-calendar.css";
 import {
   workspaceNavigationScope,
   withWorkspaceNavigationScope,
@@ -22,6 +23,7 @@ import {
   renderWorkspaceNavigationFrame,
 } from "./scripts/workspaceNavigation.js";
 import { createCoalitionFieldWork } from "./scripts/coalitionFieldWork.js";
+import { createCoalitionCalendar } from "./scripts/coalitionCalendar.js";
 import {
   canonicalCoalitionFieldWorkPath,
   coalitionFieldToolOwner,
@@ -332,6 +334,54 @@ function currentCoalitionFieldWorkContext() {
       section === "notes"
         ? normalizeString(query.get("recordId") || query.get("voterId"))
         : "",
+  };
+}
+
+const coalitionCalendarPage = createCoalitionCalendar({
+  context: currentCoalitionCalendarContext,
+  request: textingRequest,
+  navigate: navigateTo,
+  onContextInvalidated: scheduleRender,
+  onItems: (items, coalitionId) => {
+    const detail = state.pages.coalitions.detail;
+    if (detail.coalition?.coalitionId === coalitionId)
+      detail.calendar = items
+        .slice(0, 6)
+        .map((item) => normalizeCandidateDashboardCalendarItem(item.raw));
+  },
+});
+function isPlainCoalitionCalendarRoute() {
+  const route = getCurrentRoute();
+  return (
+    coalitionSectionForRoute(route) === "calendar" &&
+    !coalitionFieldToolOwner(coalitionRouteKeywordParts(route))
+  );
+}
+function currentCoalitionCalendarContext() {
+  if (!isPlainCoalitionCalendarRoute() || !state.auth.session) return null;
+  const route = getCurrentRoute();
+  const coalitionId = decodeRouteSegment(route.routeParams.coalitionId);
+  const detail = state.pages.coalitions.detail;
+  const item = findCoalitionListItem(coalitionId);
+  const matching = detail.coalition?.coalitionId === coalitionId;
+  const coalition = (matching ? detail.coalition : null) || item?.coalition;
+  const membership = (matching ? detail.membership : null) || item?.membership;
+  if (!coalition || !membership) return null;
+  return {
+    userId: getAuthenticatedUser(state.auth.session)?.userId || "",
+    sessionKey:
+      state.auth.session.idToken || state.auth.session.accessToken || "",
+    coalitionId,
+    name: coalition.name,
+    membership,
+    timeZone:
+      coalition.timeZone ||
+      coalition.timezone ||
+      coalition.raw?.timeZone ||
+      coalition.raw?.timezone,
+    fieldAccess:
+      coalition.voterMapEnabled === true &&
+      membership.canAccessVoterMap === true,
   };
 }
 
@@ -18089,6 +18139,8 @@ function coalitionCalendarWorkspace() {
 }
 
 async function loadCoalitionCalendar(coalitionId, { refresh = false } = {}) {
+  if (isPlainCoalitionCalendarRoute())
+    return coalitionCalendarPage.load({ refresh });
   const normalizedCoalitionId = decodeRouteSegment(coalitionId);
   if (!normalizedCoalitionId) {
     return;
@@ -36979,10 +37031,12 @@ async function loadCoalitionDetail(coalitionId, { refresh = false } = {}) {
       `/api/missions?scopeType=coalition&scopeId=${encodedId}&view=mine&limit=6`,
       { auth: true },
     ),
-    calendar: fetchJson(
-      `/api/coalitions/${encodedId}/calendar/items?from=${encodeURIComponent(from.toISOString())}&to=${encodeURIComponent(to.toISOString())}&limit=6`,
-      { auth: true },
-    ),
+    calendar: isPlainCoalitionCalendarRoute()
+      ? Promise.resolve({ items: [] })
+      : fetchJson(
+          `/api/coalitions/${encodedId}/calendar/items?from=${encodeURIComponent(from.toISOString())}&to=${encodeURIComponent(to.toISOString())}&limit=6`,
+          { auth: true },
+        ),
     constitution: fetchJson(`/api/coalitions/${encodedId}/constitution`, {
       auth: true,
     }),
@@ -91387,6 +91441,7 @@ function renderCoalitionCalendarConnections(resource) {
 }
 
 function renderCoalitionCalendar(detail, coalition, membership) {
+  if (isPlainCoalitionCalendarRoute()) return coalitionCalendarPage.markup();
   const resource =
     detail.calendarWorkspace || createCandidateDashboardCalendarState();
   const items = resource.loaded ? resource.items : detail.calendar;
@@ -96983,6 +97038,9 @@ function renderCoalitionDetailPage() {
   const workspaceClasses = [
     "shared-page",
     "shared-coalition-workspace",
+    isPlainCoalitionCalendarRoute()
+      ? "shared-coalition-workspace--calendar"
+      : "",
     isOverviewSection
       ? "shared-coalition-workspace--overview"
       : "shared-coalition-workspace--section",
@@ -97005,7 +97063,7 @@ function renderCoalitionDetailPage() {
     identityHtml: renderCoalitionAvatar(coalition),
     sidebarFooterHtml:
       '<button class="coalition-ui-all coalition-ui-app" type="button" data-action="open-app-shell">Open app</button>',
-    content: `${isOverviewSection && membership.isActive && !membership.isPending ? "" : renderCoalitionHero(coalition, membership)}
+    content: `${(isOverviewSection || isPlainCoalitionCalendarRoute()) && membership.isActive && !membership.isPending ? "" : renderCoalitionHero(coalition, membership)}
       ${detail.error ? `<div class="shared-page__error">${escapeHtml(detail.error)}</div>` : ""}
       ${renderCoalitionSection(detail, coalition, membership, activeSection)}`,
   });
@@ -129107,7 +129165,7 @@ function renderApp() {
         ${routeStage}
       </div>
       ${renderToast()}`
-          : `<div class="shared-feed-shell${isCoalitionPresentationRoute() ? " shared-feed-shell--coalition polis-coalition-ui" : ""}">
+          : `<div class="shared-feed-shell${isPlainCoalitionCalendarRoute() ? " coalition-calendar-route" : ""}${isCoalitionPresentationRoute() ? " shared-feed-shell--coalition polis-coalition-ui" : ""}">
         ${isCoalitionPresentationRoute() ? "" : renderRail()}
         ${routeStage}
       </div>
@@ -129123,9 +129181,11 @@ function renderApp() {
       ${renderCandidateDonationFlowModal()}
       ${renderToast()}`;
   coalitionFieldWork.beforeRender();
+  coalitionCalendarPage.beforeRender();
   root.innerHTML = shell;
   territoryBuilder.mount(root);
   coalitionFieldWork.mount(root);
+  coalitionCalendarPage.mount(root);
   organizationDashboardPage.mount(root);
   restoreFeedScrollState(scrollSnapshot);
   restorePetitionAddressFocusState(petitionAddressFocusSnapshot);
@@ -138295,6 +138355,81 @@ async function bootstrapFilesNavigation() {
   }
 }
 
+let calendarResumeVersion = 0;
+let calendarResumeInvocation = 0;
+let calendarResumeReadAt = 0;
+/** Calendar resume reconciles stored credentials before reauthorizing its
+ * workspace. Old private records and drafts cannot survive an account switch. */
+async function refreshCoalitionCalendarOnResume() {
+  if (document.hidden || !isPlainCoalitionCalendarRoute()) return;
+  const path = getCurrentPathWithQuery();
+  const invocation = ++calendarResumeInvocation;
+  const session = await restoreSharedFeedSession(state.auth.config, {
+    clearOnFailure: false,
+  });
+  if (
+    invocation !== calendarResumeInvocation ||
+    path !== getCurrentPathWithQuery() ||
+    !isPlainCoalitionCalendarRoute()
+  )
+    return;
+  const signature = (value) => value?.idToken || value?.accessToken || "";
+  const changed = signature(state.auth.session) !== signature(session);
+  if (!changed && Date.now() - calendarResumeReadAt < 1500) return;
+  calendarResumeReadAt = Date.now();
+  const version = ++calendarResumeVersion;
+  const coalitionId = decodeRouteSegment(
+    getCurrentRoute().routeParams.coalitionId,
+  );
+  if (changed) {
+    coalitionCalendarPage.reset();
+    state.auth.session = session;
+    state.auth.user = getAuthenticatedUser(session);
+    state.pages.coalitions.detail = { ...state.pages.coalitions.detail };
+    resetCoalitionDetail(coalitionId);
+    state.pages.coalitions.detail.loading = false;
+    state.pages.coalitions.list = {
+      ...state.pages.coalitions.list,
+      items: [],
+      loaded: false,
+      loading: false,
+      error: "",
+    };
+    scheduleRender();
+  }
+  workspaceNavigationGeneration++;
+  workspaceNavigationAccess = { key: "", loading: false, loaded: false };
+  if (!session) {
+    scheduleRender();
+    return;
+  }
+  const expectedKey = workspaceNavigationKey();
+  await loadWorkspaceNavigation({ refresh: true });
+  if (
+    version !== calendarResumeVersion ||
+    path !== getCurrentPathWithQuery() ||
+    expectedKey !== workspaceNavigationKey()
+  )
+    return;
+  const access = currentWorkspaceNavigationAccess();
+  const detail = state.pages.coalitions.detail;
+  detail.membership = access?.membership || null;
+  if (access?.coalition) detail.coalition = access.coalition;
+  state.pages.coalitions.list.items = state.pages.coalitions.list.items.map(
+    (item) =>
+      item.coalition?.coalitionId === coalitionId
+        ? {
+            ...item,
+            coalition: access?.coalition || item.coalition,
+            membership: access?.membership || null,
+          }
+        : item,
+  );
+  if (!access?.membership) coalitionCalendarPage.reset();
+  scheduleRender();
+  if (access?.membership) await coalitionCalendarPage.load({ refresh: true });
+}
+
 let textingResumeReadAt = 0;
 function refreshTextingOnResume() {
   const current = currentTextingContext();
@@ -138320,9 +138455,23 @@ function refreshTextingOnResume() {
 function attachGlobalListeners() {
   window.addEventListener("pagehide", () => textingWorkspacePage.exit());
   window.addEventListener("pageshow", (event) => {
-    if (event.persisted) refreshTextingOnResume();
+    if (event.persisted) {
+      refreshTextingOnResume();
+      refreshCoalitionCalendarOnResume().catch(() => {});
+    }
   });
   window.addEventListener("focus", refreshTextingOnResume);
+  window.addEventListener("focus", () =>
+    refreshCoalitionCalendarOnResume().catch(() => {}),
+  );
+  window.addEventListener("storage", (event) => {
+    if (
+      ["sharedFeedSession.v1", "sharedFeedSessionPersisted.v1"].includes(
+        event.key,
+      )
+    )
+      refreshCoalitionCalendarOnResume().catch(() => {});
+  });
   window.addEventListener("focus", () =>
     organizationDashboardPage.resume().catch(() => {}),
   );
@@ -138376,6 +138525,7 @@ function attachGlobalListeners() {
       return;
     }
     refreshTextingOnResume();
+    refreshCoalitionCalendarOnResume().catch(() => {});
     organizationDashboardPage.resume().catch(() => {});
     if (isElectionDayRoute()) {
       configureElectionPolling();

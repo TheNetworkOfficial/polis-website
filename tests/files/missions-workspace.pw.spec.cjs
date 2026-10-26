@@ -71,9 +71,19 @@ async function assertCleanWorkspace(page) {
     viewport: innerWidth,
   }));
   expect(overflow.page).toBeLessThanOrEqual(overflow.viewport + 1);
-  const selectedTab = await page
-    .locator('.polis-missions [role="tab"][aria-selected="true"]')
-    .boundingBox();
+  let selectedTab;
+  await expect
+    .poll(async () => {
+      selectedTab = await page
+        .locator('.polis-missions [role="tab"][aria-selected="true"]')
+        .boundingBox();
+      return Boolean(
+        selectedTab &&
+          selectedTab.x >= -1 &&
+          selectedTab.x + selectedTab.width <= overflow.viewport + 1,
+      );
+    })
+    .toBe(true);
   expect(selectedTab.x).toBeGreaterThanOrEqual(-1);
   expect(selectedTab.x + selectedTab.width).toBeLessThanOrEqual(
     overflow.viewport + 1,

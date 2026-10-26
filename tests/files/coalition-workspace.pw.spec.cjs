@@ -258,6 +258,14 @@ async function mockCoalitionWorkspace(
           canManageBilling: admin,
         },
       });
+    if (path.endsWith("/calendar/items"))
+      return respond({
+        ok: true,
+        items: [],
+        overlap: true,
+        complete: true,
+        nextCursor: null,
+      });
     return respond({ ok: true, items: [], audiences: [], workspaces: [] });
   });
   return { writes, errors, reads };
@@ -337,7 +345,13 @@ test("coalition navigation preserves the existing Texting Hub and scoped Files d
     await navigation
       .locator(`[data-route="${COALITION_PATH}/${section}"]`)
       .click();
-    await expect(page.locator(".coalition-ui-heading h1")).toBeVisible();
+    await expect(
+      page.locator(
+        section === "calendar"
+          ? ".coalition-calendar-page .page-heading h1"
+          : ".coalition-ui-heading h1",
+      ),
+    ).toBeVisible();
     await expect(page.locator(".shared-page__loading")).toHaveCount(0);
     const width = await page.evaluate(() => ({
       content: document.documentElement.scrollWidth,
