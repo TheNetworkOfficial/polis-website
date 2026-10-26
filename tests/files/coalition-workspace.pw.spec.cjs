@@ -588,6 +588,62 @@ test("standalone Files does not inherit an old organization mode or trust mismat
   expect(fixture.errors).toEqual([]);
 });
 
+for (const width of [320, 390]) {
+  test(`mobile Files organization menu keeps Administration and Exit clickable at ${width}px`, async ({
+    page,
+  }, testInfo) => {
+    const fixture = await mockCoalitionWorkspace(page);
+    await page.setViewportSize({ width, height: 844 });
+    await page.goto(
+      `${BASE_URL}/files?workspace=${encodeURIComponent(FILES_WORKSPACE_ID)}&organizationScopeType=coalition&organizationScopeId=${COALITION_ID}`,
+    );
+    await expect(page.locator(".files-shell")).toBeVisible();
+    const menu = page.locator(".coalition-ui-mobile-nav");
+    await menu.locator("summary").click();
+    const administration = menu.getByRole("link", {
+      name: "Administration",
+      exact: true,
+    });
+    await administration.scrollIntoViewIfNeeded();
+    const hitCenter = (locator) =>
+      locator.evaluate((element) => {
+        const box = element.getBoundingClientRect();
+        return element.contains(
+          document.elementFromPoint(
+            box.x + box.width / 2,
+            box.y + box.height / 2,
+          ),
+        );
+      });
+    expect(await hitCenter(administration)).toBe(true);
+    await administration.click();
+    await expect(page).toHaveURL(`${BASE_URL}${COALITION_PATH}/admin/edit`);
+    await expect(page.locator(".coalition-ui-heading h1")).toHaveText(
+      "Administration",
+    );
+    await menu.locator("summary").click();
+    await menu.getByRole("link", { name: "Files", exact: true }).click();
+    await expect(page.locator(".files-shell")).toBeVisible();
+    await menu.locator("summary").click();
+    const exit = menu.getByRole("button", {
+      name: "Exit workspace",
+      exact: true,
+    });
+    await exit.scrollIntoViewIfNeeded();
+    expect(await hitCenter(exit)).toBe(true);
+    await page.screenshot({
+      path: testInfo.outputPath(`mobile-files-exit-pointer-${width}.png`),
+      animations: "disabled",
+    });
+    await exit.click();
+    await expect(page).toHaveURL(`${BASE_URL}/feed`);
+    await expect(page.locator(".coalition-ui-mobile-nav")).toHaveCount(0);
+    await expect(page.locator(".coalition-ui-sidebar")).toHaveCount(0);
+    expect(fixture.writes).toEqual([]);
+    expect(fixture.errors).toEqual([]);
+  });
+}
+
 test("same-user credential refresh keeps the authorized organization tabs without leaving Texting", async ({
   page,
 }) => {

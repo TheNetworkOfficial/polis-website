@@ -631,7 +631,7 @@
   .coalition-ui-mobile-nav {
     position: sticky;
     top: var(--coalition-navigation-header-height);
-    z-index: 30;
+    z-index: 35;
     display: block;
     max-height: calc(100vh - var(--coalition-navigation-header-height) - 60px);
     max-height: calc(
