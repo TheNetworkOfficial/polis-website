@@ -14,6 +14,8 @@ function publicAuthConfig(req, env = process.env) {
     domain: normalizeString(env.COGNITO_DOMAIN),
     scopes: normalizeString(env.COGNITO_SCOPES),
     enablePasswordFlow: normalizeString(env.COGNITO_ENABLE_PASSWORD_FLOW),
+    supportedIdentityProviders:
+      normalizeString(env.COGNITO_SUPPORTED_IDENTITY_PROVIDERS) || "COGNITO",
     redirectUri:
       normalizeString(env.COGNITO_REDIRECT_URI) ||
       `${req.protocol}://${req.get("host")}${req.originalUrl}`,

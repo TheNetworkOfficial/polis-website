@@ -107,6 +107,8 @@ function buildStaticSharedFeedShellHtml({
       domain: process.env.COGNITO_DOMAIN || "",
       scopes: process.env.COGNITO_SCOPES || "",
       enablePasswordFlow: process.env.COGNITO_ENABLE_PASSWORD_FLOW || "false",
+      supportedIdentityProviders:
+        process.env.COGNITO_SUPPORTED_IDENTITY_PROVIDERS || "COGNITO",
       redirectUri: process.env.COGNITO_REDIRECT_URI || "",
     },
     map: {

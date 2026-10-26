@@ -8,6 +8,14 @@ import "./css/coalition-workspace.css";
 import "./css/coalition-features.css";
 import "./css/coalition-rooms.css";
 import "./css/organization-publishing.css";
+import "./css/polis-auth.css";
+import {
+  renderPolisAuthLayout,
+  renderPolisAuthPassword,
+  renderPolisAuthProviders,
+  createPolisAuthInteractions,
+} from "./scripts/polisAuthPresentation.js";
+const polisAuthInteractions = createPolisAuthInteractions();
 import polisLogoUrl from "../../assets/images/polis/Polis.png";
 
 import {
@@ -6990,6 +6998,7 @@ function navigateTo(path, { replace = false } = {}) {
   if (!normalizedPath) {
     return;
   }
+  if (state.ui.authModal) closeAuthModal();
   const nextUrl = normalizedPath.startsWith("http")
     ? normalizedPath
     : normalizedPath.startsWith("/")
@@ -7249,13 +7258,6 @@ async function loadStripeJs() {
   return stripeJsLoadPromise;
 }
 
-function getStoreUrls() {
-  return {
-    ios: normalizeUrl(runtimeConfig.iosStoreUrl),
-    android: normalizeUrl(runtimeConfig.androidStoreUrl),
-  };
-}
-
 function normalizeAuthModalMode(value) {
   const normalized = normalizeString(value).toLowerCase();
   if (normalized === "signup" || normalized === "confirm") {
@@ -7405,6 +7407,7 @@ function buildAuthModalState(kind, context = {}) {
 }
 
 function openAuthModal(kind, context = {}) {
+  polisAuthInteractions.rememberTrigger();
   state.ui.authModal = buildAuthModalState(kind, context);
   scheduleRender();
 }
@@ -9849,7 +9852,10 @@ async function fetchJsonRaw(
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    if (response.status === 428 && payload?.error === "policy_acceptance_required") {
+    if (
+      response.status === 428 &&
+      payload?.error === "policy_acceptance_required"
+    ) {
       policyAcceptance.review({ force: true }).catch(() => {});
     }
     const error = new Error(
@@ -115614,28 +115620,19 @@ function renderMessagingPage() {
   </section>`;
 }
 
-function renderAuthRouteModeControls(activeMode) {
-  const returnTo = encodeURIComponent(authRouteReturnPath());
-  const controls = [
-    ["login", "Sign in", `/auth?returnTo=${returnTo}`],
-    ["signup", "Create account", `/auth/signup/email?returnTo=${returnTo}`],
-    ["reset", "Reset password", `/auth/forgot-password?returnTo=${returnTo}`],
-  ];
-  return `<div class="shared-auth-route-tabs">
-    ${controls
-      .map(
-        ([mode, label, route]) =>
-          `<button class="shared-feed-chip${activeMode === mode ? " shared-feed-chip--primary" : ""}" type="button" data-action="navigate" data-route="${escapeHtml(route)}">${escapeHtml(label)}</button>`,
-      )
-      .join("")}
-  </div>`;
+function renderBrowserAuthSwitch(mode, modal = false) {
+  const signup = mode === "signup" || mode === "confirm";
+  const label = signup ? "Sign in" : "Create an account";
+  const targetMode = signup ? "login" : "signup";
+  const route = `${signup ? "/auth" : "/auth/signup/email"}?returnTo=${encodeURIComponent(authRouteReturnPath())}`;
+  return `<p class="polis-auth__switch">${signup ? "Already have an account?" : "New to Polis?"} ${modal ? `<button type="button" data-action="auth-switch-mode" data-auth-mode="${targetMode}">${label}</button>` : `<a href="${escapeHtml(route)}" data-action="navigate" data-route="${escapeHtml(route)}">${label}</a>`}</p>`;
 }
 
 function renderAuthRouteStatus(resource) {
   if (!resource) {
     return "";
   }
-  return `${resource.error ? `<div class="shared-auth-modal__status shared-auth-modal__status--error">${escapeHtml(resource.error)}</div>` : ""}${resource.notice ? `<div class="shared-auth-modal__status shared-auth-modal__status--notice">${escapeHtml(resource.notice)}</div>` : ""}`;
+  return `${resource.error ? `<div class="shared-auth-modal__status shared-auth-modal__status--error" role="alert">${escapeHtml(resource.error)}</div>` : ""}${resource.notice ? `<div class="shared-auth-modal__status shared-auth-modal__status--notice" role="status">${escapeHtml(resource.notice)}</div>` : ""}`;
 }
 
 function renderAuthRouteSignedIn() {
@@ -115658,115 +115655,80 @@ function renderAuthRouteSignedIn() {
 }
 
 function renderAuthRouteFallback({
-  mode,
   title,
-  copy,
   primaryAction,
   primaryLabel,
   auth,
   capabilities,
 }) {
-  const returnTo = authRouteReturnPath();
-  const statusItems = [
-    {
-      label: mode === "signup" ? "Direct sign-up" : "Password",
-      ready: mode !== "signup" ? capabilities.password : capabilities.direct,
-    },
-    { label: "Hosted auth", ready: capabilities.hosted },
-  ];
-  const primaryButton =
-    primaryAction && primaryLabel
-      ? `<button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="${escapeHtml(primaryAction)}"${disabledAttr(auth.pending)}>${escapeHtml(primaryLabel)}</button>`
-      : `<button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="open-app-shell">Open Polis app</button>`;
-  return `<div class="shared-auth-route-fallback">
-    <div class="shared-auth-route-fallback__icon">${renderIcon("lock")}</div>
-    <div class="shared-auth-route-fallback__body">
-      <h2>${escapeHtml(title)}</h2>
-      <p>${escapeHtml(copy)}</p>
-    </div>
-    <div class="shared-auth-route-fallback__status">
-      ${statusItems
-        .map(
-          (item) =>
-            `<span class="shared-settings-status-pill${item.ready ? " is-good" : " is-pending"}">${escapeHtml(item.ready ? `${item.label} ready` : `${item.label} unavailable`)}</span>`,
-        )
-        .join("")}
-    </div>
-    <div class="shared-auth-route-actions">
-      ${primaryButton}
-      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(returnTo)}">Return to previous page</button>
-      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/settings/security">Security settings</button>
-    </div>
-  </div>`;
+  return `<div class="shared-auth-route-fallback"><p>${escapeHtml(capabilities.hosted ? "Continue securely with your Polis account." : "Browser sign-in is temporarily unavailable. Please try again later or use the Polis app.")}</p><div class="shared-auth-route-actions">${capabilities.hosted ? `<button class="shared-feed-chip shared-feed-chip--primary polis-auth__submit" type="button" data-action="${escapeHtml(primaryAction)}"${disabledAttr(auth.pending)}>${escapeHtml(primaryLabel || title)}</button>` : `<button class="shared-feed-chip shared-feed-chip--primary polis-auth__submit" type="button" data-action="open-app-shell">Open Polis app</button>`}</div></div>`;
+}
+
+function renderBrowserAuthLogin(auth, capabilities, modal = false) {
+  const target = modal
+    ? auth.targetPath || getCurrentPathWithQuery()
+    : authRouteReturnPath();
+  const recoveryUrl = `/auth/forgot-password?returnTo=${encodeURIComponent(target)}`;
+  const action = modal ? "auth-start-hosted-login" : "auth-route-hosted-login";
+  if (!capabilities.password) {
+    const fallback = modal
+      ? renderAuthModalFallback({
+          modal: auth,
+          capabilities,
+          primaryAction: action,
+          primaryLabel: "Continue to sign in",
+        })
+      : renderAuthRouteFallback({
+          auth,
+          capabilities,
+          primaryAction: action,
+          primaryLabel: "Continue to sign in",
+        });
+    return `${fallback}${capabilities.google ? renderPolisAuthProviders({ capabilities, action, pending: auth.pending }) : ""}${renderBrowserAuthSwitch("login", modal)}`;
+  }
+  return `<form class="shared-auth-modal__form" data-route-form="${modal ? "auth-login" : "auth-route-login"}" aria-busy="${Boolean(auth.pending)}">
+    <label><span>Username or email</span><input ${modal ? 'data-auth-field="identifier" ' : ""}name="identifier" autocomplete="username" autocapitalize="none" spellcheck="false" value="${escapeHtml(auth.fields.identifier)}" placeholder="you@example.com" required></label>
+    ${renderPolisAuthPassword({ value: auth.fields.password, field: modal ? "password" : "", recoveryUrl })}
+    <div class="shared-auth-modal__actions"><button class="shared-feed-chip shared-feed-chip--primary polis-auth__submit" type="submit"${disabledAttr(auth.pending)}>${auth.pending ? "Signing in…" : "Sign in"}<span aria-hidden="true">→</span></button></div>
+    ${renderPolisAuthProviders({ capabilities, action, pending: auth.pending })}
+  </form>${renderBrowserAuthSwitch("login", modal)}`;
 }
 
 function renderAuthRouteLogin(auth, capabilities) {
-  if (!capabilities.password) {
-    return renderAuthRouteFallback({
-      mode: "login",
-      title: capabilities.hosted
-        ? "Use browser sign-in"
-        : "Sign-in is not configured here",
-      copy: capabilities.hosted
-        ? "This web build uses the hosted Polis account flow for sign-in."
-        : "This local web build does not have a browser sign-in provider configured, so it cannot collect account credentials on this page.",
-      primaryAction: capabilities.hosted ? "auth-route-hosted-login" : "",
-      primaryLabel: capabilities.hosted ? "Continue in browser" : "",
-      auth,
-      capabilities,
-    });
+  return renderBrowserAuthLogin(auth, capabilities);
+}
+
+function renderBrowserAuthSignup(auth, capabilities, modal = false) {
+  const action = modal
+    ? "auth-start-hosted-signup"
+    : "auth-route-hosted-signup";
+  if (!capabilities.direct) {
+    const fallback = modal
+      ? renderAuthModalFallback({
+          modal: auth,
+          capabilities,
+          primaryAction: action,
+          primaryLabel: "Continue to create account",
+        })
+      : renderAuthRouteFallback({
+          auth,
+          capabilities,
+          primaryAction: action,
+          primaryLabel: "Continue to create account",
+        });
+    return `${fallback}${renderBrowserAuthSwitch("signup", modal)}`;
   }
-  return `<form class="shared-auth-modal__form" data-route-form="auth-route-login">
-    <label>
-      <span>Username or email</span>
-      <input name="identifier" autocomplete="username" value="${escapeHtml(auth.fields.identifier)}" placeholder="you@example.com" />
-    </label>
-    <label>
-      <span>Password</span>
-      <input name="password" type="password" autocomplete="current-password" value="${escapeHtml(auth.fields.password)}" placeholder="Password" />
-    </label>
-    <div class="shared-auth-route-actions">
-      <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(auth.pending)}>${auth.pending ? "Signing in..." : "Sign in"}</button>
-      ${capabilities.hosted ? `<button class="shared-feed-chip" type="button" data-action="auth-route-hosted-login"${disabledAttr(auth.pending)}>Use browser sign-in</button>` : ""}
-      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/auth/forgot-password?returnTo=${escapeHtml(encodeURIComponent(authRouteReturnPath()))}">Forgot password</button>
-    </div>
-  </form>`;
+  return `<form class="shared-auth-modal__form" data-route-form="${modal ? "auth-signup" : "auth-route-signup"}" aria-busy="${Boolean(auth.pending)}">
+    <label><span>Email</span><input ${modal ? 'data-auth-field="email" ' : ""}name="email" type="email" autocomplete="email" autocapitalize="none" spellcheck="false" value="${escapeHtml(auth.fields.email)}" placeholder="you@example.com" required></label>
+    ${renderPolisAuthPassword({ value: auth.fields.signupPassword, autocomplete: "new-password", field: modal ? "signupPassword" : "", hint: "Use at least 8 characters.", minimum: true })}
+    ${renderPolisAuthPassword({ name: "confirmPassword", value: auth.fields.confirmPassword, autocomplete: "new-password", field: modal ? "confirmPassword" : "", label: "Confirm password", minimum: true })}
+    <div class="shared-auth-modal__actions"><button class="shared-feed-chip shared-feed-chip--primary polis-auth__submit" type="submit"${disabledAttr(auth.pending)}>${auth.pending ? "Creating account…" : "Create account"}<span aria-hidden="true">→</span></button></div>
+    ${renderPolisAuthProviders({ capabilities, action, pending: auth.pending })}
+  </form>${renderBrowserAuthSwitch("signup", modal)}`;
 }
 
 function renderAuthRouteSignup(auth, capabilities) {
-  if (!capabilities.direct) {
-    return renderAuthRouteFallback({
-      mode: "signup",
-      title: capabilities.hosted
-        ? "Create your account in browser"
-        : "Account creation is not configured here",
-      copy: capabilities.hosted
-        ? "This web build uses the hosted Polis account flow for new accounts."
-        : "This local web build does not have an account creation provider configured, so it cannot create Polis accounts on this page.",
-      primaryAction: capabilities.hosted ? "auth-route-hosted-signup" : "",
-      primaryLabel: capabilities.hosted ? "Use browser sign-up" : "",
-      auth,
-      capabilities,
-    });
-  }
-  return `<form class="shared-auth-modal__form" data-route-form="auth-route-signup">
-    <label>
-      <span>Email</span>
-      <input name="email" type="email" autocomplete="email" value="${escapeHtml(auth.fields.email)}" placeholder="you@example.com" />
-    </label>
-    <label>
-      <span>Password</span>
-      <input name="password" type="password" autocomplete="new-password" value="${escapeHtml(auth.fields.signupPassword)}" placeholder="Use at least 8 characters" />
-    </label>
-    <label>
-      <span>Confirm password</span>
-      <input name="confirmPassword" type="password" autocomplete="new-password" value="${escapeHtml(auth.fields.confirmPassword)}" placeholder="Confirm password" />
-    </label>
-    <div class="shared-auth-route-actions">
-      <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(auth.pending)}>${auth.pending ? "Creating..." : "Create account"}</button>
-      ${capabilities.hosted ? `<button class="shared-feed-chip" type="button" data-action="auth-route-hosted-signup"${disabledAttr(auth.pending)}>Use browser sign-up</button>` : ""}
-    </div>
-  </form>`;
+  return renderBrowserAuthSignup(auth, capabilities);
 }
 
 function renderAuthRouteConfirm(auth) {
@@ -115792,10 +115754,10 @@ function renderAuthRouteConfirm(auth) {
       }
       <label>
         <span>6-digit code</span>
-        <input name="code" inputmode="numeric" autocomplete="one-time-code" value="${escapeHtml(auth.fields.code)}" placeholder="123456" />
+        <input name="code" inputmode="numeric" autocomplete="one-time-code" value="${escapeHtml(auth.fields.code)}" placeholder="6-digit code" pattern="[0-9]{6}" maxlength="6" required />
       </label>
       <div class="shared-auth-route-actions">
-        <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(auth.pending)}>${auth.pending ? "Confirming..." : "Confirm account"}</button>
+        <button class="shared-feed-chip shared-feed-chip--primary polis-auth__submit" type="submit"${disabledAttr(auth.pending)}>${auth.pending ? "Confirming..." : "Confirm account"}</button>
         <button class="shared-feed-chip" type="button" data-action="auth-route-resend-code"${disabledAttr(auth.pending || !awaiting.username)}>Resend code</button>
       </div>
     </form>`;
@@ -115804,86 +115766,58 @@ function renderAuthRouteConfirm(auth) {
 function renderAuthRoutePasswordReset(mode) {
   const reset = settingsAccountSecurity().reset;
   const confirming = mode === "reset-confirm";
-  return `<div class="shared-auth-route-reset">
-    ${renderAuthRouteStatus(reset)}
-    ${
-      confirming
-        ? `<form class="shared-auth-modal__form" data-route-form="settings-password-reset-confirm">
-            <label>
-              <span>Email or username</span>
-              <input name="identifier" autocomplete="username" value="${escapeHtml(reset.username || reset.identifier || "")}" placeholder="you@example.com" />
-            </label>
-            <label>
-              <span>Reset code</span>
-              <input name="code" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" />
-            </label>
-            <label>
-              <span>New password</span>
-              <input name="password" type="password" autocomplete="new-password" placeholder="Use at least 8 characters" />
-            </label>
-            <div class="shared-auth-route-actions">
-              <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(reset.confirming)}>${reset.confirming ? "Updating..." : "Update password"}</button>
-              <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/auth">Sign in</button>
-            </div>
-          </form>`
-        : `<form class="shared-auth-modal__form" data-route-form="settings-password-reset-request">
-            <label>
-              <span>Email or username</span>
-              <input name="identifier" autocomplete="username" value="${escapeHtml(defaultSettingsSecurityIdentifier())}" placeholder="you@example.com" />
-            </label>
-            <div class="shared-auth-route-actions">
-              <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(reset.requesting)}>${reset.requesting ? "Sending..." : "Send reset code"}</button>
-              <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/auth/forgot-password/confirm?returnTo=${escapeHtml(encodeURIComponent(authRouteReturnPath()))}">I have a code</button>
-            </div>
-          </form>`
-    }
-  </div>`;
+  const returnTo = encodeURIComponent(authRouteReturnPath());
+  const capabilities = getSharedFeedAuthCapabilities(state.auth.config);
+  if (!capabilities.direct)
+    return renderAuthRouteFallback({
+      auth: routeAuthState(),
+      capabilities,
+      primaryAction: "auth-route-hosted-login",
+      primaryLabel: "Continue to account recovery",
+    });
+  return `<div class="shared-auth-route-reset">${renderAuthRouteStatus(reset)}
+    <form class="shared-auth-modal__form" data-route-form="settings-password-reset-${confirming ? "confirm" : "request"}" aria-busy="${Boolean(reset.requesting || reset.confirming)}">
+      <label><span>Username or email</span><input name="identifier" autocomplete="username" autocapitalize="none" spellcheck="false" value="${escapeHtml(reset.identifier || reset.username || defaultSettingsSecurityIdentifier())}" placeholder="you@example.com" required></label>
+      ${confirming ? `<label><span>Reset code</span><input name="code" inputmode="numeric" autocomplete="one-time-code" placeholder="6-digit code" pattern="[0-9]{6}" maxlength="6" required></label>${renderPolisAuthPassword({ autocomplete: "new-password", label: "New password", hint: "Use at least 8 characters.", minimum: true })}` : ""}
+      <div class="shared-auth-route-actions"><button class="shared-feed-chip shared-feed-chip--primary polis-auth__submit" type="submit"${disabledAttr(reset.requesting || reset.confirming)}>${confirming ? (reset.confirming ? "Updating password…" : "Update password") : reset.requesting ? "Sending code…" : "Send reset code"}</button></div>
+      ${!confirming ? `<a class="polis-auth__options" href="/auth/forgot-password/confirm?returnTo=${returnTo}" data-action="navigate" data-route="/auth/forgot-password/confirm?returnTo=${returnTo}">I already have a code</a>` : ""}
+    </form><p class="polis-auth__switch"><a href="/auth?returnTo=${returnTo}" data-action="navigate" data-route="/auth?returnTo=${returnTo}">Back to sign in</a></p></div>`;
 }
 
 function renderAuthRoutePage() {
   const mode = authRouteModeFromPath();
   const auth = routeAuthState();
   const capabilities = getSharedFeedAuthCapabilities(state.auth.config);
-  let body = "";
-  if (state.auth.session) {
-    body = renderAuthRouteSignedIn();
-  } else if (mode === "signup") {
-    body = `${renderAuthRouteModeControls("signup")} ${renderAuthRouteStatus(auth)} ${renderAuthRouteSignup(auth, capabilities)}`;
-  } else if (mode === "confirm") {
-    body = `${renderAuthRouteModeControls("signup")} ${renderAuthRouteStatus(auth)} ${renderAuthRouteConfirm(auth)}`;
-  } else if (mode === "reset" || mode === "reset-confirm") {
-    body = `${renderAuthRouteModeControls("reset")} ${renderAuthRoutePasswordReset(mode)}`;
-  } else {
-    body = `${renderAuthRouteModeControls("login")} ${renderAuthRouteStatus(auth)} ${renderAuthRouteLogin(auth, capabilities)}`;
-  }
-  if (isTextingAuthRoute()) {
-    const heading =
-      mode === "signup"
-        ? "Create your account."
-        : mode === "confirm"
-          ? "Check your inbox."
-          : mode.startsWith("reset")
-            ? "Reset your password."
+  const heading = state.auth.session
+    ? "You're signed in."
+    : mode === "signup"
+      ? "Create your account."
+      : mode === "confirm"
+        ? "Check your inbox."
+        : mode === "reset-confirm"
+          ? "Choose a new password."
+          : mode === "reset"
+            ? "Forgot your password?"
             : "Welcome back.";
-    return `<section class="texting-workspace"><main class="pt-auth">
-      <a class="pt-brand" href="/feed" data-action="navigate" data-route="/feed"><img src="${escapeHtml(resolveSharedAssetUrl(polisLogoUrl))}" alt="" width="48" height="48"><span>Polis</span></a>
-      <div class="pt-eyebrow">YOUR ORGANIZATION. CONNECTED.</div><h1>${heading}</h1>
-      <p>Sign in to continue to texting.</p><section class="shared-auth-route-panel">${body}</section>
-    </main></section>`;
-  }
-  return `<section class="shared-page shared-auth-route-page">
-    ${renderTopChrome()}
-    <div class="shared-page__content shared-auth-route-content">
-      <section class="shared-auth-route-hero">
-        <span class="shared-settings-eyebrow">Polis account</span>
-        <h1>${escapeHtml(mode === "signup" ? "Create your account" : mode === "confirm" ? "Confirm your account" : mode === "reset" || mode === "reset-confirm" ? "Reset your password" : "Sign in to Polis")}</h1>
-        <p>Use your Polis account to open the feed, messages, coalitions, campaign dashboards, settings, and creator tools from the browser.</p>
-      </section>
-      <section class="shared-auth-route-panel">
-        ${body}
-      </section>
-    </div>
-  </section>`;
+  const copy = state.auth.session
+    ? "Your Polis workspace is ready."
+    : mode === "signup"
+      ? "A place for your community. An account to get started."
+      : mode === "confirm"
+        ? "Enter your verification code to finish creating your account."
+        : mode === "reset-confirm"
+          ? "Enter the code from your email and set a new password."
+          : mode === "reset"
+            ? "We'll email you a code to reset your password."
+            : isTextingAuthRoute()
+              ? "Sign in to continue to Text Banking."
+              : "Sign in to pick up where you left off.";
+  const body = state.auth.session
+    ? renderAuthRouteSignedIn()
+    : mode.startsWith("reset")
+      ? renderAuthRoutePasswordReset(mode)
+      : `${renderAuthRouteStatus(auth)}${mode === "signup" ? renderAuthRouteSignup(auth, capabilities) : mode === "confirm" ? renderAuthRouteConfirm(auth) + renderBrowserAuthSwitch("confirm") : renderAuthRouteLogin(auth, capabilities)}`;
+  return `<main class="polis-auth polis-auth--page">${renderPolisAuthLayout({ logoUrl: resolveSharedAssetUrl(polisLogoUrl), heading, copy, body, footer: '<a href="/feed" data-action="navigate" data-route="/feed">← Back to Polis</a>' })}</main>`;
 }
 
 function renderBootstrapRoutePage() {
@@ -127731,172 +127665,42 @@ function renderTextPromptPanel() {
   </div>`;
 }
 
-function renderAuthModalModeControls(modal) {
-  if (!modal) {
-    return "";
-  }
-  const isConfirm = modal.mode === "confirm";
-  return `<div class="shared-auth-modal__modes">
-    <button class="shared-feed-chip${modal.mode === "login" ? " shared-feed-chip--primary" : ""}" data-action="auth-switch-mode" data-auth-mode="login">Sign in</button>
-    <button class="shared-feed-chip${modal.mode === "signup" || isConfirm ? " shared-feed-chip--primary" : ""}" data-action="auth-switch-mode" data-auth-mode="signup">Create account</button>
-    ${
-      isConfirm
-        ? '<button class="shared-feed-chip" data-action="auth-switch-mode" data-auth-mode="confirm" disabled>Confirm code</button>'
-        : ""
-    }
-  </div>`;
-}
-
 function renderAuthModalStatus(modal) {
   if (!modal) {
     return "";
   }
   const errorMarkup = modal.error
-    ? `<div class="shared-auth-modal__status shared-auth-modal__status--error">${escapeHtml(modal.error)}</div>`
+    ? `<div class="shared-auth-modal__status shared-auth-modal__status--error" role="alert">${escapeHtml(modal.error)}</div>`
     : "";
   const noticeMarkup = modal.notice
-    ? `<div class="shared-auth-modal__status shared-auth-modal__status--notice">${escapeHtml(modal.notice)}</div>`
+    ? `<div class="shared-auth-modal__status shared-auth-modal__status--notice" role="status">${escapeHtml(modal.notice)}</div>`
     : "";
   return `${errorMarkup}${noticeMarkup}`;
 }
 
 function renderAuthModalFallback({
-  mode,
-  title,
-  copy,
   primaryAction,
   primaryLabel,
   modal,
   capabilities,
 }) {
-  const normalizedMode = mode === "signup" ? "signup" : "login";
-  const targetPath =
-    normalizeString(modal?.targetPath) || getCurrentPathWithQuery();
-  const routePath =
-    normalizedMode === "signup" ? "/auth/signup/email" : "/auth";
-  const fullAuthRoute = `${routePath}?returnTo=${encodeURIComponent(targetPath)}`;
-  const statusItems = [
-    {
-      label: normalizedMode === "signup" ? "Direct sign-up" : "Password",
-      ready:
-        normalizedMode === "signup"
-          ? capabilities.direct
-          : capabilities.password,
-    },
-    { label: "Hosted auth", ready: capabilities.hosted },
-  ];
-  const pending = Boolean(modal?.pending);
-  const fallbackPrimaryAction = capabilities.hosted
-    ? primaryAction
-    : "auth-open-app";
-  const fallbackPrimaryLabel = capabilities.hosted
-    ? primaryLabel
-    : "Open Polis app";
-  const fallbackPrimaryAttrs =
-    fallbackPrimaryAction === "auth-open-app"
-      ? ` data-route="${escapeHtml(targetPath)}" data-post-id="${escapeHtml(modal?.postId || runtimeConfig.shareContext?.postId || runtimeConfig.postId || "")}"`
-      : "";
-  return `<div class="shared-auth-modal__fallback shared-auth-modal__gateway">
-    <div class="shared-auth-modal__gateway-icon">${renderIcon("lock")}</div>
-    <div class="shared-auth-modal__gateway-body">
-      <strong>${escapeHtml(title)}</strong>
-      <p>${escapeHtml(copy)}</p>
-    </div>
-    <div class="shared-auth-modal__gateway-status" aria-label="Account capability status">
-      ${statusItems
-        .map(
-          (item) =>
-            `<span class="shared-settings-status-pill${item.ready ? " is-good" : " is-pending"}">${escapeHtml(item.ready ? `${item.label} ready` : `${item.label} unavailable`)}</span>`,
-        )
-        .join("")}
-    </div>
-    <div class="shared-auth-modal__actions shared-auth-modal__gateway-actions">
-      <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="${escapeHtml(fallbackPrimaryAction)}"${fallbackPrimaryAttrs}${disabledAttr(pending && capabilities.hosted)}>${escapeHtml(fallbackPrimaryLabel)}</button>
-      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="${escapeHtml(fullAuthRoute)}">${escapeHtml(normalizedMode === "signup" ? "Open sign-up page" : "Open sign-in page")}</button>
-    </div>
-  </div>`;
+  return `<div class="shared-auth-modal__fallback"><p>${escapeHtml(capabilities.hosted ? "Continue securely with your Polis account." : "Browser sign-in is temporarily unavailable. Please try again later or use the Polis app.")}</p><div class="shared-auth-modal__actions"><button class="shared-feed-chip shared-feed-chip--primary polis-auth__submit" type="button" data-action="${capabilities.hosted ? primaryAction : "auth-open-app"}" data-route="${escapeHtml(modal.targetPath || "")}"${disabledAttr(modal.pending && capabilities.hosted)}>${escapeHtml(capabilities.hosted ? primaryLabel : "Open Polis app")}</button></div></div>`;
 }
 
 function renderAuthModalLogin(modal) {
-  const capabilities =
-    modal?.capabilities || getSharedFeedAuthCapabilities(state.auth.config);
-  if (!capabilities.password) {
-    return renderAuthModalFallback({
-      mode: "login",
-      title: capabilities.hosted
-        ? "Use browser sign-in"
-        : "Sign-in is not configured here",
-      copy: capabilities.hosted
-        ? "This web build uses the hosted Polis account flow for sign-in."
-        : "This local web build does not have a browser sign-in provider configured, so it cannot collect account credentials in this modal.",
-      primaryAction: "auth-start-hosted-login",
-      primaryLabel: "Continue in browser",
-      modal,
-      capabilities,
-    });
-  }
-
-  return `<form class="shared-auth-modal__form" data-route-form="auth-login">
-    <label>
-      <span>Username or email</span>
-      <input data-auth-field="identifier" name="identifier" autocomplete="username" value="${escapeHtml(modal.fields.identifier)}" placeholder="you@example.com" />
-    </label>
-    <label>
-      <span>Password</span>
-      <input data-auth-field="password" type="password" name="password" autocomplete="current-password" value="${escapeHtml(modal.fields.password)}" placeholder="Password" />
-    </label>
-    <div class="shared-auth-modal__actions">
-      <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${modal.pending ? " disabled" : ""}>${modal.pending ? "Signing in..." : "Sign in"}</button>
-      ${
-        capabilities.hosted
-          ? `<button class="shared-feed-chip" type="button" data-action="auth-start-hosted-login"${modal.pending ? " disabled" : ""}>Use browser sign-in</button>`
-          : ""
-      }
-    </div>
-  </form>`;
+  return renderBrowserAuthLogin(
+    modal,
+    modal.capabilities || getSharedFeedAuthCapabilities(state.auth.config),
+    true,
+  );
 }
 
 function renderAuthModalSignup(modal) {
-  const capabilities =
-    modal?.capabilities || getSharedFeedAuthCapabilities(state.auth.config);
-  if (!capabilities.direct) {
-    return renderAuthModalFallback({
-      mode: "signup",
-      title: capabilities.hosted
-        ? "Create your account in browser"
-        : "Account creation is not configured here",
-      copy: capabilities.hosted
-        ? "This web build uses the hosted Polis account flow for new accounts."
-        : "This local web build does not have an account creation provider configured, so it cannot create Polis accounts in this modal.",
-      primaryAction: "auth-start-hosted-signup",
-      primaryLabel: "Use browser sign-up",
-      modal,
-      capabilities,
-    });
-  }
-
-  return `<form class="shared-auth-modal__form" data-route-form="auth-signup">
-    <label>
-      <span>Email</span>
-      <input data-auth-field="email" type="email" name="email" autocomplete="email" value="${escapeHtml(modal.fields.email)}" placeholder="you@example.com" />
-    </label>
-    <label>
-      <span>Password</span>
-      <input data-auth-field="signupPassword" type="password" name="password" autocomplete="new-password" value="${escapeHtml(modal.fields.signupPassword)}" placeholder="Use at least 8 characters" />
-    </label>
-    <label>
-      <span>Confirm password</span>
-      <input data-auth-field="confirmPassword" type="password" name="confirmPassword" autocomplete="new-password" value="${escapeHtml(modal.fields.confirmPassword)}" placeholder="Confirm password" />
-    </label>
-    <div class="shared-auth-modal__actions">
-      <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${modal.pending ? " disabled" : ""}>${modal.pending ? "Creating..." : "Create account"}</button>
-      ${
-        capabilities.hosted
-          ? `<button class="shared-feed-chip" type="button" data-action="auth-start-hosted-signup"${modal.pending ? " disabled" : ""}>Use browser sign-up</button>`
-          : ""
-      }
-    </div>
-  </form>`;
+  return renderBrowserAuthSignup(
+    modal,
+    modal.capabilities || getSharedFeedAuthCapabilities(state.auth.config),
+    true,
+  );
 }
 
 function renderAuthModalConfirm(modal) {
@@ -127911,10 +127715,10 @@ function renderAuthModalConfirm(modal) {
     <form class="shared-auth-modal__form" data-route-form="auth-confirm">
       <label>
         <span>6-digit code</span>
-        <input data-auth-field="code" name="code" inputmode="numeric" autocomplete="one-time-code" value="${escapeHtml(modal.fields.code)}" placeholder="123456" />
+        <input data-auth-field="code" name="code" inputmode="numeric" autocomplete="one-time-code" value="${escapeHtml(modal.fields.code)}" placeholder="6-digit code" pattern="[0-9]{6}" maxlength="6" required />
       </label>
       <div class="shared-auth-modal__actions">
-        <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${modal.pending ? " disabled" : ""}>${modal.pending ? "Confirming..." : "Confirm"}</button>
+        <button class="shared-feed-chip shared-feed-chip--primary polis-auth__submit" type="submit"${modal.pending ? " disabled" : ""}>${modal.pending ? "Confirming..." : "Confirm"}</button>
         <button class="shared-feed-chip" type="button" data-action="auth-resend-code"${modal.pending ? " disabled" : ""}>Resend code</button>
       </div>
     </form>`;
@@ -127922,70 +127726,22 @@ function renderAuthModalConfirm(modal) {
 
 function renderAuthModal() {
   const modal = state.ui.authModal;
-  const stores = getStoreUrls();
-  const capabilities =
-    modal?.capabilities || getSharedFeedAuthCapabilities(state.auth.config);
-  let bodyMarkup = "";
-  const modeFallbackActive =
-    Boolean(modal) &&
-    modal.mode !== "confirm" &&
-    (modal.mode === "signup" ? !capabilities.direct : !capabilities.password);
-  const showSecondaryAuthActions = !(
-    modeFallbackActive && !capabilities.hosted
-  );
-
-  if (modal?.mode === "confirm") {
-    bodyMarkup = renderAuthModalConfirm(modal);
-  } else if (modal?.mode === "signup") {
-    bodyMarkup = renderAuthModalSignup(modal);
-  } else if (modal) {
-    bodyMarkup = renderAuthModalLogin(modal);
-  }
-
-  return `<div class="shared-auth-modal${modal ? " is-open" : ""}">
-    <button class="shared-auth-modal__backdrop" data-action="close-auth-modal" aria-label="Close sign-in modal"></button>
-    <section class="shared-auth-modal__dialog" aria-hidden="${modal ? "false" : "true"}">
-      <div class="shared-auth-modal__header">
-        <div class="shared-auth-modal__heading">
-          <p class="shared-auth-modal__eyebrow">Polis account</p>
-          <h2>${escapeHtml(modal?.title || "Join Polis")}</h2>
-          <p>${escapeHtml(modal?.message || "Sign in to unlock the full feed.")}</p>
-        </div>
-        <button class="shared-comments__close shared-auth-modal__close" type="button" data-action="close-auth-modal" aria-label="Close sign-in modal">${renderIcon("close")}</button>
-      </div>
-      ${renderAuthModalModeControls(modal)}
-      ${renderAuthModalStatus(modal)}
-      ${bodyMarkup}
-      ${
-        showSecondaryAuthActions
-          ? `<div class="shared-auth-modal__secondary">
-        <button class="shared-feed-chip" data-action="auth-open-app" data-route="${escapeHtml(modal?.targetPath || "")}" data-post-id="${escapeHtml(modal?.postId || runtimeConfig.shareContext?.postId || runtimeConfig.postId || "")}">Open app instead</button>
-        ${
-          !capabilities.direct && !capabilities.hosted
-            ? '<span class="shared-auth-modal__hint">Web auth is unavailable in this environment.</span>'
-            : ""
-        }
-        ${
-          stores.ios || stores.android
-            ? `<div class="shared-auth-modal__stores">
-                ${
-                  stores.ios
-                    ? `<a href="${escapeHtml(stores.ios)}" target="_blank" rel="noopener noreferrer">iPhone</a>`
-                    : ""
-                }
-                ${
-                  stores.android
-                    ? `<a href="${escapeHtml(stores.android)}" target="_blank" rel="noopener noreferrer">Android</a>`
-                    : ""
-                }
-              </div>`
-            : ""
-        }
-      </div>`
-          : ""
-      }
-    </section>
-  </div>`;
+  if (!modal) return "";
+  const heading =
+    modal.mode === "confirm"
+      ? "Check your inbox."
+      : modal.mode === "signup"
+        ? "Create your account."
+        : "Welcome back.";
+  const copy =
+    modal.mode === "confirm"
+      ? "Enter your verification code to finish creating your account."
+      : modal.mode === "signup"
+        ? "A place for your community. An account to get started."
+        : "Sign in to continue where you left off.";
+  const body = `${renderAuthModalStatus(modal)}${modal.mode === "confirm" ? renderAuthModalConfirm(modal) + renderBrowserAuthSwitch("confirm", true) : modal.mode === "signup" ? renderAuthModalSignup(modal) : renderAuthModalLogin(modal)}`;
+  const footer = `<button type="button" data-action="auth-open-app" data-route="${escapeHtml(modal.targetPath || "")}" data-post-id="${escapeHtml(modal.postId || runtimeConfig.shareContext?.postId || runtimeConfig.postId || "")}">Open the Polis app instead <span aria-hidden="true">↗</span></button>`;
+  return `<div class="shared-auth-modal is-open"><button class="shared-auth-modal__backdrop" type="button" data-action="close-auth-modal" aria-label="Close sign-in" tabindex="-1"></button><section class="shared-auth-modal__dialog polis-auth" role="dialog" aria-modal="true" aria-labelledby="polis-auth-title" aria-describedby="polis-auth-description"><button class="shared-comments__close shared-auth-modal__close" type="button" data-action="close-auth-modal" aria-label="Close sign-in">${renderIcon("close")}</button>${renderPolisAuthLayout({ logoUrl: resolveSharedAssetUrl(polisLogoUrl), heading, copy, body, footer, modal: true })}</section></div>`;
 }
 
 function renderToast() {
@@ -128083,6 +127839,7 @@ function renderApp() {
 
   syncDocumentTitle();
   ensureActiveIndexInBounds();
+  const authSnapshot = polisAuthInteractions.beforeRender(root);
   const playbackSnapshot = snapshotPlaybackState();
   const scrollSnapshot = snapshotFeedScrollState();
   const petitionAddressFocusSnapshot = snapshotPetitionAddressFocusState();
@@ -128094,14 +127851,17 @@ function renderApp() {
     ? getAuthenticatedUser(state.auth.session)?.userId || ""
     : "";
   const textingFocus = snapshotTextingFocus(root, textingIdentity);
-  const shell = textingPresentation
-    ? `<div class="shared-feed-shell shared-feed-shell--texting">${renderRouteStage()}</div>${renderAuthModal()}${renderConfirmationPanel()}${renderToast()}`
-    : publicPetitionRoute
-      ? `<div class="shared-feed-shell shared-feed-shell--public">
+  const shell =
+    getCurrentRoute().routeKey === ROUTE_KEY_AUTH
+      ? `<div class="shared-feed-shell shared-feed-shell--texting">${renderRouteStage()}</div>${renderToast()}`
+      : textingPresentation
+        ? `<div class="shared-feed-shell shared-feed-shell--texting">${renderRouteStage()}</div>${renderAuthModal()}${renderConfirmationPanel()}${renderToast()}`
+        : publicPetitionRoute
+          ? `<div class="shared-feed-shell shared-feed-shell--public">
         ${renderRouteStage()}
       </div>
       ${renderToast()}`
-      : `<div class="shared-feed-shell${isCoalitionPresentationRoute() ? " shared-feed-shell--coalition polis-coalition-ui" : ""}">
+          : `<div class="shared-feed-shell${isCoalitionPresentationRoute() ? " shared-feed-shell--coalition polis-coalition-ui" : ""}">
         ${isCoalitionPresentationRoute() ? "" : renderRail()}
         ${renderRouteStage()}
       </div>
@@ -128133,6 +127893,7 @@ function renderApp() {
   restorePlaybackState(playbackSnapshot);
   focusComposerIfNeeded();
   syncMessagingRouteHighlightAfterRender();
+  polisAuthInteractions.afterRender(root, authSnapshot);
 }
 
 function bindElectionCounters() {
@@ -128548,7 +128309,7 @@ function normalizeAuthErrorMessage(error, fallbackMessage) {
   return normalizeString(error?.message) || fallbackMessage;
 }
 
-async function startHostedModalAuth(mode) {
+async function startHostedModalAuth(mode, identityProvider = "") {
   const modal = state.ui.authModal;
   if (!modal) {
     return;
@@ -128563,10 +128324,12 @@ async function startHostedModalAuth(mode) {
     if (mode === "signup") {
       await startHostedSignUp(state.auth.config, {
         postAuthPath: modal.targetPath,
+        identityProvider,
       });
     } else {
       await startHostedSignIn(state.auth.config, {
         postAuthPath: modal.targetPath,
+        identityProvider,
       });
     }
   } catch (error) {
@@ -128784,7 +128547,7 @@ function authRouteModeFromPath(pathname = window.location.pathname) {
   if (path === "/auth/forgot-password") {
     return "reset";
   }
-  return routeAuthState().mode === "confirm" ? "confirm" : "login";
+  return "login";
 }
 
 function authRouteReturnPath() {
@@ -128838,7 +128601,7 @@ function setRouteAuthError(message) {
   });
 }
 
-async function startHostedRouteAuth(mode) {
+async function startHostedRouteAuth(mode, identityProvider = "") {
   if (!hasHostedSignInConfig(state.auth.config)) {
     setRouteAuthError("Hosted sign-in is not configured for this environment.");
     return;
@@ -128848,9 +128611,15 @@ async function startHostedRouteAuth(mode) {
   try {
     setSharedFeedPostAuthPath(targetPath);
     if (mode === "signup") {
-      await startHostedSignUp(state.auth.config, { postAuthPath: targetPath });
+      await startHostedSignUp(state.auth.config, {
+        postAuthPath: targetPath,
+        identityProvider,
+      });
     } else {
-      await startHostedSignIn(state.auth.config, { postAuthPath: targetPath });
+      await startHostedSignIn(state.auth.config, {
+        postAuthPath: targetPath,
+        identityProvider,
+      });
     }
   } catch (error) {
     setRouteAuthError(
@@ -129124,6 +128893,23 @@ async function handleRootClick(event) {
   }
 
   if (action === "navigate") {
+    if (target.matches(".polis-auth a[href], .polis-auth a[href] *")) {
+      if (
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey
+      )
+        return;
+      event.preventDefault();
+      routeAuthState().error = "";
+      routeAuthState().notice = "";
+      if (target.getAttribute("data-route") === "/feed") {
+        navigateTo("/feed");
+        return;
+      }
+    }
     if (
       target.matches("a[href]") &&
       target.closest(".texting-workspace") &&
@@ -132191,28 +131977,45 @@ async function handleRootClick(event) {
     return;
   }
 
+  if (action === "auth-toggle-password") {
+    polisAuthInteractions.togglePassword(target);
+    return;
+  }
+
   if (action === "auth-switch-mode") {
     setAuthModalMode(target.getAttribute("data-auth-mode"));
     return;
   }
 
   if (action === "auth-start-hosted-login") {
-    startHostedModalAuth("login").catch(() => {});
+    startHostedModalAuth(
+      "login",
+      target.getAttribute("data-auth-provider") || "",
+    ).catch(() => {});
     return;
   }
 
   if (action === "auth-start-hosted-signup") {
-    startHostedModalAuth("signup").catch(() => {});
+    startHostedModalAuth(
+      "signup",
+      target.getAttribute("data-auth-provider") || "",
+    ).catch(() => {});
     return;
   }
 
   if (action === "auth-route-hosted-login") {
-    startHostedRouteAuth("login").catch(() => {});
+    startHostedRouteAuth(
+      "login",
+      target.getAttribute("data-auth-provider") || "",
+    ).catch(() => {});
     return;
   }
 
   if (action === "auth-route-hosted-signup") {
-    startHostedRouteAuth("signup").catch(() => {});
+    startHostedRouteAuth(
+      "signup",
+      target.getAttribute("data-auth-provider") || "",
+    ).catch(() => {});
     return;
   }
 
@@ -134367,6 +134170,12 @@ function syncPublicPetitionFieldControl(control) {
 }
 
 function handleRootKeydown(event) {
+  if (state.ui.authModal && event.key === "Escape") {
+    event.preventDefault();
+    closeAuthModal();
+    return;
+  }
+  if (polisAuthInteractions.trapFocus(event, root)) return;
   if (
     event.key === "Escape" &&
     state.pages.settings.candidateAccess.helpField
@@ -134555,6 +134364,17 @@ function handleRootInput(event) {
         [fieldName]: authField.value,
       };
     }
+    return;
+  }
+
+  const routeAuthField = event.target.closest(".polis-auth--page [name]");
+  if (routeAuthField?.closest('[data-route-form^="auth-route-"]')) {
+    const name = routeAuthField.name;
+    const field =
+      name === "password" && authRouteModeFromPath() === "signup"
+        ? "signupPassword"
+        : name;
+    routeAuthState().fields[field] = routeAuthField.value;
     return;
   }
 
@@ -136675,13 +136495,46 @@ function handleCommentSubmit(event) {
       return;
     }
     if (formKind === "settings-password-reset-request") {
-      requestSettingsPasswordReset(formData).catch(() => {});
+      const startingPath = getCurrentPathWithQuery();
+      const authReturnPath =
+        getCurrentRoute().routeKey === ROUTE_KEY_AUTH
+          ? authRouteReturnPath()
+          : "";
+      requestSettingsPasswordReset(formData)
+        .then((sent) => {
+          if (
+            sent &&
+            authReturnPath &&
+            getCurrentPathWithQuery() === startingPath
+          )
+            navigateTo(
+              `/auth/forgot-password/confirm?returnTo=${encodeURIComponent(authReturnPath)}`,
+            );
+        })
+        .catch(() => {});
       return;
     }
     if (formKind === "settings-password-reset-confirm") {
+      const startingPath = getCurrentPathWithQuery();
+      const authReturnPath =
+        getCurrentRoute().routeKey === ROUTE_KEY_AUTH
+          ? authRouteReturnPath()
+          : "";
       confirmSettingsPasswordReset(formData)
         .then((saved) => {
-          if (saved) routeForm.reset();
+          if (!saved) return;
+          if (authReturnPath && getCurrentPathWithQuery() === startingPath) {
+            patchRouteAuth({
+              mode: "login",
+              error: "",
+              notice: "Password updated. Sign in with your new password.",
+              fields: {
+                identifier: settingsAccountSecurity().reset.identifier,
+                password: "",
+              },
+            });
+            navigateTo(`/auth?returnTo=${encodeURIComponent(authReturnPath)}`);
+          } else routeForm.reset();
         })
         .catch(() => {});
       return;
