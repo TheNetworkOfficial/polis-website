@@ -12,6 +12,24 @@ import "./css/coalition-rooms.css";
 import "./css/organization-publishing.css";
 import "./css/polis-auth.css";
 import "./css/coalition-people.css";
+import "./css/coalition-missions.css";
+import {
+  renderCoalitionMissionsPresentation,
+  renderCoalitionMissionResults,
+  filterCoalitionMissionItems,
+} from "./scripts/coalitionMissionsPresentation.js";
+import {
+  renderCoalitionMissionCreateForm,
+  renderCoalitionMissionDetail,
+} from "./scripts/coalitionMissionDialogs.js";
+import { renderCoalitionMissionTemplateForm } from "./scripts/coalitionMissionTemplate.js";
+import {
+  createCoalitionMissionsInteractions,
+  canonicalCoalitionMissionsPath,
+} from "./scripts/coalitionMissionsInteractions.js";
+const coalitionMissionsInteractions = createCoalitionMissionsInteractions({
+  onClose: closeApprovedCoalitionMissionDialog,
+});
 import {
   renderPolisAuthLayout,
   renderPolisAuthPassword,
@@ -3435,6 +3453,16 @@ function normalizeCalendarReturnLocation() {
 }
 
 function parseRouteFromLocation(pathname = window.location.pathname) {
+  if (pathname === window.location.pathname) {
+    const canonical = canonicalCoalitionMissionsPath(
+      window.location.pathname + window.location.search,
+      window.location.origin,
+    );
+    if (canonical) {
+      window.history.replaceState({}, document.title, canonical);
+      pathname = window.location.pathname;
+    }
+  }
   const calendarTargetPath = calendarReturnTargetPathFromLocation(pathname);
   const normalizedPath = calendarTargetPath || normalizePathname(pathname);
   const organizationRoute = normalizedPath.match(
@@ -17160,6 +17188,43 @@ function missionPayloadFromForm(formData, scopeType, scopeId) {
   }
   const templateId = normalizeString(formData.get("templateId"));
   const templateVersion = Number(formData.get("templateVersion")) || null;
+  let successConditions = missionPresetSuccessConditions(presetKey);
+  if (formData.has("presentationOptions")) {
+    let inherited = [];
+    try {
+      inherited = JSON.parse(formData.get("presentationConditions") || "[]");
+    } catch {
+      /* Server validation remains authoritative. */
+    }
+    if (Array.isArray(inherited) && inherited.length)
+      successConditions = inherited;
+    successConditions = successConditions.filter(
+      (condition) =>
+        !["checklist", "checklist_completed", "required_approval"].includes(
+          condition.type,
+        ),
+    );
+    const checklist = normalizeString(formData.get("presentationChecklist"))
+      .split("\n")
+      .map((label) => label.trim())
+      .filter(Boolean);
+    successConditions.push(
+      ...checklist.map((label) => ({
+        type: "checklist",
+        label,
+        required: true,
+        completed: false,
+        target: 1,
+        current: 0,
+      })),
+    );
+    if (formData.has("presentationRequiresReview"))
+      successConditions.push({
+        type: "required_approval",
+        label: "Review before completion",
+        required: true,
+      });
+  }
   return {
     scopeType: normalizedScopeType,
     scopeId: normalizedScopeId,
@@ -17183,7 +17248,7 @@ function missionPayloadFromForm(formData, scopeType, scopeId) {
           formData.get("timeoutPolicy"),
           formData.get("timeoutHours"),
         ),
-        successConditions: missionPresetSuccessConditions(presetKey),
+        successConditions,
       },
     ],
   };
@@ -17339,6 +17404,18 @@ async function saveMissionTemplate(resource, formData, refreshTemplates) {
     showToast(resource.templatesError);
     scheduleRender();
     return false;
+  }
+  if (formData.has("presentationChecklist")) {
+    const config = resource.templateDraft?.config || {};
+    payload.config = {
+      ...config,
+      ...payload.config,
+      category: normalizeString(formData.get("presentationCategory")),
+      successConditions: approvedMissionChecklistConditions(
+        formData.get("presentationChecklist"),
+        config.successConditions,
+      ),
+    };
   }
   const templateId = normalizeString(formData.get("templateId"));
   const isUpdate = Boolean(templateId);
@@ -17533,6 +17610,7 @@ async function loadCoalitionMissions(coalitionId, { refresh = false } = {}) {
   }
   const detail = state.pages.coalitions.detail;
   const resource = detail.missionsWorkspace;
+  const actorId = normalizeString(state.auth.user?.userId);
   if (resource.loading) {
     return;
   }
@@ -17567,6 +17645,12 @@ async function loadCoalitionMissions(coalitionId, { refresh = false } = {}) {
     );
   }
   const [missionsResult, templatesResult] = await Promise.allSettled(tasks);
+  if (
+    normalizeString(state.auth.user?.userId) !== actorId ||
+    currentCoalitionDetailId() !== normalizedCoalitionId ||
+    state.pages.coalitions.detail.missionsWorkspace !== resource
+  )
+    return;
 
   if (missionsResult.status === "fulfilled") {
     resource.items = readArrayPayload(missionsResult.value, [
@@ -18462,7 +18546,8 @@ function buildMissionsRoute(filters = {}) {
   if (q) {
     params.set("q", q);
   }
-  return `/missions${params.toString() ? `?${params.toString()}` : ""}`;
+  const path = `/missions${params.toString() ? `?${params.toString()}` : ""}`;
+  return canonicalCoalitionMissionsPath(path, window.location.origin) || path;
 }
 
 function missionScopeLabel(scopeType, scopeId = "") {
@@ -18621,32 +18706,56 @@ async function loadMissionsList({ refresh = false } = {}) {
 
 async function loadMissionDetail(missionId, { refresh = false } = {}) {
   const normalizedMissionId = decodeRouteSegment(missionId);
-  if (!normalizedMissionId) {
-    return;
-  }
+  if (!normalizedMissionId) return;
   const detail = state.pages.missions.detail;
-  if (detail.loading) {
-    return;
-  }
+  const actorId = normalizeString(state.auth.user?.userId);
+  const context = approvedCoalitionMissionContext();
+  const scopeId = context?.scopeId || "";
   if (
-    refresh ||
-    normalizeString(detail.item?.missionId) !== normalizedMissionId
-  ) {
-    resetMissionDetail();
-  }
-  if (detail.loaded && !refresh) {
+    detail.loading &&
+    detail.requestedId === normalizedMissionId &&
+    detail.approvedActorId === actorId &&
+    detail.approvedScopeId === scopeId &&
+    !refresh
+  )
     return;
-  }
+  if (
+    detail.loaded &&
+    detail.item?.missionId === normalizedMissionId &&
+    detail.approvedActorId === actorId &&
+    detail.approvedScopeId === scopeId &&
+    !refresh
+  )
+    return;
+  const requestToken = (detail.requestToken || 0) + 1;
+  const sameMission =
+    detail.item?.missionId === normalizedMissionId &&
+    detail.approvedActorId === actorId &&
+    detail.approvedScopeId === scopeId;
+  if (!sameMission) resetMissionDetail();
+  else detail.error = "";
+  detail.requestToken = requestToken;
+  detail.requestedId = normalizedMissionId;
+  detail.approvedActorId = actorId;
+  detail.approvedScopeId = scopeId;
+  const isCurrent = () =>
+    detail.requestToken === requestToken &&
+    normalizeString(state.auth.user?.userId) === actorId &&
+    (!scopeId ||
+      (approvedCoalitionMissionContext()?.scopeId === scopeId &&
+        context.resource.approvedUi?.detailId === normalizedMissionId));
   detail.loading = true;
-  detail.error = "";
   scheduleRender();
-
   try {
-    const encodedId = encodeURIComponent(normalizedMissionId);
-    const payload = await fetchJson(`/api/missions/${encodedId}`, {
-      auth: true,
-    });
-    detail.item = normalizeMission(payload.mission || payload);
+    const payload = await fetchJson(
+      `/api/missions/${encodeURIComponent(normalizedMissionId)}`,
+      { auth: true },
+    );
+    if (!isCurrent()) return;
+    const item = normalizeMission(payload.mission || payload);
+    if (scopeId && (item.scopeType !== "coalition" || item.scopeId !== scopeId))
+      throw new Error("This mission is not available in this workspace.");
+    detail.item = item;
     detail.events = readArrayPayload(payload, ["events"]).map(
       normalizeMissionEvent,
     );
@@ -18660,12 +18769,24 @@ async function loadMissionDetail(missionId, { refresh = false } = {}) {
           }
         : null;
     detail.loaded = true;
+    if (scopeId) {
+      const resource = context.resource;
+      resource.items = resource.items.map((mission) =>
+        mission.missionId === item.missionId ? item : mission,
+      );
+      context.detail.missions = context.detail.missions.map((mission) =>
+        mission.missionId === item.missionId ? item : mission,
+      );
+    }
   } catch (error) {
-    detail.error =
-      normalizeString(error?.message) || "Mission could not be loaded.";
+    if (isCurrent())
+      detail.error =
+        normalizeString(error?.message) || "Mission could not be loaded.";
   } finally {
-    detail.loading = false;
-    scheduleRender();
+    if (isCurrent()) {
+      detail.loading = false;
+      scheduleRender();
+    }
   }
 }
 
@@ -19018,6 +19139,7 @@ async function runMissionJobAction({
     const config = missionJobActionConfig(normalizedAction);
     showToast(config.toast || "Mission task updated.");
     detail.actionDraft = null;
+    detail.approvedDraftEpoch = (detail.approvedDraftEpoch || 0) + 1;
     await loadMissionDetail(normalizedMissionId, { refresh: true });
     const filters = readMissionListFilters();
     if (filters.scopeType && filters.scopeId) {
@@ -36653,6 +36775,12 @@ async function loadCoalitionsPage({ refresh = false } = {}) {
     const activeSection = coalitionSectionForRoute(route);
     if (activeSection === "missions") {
       await loadCoalitionMissions(coalitionId, { refresh });
+      const resource = state.pages.coalitions.detail.missionsWorkspace;
+      const ui = approvedCoalitionMissionUi(
+        resource,
+        canManageCoalitionMissions(state.pages.coalitions.detail.membership),
+      );
+      if (ui.detailId) await loadMissionDetail(ui.detailId, { refresh });
     }
     if (activeSection === "petitions") {
       await loadPetitionsWorkspace("coalition", coalitionId, { refresh });
@@ -80369,6 +80497,16 @@ function syncMissionCreateDraftFromForm(form) {
     timeoutPolicy: normalizeString(formData.get("timeoutPolicy")),
     timeoutHours: normalizeString(formData.get("timeoutHours")),
     description: normalizeString(formData.get("description")),
+    ...(formData.has("presentationOptions")
+      ? {
+          presentationChecklist: String(
+            formData.get("presentationChecklist") || "",
+          ),
+          presentationRequiresReview: formData.has(
+            "presentationRequiresReview",
+          ),
+        }
+      : {}),
   };
   return resource.createDraft;
 }
@@ -89746,34 +89884,889 @@ function renderCoalitionRooms(coalition, membership, detail) {
   </div>`;
 }
 
-function renderCoalitionMissions(detail, coalition, membership) {
-  const resource =
-    detail.missionsWorkspace || createCandidateDashboardMissionsState();
-  const canManage = canManageCoalitionMissions(membership);
-  const items = resource.loaded ? resource.items : detail.missions;
-  if (!canViewCoalitionMissions(membership)) {
-    return `<div class="shared-page__empty">This coalition role does not include mission access.</div>`;
+function approvedCoalitionMissionContext() {
+  const route = getCurrentRoute();
+  if (
+    ![ROUTE_KEY_COALITION_DETAIL, ROUTE_KEY_COALITION_SECTION].includes(
+      route.routeKey,
+    ) ||
+    coalitionSectionForRoute(route) !== "missions"
+  )
+    return null;
+  const detail = state.pages.coalitions.detail;
+  const scopeId = currentCoalitionDetailId();
+  if (!scopeId || detail.coalition?.coalitionId !== scopeId) return null;
+  return {
+    scopeId,
+    detail,
+    resource: detail.missionsWorkspace,
+    actorId: normalizeString(state.auth.user?.userId),
+  };
+}
+
+/** Presentation state belongs to an actor and workspace, never to a shared legacy hub. */
+function approvedCoalitionMissionUi(resource, canManage) {
+  const scopeId = currentCoalitionDetailId();
+  const contextKey = `${normalizeString(state.auth.user?.userId)}:${scopeId}`;
+  if (resource.approvedUi?.contextKey !== contextKey) {
+    const params = readCurrentSearchParams();
+    const requested = normalizeString(params.get("missionView"));
+    const allowed = canManage
+      ? ["missions", "attention", "people", "templates", "timeline", "activity"]
+      : ["mine", "available", "completed"];
+    resource.approvedUi = {
+      contextKey,
+      view: allowed.includes(requested)
+        ? requested
+        : canManage
+          ? "missions"
+          : "mine",
+      layout: params.get("missionLayout") === "board" ? "board" : "list",
+      query: normalizeString(params.get("missionQuery")),
+      status: normalizeString(params.get("missionStatus")) || "all",
+      assignee: canManage && requested === "mine" ? "mine" : "all",
+      reverseDue: false,
+      detailId: normalizeString(params.get("missionId")),
+      selectedJobId: "",
+    };
   }
-  return renderMissionWorkspaceShell({
-    resource,
-    items,
-    canManage,
-    scopeType: "coalition",
-    scopeId: coalition.coalitionId,
-    eyebrow: "Coalition Mission Hub",
-    title: "Missions",
-    description:
-      "Assign coalition work, claim role tasks, track blockers, review submissions, and keep shared operations moving from the browser.",
-    loadingLabel: "Loading coalition missions...",
-    refreshAction: "coalition-missions-refresh",
-    createToggleAction: "coalition-missions-create-toggle",
-    viewAction: "coalition-missions-view",
-    filterAction: "coalition-missions-filter",
-    usePresetAction: "coalition-missions-use-preset",
-    claimAction: "coalition-mission-job-claim",
-    formKind: "coalition-missions-create",
-    noun: "coalition",
+  const ui = resource.approvedUi;
+  if (!canManage && !["mine", "available", "completed"].includes(ui.view))
+    ui.view = "mine";
+  return ui;
+}
+
+function approvedMissionDueLabel(value) {
+  if (!value) return "No deadline";
+  const due = new Date(value);
+  const today = new Date();
+  const day = Date.UTC(due.getFullYear(), due.getMonth(), due.getDate());
+  const now = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
+  const difference = Math.round((day - now) / 86400000);
+  if (difference === 0) return "Today";
+  if (difference === 1) return "Tomorrow";
+  if (difference === -1) return "Yesterday";
+  return due.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function approvedMissionStatus(mission, job = missionNextJob(mission)) {
+  if (mission.status !== "active")
+    return ["approved", "completed"].includes(mission.status)
+      ? "completed"
+      : mission.status;
+  const status =
+    mission.status !== "active"
+      ? mission.status
+      : job?.status || mission.status;
+  if (["approved", "completed"].includes(status) || missionIsCompleted(mission))
+    return "completed";
+  if (status === "needs_changes") return "changes";
+  if (status === "late") return "active";
+  return status;
+}
+
+function approvedMissionSteps(mission) {
+  const all = mission.jobs.flatMap((job) =>
+    job.successConditions.map((condition) => ({ job, condition })),
+  );
+  const checklist = all.filter(({ condition }) =>
+    ["checklist", "checklist_completed"].includes(condition.type),
+  );
+  const conditions = checklist.length
+    ? checklist
+    : all.filter(
+        ({ condition }) =>
+          !["required_approval", "approval"].includes(condition.type),
+      );
+  if (conditions.length)
+    return conditions.map(({ job, condition }) => ({
+      label: condition.label || humanizeLabel(condition.type),
+      done:
+        ["approved", "completed"].includes(job.status) ||
+        condition.completed ||
+        condition.status === "completed" ||
+        (condition.target > 0 && condition.current >= condition.target),
+    }));
+  return mission.jobs.map((job) => ({
+    label: job.title,
+    done: ["approved", "completed"].includes(job.status),
+  }));
+}
+
+function approvedCoalitionMissionPeople(detail, items) {
+  const records = new Map();
+  for (const member of detail.members || []) {
+    if (!member.userId) continue;
+    const name = coalitionAccessDisplayName(member);
+    records.set(member.userId, {
+      id: member.userId,
+      name,
+      initials: name
+        .split(/\s+/u)
+        .map((part) => part[0])
+        .slice(0, 2)
+        .join(""),
+      role: member.roleLabel || coalitionRoleLabel(member.roleKey),
+    });
+  }
+  for (const mission of items)
+    for (const job of mission.jobs) {
+      if (job.assigneeUserId && !records.has(job.assigneeUserId)) {
+        const name =
+          job.assigneeDisplayName ||
+          (job.assigneeUsername
+            ? `@${job.assigneeUsername}`
+            : "Assigned member");
+        records.set(job.assigneeUserId, {
+          id: job.assigneeUserId,
+          name,
+          initials: name
+            .split(/\s+/u)
+            .map((part) => part[0])
+            .slice(0, 2)
+            .join(""),
+          role: job.targetRoleLabel || "Member",
+        });
+      }
+    }
+  return [...records.values()];
+}
+
+function approvedMissionRecord(mission, people) {
+  const job = missionNextJob(mission) || mission.jobs[0];
+  const assigneeIds = [
+    ...new Set(mission.jobs.map((item) => item.assigneeUserId).filter(Boolean)),
+  ];
+  const owner = people.find((person) => person.id === job?.assigneeUserId);
+  return {
+    id: mission.missionId,
+    title: mission.title,
+    description: mission.description,
+    project:
+      normalizeString(
+        mission.raw.projectName ||
+          mission.raw.project?.name ||
+          mission.raw.category,
+      ) ||
+      (mission.templateId
+        ? "From a mission template"
+        : mission.scopeName || "Coalition work"),
+    status: approvedMissionStatus(mission, job),
+    priority: mission.priority,
+    assigneeId:
+      assigneeIds.length === 1 ? assigneeIds[0] : job?.assigneeUserId || null,
+    assigneeIds,
+    assigneeLabel:
+      assigneeIds.length > 1
+        ? `${assigneeIds.length} people`
+        : owner?.name || job?.assigneeDisplayName || "",
+    claimableRole: job?.isClaimable
+      ? job.targetRoleLabel || "Eligible members"
+      : null,
+    availableJobCount:
+      mission.status === "active" && !mission.lifecycleTransition
+        ? mission.jobs.filter((item) => item.isClaimable).length
+        : 0,
+    dueDate: mission.dueAt ? new Date(mission.dueAt).toISOString() : "",
+    dueLabel: approvedMissionDueLabel(mission.dueAt),
+    overdue: mission.jobs.some((item) => item.isLate && !item.isClosed),
+    steps: approvedMissionSteps(mission),
+    dependencies: mission.jobs.flatMap((item) =>
+      item.startConditions.map((condition) => condition.label).filter(Boolean),
+    ),
+    requiresReview: mission.jobs.some(missionJobRequiresApproval),
+    rawMission: mission,
+  };
+}
+
+function approvedMissionEvents(missions, people) {
+  return missions
+    .flatMap((mission) =>
+      mission.recentEvents.map((event) => ({
+        id: event.eventId,
+        missionId: mission.missionId,
+        actor:
+          normalizeString(event.raw.actorDisplayName || event.raw.actorName) ||
+          people.find((person) => person.id === event.actorUserId)?.name ||
+          "A teammate",
+        action:
+          normalizeString(
+            event.raw.summary || event.details.summary || event.details.message,
+          ) || humanizeLabel(event.type),
+        time: event.createdAt
+          ? formatAbsoluteDateTime(event.createdAt)
+          : "Recent update",
+        timestamp: event.createdAt || 0,
+      })),
+    )
+    .sort((a, b) => b.timestamp - a.timestamp);
+}
+
+function approvedMissionAssigneePicker(draft, pending, scopeId) {
+  const people = missionCreateAssigneePeople("coalition", scopeId).map(
+    (person) => ({
+      ...person,
+      label: person.label === person.value ? "Team member" : person.label,
+    }),
+  );
+  const roles = missionCreateAssigneeRoles("coalition", scopeId);
+  const mode = draft.targetMode || "user";
+  return `<div class="form-grid full-width"><label class="field"><span>Assignment</span><select data-missions-target-mode${disabledAttr(pending)}>${[
+    ["user", "A person"],
+    ["role_claim", "Anyone in a role can claim"],
+    ["role_fanout", "One task per role member"],
+  ]
+    .map(
+      ([value, label]) =>
+        `<option value="${value}"${selectedAttr(value === mode)}>${label}</option>`,
+    )
+    .join(
+      "",
+    )}</select></label><label class="field"${mode === "user" ? "" : " hidden"} data-missions-person-field><span>Assign to</span><select data-missions-person-target${disabledAttr(pending)}><option value="">Choose a teammate</option>${people.map((person) => `<option value="${escapeHtml(person.value)}"${selectedAttr(mode === "user" && person.value === draft.assignee)}>${escapeHtml(person.label)}</option>`).join("")}${mode === "user" && draft.assignee && !people.some((person) => person.value === draft.assignee) ? `<option value="${escapeHtml(draft.assignee)}" selected>Selected teammate</option>` : ""}</select></label><label class="field"${mode !== "user" ? "" : " hidden"} data-missions-role-field><span>Volunteer role</span><select data-missions-role-target${disabledAttr(pending)}><option value="">Choose a role</option>${roles.map((role) => `<option value="${escapeHtml(role.value)}"${selectedAttr(mode !== "user" && role.value === draft.assignee)}>${escapeHtml(role.label)}</option>`).join("")}</select></label></div>`;
+}
+
+function approvedCoalitionMissionDetailHtml(ui, model) {
+  const detail = state.pages.missions.detail;
+  const mission = detail.item;
+  if (detail.error && !detail.loading && !mission)
+    return `<div class="dialog-body"><h2>Mission unavailable</h2><p role="alert">${escapeHtml(detail.error)}</p><button type="button" class="secondary-button" data-action="coalition-missions-ui-close-detail">Close</button></div>`;
+  if (
+    !mission ||
+    mission.missionId !== ui.detailId ||
+    detail.approvedActorId !== normalizeString(state.auth.user?.userId)
+  )
+    return "";
+  if (mission.scopeType !== "coalition" || mission.scopeId !== model.scopeId)
+    return `<div class="dialog-body"><h2>Mission unavailable</h2><p>This mission is not available in this workspace.</p><button type="button" class="secondary-button" data-action="coalition-missions-ui-close-detail">Close</button></div>`;
+  const record = approvedMissionRecord(mission, model.people);
+  const job =
+    mission.jobs.find((item) => item.jobId === ui.selectedJobId) ||
+    (ui.view === "available"
+      ? mission.jobs.find((item) => item.isClaimable)
+      : null) ||
+    missionNextJob(mission) ||
+    mission.jobs[0];
+  const flags = job ? missionJobControlFlags(mission, job) : null;
+  const manager = Boolean(detail.viewer?.admin || detail.viewer?.canManage);
+  const canApprove = Boolean(detail.viewer?.admin || detail.viewer?.canApprove);
+  const workActive =
+    mission.status === "active" && !mission.lifecycleTransition;
+  const canDiscuss =
+    ["active", "paused"].includes(mission.status) &&
+    !mission.lifecycleTransition;
+  if (flags) {
+    flags.isAdmin = manager;
+    flags.canWorkJob = flags.canWorkJob && (flags.isMine || manager);
+    flags.canAdminActivate =
+      flags.canAdminActivate && (manager || detail.viewer?.canAssign === true);
+    flags.canAdminIntervene = flags.canAdminIntervene && manager;
+    flags.canAddFollowUp = flags.canAddFollowUp && (flags.isMine || manager);
+    flags.canPostUpdate = flags.canPostUpdate && (flags.isMine || manager);
+  }
+  const footer = [];
+  const support = [];
+  const inlineSupport = [];
+  const permittedActions = new Set();
+  const button = (action, options = {}) => {
+    if (!options.disabled) permittedActions.add(action);
+    return renderMissionJobActionButton({
+      mission,
+      job,
+      action,
+      ...options,
+      disabled: Boolean(
+        options.disabled ||
+          detail.loading ||
+          detail.artifactPendingKey ||
+          detail.followUpPendingKey,
+      ),
+    });
+  };
+  if (
+    job?.isClaimable &&
+    mission.status === "active" &&
+    !mission.lifecycleTransition
+  )
+    footer.push(
+      renderMissionClaimButton(mission.missionId, job, "Claim mission"),
+    );
+  if (flags?.canAdminActivate)
+    footer.push(button("activate", { direct: true, primary: true }));
+  if (flags?.canWorkJob && !job.isBlocked && job.status !== "submitted") {
+    if (!job.lastStartedAt) support.push(button("start", { direct: true }));
+    footer.push(
+      button(missionJobRequiresApproval(job) ? "submit" : "complete", {
+        primary: true,
+        label: missionJobRequiresApproval(job)
+          ? "Submit for review"
+          : mission.jobs.length === 1
+            ? "Complete mission"
+            : "Complete task",
+        disabled: Boolean(missionJobCompletionBlocker(job)),
+        noteRequired: missionJobHasRequiredNote(job),
+      }),
+    );
+  }
+  if (job?.status === "submitted" && canApprove && workActive)
+    footer.push(
+      button("request_changes", { noteRequired: true }),
+      button("approve", {
+        primary: true,
+        direct: true,
+        label: mission.jobs.length === 1 ? "Approve mission" : "Approve task",
+      }),
+    );
+  if (job?.isBlocked && flags?.isAdmin && workActive)
+    footer.push(button("unblock", { direct: true, primary: true }));
+  const inlineUpdate = flags?.canPostUpdate && job.status !== "submitted";
+  if (inlineUpdate) permittedActions.add("post_update");
+  else if (flags?.canPostUpdate)
+    support.push(button("post_update", { noteRequired: true }));
+  if (flags?.isMine && !job.isClosed && canDiscuss)
+    (inlineUpdate ? inlineSupport : support).push(
+      button("request_clarification", {
+        noteRequired: true,
+        label: "Ask for clarification",
+      }),
+    );
+  if (
+    flags?.canAdminIntervene &&
+    !["submitted", "blocked"].includes(job.status)
+  )
+    support.push(
+      button("block", { noteRequired: true }),
+      button("cancel", { noteRequired: true }),
+      button("fail", { noteRequired: true }),
+    );
+  if (flags?.canMessageLead)
+    support.push(
+      `<button class="text-button" data-action="mission-message-lead" data-lead-user-id="${escapeHtml(flags.leadUserId)}">Message mission lead</button>`,
+    );
+  if (
+    !detail.loading &&
+    detail.actionDraft &&
+    detail.actionDraft.missionId === mission.missionId &&
+    detail.actionDraft.jobId === job?.jobId &&
+    !permittedActions.has(detail.actionDraft.action)
+  )
+    detail.actionDraft = null;
+  const person = model.people.find((item) => item.id === record.assigneeId);
+  const checklist =
+    mission.jobs.length === 1 && record.steps.length
+      ? record.steps.map((step, index) => ({
+          id: job.jobId,
+          title: step.label,
+          done: step.done,
+          selected: false,
+          statusLabel: "",
+          key: `${job.jobId}:${index}`,
+        }))
+      : mission.jobs.map((item) => ({
+          id: item.jobId,
+          title: item.title,
+          done: ["approved", "completed"].includes(item.status),
+          selected: item.jobId === job?.jobId,
+          statusLabel: messagingMissionStatusLabel(item.status),
+        }));
+  const events = approvedMissionEvents(
+    [
+      {
+        ...mission,
+        recentEvents: detail.events.length
+          ? detail.events
+          : mission.recentEvents,
+      },
+    ],
+    model.people,
+  );
+  const updatePending = Boolean(
+    detail.loading || detail.actionPendingKey || detail.artifactPendingKey,
+  );
+  const updateHtml = inlineUpdate
+    ? `<form class="mission-inline-update" data-route-form="mission-job-action">
+        <input type="hidden" name="missionId" value="${escapeHtml(mission.missionId)}" />
+        <input type="hidden" name="jobId" value="${escapeHtml(job.jobId)}" />
+        <input type="hidden" name="action" value="post_update" />
+        <input type="hidden" name="noteRequired" value="true" />
+        <label class="field"><span>Your update</span><textarea name="note" rows="3" placeholder="Share progress, a result, or a question…" required${disabledAttr(updatePending)}></textarea></label>
+        <div class="note-actions"><button class="secondary-button" type="submit"${disabledAttr(updatePending)}>${detail.actionPendingKey?.endsWith(":post_update") ? "Saving..." : "Post update"}</button>${inlineSupport.join("")}</div>
+      </form>`
+    : "";
+  return renderCoalitionMissionDetail({
+    mission: {
+      ...record,
+      statusLabel:
+        job?.isClaimable && workActive
+          ? "Available"
+          : {
+              submitted: "Needs review",
+              active: "In progress",
+              changes: "Needs changes",
+              queued: "Not started",
+              completed: "Completed",
+            }[record.status] || humanizeLabel(record.status),
+      assigneeHtml: `<span class="person"><span class="avatar">${escapeHtml(person?.initials || "—")}</span><span>${escapeHtml(record.assigneeLabel || "Unassigned")}</span></span>`,
+    },
+    jobs: checklist,
+    selectedJob: job
+      ? {
+          id: job.jobId,
+          title: job.title,
+          description: job.description,
+          note: normalizeString(
+            job.raw.completionNote ||
+              job.raw.lastUpdateNote ||
+              job.raw.note ||
+              job.raw.notes ||
+              job.raw.submissionNote,
+          ),
+          updateHtml,
+          guidanceHtml: renderMissionJobGuidance(job),
+          artifactHtml: renderMissionArtifactControls(mission, job, flags),
+          followUpHtml: renderMissionFollowUpForm(mission, job, flags),
+        }
+      : null,
+    events,
+    error: detail.error,
+    actionDraftHtml:
+      job && !(inlineUpdate && detail.actionDraft?.action === "post_update")
+        ? renderMissionJobActionDraft(job, mission)
+        : "",
+    managerHtml:
+      detail.viewer?.admin || detail.viewer?.canManage
+        ? renderMissionManagerControls(mission, detail)
+            .replace(/^<details[^>]*><summary>Manage mission<\/summary>/u, "")
+            .replace(/<\/details>$/u, "")
+        : "",
+    footerHtml: footer.join(""),
+    supportHtml: support.join(""),
+    sourceHtml: mission.source?.conversationId
+      ? `<button class="text-button" data-action="navigate" data-route="/messages/conversations/${escapeHtml(encodeURIComponent(mission.source.conversationId))}">Open source chat</button>`
+      : "",
   });
+}
+
+function approvedCoalitionMissionModel(detail, coalition, membership) {
+  const resource = detail.missionsWorkspace;
+  const canManage = canManageCoalitionMissions(membership);
+  const ui = approvedCoalitionMissionUi(resource, canManage);
+  const rawItems = resource.loaded ? resource.items : detail.missions;
+  const people = approvedCoalitionMissionPeople(detail, rawItems);
+  const canCreate =
+    membership?.isAdmin ||
+    coalitionHasAnyPermission(membership, [
+      "missions_assign",
+      "missions_delegate",
+      "missions_manage",
+    ]);
+  const canManageTemplates =
+    membership?.isAdmin ||
+    coalitionHasAnyPermission(membership, [
+      "mission_templates_manage",
+      "missions_manage",
+    ]);
+  const model = {
+    ui,
+    resource,
+    canManage,
+    canCreate,
+    canManageTemplates,
+    role: canManage ? "admin" : "member",
+    currentUserId: normalizeString(state.auth.user?.userId),
+    scopeId: coalition.coalitionId,
+    contextKey: ui.contextKey,
+    scopeName: coalition.name,
+    memberRoleLabel: membership.roleLabel,
+    loading: resource.loading && !resource.loaded,
+    error: resource.error,
+    people,
+    items: rawItems.map((mission) => {
+      const record = approvedMissionRecord(mission, people);
+      if (ui.view === "available" && record.availableJobCount > 0) {
+        const job = mission.jobs.find((item) => item.isClaimable);
+        return {
+          ...record,
+          status: "active",
+          assigneeId: null,
+          assigneeLabel: "Unassigned",
+          claimableRole: job.targetRoleLabel || "Eligible members",
+        };
+      }
+      return record;
+    }),
+    events: approvedMissionEvents(rawItems, people),
+    templates: resource.templates.map((template) => ({
+      id: template.templateId,
+      title: template.title,
+      description: template.description,
+      category:
+        normalizeString(template.raw.category || template.config.category) ||
+        missionPresetForKey(template.presetKey).label,
+      version: template.version || 1,
+      steps: (Array.isArray(template.config.successConditions)
+        ? template.config.successConditions
+        : missionPresetSuccessConditions(template.presetKey)
+      ).map((condition) => condition.label || humanizeLabel(condition.type)),
+      targetRole:
+        missionCreateAssigneeRoles("coalition", coalition.coalitionId).find(
+          (role) =>
+            role.value ===
+            (template.config.assignee || template.config.target?.roleKey),
+        )?.label || "Reusable mission",
+    })),
+    templatesLoading: resource.templatesLoading,
+    templatesError: resource.templatesError,
+    createOpen: resource.createOpen && canCreate,
+    templateEditorOpen: resource.templateEditorOpen && canManageTemplates,
+    detailId: ui.detailId,
+    detailLoading:
+      state.pages.missions.detail.loading &&
+      state.pages.missions.detail.item?.missionId !== ui.detailId,
+    detailRevision: `${ui.detailId}:${state.pages.missions.detail.item?.mutationRevision || 0}:${state.pages.missions.detail.approvedDraftEpoch || 0}`,
+  };
+  const draft = resource.createDraft || {};
+  model.createHtml = model.createOpen
+    ? renderCoalitionMissionCreateForm({
+        draft,
+        scopeId: model.scopeId,
+        pending: resource.actionPendingKey === "create",
+        presets: MISSION_PRESETS,
+        assigneeHtml: approvedMissionAssigneePicker(
+          draft,
+          resource.actionPendingKey === "create",
+          model.scopeId,
+        ),
+      })
+    : "";
+  const templateDraft = resource.templateDraft || {};
+  model.templateEditorTitle = templateDraft.templateId
+    ? "Edit template"
+    : "New template";
+  model.templateEditorHtml = model.templateEditorOpen
+    ? renderCoalitionMissionTemplateForm({
+        draft: templateDraft,
+        scopeId: model.scopeId,
+        pending: Boolean(resource.actionPendingKey),
+        presets: MISSION_PRESETS,
+        roles: missionCreateAssigneeRoles("coalition", model.scopeId),
+      })
+    : "";
+  model.detailHtml = ui.detailId
+    ? approvedCoalitionMissionDetailHtml(ui, model)
+    : "";
+  return model;
+}
+
+function renderCoalitionMissions(detail, coalition, membership) {
+  if (!canViewCoalitionMissions(membership))
+    return '<div class="shared-page__empty">This coalition role does not include mission access.</div>';
+  return renderCoalitionMissionsPresentation(
+    approvedCoalitionMissionModel(detail, coalition, membership),
+  );
+}
+
+function closeApprovedCoalitionMissionDialog(kind) {
+  const context = approvedCoalitionMissionContext();
+  if (!context) return;
+  const { resource } = context;
+  const detail = state.pages.missions.detail;
+  if (
+    resource.actionPendingKey ||
+    detail.actionPendingKey ||
+    detail.artifactPendingKey ||
+    detail.followUpPendingKey
+  ) {
+    showToast("Wait for the current update to finish.");
+    return;
+  }
+  if (kind === "create") {
+    resource.createOpen = false;
+    resource.createDraft = null;
+  }
+  if (kind === "template") {
+    resource.templateEditorOpen = false;
+    resource.templateDraft = null;
+  }
+  if (kind === "detail") {
+    resource.approvedUi.detailId = "";
+    resource.approvedUi.selectedJobId = "";
+    detail.requestToken = (detail.requestToken || 0) + 1;
+    resetMissionDetail();
+    const url = new URL(window.location.href);
+    url.searchParams.delete("missionId");
+    window.history.replaceState({}, document.title, url.pathname + url.search);
+  }
+  scheduleRender();
+}
+
+function approvedMissionTemplateDraft(template) {
+  const config = template?.config || {};
+  const target = config.target || {};
+  return {
+    ...config,
+    config: { ...config },
+    templateId: template?.templateId || "",
+    templateVersion: template?.version || "",
+    title: template?.title || "",
+    description: template?.description || "",
+    presentationCategory: normalizeString(
+      template?.raw?.category || config.category,
+    ),
+    presentationChecklist: Array.isArray(config.successConditions)
+      ? config.successConditions
+          .filter((condition) =>
+            ["checklist", "checklist_completed"].includes(condition.type),
+          )
+          .map((condition) => condition.label || "")
+          .filter(Boolean)
+          .join("\n")
+      : "",
+    presentationRequiresReview: Array.isArray(config.successConditions)
+      ? config.successConditions.some(
+          (condition) => condition.type === "required_approval",
+        )
+      : true,
+    presetKey: template?.presetKey || "general",
+    targetMode: config.targetMode || target.mode || target.targetMode || "user",
+    assignee:
+      config.assignee ||
+      target.userId ||
+      target.username ||
+      target.roleKey ||
+      "",
+  };
+}
+
+function approvedMissionChecklistConditions(value, previous = []) {
+  const retained = Array.isArray(previous)
+    ? previous.filter(
+        (condition) =>
+          !["checklist", "checklist_completed"].includes(condition.type),
+      )
+    : [];
+  const labels = String(value || "")
+    .split("\n")
+    .map((label) => label.trim())
+    .filter(Boolean);
+  return [
+    ...retained,
+    ...labels.map((label) => ({
+      type: "checklist",
+      label,
+      required: true,
+      completed: false,
+      target: 1,
+      current: 0,
+    })),
+  ];
+}
+
+function handleApprovedCoalitionMissionAction(action, target) {
+  if (!action.startsWith("coalition-missions-ui-")) return false;
+  const context = approvedCoalitionMissionContext();
+  if (!context) return true;
+  const { resource, detail, scopeId } = context;
+  const model = approvedCoalitionMissionModel(
+    detail,
+    detail.coalition,
+    detail.membership,
+  );
+  const ui = model.ui;
+  const name = action.slice("coalition-missions-ui-".length);
+  coalitionMissionsInteractions.rememberOpener(target);
+  if (name === "view") {
+    const allowed = model.canManage
+      ? ["missions", "attention", "people", "templates", "timeline", "activity"]
+      : ["mine", "available", "completed"];
+    if (!allowed.includes(target.dataset.view)) return true;
+    ui.view = target.dataset.view;
+    ui.query = "";
+    ui.status = "all";
+    ui.assignee = "all";
+    const url = new URL(window.location.href);
+    url.searchParams.set("missionView", ui.view);
+    window.history.replaceState({}, document.title, url.pathname + url.search);
+  } else if (name === "layout")
+    ui.layout = target.dataset.layout === "board" ? "board" : "list";
+  else if (name === "open") {
+    ui.detailId = normalizeString(target.dataset.id);
+    ui.selectedJobId = "";
+    const url = new URL(window.location.href);
+    url.searchParams.set("missionId", ui.detailId);
+    window.history.replaceState({}, document.title, url.pathname + url.search);
+    loadMissionDetail(ui.detailId, { refresh: true }).catch(() => {});
+  } else if (name === "select-job")
+    ui.selectedJobId = normalizeString(target.dataset.id);
+  else if (
+    name === "close-detail" ||
+    name === "close-create" ||
+    name === "close-template"
+  ) {
+    closeApprovedCoalitionMissionDialog(name.slice(6));
+    return true;
+  } else if (name === "create" && model.canCreate) {
+    resource.createOpen = true;
+    resource.createDraft = null;
+  } else if (name === "new-template" && model.canManageTemplates) {
+    resource.templateEditorOpen = true;
+    resource.templateDraft = null;
+  } else if (name === "use-template" && model.canCreate) {
+    const template = resource.templates.find(
+      (item) => item.templateId === target.dataset.id,
+    );
+    if (template) {
+      resource.createDraft = approvedMissionTemplateDraft(template);
+      resource.createOpen = true;
+    }
+  } else if (name === "edit-template" && model.canManageTemplates) {
+    const template = resource.templates.find(
+      (item) => item.templateId === target.dataset.id,
+    );
+    if (template) {
+      resource.templateDraft = approvedMissionTemplateDraft(template);
+      resource.templateEditorOpen = true;
+    }
+  } else if (name === "person" && model.canManage) {
+    ui.view = "missions";
+    ui.assignee = normalizeString(target.dataset.id);
+    ui.query = "";
+    ui.status = "all";
+  } else if (name === "clear") {
+    ui.query = "";
+    ui.status = "all";
+    ui.assignee = "all";
+  } else if (name === "sort") ui.reverseDue = !ui.reverseDue;
+  else if (name === "refresh")
+    loadCoalitionMissions(scopeId, { refresh: true }).catch(() => {});
+  scheduleRender();
+  return true;
+}
+
+function updateApprovedMissionResults() {
+  const context = approvedCoalitionMissionContext();
+  if (!context) return;
+  const model = approvedCoalitionMissionModel(
+    context.detail,
+    context.detail.coalition,
+    context.detail.membership,
+  );
+  const target = root.querySelector(".polis-missions [data-missions-results]");
+  if (!target) return;
+  target.innerHTML = renderCoalitionMissionResults(model);
+  const count = filterCoalitionMissionItems(model).length;
+  const summary = root.querySelector(".polis-missions [data-missions-summary]");
+  if (summary)
+    summary.textContent = `${count} ${count === 1 ? "mission" : "missions"}${model.ui.view === "attention" ? " needing attention" : ""}`;
+  const clear = root.querySelector(
+    '[data-action="coalition-missions-ui-clear"]',
+  );
+  if (clear)
+    clear.disabled =
+      !model.ui.query &&
+      model.ui.status === "all" &&
+      model.ui.assignee === "all";
+}
+
+function handleApprovedCoalitionMissionField(event) {
+  const target = event.target;
+  if (!target?.closest?.(".polis-missions")) return false;
+  const context = approvedCoalitionMissionContext();
+  if (!context) return false;
+  const ui = approvedCoalitionMissionUi(
+    context.resource,
+    canManageCoalitionMissions(context.detail.membership),
+  );
+  if (target.matches("[data-missions-query]")) {
+    ui.query = target.value;
+    updateApprovedMissionResults();
+    return true;
+  }
+  if (target.matches("[data-missions-status]")) {
+    ui.status = target.value;
+    updateApprovedMissionResults();
+    return true;
+  }
+  if (target.matches("[data-missions-assignee]")) {
+    ui.assignee = target.value;
+    updateApprovedMissionResults();
+    return true;
+  }
+  if (event.type !== "change") return false;
+  const form = target.closest("form[data-route-form]");
+  if (!form) return false;
+  if (target.matches("[data-missions-template-role]")) {
+    form.querySelector('input[name="assignee"]').value = target.value;
+    form.querySelector('input[name="targetMode"]').value = "role_claim";
+    syncMissionTemplateDraftFromForm(form);
+    return true;
+  }
+  if (
+    target.matches(
+      "[data-missions-target-mode],[data-missions-person-target],[data-missions-role-target]",
+    )
+  ) {
+    const mode = form.querySelector("[data-missions-target-mode]").value;
+    form.querySelector('input[name="targetMode"]').value = mode;
+    form.querySelector('input[name="assignee"]').value = form.querySelector(
+      mode === "user"
+        ? "[data-missions-person-target]"
+        : "[data-missions-role-target]",
+    ).value;
+    form.querySelector("[data-missions-person-field]").hidden = mode !== "user";
+    form.querySelector("[data-missions-role-field]").hidden = mode === "user";
+    if (form.dataset.routeForm === "coalition-missions-create")
+      syncMissionCreateDraftFromForm(form);
+    else syncMissionTemplateDraftFromForm(form);
+    return true;
+  }
+  if (target.matches("[data-missions-due-date]")) {
+    const draft =
+      form.dataset.routeForm === "coalition-missions-create"
+        ? syncMissionCreateDraftFromForm(form)
+        : syncMissionTemplateDraftFromForm(form);
+    if (draft) draft.presentationDueDate = target.value;
+    return true;
+  }
+  return false;
+}
+
+function prepareApprovedMissionDate(form) {
+  const input = form.querySelector("[data-missions-due-date]");
+  if (!input?.value) return true;
+  const deadline = new Date(`${input.value}T23:59:00`).getTime();
+  if (!Number.isFinite(deadline) || deadline <= Date.now()) {
+    showToast("Choose a future due date.");
+    input.focus();
+    return false;
+  }
+  form.querySelector('[name="deadlineMode"]').value = "due_at";
+  form.querySelector('[name="dueHours"]').value = String(
+    (deadline - Date.now()) / 3600000,
+  );
+  if (form.dataset.routeForm === "coalition-missions-create")
+    syncMissionCreateDraftFromForm(form);
+  else syncMissionTemplateDraftFromForm(form);
+  return true;
+}
+
+function handleApprovedMissionKeyboard(event) {
+  const tab = event.target.closest?.('.polis-missions [role="tab"]');
+  if (!tab || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key))
+    return;
+  const tabs = [
+    ...tab.closest('[role="tablist"]').querySelectorAll('[role="tab"]'),
+  ];
+  const index = tabs.indexOf(tab);
+  const next =
+    event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? tabs.length - 1
+        : (index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) %
+          tabs.length;
+  event.preventDefault();
+  tabs[next].focus();
+  tabs[next].click();
 }
 
 function coalitionCalendarAccessLevel(membership) {
@@ -96460,10 +97453,10 @@ function renderMissionNextStepPanel(mission) {
   </article>`;
 }
 
-function renderMissionClaimButton(missionId, job) {
+function renderMissionClaimButton(missionId, job, label = "Claim") {
   const pendingKey = `${missionId}:${job.jobId}:claim`;
   const pending = state.pages.missions.detail.actionPendingKey === pendingKey;
-  return `<button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="mission-job-claim" data-mission-id="${escapeHtml(missionId)}" data-job-id="${escapeHtml(job.jobId)}"${pending ? " disabled" : ""}>${pending ? "Claiming..." : "Claim"}</button>`;
+  return `<button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="mission-job-claim" data-mission-id="${escapeHtml(missionId)}" data-job-id="${escapeHtml(job.jobId)}"${pending ? " disabled" : ""}>${pending ? "Claiming..." : escapeHtml(label)}</button>`;
 }
 
 function renderMissionJobActionButton({
@@ -127764,6 +128757,7 @@ function renderApp() {
   syncDocumentTitle();
   ensureActiveIndexInBounds();
   const peopleSnapshot = coalitionPeopleInteractions.beforeRender(root);
+  const missionsSnapshot = coalitionMissionsInteractions.beforeRender(root);
   const authSnapshot = polisAuthInteractions.beforeRender(root);
   const playbackSnapshot = snapshotPlaybackState();
   const scrollSnapshot = snapshotFeedScrollState();
@@ -127820,6 +128814,7 @@ function renderApp() {
   syncMessagingRouteHighlightAfterRender();
   polisAuthInteractions.afterRender(root, authSnapshot);
   coalitionPeopleInteractions.afterRender(root, peopleSnapshot);
+  coalitionMissionsInteractions.afterRender(root, missionsSnapshot);
 }
 
 function bindElectionCounters() {
@@ -128756,6 +129751,10 @@ async function handleRootClick(event) {
     return;
   }
   const action = target.getAttribute("data-action");
+  if (handleApprovedCoalitionMissionAction(action || "", target)) {
+    event.preventDefault();
+    return;
+  }
   if (coalitionPeopleInteractions.handleAction(action, target, root)) {
     event.preventDefault();
     return;
@@ -134251,6 +135250,7 @@ function handleRootKeydown(event) {
 }
 
 function handleRootInput(event) {
+  if (handleApprovedCoalitionMissionField(event)) return;
   const missionCreateForm = event.target.closest(
     '[data-route-form="missions-create"], [data-route-form="candidate-missions-create"], [data-route-form="coalition-missions-create"]',
   );
@@ -134803,6 +135803,7 @@ function syncCampaignQuestOutcomeChoices(row, outreachType) {
 }
 
 function handleRootChange(event) {
+  if (handleApprovedCoalitionMissionField(event)) return;
   if (event.target.matches?.("[data-create-audience-choice]")) {
     const form = event.target.closest("form");
     updatePostComposerField(
@@ -135576,6 +136577,19 @@ function handleRootChange(event) {
 }
 
 function handleCommentSubmit(event) {
+  const approvedForm = event.target.closest?.(
+    ".polis-missions form[data-route-form]",
+  );
+  if (
+    approvedForm &&
+    ["coalition-missions-create", "coalition-missions-template-save"].includes(
+      approvedForm.dataset.routeForm,
+    ) &&
+    !prepareApprovedMissionDate(approvedForm)
+  ) {
+    event.preventDefault();
+    return;
+  }
   const routeForm = event.target.closest("[data-route-form]");
   if (routeForm) {
     event.preventDefault();
@@ -136977,6 +137991,7 @@ function attachGlobalListeners() {
   root?.addEventListener("keydown", handleRootKeydown);
   root?.addEventListener("input", handleRootInput);
   root?.addEventListener("change", handleRootChange);
+  root?.addEventListener("keydown", handleApprovedMissionKeyboard);
   root?.addEventListener("submit", handleCommentSubmit);
   root?.addEventListener("error", handleRouteImageError, true);
   window.addEventListener("popstate", () => {

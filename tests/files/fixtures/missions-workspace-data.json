@@ -1,0 +1,654 @@
+{
+  "people": [
+    {
+      "id": "alex",
+      "name": "Alex Morgan",
+      "handle": "alex.morgan",
+      "initials": "AM",
+      "color": "#4778c2",
+      "role": "Administrator"
+    },
+    {
+      "id": "priya",
+      "name": "Priya Shah",
+      "handle": "priya.shah",
+      "initials": "PS",
+      "color": "#2b8a79",
+      "role": "Field organizer"
+    },
+    {
+      "id": "marcus",
+      "name": "Marcus Rivera",
+      "handle": "marcus.rivera",
+      "initials": "MR",
+      "color": "#56856a",
+      "role": "Field organizer"
+    },
+    {
+      "id": "elena",
+      "name": "Elena Brooks",
+      "handle": "elena.brooks",
+      "initials": "EB",
+      "color": "#a27547",
+      "role": "Volunteer"
+    },
+    {
+      "id": "avery",
+      "name": "Avery Chen",
+      "handle": "avery.chen",
+      "initials": "AC",
+      "color": "#8777a9",
+      "role": "Member"
+    },
+    {
+      "id": "noah",
+      "name": "Noah Williams",
+      "handle": "noah.williams",
+      "initials": "NW",
+      "color": "#4f89a0",
+      "role": "Volunteer"
+    },
+    {
+      "id": "jordan",
+      "name": "Jordan Reed",
+      "handle": "jordan.reed",
+      "initials": "JR",
+      "color": "#8a748b",
+      "role": "Member"
+    },
+    {
+      "id": "lena",
+      "name": "Lena Patel",
+      "handle": "lena.patel",
+      "initials": "LP",
+      "color": "#ab795b",
+      "role": "Volunteer"
+    }
+  ],
+  "missions": [
+    {
+      "id": "prepare-launch",
+      "title": "Prepare Saturday’s canvass launch",
+      "project": "Weekend canvass",
+      "description": "Get the walk lists, captain briefing, and launch checklist ready for Saturday morning.",
+      "status": "active",
+      "priority": "high",
+      "assigneeId": "priya",
+      "claimableRole": null,
+      "dueLabel": "Tomorrow",
+      "dueDate": "2026-10-27T17:00:00-06:00",
+      "overdue": false,
+      "requiresReview": false,
+      "completedSteps": 2,
+      "steps": [
+        {
+          "label": "Confirm meeting point",
+          "done": true
+        },
+        {
+          "label": "Prepare walk lists",
+          "done": true
+        },
+        {
+          "label": "Review captain briefing",
+          "done": false
+        },
+        {
+          "label": "Share launch checklist",
+          "done": false
+        }
+      ],
+      "blocker": "",
+      "notes": "Meet at the library courtyard at 9 a.m. on Saturday. Bring spare clipboards.",
+      "dependencies": [],
+      "leadId": "alex",
+      "activity": [
+        {
+          "actor": "Priya Shah",
+          "action": "finished preparing the walk lists",
+          "time": "25 minutes ago"
+        },
+        {
+          "actor": "Alex Morgan",
+          "action": "assigned this mission to Priya",
+          "time": "Yesterday"
+        }
+      ]
+    },
+    {
+      "id": "welcome-guide",
+      "title": "Review the volunteer welcome guide",
+      "project": "Volunteer onboarding",
+      "description": "Review the updated guide before it goes into this week’s volunteer welcome email.",
+      "status": "submitted",
+      "priority": "high",
+      "assigneeId": "elena",
+      "claimableRole": null,
+      "dueLabel": "Today",
+      "dueDate": "2026-10-26T17:00:00-06:00",
+      "overdue": false,
+      "requiresReview": true,
+      "completedSteps": 3,
+      "steps": [
+        {
+          "label": "Update the welcome copy",
+          "done": true
+        },
+        {
+          "label": "Check links and contact details",
+          "done": true
+        },
+        {
+          "label": "Upload the draft guide",
+          "done": true
+        }
+      ],
+      "blocker": "",
+      "notes": "The updated guide includes arrival times, accessibility information, and a short first-shift checklist.",
+      "dependencies": [],
+      "leadId": "alex",
+      "activity": [
+        {
+          "actor": "Elena Brooks",
+          "action": "submitted the guide for review",
+          "time": "18 minutes ago"
+        },
+        {
+          "actor": "Elena Brooks",
+          "action": "added welcome-guide.pdf",
+          "time": "22 minutes ago"
+        }
+      ]
+    },
+    {
+      "id": "early-voting-card",
+      "title": "Approve the early voting reminder card",
+      "project": "Community outreach",
+      "description": "Check the dates, location, and readability of the reminder card before printing.",
+      "status": "submitted",
+      "priority": "normal",
+      "assigneeId": "avery",
+      "claimableRole": null,
+      "dueLabel": "Today",
+      "dueDate": "2026-10-26T16:00:00-06:00",
+      "overdue": false,
+      "requiresReview": true,
+      "completedSteps": 2,
+      "steps": [
+        {
+          "label": "Check the official voting information",
+          "done": true
+        },
+        {
+          "label": "Upload the print-ready card",
+          "done": true
+        }
+      ],
+      "blocker": "",
+      "notes": "A large-print version is included with the standard card.",
+      "dependencies": [],
+      "leadId": "alex",
+      "activity": [
+        {
+          "actor": "Avery Chen",
+          "action": "submitted two reminder card versions",
+          "time": "42 minutes ago"
+        }
+      ]
+    },
+    {
+      "id": "community-hall",
+      "title": "Confirm the community hall booking",
+      "project": "Volunteer onboarding",
+      "description": "Secure the room and equipment for next week’s volunteer orientation.",
+      "status": "blocked",
+      "priority": "high",
+      "assigneeId": "marcus",
+      "claimableRole": null,
+      "dueLabel": "Today",
+      "dueDate": "2026-10-26T17:00:00-06:00",
+      "overdue": false,
+      "requiresReview": false,
+      "completedSteps": 1,
+      "steps": [
+        {
+          "label": "Check room availability",
+          "done": true
+        },
+        {
+          "label": "Confirm the room booking",
+          "done": false
+        },
+        {
+          "label": "Reserve chairs and projector",
+          "done": false
+        }
+      ],
+      "blocker": "Waiting for the venue’s updated room quote.",
+      "notes": "Marcus followed up this morning. A backup room is available at the library.",
+      "dependencies": [],
+      "leadId": "alex",
+      "activity": [
+        {
+          "actor": "Marcus Rivera",
+          "action": "reported a blocker: room quote pending",
+          "time": "1 hour ago"
+        }
+      ]
+    },
+    {
+      "id": "captain-briefing",
+      "title": "Update the canvass captain briefing",
+      "project": "Weekend canvass",
+      "description": "Bring the briefing up to date with the new meeting point and shift handoff plan.",
+      "status": "active",
+      "priority": "high",
+      "assigneeId": "alex",
+      "claimableRole": null,
+      "dueLabel": "Yesterday",
+      "dueDate": "2026-10-25T17:00:00-06:00",
+      "overdue": true,
+      "requiresReview": false,
+      "completedSteps": 1,
+      "steps": [
+        {
+          "label": "Confirm captain availability",
+          "done": true
+        },
+        {
+          "label": "Update the meeting point",
+          "done": false
+        },
+        {
+          "label": "Share the handoff plan",
+          "done": false
+        }
+      ],
+      "blocker": "",
+      "notes": "Please finish this before Priya shares the final launch checklist.",
+      "dependencies": [],
+      "leadId": "alex",
+      "activity": [
+        {
+          "actor": "Alex Morgan",
+          "action": "confirmed the captain roster",
+          "time": "Yesterday"
+        }
+      ]
+    },
+    {
+      "id": "check-in",
+      "title": "Confirm volunteer check-in coverage",
+      "project": "Volunteer onboarding",
+      "description": "Make sure someone is ready to greet and check in each new volunteer.",
+      "status": "active",
+      "priority": "normal",
+      "assigneeId": "alex",
+      "claimableRole": null,
+      "dueLabel": "Today",
+      "dueDate": "2026-10-26T18:00:00-06:00",
+      "overdue": false,
+      "requiresReview": false,
+      "completedSteps": 1,
+      "steps": [
+        {
+          "label": "Review the shift sign-ups",
+          "done": true
+        },
+        {
+          "label": "Confirm the check-in lead",
+          "done": false
+        }
+      ],
+      "blocker": "",
+      "notes": "Elena can cover the first half hour if the check-in lead arrives late.",
+      "dependencies": [],
+      "leadId": "priya",
+      "activity": [
+        {
+          "actor": "Alex Morgan",
+          "action": "reviewed this week’s shift sign-ups",
+          "time": "2 hours ago"
+        }
+      ]
+    },
+    {
+      "id": "ballot-guide-checklist",
+      "title": "Revise the ballot guide review checklist",
+      "project": "Community outreach",
+      "description": "Address the review notes so each guide gets the same accessibility and source checks.",
+      "status": "changes",
+      "priority": "normal",
+      "assigneeId": "alex",
+      "claimableRole": null,
+      "dueLabel": "Tomorrow",
+      "dueDate": "2026-10-27T16:00:00-06:00",
+      "overdue": false,
+      "requiresReview": true,
+      "completedSteps": 1,
+      "steps": [
+        {
+          "label": "Add source verification steps",
+          "done": true
+        },
+        {
+          "label": "Add readability checks",
+          "done": false
+        },
+        {
+          "label": "Resubmit the checklist",
+          "done": false
+        }
+      ],
+      "blocker": "",
+      "notes": "Add a large-print check and make the approval owner clear before resubmitting.",
+      "dependencies": [],
+      "leadId": "priya",
+      "activity": [
+        {
+          "actor": "Priya Shah",
+          "action": "requested changes to the review checklist",
+          "time": "3 hours ago"
+        }
+      ]
+    },
+    {
+      "id": "pack-kits",
+      "title": "Pack Saturday’s canvass kits",
+      "project": "Weekend canvass",
+      "description": "Put together clipboards, pens, walk lists, and reminder cards for each volunteer team.",
+      "status": "active",
+      "priority": "normal",
+      "assigneeId": null,
+      "claimableRole": "Volunteer",
+      "dueLabel": "Tomorrow",
+      "dueDate": "2026-10-27T18:00:00-06:00",
+      "overdue": false,
+      "requiresReview": false,
+      "completedSteps": 0,
+      "steps": [
+        {
+          "label": "Count the supplies",
+          "done": false
+        },
+        {
+          "label": "Pack twelve team kits",
+          "done": false
+        },
+        {
+          "label": "Confirm the kits are ready",
+          "done": false
+        }
+      ],
+      "blocker": "",
+      "notes": "Supplies are in the blue storage cabinet. This task is ready for a volunteer to claim.",
+      "dependencies": [],
+      "leadId": "priya",
+      "activity": [
+        {
+          "actor": "Priya Shah",
+          "action": "opened this mission for volunteers to claim",
+          "time": "Today, 8:30 a.m."
+        }
+      ]
+    },
+    {
+      "id": "welcome-calls",
+      "title": "Welcome this week’s new volunteers",
+      "project": "Volunteer onboarding",
+      "description": "Call the new volunteer group, answer first-shift questions, and record a short follow-up note.",
+      "status": "active",
+      "priority": "low",
+      "assigneeId": null,
+      "claimableRole": "Volunteer",
+      "dueLabel": "Wednesday",
+      "dueDate": "2026-10-28T18:00:00-06:00",
+      "overdue": false,
+      "requiresReview": false,
+      "completedSteps": 0,
+      "steps": [
+        {
+          "label": "Make the welcome calls",
+          "done": false
+        },
+        {
+          "label": "Add a follow-up summary",
+          "done": false
+        }
+      ],
+      "blocker": "",
+      "notes": "Use the welcome guide to keep the call short and helpful. A coordinator can handle any questions you cannot answer.",
+      "dependencies": [],
+      "leadId": "elena",
+      "activity": [
+        {
+          "actor": "Elena Brooks",
+          "action": "made this mission available to volunteers",
+          "time": "Today, 8:15 a.m."
+        }
+      ]
+    },
+    {
+      "id": "deliver-kits",
+      "title": "Deliver the canvass kits",
+      "project": "Weekend canvass",
+      "description": "Bring the packed kits to the library courtyard before Saturday’s launch.",
+      "status": "queued",
+      "priority": "normal",
+      "assigneeId": "noah",
+      "claimableRole": null,
+      "dueLabel": "Saturday",
+      "dueDate": "2026-10-31T08:30:00-06:00",
+      "overdue": false,
+      "requiresReview": false,
+      "completedSteps": 0,
+      "steps": [
+        {
+          "label": "Collect the packed kits",
+          "done": false
+        },
+        {
+          "label": "Confirm delivery at the launch",
+          "done": false
+        }
+      ],
+      "blocker": "",
+      "notes": "This mission becomes ready when the canvass kits are packed.",
+      "dependencies": ["pack-kits"],
+      "leadId": "priya",
+      "activity": [
+        {
+          "actor": "Priya Shah",
+          "action": "scheduled delivery after kit packing",
+          "time": "Yesterday"
+        }
+      ]
+    },
+    {
+      "id": "launch-reminder",
+      "title": "Send the canvass launch reminder",
+      "project": "Weekend canvass",
+      "description": "Share the final arrival time, meeting point, and what to bring with the volunteer teams.",
+      "status": "queued",
+      "priority": "normal",
+      "assigneeId": "jordan",
+      "claimableRole": null,
+      "dueLabel": "Friday",
+      "dueDate": "2026-10-30T16:00:00-06:00",
+      "overdue": false,
+      "requiresReview": true,
+      "completedSteps": 0,
+      "steps": [
+        {
+          "label": "Draft the launch reminder",
+          "done": false
+        },
+        {
+          "label": "Submit the reminder for review",
+          "done": false
+        }
+      ],
+      "blocker": "",
+      "notes": "Wait for the final launch checklist so everyone receives the same details.",
+      "dependencies": ["prepare-launch"],
+      "leadId": "alex",
+      "activity": [
+        {
+          "actor": "Alex Morgan",
+          "action": "linked this mission to the launch checklist",
+          "time": "Yesterday"
+        }
+      ]
+    },
+    {
+      "id": "registration-table",
+      "title": "Restock the voter registration table",
+      "project": "Community outreach",
+      "description": "Check the table supplies and leave everything ready for the next volunteer shift.",
+      "status": "completed",
+      "priority": "low",
+      "assigneeId": "lena",
+      "claimableRole": null,
+      "dueLabel": "Today",
+      "dueDate": "2026-10-26T10:00:00-06:00",
+      "overdue": false,
+      "requiresReview": false,
+      "completedSteps": 2,
+      "steps": [
+        {
+          "label": "Restock forms and pens",
+          "done": true
+        },
+        {
+          "label": "Confirm supplies with the shift lead",
+          "done": true
+        }
+      ],
+      "blocker": "",
+      "notes": "Forms, pens, and clipboards are restocked. The next shift is ready to go.",
+      "dependencies": [],
+      "leadId": "marcus",
+      "activity": [
+        {
+          "actor": "Lena Patel",
+          "action": "completed this mission",
+          "time": "Today, 9:10 a.m."
+        }
+      ]
+    }
+  ],
+  "templates": [
+    {
+      "id": "canvass-launch",
+      "title": "Canvass launch",
+      "description": "Prepare a volunteer team for a neighborhood canvass.",
+      "category": "Field work",
+      "version": 3,
+      "steps": [
+        "Confirm the meeting point",
+        "Prepare walk lists and supplies",
+        "Brief the team captains",
+        "Share the final launch checklist"
+      ],
+      "targetRole": "Field organizer"
+    },
+    {
+      "id": "volunteer-welcome",
+      "title": "Volunteer welcome",
+      "description": "Help a new volunteer feel ready for their first shift.",
+      "category": "Volunteer onboarding",
+      "version": 2,
+      "steps": [
+        "Send the welcome guide",
+        "Confirm the first shift",
+        "Answer questions and add a short note"
+      ],
+      "targetRole": "Volunteer"
+    },
+    {
+      "id": "review-material",
+      "title": "Review an outreach asset",
+      "description": "Check a draft, request changes, and approve the final version.",
+      "category": "Approval workflow",
+      "version": 4,
+      "steps": [
+        "Upload the draft",
+        "Check sources and readability",
+        "Review the final version"
+      ],
+      "targetRole": "Member"
+    },
+    {
+      "id": "community-event",
+      "title": "Community event setup",
+      "description": "Get the room, supplies, and volunteer coverage ready.",
+      "category": "Event staffing",
+      "version": 1,
+      "steps": [
+        "Confirm the venue",
+        "Assign setup and check-in coverage",
+        "Prepare materials",
+        "Confirm the space is ready"
+      ],
+      "targetRole": "Field organizer"
+    }
+  ],
+  "events": [
+    {
+      "id": "event-1",
+      "actor": "Elena Brooks",
+      "action": "submitted the welcome guide for review",
+      "missionId": "welcome-guide",
+      "time": "18 minutes ago"
+    },
+    {
+      "id": "event-2",
+      "actor": "Priya Shah",
+      "action": "finished preparing the walk lists",
+      "missionId": "prepare-launch",
+      "time": "25 minutes ago"
+    },
+    {
+      "id": "event-3",
+      "actor": "Avery Chen",
+      "action": "submitted the early voting reminder card",
+      "missionId": "early-voting-card",
+      "time": "42 minutes ago"
+    },
+    {
+      "id": "event-4",
+      "actor": "Marcus Rivera",
+      "action": "reported a blocker on the hall booking",
+      "missionId": "community-hall",
+      "time": "1 hour ago"
+    },
+    {
+      "id": "event-5",
+      "actor": "Alex Morgan",
+      "action": "reviewed volunteer check-in coverage",
+      "missionId": "check-in",
+      "time": "2 hours ago"
+    },
+    {
+      "id": "event-6",
+      "actor": "Priya Shah",
+      "action": "requested changes to the ballot guide checklist",
+      "missionId": "ballot-guide-checklist",
+      "time": "3 hours ago"
+    },
+    {
+      "id": "event-7",
+      "actor": "Lena Patel",
+      "action": "completed restocking the registration table",
+      "missionId": "registration-table",
+      "time": "Today, 9:10 a.m."
+    },
+    {
+      "id": "event-8",
+      "actor": "Priya Shah",
+      "action": "opened kit packing for volunteers to claim",
+      "missionId": "pack-kits",
+      "time": "Today, 8:30 a.m."
+    }
+  ]
+}
