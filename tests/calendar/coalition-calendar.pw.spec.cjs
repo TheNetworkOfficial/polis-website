@@ -393,7 +393,11 @@ test("Calendar all-day multi-day item uses exclusive midnight boundaries and sur
     startAt: Date.parse("2026-10-28T00:00:00Z"),
     endAt: Date.parse("2026-10-30T00:00:00Z"),
   });
+  await expect(dialog(page, "detail")).toContainText(
+    "Two-day team preparation",
+  );
   await page.keyboard.press("Escape");
+  await expect(dialog(page, "detail")).toHaveCount(0);
   for (const day of ["2026-10-28", "2026-10-29"]) {
     await app(page).locator(`.day-number[data-day="${day}"]`).click();
     await expect(
