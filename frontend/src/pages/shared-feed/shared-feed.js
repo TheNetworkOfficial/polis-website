@@ -24,6 +24,8 @@ import {
 } from "./scripts/workspaceNavigation.js";
 import { createCoalitionFieldWork } from "./scripts/coalitionFieldWork.js";
 import { createCoalitionCalendar } from "./scripts/coalitionCalendar.js";
+import { createCoalitionAdministration } from "./scripts/coalitionAdministration.js";
+import "./css/coalition-administration.css";
 import {
   canonicalCoalitionFieldWorkPath,
   coalitionFieldToolOwner,
@@ -383,6 +385,73 @@ function currentCoalitionCalendarContext() {
     fieldAccess:
       coalition.voterMapEnabled === true &&
       membership.canAccessVoterMap === true,
+  };
+}
+
+const coalitionAdministrationPage = createCoalitionAdministration({
+  context: currentCoalitionAdministrationContext,
+  account: () => ({
+    userId: getAuthenticatedUser(state.auth.session)?.userId || "",
+    sessionKey:
+      state.auth.session?.idToken || state.auth.session?.accessToken || "",
+  }),
+  request: fetchJson,
+  navigate: navigateTo,
+  onContextInvalidated: scheduleRender,
+  onProfile: (payload, coalitionId) => {
+    if (currentCoalitionAdministrationContext()?.coalitionId !== coalitionId)
+      return;
+    const detail = state.pages.coalitions.detail;
+    const coalition = normalizeCoalition(payload.coalition);
+    const membership = payload.membership
+      ? normalizeCoalitionMembership(payload.membership)
+      : null;
+    detail.coalition = coalition;
+    detail.membership = membership;
+    detail.loaded = true;
+    detail.loading = false;
+    detail.accessWorkspace.loading = false;
+    const item = findCoalitionListItem(coalitionId);
+    if (item) {
+      item.coalition = coalition;
+      item.membership = membership;
+    }
+    scheduleRender();
+  },
+});
+function isCoalitionAdministrationRoute(route = getCurrentRoute()) {
+  return (
+    [ROUTE_KEY_COALITION_DETAIL, ROUTE_KEY_COALITION_SECTION].includes(
+      route.routeKey,
+    ) && isCoalitionAdminEditRoute(route)
+  );
+}
+function currentCoalitionAdministrationContext() {
+  if (!isCoalitionAdministrationRoute() || !state.auth.session) return null;
+  const route = getCurrentRoute();
+  const coalitionId = decodeRouteSegment(route.routeParams.coalitionId);
+  const detail = state.pages.coalitions.detail;
+  const item = findCoalitionListItem(coalitionId);
+  const matching = detail.coalition?.coalitionId === coalitionId;
+  const coalition = (matching ? detail.coalition : null) || item?.coalition;
+  const membership = (matching ? detail.membership : null) || item?.membership;
+  const mobileNavigation =
+    coalition && membership
+      ? `<details class="mobile-navigation coalition-ui-mobile-nav"><summary>Organization menu</summary>${renderCoalitionTabs(coalition, membership, "members")}<button class="coalition-ui-all coalition-ui-app" type="button" data-action="open-app-shell">Open app</button><button class="coalition-ui-all coalition-ui-exit" type="button" data-action="workspace-exit" data-route="/feed">Exit workspace</button></details>`
+      : "";
+  return {
+    userId: getAuthenticatedUser(state.auth.session)?.userId || "",
+    sessionKey:
+      state.auth.session.idToken || state.auth.session.accessToken || "",
+    coalitionId,
+    coalition,
+    membership,
+    mobileNavigation,
+    path: getCurrentPathWithQuery(),
+    tab:
+      coalitionRouteKeywordParts(route)[2] === "outreach"
+        ? "outreach"
+        : "profile",
   };
 }
 
@@ -7349,6 +7418,12 @@ function navigateTo(path, { replace = false, exitWorkspace = false } = {}) {
   if (!normalizedPath) {
     return;
   }
+  if (
+    !coalitionAdministrationPage.beforeNavigate(normalizedPath, () =>
+      navigateTo(normalizedPath, { replace, exitWorkspace }),
+    )
+  )
+    return;
   if (state.ui.authModal) closeAuthModal();
   const destination = normalizedPath.startsWith("http")
     ? normalizedPath
@@ -37026,6 +37101,25 @@ async function loadCoalitionDetail(coalitionId, { refresh = false } = {}) {
     detail.coalition = listItem.coalition;
     detail.membership = listItem.membership;
   }
+  if (isCoalitionAdministrationRoute()) {
+    detail.loading = true;
+    detail.error = "";
+    scheduleRender();
+    try {
+      await coalitionAdministrationPage.load({ refresh });
+    } finally {
+      if (
+        currentCoalitionAdministrationContext()?.coalitionId ===
+        normalizedCoalitionId
+      ) {
+        detail.loaded = true;
+        detail.loading = false;
+        detail.accessWorkspace.loading = false;
+        scheduleRender();
+      }
+    }
+    return;
+  }
   detail.loading = true;
   detail.accessWorkspace.loading = true;
   detail.error = "";
@@ -37082,6 +37176,9 @@ async function loadCoalitionDetail(coalitionId, { refresh = false } = {}) {
 
   const keys = Object.keys(requests);
   const results = await Promise.allSettled(Object.values(requests));
+  // An older non-settings bootstrap must not replace the independently
+  // reauthorized Administration controller's metadata or saved profile.
+  if (isCoalitionAdministrationRoute()) return;
   const byKey = keys.reduce((acc, key, index) => {
     acc[key] = results[index];
     return acc;
@@ -37213,7 +37310,7 @@ async function loadCoalitionsPage({ refresh = false } = {}) {
     }
     if (movedFieldTool === "members")
       await loadCoalitionDirectory(coalitionId, { refresh });
-    if (movedFieldTool === "scripts")
+    if (movedFieldTool === "scripts" && !isCoalitionAdministrationRoute())
       await loadCoalitionVoterMapOutreachTemplates(coalitionId, { refresh });
     if (movedFieldTool === "cta" || movedFieldTool === "cta/transport") {
       await loadCoalitionCtaEvents(coalitionId, { refresh });
@@ -88929,7 +89026,7 @@ function renderCoalitionTabs(coalition, membership, activeSection) {
     ${filesRoute ? `<a class="shared-coalition-tab${activeSection === "files" ? " is-active" : ""}" href="${escapeHtml(filesRoute)}" data-route="${escapeHtml(filesRoute)}"><span>${renderIcon("file")}</span><strong>Files</strong></a>` : ""}
     ${active ? `<button class="shared-coalition-tab coalition-ui-texting-link${activeSection === "texting" ? " is-active" : ""}" type="button" data-action="navigate" data-route="${escapeHtml(textingRoute(coalition.coalitionId))}"><span>${renderIcon("messages")}</span><strong>Texting</strong></button>` : ""}
     ${active && coalitionHasAnyPermission(membership, ["contact_book_view"]) ? `<button class="shared-coalition-tab${activeSection === "ballot-chaser" ? " is-active" : ""}" type="button" data-action="navigate" data-route="/workspace/coalition/${encodeURIComponent(coalition.coalitionId)}/work/ballot-chaser"><span>${renderIcon("election")}</span><strong>Ballot Chaser</strong></button>` : ""}
-    ${active && membership.isLeader ? `<button class="shared-coalition-tab${administration ? " is-active" : ""}" type="button" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, "admin/edit"))}"><span>${renderIcon("settings")}</span><strong>Administration</strong></button>` : ""}
+    ${active && (membership.isLeader || canManageCoalitionProfile(membership)) ? `<button class="shared-coalition-tab${administration ? " is-active" : ""}" type="button" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, "admin/edit"))}"><span>${renderIcon("settings")}</span><strong>Administration</strong></button>` : ""}
   </nav>`;
 }
 
@@ -96991,6 +97088,8 @@ function renderCoalitionAmplify(detail, coalition, membership) {
 }
 
 function renderCoalitionSection(detail, coalition, membership, activeSection) {
+  if (isCoalitionAdministrationRoute())
+    return coalitionAdministrationPage.markup();
   const movedFieldTool = coalitionFieldToolOwner(coalitionRouteKeywordParts());
   if (movedFieldTool)
     return renderCoalitionOwnedFieldTool(
@@ -97052,10 +97151,17 @@ function renderCoalitionDetailPage() {
   const detail = state.pages.coalitions.detail;
   const listItem = findCoalitionListItem(coalitionId);
   const matchingDetail = detail.coalition?.coalitionId === coalitionId;
-  const coalition =
+  let coalition =
     (matchingDetail ? detail.coalition : null) || listItem?.coalition;
-  const membership =
+  let membership =
     (matchingDetail ? detail.membership : null) || listItem?.membership;
+  if (isCoalitionAdministrationRoute()) {
+    coalition ||= normalizeCoalition({ coalitionId, name: "Organization" });
+    membership ||= normalizeCoalitionMembership({
+      status: "unavailable",
+      role: "member",
+    });
+  }
   const activeSection = coalitionSectionForRoute(route);
   const isOverviewSection = activeSection === COALITION_DEFAULT_SECTION;
   const workspaceClasses = [
@@ -97063,6 +97169,9 @@ function renderCoalitionDetailPage() {
     "shared-coalition-workspace",
     isPlainCoalitionCalendarRoute()
       ? "shared-coalition-workspace--calendar"
+      : "",
+    isCoalitionAdministrationRoute()
+      ? "shared-coalition-workspace--administration"
       : "",
     isOverviewSection
       ? "shared-coalition-workspace--overview"
@@ -97081,12 +97190,13 @@ function renderCoalitionDetailPage() {
     scope: { scopeType: "coalition", scopeId: coalitionId },
     name: coalition.name,
     extraClass: workspaceClasses,
+    mobileNavigation: !isCoalitionAdministrationRoute(),
     topbarHtml: renderTopChrome(),
     navHtml: renderCoalitionTabs(coalition, membership, activeSection),
     identityHtml: renderCoalitionAvatar(coalition),
     sidebarFooterHtml:
       '<button class="coalition-ui-all coalition-ui-app" type="button" data-action="open-app-shell">Open app</button>',
-    content: `${(isOverviewSection || isPlainCoalitionCalendarRoute()) && membership.isActive && !membership.isPending ? "" : renderCoalitionHero(coalition, membership)}
+    content: `${isCoalitionAdministrationRoute() || ((isOverviewSection || isPlainCoalitionCalendarRoute()) && membership.isActive && !membership.isPending) ? "" : renderCoalitionHero(coalition, membership)}
       ${detail.error ? `<div class="shared-page__error">${escapeHtml(detail.error)}</div>` : ""}
       ${renderCoalitionSection(detail, coalition, membership, activeSection)}`,
   });
@@ -129188,7 +129298,7 @@ function renderApp() {
         ${routeStage}
       </div>
       ${renderToast()}`
-          : `<div class="shared-feed-shell${isPlainCoalitionCalendarRoute() ? " coalition-calendar-route" : ""}${isCoalitionPresentationRoute() ? " shared-feed-shell--coalition polis-coalition-ui" : ""}">
+          : `<div class="shared-feed-shell${isPlainCoalitionCalendarRoute() ? " coalition-calendar-route" : ""}${isCoalitionAdministrationRoute() ? " coalition-administration-route" : ""}${isCoalitionPresentationRoute() ? " shared-feed-shell--coalition polis-coalition-ui" : ""}">
         ${isCoalitionPresentationRoute() ? "" : renderRail()}
         ${routeStage}
       </div>
@@ -129205,10 +129315,12 @@ function renderApp() {
       ${renderToast()}`;
   coalitionFieldWork.beforeRender();
   coalitionCalendarPage.beforeRender();
+  coalitionAdministrationPage.beforeRender();
   root.innerHTML = shell;
   territoryBuilder.mount(root);
   coalitionFieldWork.mount(root);
   coalitionCalendarPage.mount(root);
+  coalitionAdministrationPage.mount(root);
   organizationDashboardPage.mount(root);
   restoreFeedScrollState(scrollSnapshot);
   restorePetitionAddressFocusState(petitionAddressFocusSnapshot);
@@ -138453,6 +138565,85 @@ async function refreshCoalitionCalendarOnResume() {
   if (access?.membership) await coalitionCalendarPage.load({ refresh: true });
 }
 
+let administrationResumeInvocation = 0;
+let administrationResumeReadAt = 0;
+/** Resume reauthorizes settings without replacing the same actor's unsaved work. */
+async function refreshCoalitionAdministrationOnResume() {
+  if (document.hidden || !isCoalitionAdministrationRoute()) return;
+  const path = getCurrentPathWithQuery();
+  const invocation = ++administrationResumeInvocation;
+  const previousActor = getAuthenticatedUser(state.auth.session)?.userId || "";
+  const previousSignature =
+    state.auth.session?.idToken || state.auth.session?.accessToken || "";
+  let session;
+  try {
+    session = await restoreSharedFeedSession(state.auth.config, {
+      clearOnFailure: false,
+      throwOnFailure: true,
+    });
+  } catch (error) {
+    if (
+      invocation !== administrationResumeInvocation ||
+      path !== getCurrentPathWithQuery() ||
+      !isCoalitionAdministrationRoute()
+    )
+      return;
+    const status = Number(error.statusCode || error.status || 0);
+    if (![400, 401, 403].includes(status)) {
+      if (
+        getAuthenticatedUser(state.auth.session)?.userId === previousActor &&
+        (state.auth.session?.idToken ||
+          state.auth.session?.accessToken ||
+          "") === previousSignature
+      )
+        coalitionAdministrationPage.sessionUnavailable(
+          "Unable to renew your session right now. Your unsaved changes are kept. Please try again.",
+        );
+      return;
+    }
+    session = null;
+  }
+  if (
+    invocation !== administrationResumeInvocation ||
+    path !== getCurrentPathWithQuery() ||
+    !isCoalitionAdministrationRoute()
+  )
+    return;
+  const actor = getAuthenticatedUser(session)?.userId || "";
+  const signature = session?.idToken || session?.accessToken || "";
+  const currentActor = getAuthenticatedUser(state.auth.session)?.userId || "";
+  if (currentActor !== previousActor && currentActor !== actor) return;
+  const changed = signature !== previousSignature;
+  if (!changed && Date.now() - administrationResumeReadAt < 1500) return;
+  administrationResumeReadAt = Date.now();
+  const coalitionId = decodeRouteSegment(
+    getCurrentRoute().routeParams.coalitionId,
+  );
+  if (changed) {
+    state.auth.session = session;
+    state.auth.user = getAuthenticatedUser(session);
+    if (!actor || actor !== previousActor) {
+      coalitionAdministrationPage.reset();
+      resetCoalitionDetail(coalitionId);
+      state.pages.coalitions.list = {
+        ...state.pages.coalitions.list,
+        items: [],
+        loaded: false,
+        loading: false,
+        error: "",
+      };
+    } else coalitionAdministrationPage.acceptSession();
+  }
+  if (!session) {
+    scheduleRender();
+    return;
+  }
+  workspaceNavigationGeneration++;
+  workspaceNavigationAccess = { key: "", loading: false, loaded: false };
+  scheduleRender();
+  await coalitionAdministrationPage.load({ refresh: true });
+}
+
 let textingResumeReadAt = 0;
 function refreshTextingOnResume() {
   const current = currentTextingContext();
@@ -138481,19 +138672,25 @@ function attachGlobalListeners() {
     if (event.persisted) {
       refreshTextingOnResume();
       refreshCoalitionCalendarOnResume().catch(() => {});
+      refreshCoalitionAdministrationOnResume().catch(() => {});
     }
   });
   window.addEventListener("focus", refreshTextingOnResume);
   window.addEventListener("focus", () =>
     refreshCoalitionCalendarOnResume().catch(() => {}),
   );
+  window.addEventListener("focus", () =>
+    refreshCoalitionAdministrationOnResume().catch(() => {}),
+  );
   window.addEventListener("storage", (event) => {
     if (
       ["sharedFeedSession.v1", "sharedFeedSessionPersisted.v1"].includes(
         event.key,
       )
-    )
+    ) {
       refreshCoalitionCalendarOnResume().catch(() => {});
+      refreshCoalitionAdministrationOnResume().catch(() => {});
+    }
   });
   window.addEventListener("focus", () =>
     organizationDashboardPage.resume().catch(() => {}),
@@ -138549,6 +138746,7 @@ function attachGlobalListeners() {
     }
     refreshTextingOnResume();
     refreshCoalitionCalendarOnResume().catch(() => {});
+    refreshCoalitionAdministrationOnResume().catch(() => {});
     organizationDashboardPage.resume().catch(() => {});
     if (isElectionDayRoute()) {
       configureElectionPolling();
