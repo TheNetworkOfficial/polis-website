@@ -1,5 +1,6 @@
 const fs = require("node:fs");
 const path = require("node:path");
+const crypto = require("node:crypto");
 
 const BASE_URL = process.env.POLIS_TEST_BASE_URL || "http://127.0.0.1:9068";
 const COALITION_ID = "cedar-valley";
@@ -105,6 +106,7 @@ async function mockAdministrationWorkspace(page, options = {}) {
     unexpectedWrites: [],
     blockedExternalRequests: [],
     externalFixtureRequests: [],
+    runtimeAssetResponses: [],
     profileReadFailures: 0,
     profileReadStatus: 503,
     profileWriteFailures: 0,
@@ -350,6 +352,26 @@ async function mockAdministrationWorkspace(page, options = {}) {
       if (!["GET", "HEAD"].includes(method)) {
         data.unexpectedWrites.push(row);
         return route.abort("blockedbyclient");
+      }
+      if (
+        method === "GET" &&
+        ["/scripts/shared-feed.js", "/css/shared-feed.css"].includes(
+          url.pathname,
+        )
+      ) {
+        const response = await route.fetch({ maxRedirects: 0 });
+        if (response.status() !== 200)
+          throw new Error(
+            `Actual Administration asset could not be read: ${url.pathname}`,
+          );
+        const bytes = await response.body();
+        data.runtimeAssetResponses.push({
+          url: request.url(),
+          path: url.pathname.slice(1),
+          sha256: crypto.createHash("sha256").update(bytes).digest("hex"),
+          bytes: bytes.length,
+        });
+        return route.fulfill({ response, body: bytes });
       }
       return route.continue();
     }

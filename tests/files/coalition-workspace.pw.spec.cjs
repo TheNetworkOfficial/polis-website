@@ -464,7 +464,7 @@ for (const width of [1440, 390]) {
     });
     await administration.click();
     await expect(page).toHaveURL(`${BASE_URL}${COALITION_PATH}/admin/edit`);
-    await expect(page.locator(".coalition-ui-heading h1")).toHaveText(
+    await expect(page.locator(".coalition-administration-page h1")).toHaveText(
       "Administration",
     );
     expect(fixture.writes).toEqual([]);
@@ -632,7 +632,7 @@ for (const width of [320, 390]) {
     expect(await hitCenter(administration)).toBe(true);
     await administration.click();
     await expect(page).toHaveURL(`${BASE_URL}${COALITION_PATH}/admin/edit`);
-    await expect(page.locator(".coalition-ui-heading h1")).toHaveText(
+    await expect(page.locator(".coalition-administration-page h1")).toHaveText(
       "Administration",
     );
     await menu.locator("summary").click();
@@ -935,12 +935,31 @@ for (const viewport of [
       .getByRole("button", { name: "Administration", exact: true })
       .click();
     await expect(page).toHaveURL(`${BASE_URL}${COALITION_PATH}/admin/edit`);
-    await expect(page.locator(".coalition-ui-heading h1")).toHaveText(
+    await expect(page.locator(".coalition-administration-page h1")).toHaveText(
       "Administration",
     );
+    const administration = page.locator(".coalition-administration-page");
+    await expect(administration.locator("#profile-form")).toBeVisible();
     await expect(
-      page.locator('[data-route-form="coalition-profile-edit"]'),
-    ).toBeVisible();
+      administration.getByRole("tab", { name: "Profile", exact: true }),
+    ).toHaveAttribute("aria-selected", "true");
+    await expect(administration.getByRole("tab")).toHaveCount(2);
+    await expect(
+      administration.locator(
+        ".coalition-people, [data-coalition-member-card], [data-people-tab]",
+      ),
+    ).toHaveCount(0);
+    await administration
+      .getByRole("tab", { name: "Outreach templates", exact: true })
+      .click();
+    await expect(administration.locator("#script-form")).toBeVisible();
+    await expect(
+      administration.locator("[data-admin-action='channel']"),
+    ).toHaveCount(4);
+    await administration
+      .getByRole("tab", { name: "Profile", exact: true })
+      .click();
+    await expect(administration.locator("#profile-form")).toBeVisible();
     const adminNavigation = await openNavigation();
     await expect(
       adminNavigation.getByRole("button", {

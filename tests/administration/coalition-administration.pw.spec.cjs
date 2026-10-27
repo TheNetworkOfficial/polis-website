@@ -109,6 +109,7 @@ test.afterEach(async ({ page }, testInfo) => {
         unexpectedWrites: fixture.unexpectedWrites,
         blockedExternalRequests: fixture.blockedExternalRequests,
         externalFixtureRequests: fixture.externalFixtureRequests,
+        runtimeAssetResponses: fixture.runtimeAssetResponses,
         errors: fixture.errors,
       },
       null,

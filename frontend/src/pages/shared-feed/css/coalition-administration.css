@@ -71,8 +71,21 @@
 }
 #shared-feed-app
   .coalition-administration-page
+  .mobile-navigation.coalition-ui-mobile-nav {
+  position: static;
+  top: auto;
+  z-index: auto;
+  max-height: none;
+  overflow: visible;
+  overscroll-behavior: auto;
+}
+#shared-feed-app
+  .coalition-administration-page
   .mobile-navigation.coalition-ui-mobile-nav
   > summary {
+  position: static;
+  top: auto;
+  z-index: auto;
   background: transparent;
 }
 #shared-feed-app
