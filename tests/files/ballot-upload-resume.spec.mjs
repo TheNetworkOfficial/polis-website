@@ -263,11 +263,13 @@ function fixture(t, { initialJob = null } = {}) {
       }
       if (suffix?.endsWith("/mapping")) {
         job.status = "reviewing";
+        job.processingPhase = "comparing";
         return response({ import: job });
       }
       if (suffix?.endsWith("/apply")) {
         assert.equal(job.status, "review_ready");
         job.status = "complete";
+        job.processingPhase = "complete";
         publishedSnapshot = job.importId;
         return response({ import: job });
       }
@@ -321,6 +323,7 @@ function fixture(t, { initialJob = null } = {}) {
     },
     setStatus(status) {
       job.status = status;
+      job.processingPhase = status;
     },
     setScopePages(pages) {
       scopePages = structuredClone(pages);
@@ -478,6 +481,7 @@ test("normal sent-file completion immediately shows column review and requires e
   h.setStatus("review_ready");
   await h.controller.action("ballot-job-refresh");
   assert.match(h.controller.render(), /Ready to apply/);
+  assert.doesNotMatch(h.controller.render(), /Processing your file/);
   assert.ok(buttonFor(h.controller.render(), "Apply reviewed county update"));
   assert.equal(
     h.calls.filter((call) => call.suffix?.endsWith("/apply")).length,
@@ -486,6 +490,7 @@ test("normal sent-file completion immediately shows column review and requires e
   await h.controller.action("ballot-apply");
   assert.equal(h.controller.state().job.status, "complete");
   assert.match(h.controller.render(), /Complete/);
+  assert.doesNotMatch(h.controller.render(), /Processing your file/);
   assert.doesNotMatch(h.controller.render(), />Apply reviewed county update</);
   assert.equal(
     h.calls.filter(
