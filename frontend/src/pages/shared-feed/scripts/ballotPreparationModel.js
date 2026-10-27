@@ -526,8 +526,201 @@ function returnStatusProfile(value) {
   };
 }
 
+/** Sent updates append only reviewed new voters; existing identities stay untouched. */
+async function prepareSentBallotFile(file, options) {
+  const state = context(file, options);
+  const policy = options.sentPolicy;
+  if (
+    policy?.enabled !== true ||
+    !Number.isSafeInteger(policy.maxRows) ||
+    policy.maxRows < 1 ||
+    policy.maxRows > 5000 ||
+    !Number.isSafeInteger(policy.maxSourceBytes) ||
+    policy.maxSourceBytes < 1 ||
+    policy.maxSourceBytes > 5000000 ||
+    policy.idColumn !== "VOTERID" ||
+    policy.districtColumn !== "CONDIST" ||
+    policy.districtValue !== "8" ||
+    policy.partyColumn !== "PARTY" ||
+    !Array.isArray(policy.partyValues) ||
+    policy.partyValues.length !== 2 ||
+    !policy.partyValues.includes("IND") ||
+    !policy.partyValues.includes("PND") ||
+    policy.statusColumn !== "BALSTATUS" ||
+    policy.issuedValue !== "S" ||
+    policy.electionDateColumn !== "ELECTDATE" ||
+    options.idColumn !== policy.idColumn ||
+    typeof options.electionDate !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(options.electionDate)
+  )
+    fail("Daily sent-ballot updates are not enabled for this election.");
+  const retained = retainedSet(options.retainedIds, state);
+  const columns = options.outputColumns;
+  if (
+    !Array.isArray(columns) ||
+    columns.length > state.limits.maxColumns ||
+    columns.some((column) => typeof column !== "string") ||
+    !["VOTERID", "CONDIST", "PARTY", "BALSTATUS", "ELECTDATE"].every((column) =>
+      columns.includes(column),
+    )
+  )
+    fail(
+      "The published master's county columns are required for a sent update.",
+    );
+  validateHeaders(columns);
+  const receipt = {
+    mode: "sent",
+    idColumn: policy.idColumn,
+    outputIdColumn: policy.idColumn,
+    inputRows: 0,
+    selectedRows: 0,
+    matchedUnique: 0,
+    existingRows: 0,
+    outsideRows: 0,
+    voidedRows: 0,
+    conflictingIds: 0,
+    excludedRows: 0,
+    duplicateRows: 0,
+    outputBytes: 0,
+    inputBytes: file.size,
+  };
+  const candidates = new Map();
+  const parts = [];
+  let headers,
+    indices,
+    idIndex,
+    districtIndex,
+    partyIndex,
+    statusIndex,
+    dateIndex;
+  let candidateBytes = 0,
+    sentCandidates = 0;
+  const append = (bytes) => {
+    if (
+      receipt.outputBytes + bytes.length >
+      Math.min(policy.maxSourceBytes, state.limits.maxOutputBytes)
+    )
+      fail(
+        "This sent update exceeds its 5 MB prepared-file limit. No voters were uploaded.",
+        "ballot_preparation_output_limit",
+      );
+    receipt.outputBytes += bytes.length;
+    parts.push(bytes);
+  };
+  await records(file, state, (row) => {
+    if (!headers) {
+      validateHeaders(row);
+      headers = row;
+      if (
+        headers.length !== columns.length ||
+        columns.some((column) => !headers.includes(column))
+      )
+        fail(
+          "Use a county sent-ballot detail file containing every original master column. Column order may differ.",
+          "ballot_preparation_sent_columns",
+        );
+      indices = columns.map((column) => headers.indexOf(column));
+      idIndex = headers.indexOf(policy.idColumn);
+      districtIndex = headers.indexOf(policy.districtColumn);
+      partyIndex = headers.indexOf(policy.partyColumn);
+      statusIndex = headers.indexOf(policy.statusColumn);
+      dateIndex = headers.indexOf("ELECTDATE");
+      return;
+    }
+    validateWidth(row, headers);
+    receipt.inputRows++;
+    if (
+      row[districtIndex] !== policy.districtValue ||
+      !policy.partyValues.includes(row[partyIndex])
+    ) {
+      receipt.outsideRows++;
+      return;
+    }
+    const id = row[idIndex];
+    if (!validId(id))
+      fail(
+        "A selected sent-ballot row has a missing or invalid official voter ID.",
+      );
+    // The retained list includes Returned voters. Never let a replacement packet
+    // or a refreshed master turn an already tracked voter back into Issued.
+    if (retained.has(id)) {
+      receipt.existingRows++;
+      return;
+    }
+    const countyDate = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(row[dateIndex]);
+    const electionDate = countyDate
+      ? `${countyDate[3]}-${countyDate[1]}-${countyDate[2]}`
+      : row[dateIndex];
+    if (electionDate !== options.electionDate)
+      fail(
+        "A new voter belongs to a different election. Choose the county sent-ballot file for this election.",
+        "ballot_preparation_sent_election",
+      );
+    const status = row[statusIndex];
+    if (status !== policy.issuedValue && status !== "X")
+      fail(
+        "A new CD8 IND/PND voter has an unsupported or blank sent-ballot status. Use the county's sent-ballot detail file with S (sent) or X (voided), not a returns file.",
+        "ballot_preparation_sent_status",
+      );
+    if (status === "X") receipt.voidedRows++;
+    const previous = candidates.get(id);
+    if (previous) receipt.duplicateRows++;
+    else if (candidates.size >= state.limits.maxRows)
+      fail("The sent file contains too many new voter IDs to review safely.");
+    const candidate = previous || { meanings: 0, bytes: null, conflict: false };
+    candidate.meanings |= status === "S" ? 1 : 2;
+    if (status === "S") {
+      const bytes = encoder.encode(csvRow(indices.map((index) => row[index])));
+      if (candidate.bytes && !sameBytes(candidate.bytes, bytes))
+        candidate.conflict = true;
+      if (!candidate.bytes) {
+        sentCandidates++;
+        candidateBytes += bytes.length;
+        if (sentCandidates > policy.maxRows)
+          fail(
+            "This sent update contains more than 5,000 new voters. No voters were uploaded; review the update's capacity rather than dropping eligible voters.",
+            "ballot_preparation_row_limit",
+          );
+        if (candidateBytes > policy.maxSourceBytes)
+          fail(
+            "This sent update exceeds its 5 MB prepared-file limit. No voters were uploaded.",
+            "ballot_preparation_output_limit",
+          );
+        candidate.bytes = bytes;
+      }
+    }
+    candidates.set(id, candidate);
+  });
+  if (!headers) fail("The county file has no header row.");
+  append(encoder.encode(csvRow(columns)));
+  for (const candidate of candidates.values()) {
+    state.check();
+    if (candidate.conflict || candidate.meanings === 3) {
+      receipt.conflictingIds++;
+      continue;
+    }
+    if (candidate.meanings !== 1) continue;
+    if (retained.size + receipt.selectedRows >= state.limits.maxRows)
+      fail(
+        "These additions exceed this election's total voter capacity. The existing list is unchanged; do not drop eligible voters to fit.",
+        "ballot_preparation_row_limit",
+      );
+    append(candidate.bytes);
+    receipt.selectedRows++;
+  }
+  receipt.matchedUnique = receipt.selectedRows;
+  receipt.excludedRows = receipt.inputRows - receipt.selectedRows;
+  receipt.delimiter = state.delimiter;
+  receipt.encoding = state.encoding;
+  receipt.elapsedMs = Date.now() - state.startedAt;
+  state.check();
+  state.progress({ phase: "complete", ...receipt });
+  return { blob: new Blob(parts, { type: "text/csv;charset=utf-8" }), receipt };
+}
+
 /** Preserves exact text and leading zeroes; returns are intersected before any upload. */
 export async function prepareBallotFile(file, options = {}) {
+  if (options.mode === "sent") return prepareSentBallotFile(file, options);
   const state = context(file, options);
   const mode = options.mode || "baseline";
   if (mode !== "baseline" && mode !== "returns")

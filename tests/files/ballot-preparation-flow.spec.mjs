@@ -5,6 +5,7 @@ const {
   createBallotPreparation,
   preparedReportDate,
   ballotPreparationCapacity,
+  ballotSentPreparationPolicy,
 } = await import(await moduleUrl("ballotPreparation"));
 
 test("expanded availability preserves an enrolled cohort's smaller frozen capacity", () => {
@@ -92,8 +93,31 @@ const statusForm = (overrides = {}) =>
     returnMeaning_1: "voided",
     ...overrides,
   });
+const sentPolicy = () => ({
+  enabled: true,
+  maxRows: 5000,
+  maxSourceBytes: 5000000,
+  idColumn: "VOTERID",
+  districtColumn: "CONDIST",
+  districtValue: "8",
+  partyColumn: "PARTY",
+  partyValues: ["IND", "PND"],
+  statusColumn: "BALSTATUS",
+  issuedValue: "S",
+  electionDateColumn: "ELECTDATE",
+});
+const sentColumns = [
+  "VOTERID",
+  "CONDIST",
+  "PARTY",
+  "BALSTATUS",
+  "ELECTDATE",
+  "Name",
+];
+const sentForm = () => form({ headersReviewed: "on", idColumn: "VOTERID" });
 function fixture({
   returns = false,
+  sent = false,
   handler,
   requestHandler,
   transport,
@@ -108,7 +132,16 @@ function fixture({
     canExport: true,
     base: "/org-one/ballot-chaser",
     electionId: "election-one",
-    snapshotId: returns ? "snapshot-one" : null,
+    snapshotId: returns || sent ? "snapshot-one" : null,
+    ...(sent
+      ? {
+          mode: "sent",
+          sentUpdates: sentPolicy(),
+          preparationColumns: [...sentColumns],
+          retainedRows: 2,
+          electionDate: "2026-11-03",
+        }
+      : {}),
   };
   const controller = createBallotPreparation({
     guard: () => {},
@@ -129,11 +162,13 @@ function fixture({
                 ? await handler(message)
                 : message.action === "inspect"
                   ? {
-                      headers: returns
-                        ? returnStatuses
-                          ? ["Return ID", "BALSTATUS", "Date"]
-                          : ["Return ID", "Date"]
-                        : ["ID", "CD", "Party"],
+                      headers: sent
+                        ? [...sentColumns]
+                        : returns
+                          ? returnStatuses
+                            ? ["Return ID", "BALSTATUS", "Date"]
+                            : ["Return ID", "Date"]
+                          : ["ID", "CD", "Party"],
                       sample: [["0001", "8", "ind"]],
                       delimiter: "comma",
                       encoding: "utf-8",
@@ -682,4 +717,170 @@ test("status labels are escaped rather than inserted as county-supplied HTML", a
   assert.doesNotMatch(html, /<img src=x/);
   assert.match(html, /&lt;img/);
   assert.deepEqual(h.controller.state().returnMeanings, [""]);
+});
+
+test("sent additions require the controlled capability and original county schema", () => {
+  assert.equal(
+    ballotSentPreparationPolicy(sentPolicy(), sentColumns)?.enabled,
+    true,
+  );
+  for (const change of [
+    { enabled: false },
+    { maxRows: 5001 },
+    { maxSourceBytes: 5000001 },
+    { districtValue: "9" },
+    { partyValues: ["IND", "PND", "NOL"] },
+    { issuedValue: "R" },
+  ])
+    assert.equal(
+      ballotSentPreparationPolicy({ ...sentPolicy(), ...change }, sentColumns),
+      null,
+    );
+  assert.equal(
+    ballotSentPreparationPolicy(sentPolicy(), ["VOTERID", "PARTY"]),
+    null,
+  );
+});
+
+test("new sent voters use the published all-ID list and fixed selection while preserving original columns", async () => {
+  const h = fixture({
+    sent: true,
+    preparedReceipt: { existingRows: 1, outsideRows: 2, voidedRows: 1 },
+  });
+  h.setContext({ limits: { maxRows: 125000 } });
+  assert.match(h.controller.render(), /Prepare newly sent ballots/);
+  assert.match(h.controller.render(), /5,000 new voters and 5 MB/);
+  await h.controller.inspect(file(), sourceForm());
+  const html = h.controller.render();
+  assert.match(html, /CONDIST 8, PARTY IND or PND, and BALSTATUS S/);
+  assert.doesNotMatch(html, /name="districtValue"|name="partyValue"/);
+  await h.controller.prepare(sentForm());
+  assert.deepEqual(h.calls[0].options.body.columns, ["ballotVoterId"]);
+  const options = h.workerCalls.at(-1).options;
+  assert.equal(options.mode, "sent");
+  assert.deepEqual(options.retainedIds, ["0001", "0002"]);
+  assert.deepEqual(options.outputColumns, sentColumns);
+  assert.deepEqual(options.filters, [
+    { column: "CONDIST", value: "8" },
+    { column: "PARTY", values: ["IND", "PND"] },
+  ]);
+  assert.deepEqual(options.sentPolicy, sentPolicy());
+  assert.equal(options.electionDate, "2026-11-03");
+  assert.equal(options.limits.maxRows, 125000);
+  const prepared = h.controller.ready();
+  assert.equal(prepared.mode, "sent");
+  assert.equal(prepared.idColumn, "VOTERID");
+  assert.equal(prepared.snapshotId, "snapshot-one");
+  assert.equal(prepared.file.name, "prepared-sent-ballots.csv");
+  assert.match(h.controller.render(), /already tracked rows skipped/);
+  assert.match(h.controller.render(), /Existing voters, previous returns/);
+  assert.match(h.controller.render(), /two-per-day and 35-per-month/);
+  assert.match(h.controller.render(), /latest returns again/);
+});
+
+test("missing sent capability, snapshot or export permission cannot start preparation", async () => {
+  for (const change of [
+    { sentUpdates: undefined },
+    { snapshotId: null },
+    { canExport: false },
+    { electionDate: undefined },
+  ]) {
+    const h = fixture({ sent: true });
+    h.setContext(change);
+    assert.match(h.controller.render(), /Sent additions unavailable/);
+    await assert.rejects(
+      h.controller.inspect(file(), sourceForm()),
+      /not available/,
+    );
+    assert.equal(h.calls.length, 0);
+    assert.equal(h.workerCalls.length, 0);
+  }
+});
+
+test("sent files missing an original county column fail before the private ID export", async () => {
+  const h = fixture({
+    sent: true,
+    handler: () => ({
+      headers: sentColumns.filter((name) => name !== "Name"),
+      sample: [],
+      delimiter: "comma",
+      encoding: "utf-8",
+    }),
+  });
+  await h.controller.inspect(file(), sourceForm());
+  await assert.rejects(
+    h.controller.prepare(sentForm()),
+    /every original master column/,
+  );
+  assert.equal(h.calls.length, 0);
+});
+
+test("a no-additions sent file never exposes an upload and consumes no import", async () => {
+  const h = fixture({
+    sent: true,
+    preparedReceipt: {
+      selectedRows: 0,
+      existingRows: 3,
+      outsideRows: 1,
+      conflictingIds: 0,
+    },
+  });
+  await h.controller.inspect(file(), sourceForm());
+  await h.controller.prepare(sentForm());
+  assert.match(h.controller.render(), /No new eligible voters/);
+  assert.match(h.controller.render(), /3 already tracked rows skipped/);
+  assert.doesNotMatch(
+    h.controller.render(),
+    /data-ballot-form="prepare-upload"/,
+  );
+  assert.throws(() => h.controller.ready(), /No update is needed/);
+  assert.ok(h.calls.every((call) => !call.path.endsWith("/imports")));
+});
+
+test("sent conflict exclusion is explicit and capability or schema changes invalidate the prepared file", async () => {
+  const h = fixture({
+    sent: true,
+    preparedReceipt: { conflictingIds: 1 },
+  });
+  await h.controller.inspect(file(), sourceForm());
+  await h.controller.prepare(sentForm());
+  assert.match(
+    h.controller.render(),
+    /Exclude new voters with conflicting sent-ballot records/,
+  );
+  assert.throws(() => h.controller.ready(), /conflicting sent-ballot records/);
+  assert.equal(
+    h.controller.ready(form({ excludeConflicted: "on" })).mode,
+    "sent",
+  );
+  h.setContext({ sentUpdates: { ...sentPolicy(), enabled: false } });
+  assert.throws(
+    () => h.controller.ready(form({ excludeConflicted: "on" })),
+    /changed/,
+  );
+  h.setContext({
+    sentUpdates: sentPolicy(),
+    preparationColumns: [...sentColumns, "Extra"],
+  });
+  assert.throws(
+    () => h.controller.ready(form({ excludeConflicted: "on" })),
+    /changed/,
+  );
+  h.setContext({ preparationColumns: sentColumns, electionDate: "2026-11-04" });
+  assert.throws(
+    () => h.controller.ready(form({ excludeConflicted: "on" })),
+    /changed/,
+  );
+});
+
+test("sent readiness also enforces the prepared row and byte limits", async () => {
+  const h = fixture({ sent: true });
+  await h.controller.inspect(file(), sourceForm());
+  await h.controller.prepare(sentForm());
+  const state = h.controller.state();
+  state.prepared.receipt.selectedRows = 5001;
+  assert.throws(() => h.controller.ready(), /5,000-new-voter or 5 MB/);
+  state.prepared.receipt.selectedRows = 1;
+  state.prepared.blob = new Blob([new Uint8Array(5000001)]);
+  assert.throws(() => h.controller.ready(), /5,000-new-voter or 5 MB/);
 });
