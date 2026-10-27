@@ -124,6 +124,7 @@ export function renderWorkspaceNavigationFrame({
   navHtml = "",
   identityHtml = "",
   sidebarFooterHtml = "",
+  mobileNavigation = true,
 }) {
   const dashboard = workspaceDashboardPath(scope);
   const chooser =
@@ -141,5 +142,8 @@ export function renderWorkspaceNavigationFrame({
   const identity =
     identityHtml ||
     `<span class="shared-coalition-avatar">${escape(text(name).slice(0, 1).toUpperCase() || "O")}</span>`;
-  return `<section class="shared-page shared-coalition-workspace ${escape(extraClass)}" data-organization-workspace="${escape(scope?.scopeType)}:${escape(scope?.scopeId)}">${topbar}<div class="coalition-ui-layout"><aside class="coalition-ui-sidebar"><div class="coalition-ui-sidebar__identity">${identity}<strong>${escape(name || "Organization")}</strong></div>${links}<button class="coalition-ui-all" type="button" data-action="navigate" data-route="${chooser}">${chooserLabel}</button>${sidebarFooterHtml}${exit}</aside><div class="shared-page__content coalition-ui-content"><details class="coalition-ui-mobile-nav"><summary>Coalition menu</summary>${links}${sidebarFooterHtml}${exit}</details>${content}</div></div></section>`;
+  const mobile = mobileNavigation
+    ? `<details class="coalition-ui-mobile-nav"><summary>Coalition menu</summary>${links}${sidebarFooterHtml}${exit}</details>`
+    : "";
+  return `<section class="shared-page shared-coalition-workspace ${escape(extraClass)}" data-organization-workspace="${escape(scope?.scopeType)}:${escape(scope?.scopeId)}">${topbar}<div class="coalition-ui-layout"><aside class="coalition-ui-sidebar"><div class="coalition-ui-sidebar__identity">${identity}<strong>${escape(name || "Organization")}</strong></div>${links}<button class="coalition-ui-all" type="button" data-action="navigate" data-route="${chooser}">${chooserLabel}</button>${sidebarFooterHtml}${exit}</aside><div class="shared-page__content coalition-ui-content">${mobile}${content}</div></div></section>`;
 }
