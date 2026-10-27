@@ -18,6 +18,44 @@ const workerFactory = () =>
   new Worker(new URL("./ballotPreparation.worker.js", import.meta.url));
 const deadlineMs = 10 * 60 * 1000;
 
+/** Only the server's controlled C4D sent-update contract exposes this workflow. */
+export function ballotSentPreparationPolicy(policy, columns) {
+  return policy?.enabled === true &&
+    policy.maxRows === 5000 &&
+    policy.maxSourceBytes === 5000000 &&
+    policy.idColumn === "VOTERID" &&
+    policy.districtColumn === "CONDIST" &&
+    policy.districtValue === "8" &&
+    policy.partyColumn === "PARTY" &&
+    Array.isArray(policy.partyValues) &&
+    policy.partyValues.length === 2 &&
+    [...policy.partyValues].sort().join(",") === "IND,PND" &&
+    policy.statusColumn === "BALSTATUS" &&
+    policy.issuedValue === "S" &&
+    policy.electionDateColumn === "ELECTDATE" &&
+    Array.isArray(columns) &&
+    columns.length > 0 &&
+    columns.length <= BALLOT_PREPARATION_LIMITS.maxColumns &&
+    new Set(columns).size === columns.length &&
+    ["VOTERID", "CONDIST", "PARTY", "BALSTATUS", "ELECTDATE"].every((name) =>
+      columns.includes(name),
+    )
+    ? policy
+    : null;
+}
+
+const sentPolicyKey = (ctx) => {
+  const date = /^\d{4}-\d{2}-\d{2}$/u.test(ctx.electionDate || "")
+    ? new Date(`${ctx.electionDate}T00:00:00.000Z`)
+    : null;
+  return date &&
+    Number.isFinite(date.getTime()) &&
+    date.toISOString().slice(0, 10) === ctx.electionDate &&
+    ballotSentPreparationPolicy(ctx.sentUpdates, ctx.preparationColumns)
+    ? JSON.stringify([ctx.electionDate, ctx.preparationColumns])
+    : "";
+};
+
 function preparationLimits(ctx) {
   const limits = { ...BALLOT_PREPARATION_LIMITS, ...ctx.limits };
   if (
@@ -189,6 +227,14 @@ export function createBallotPreparation({
         "County-file preparation is not enabled for this organization.",
       );
     if (!file?.size) throw new Error("Choose a county TXT, CSV or TSV file.");
+    const mode = ctx.mode || (ctx.snapshotId ? "returns" : "baseline");
+    if (
+      mode === "sent" &&
+      (!ctx.snapshotId || !ctx.canExport || !sentPolicyKey(ctx))
+    )
+      throw new Error(
+        "Adding newly sent ballots is not available for this election's current access. Refresh Ballot Chaser.",
+      );
     controller = new AbortController();
     const version = generation;
     state = {
@@ -200,8 +246,12 @@ export function createBallotPreparation({
         encoding: data.get("encoding") || "utf-8",
         limits: preparationLimits(ctx),
       },
-      binding: { ...ctx, capacityKey: capacityKey(ctx) },
-      mode: ctx.mode || (ctx.snapshotId ? "returns" : "baseline"),
+      binding: {
+        ...ctx,
+        capacityKey: capacityKey(ctx),
+        sentPolicyKey: sentPolicyKey(ctx),
+      },
+      mode,
     };
     changed();
     try {
@@ -228,14 +278,16 @@ export function createBallotPreparation({
       ctx.base !== saved.base ||
       ctx.electionId !== saved.electionId ||
       ctx.snapshotId !== saved.snapshotId ||
-      capacityKey(ctx) !== saved.capacityKey
+      capacityKey(ctx) !== saved.capacityKey ||
+      (state.mode === "sent" &&
+        (!sentPolicyKey(ctx) || sentPolicyKey(ctx) !== saved.sentPolicyKey))
     )
       throw new Error(
         "The election or county report changed. Refresh and prepare this file again.",
       );
-    if (state.mode === "returns" && !ctx.canExport)
+    if (["returns", "sent"].includes(state.mode) && !ctx.canExport)
       throw new Error(
-        "Matching returns requires current export permission for this election.",
+        "Matching county updates requires current export permission for this election.",
       );
     return ctx;
   };
@@ -429,7 +481,31 @@ export function createBallotPreparation({
       throw new Error("Choose the county's official voter ID column.");
     const filters = [];
     let returnStatus;
-    if (state.mode === "baseline") {
+    if (state.mode === "sent") {
+      const policy = ballotSentPreparationPolicy(
+        ctx.sentUpdates,
+        ctx.preparationColumns,
+      );
+      if (
+        !policy ||
+        idColumn !== policy.idColumn ||
+        state.preview.headers.length !== ctx.preparationColumns.length ||
+        ctx.preparationColumns.some(
+          (column) => !state.preview.headers.includes(column),
+        )
+      )
+        throw new Error(
+          "Use the county sent-ballot layout with VOTERID, CONDIST, PARTY, BALSTATUS, ELECTDATE and every original master column. Existing voters will not be changed.",
+        );
+      filters.push(
+        { column: policy.districtColumn, value: policy.districtValue },
+        { column: policy.partyColumn, values: [...policy.partyValues] },
+      );
+      state.reviewedFilters = {
+        district: policy.districtValue,
+        partyValues: [...policy.partyValues],
+      };
+    } else if (state.mode === "baseline") {
       const district = data.get("districtColumn"),
         party = data.get("partyColumn"),
         partyValues = [
@@ -518,8 +594,9 @@ export function createBallotPreparation({
     changed();
     const deadline = setTimeout(() => controller.abort(), deadlineMs);
     try {
-      const retained =
-        state.mode === "returns" ? await retainedIds(version) : undefined;
+      const retained = ["returns", "sent"].includes(state.mode)
+        ? await retainedIds(version)
+        : undefined;
       const prepared = await runWorker(
         "prepare",
         state.file,
@@ -533,6 +610,13 @@ export function createBallotPreparation({
           mode: state.mode,
           ...(returnStatus ? { returnStatus } : {}),
           ...(retained ? { retainedIds: retained } : {}),
+          ...(state.mode === "sent"
+            ? {
+                outputColumns: ctx.preparationColumns,
+                sentPolicy: ctx.sentUpdates,
+                electionDate: ctx.electionDate,
+              }
+            : {}),
         },
         version,
       );
@@ -560,18 +644,42 @@ export function createBallotPreparation({
     if (state.stage !== "ready" || !state.prepared?.blob)
       throw new Error("Prepare and review the county file before uploading.");
     if (state.prepared.receipt.selectedRows < 1)
-      throw new Error("No returns match this election. No update is needed.");
+      throw new Error(
+        state.mode === "sent"
+          ? "No new eligible voters were found. No update is needed."
+          : "No returns match this election. No update is needed.",
+      );
+    if (state.mode === "sent") {
+      const policy = ballotSentPreparationPolicy(
+        context().sentUpdates,
+        context().preparationColumns,
+      );
+      if (
+        !policy ||
+        state.prepared.receipt.selectedRows > policy.maxRows ||
+        state.prepared.blob.size > policy.maxSourceBytes
+      )
+        throw new Error(
+          "This daily sent update exceeds the controlled 5,000-new-voter or 5 MB limit. No file was uploaded.",
+        );
+    }
     if (
       state.prepared.receipt.conflictingIds > 0 &&
       !data?.has("excludeConflicted")
     )
       throw new Error(
-        "Confirm that voters with both received and voided records will be left unchanged in this update.",
+        state.mode === "sent"
+          ? "Confirm that new voters with conflicting sent-ballot records will be excluded from this update."
+          : "Confirm that voters with both received and voided records will be left unchanged in this update.",
       );
     return {
-      file: new File([state.prepared.blob], "prepared-ballots.csv", {
-        type: "text/csv",
-      }),
+      file: new File(
+        [state.prepared.blob],
+        state.mode === "sent"
+          ? "prepared-sent-ballots.csv"
+          : "prepared-ballots.csv",
+        { type: "text/csv" },
+      ),
       mode: state.mode,
       idColumn: state.mode === "returns" ? "Voter ID" : state.idColumn,
       snapshotId: state.binding.snapshotId,
@@ -591,6 +699,10 @@ export function createBallotPreparation({
     if (state.mode !== "returns") return "";
     return `<section aria-label="County return status summary"><p>County status counts: ${count(receipt.returnedRows ?? receipt.selectedRows)} received rows · ${count(receipt.voidedRows || 0)} voided rows excluded · ${count(receipt.ignoredStatusRows || 0)} other rows excluded.</p><p>${count(receipt.conflictingIds || 0)} voters with both received and voided records are excluded from this update. Voided records do not count as new returns. Previous ballot status stays unchanged for excluded voters; a received ballot is separate from an accepted ballot.</p></section>`;
   }
+  function sentSummary(receipt) {
+    if (state.mode !== "sent") return "";
+    return `<section aria-label="Newly sent ballot summary"><p>${count(receipt.selectedRows)} new CD8 IND/PND voters · ${count(receipt.existingRows || 0)} already tracked rows skipped · ${count(receipt.outsideRows || 0)} rows outside CD8 IND/PND · ${count(receipt.voidedRows || 0)} voided rows excluded.</p><p>${count(receipt.conflictingIds || 0)} new voters with conflicting sent-ballot records are excluded. Only newly listed voters with the county's S code will be added as Issued. Existing voters, previous returns and ballot history stay unchanged.</p></section>`;
+  }
   const reviewReturnsButton = () =>
     state.mode === "returns"
       ? '<form data-ballot-form="prepare-return-edit"><button class="pt-btn pt-btn--secondary" type="submit">Review return status choices</button></form>'
@@ -600,6 +712,16 @@ export function createBallotPreparation({
       return notice(
         "Preparation unavailable",
         "County-file preparation is not enabled for this organization. Ask an organization administrator to check access.",
+      );
+    if (
+      context().mode === "sent" &&
+      (!context().snapshotId ||
+        !context().canExport ||
+        !sentPolicyKey(context()))
+    )
+      return notice(
+        "Sent additions unavailable",
+        "Refresh this election's access before preparing newly sent ballots.",
       );
     const limits = preparationLimits(context());
     const submit = (text) =>
@@ -614,12 +736,12 @@ export function createBallotPreparation({
         ? `<p>Reviewed selection: district <strong>${e(state.reviewedFilters.district)}</strong> and party <strong>${state.reviewedFilters.partyValues.map(e).join(" or ")}</strong>.</p>`
         : "";
       if (receipt.selectedRows === 0)
-        return `<section class="pt-card"><h2>No matching returns</h2><p>${count(receipt.inputRows)} source records checked · ${count(receipt.unknownRows || 0)} rows outside this election · ${count(receipt.duplicateRows || 0)} repeated IDs removed.</p>${returnSummary(receipt)}<p>No update is needed. No file was uploaded.</p>${cancelButton}</section>${reviewReturnsButton()}`;
+        return `<section class="pt-card"><h2>${state.mode === "sent" ? "No new eligible voters" : "No matching returns"}</h2><p>${count(receipt.inputRows)} source records checked${state.mode === "sent" ? "" : ` · ${count(receipt.unknownRows || 0)} rows outside this election`} · ${count(receipt.duplicateRows || 0)} repeated IDs removed.</p>${returnSummary(receipt)}${sentSummary(receipt)}<p>No update is needed. No file was uploaded.</p>${cancelButton}</section>${reviewReturnsButton()}`;
       const conflictReview =
         receipt.conflictingIds > 0
-          ? '<label class="pt-workspace-check"><input type="checkbox" name="excludeConflicted" required>Leave voters with both received and voided records unchanged in this update.</label>'
+          ? `<label class="pt-workspace-check"><input type="checkbox" name="excludeConflicted" required>${state.mode === "sent" ? "Exclude new voters with conflicting sent-ballot records from this update." : "Leave voters with both received and voided records unchanged in this update."}</label>`
           : "";
-      return `<form class="pt-card" data-ballot-form="prepare-upload"><h2>Review prepared ${state.mode === "returns" ? "returns" : "sent ballots"}</h2>${reviewedSelection}<p>${count(receipt.inputRows)} source records · ${count(receipt.selectedRows)} selected · ${count(receipt.excludedRows)} excluded</p><p>${count(receipt.duplicateRows || 0)} repeated IDs were removed.</p>${state.mode === "returns" ? `<p>${count(receipt.matchedUnique || receipt.selectedRows)} unique IDs matched this election; ${count(receipt.unknownRows || 0)} rows outside this election were excluded.</p>` : ""}${returnSummary(receipt)}<p>${(state.prepared.blob.size / 1000000).toFixed(2)} MB prepared. Only this list will upload. Official IDs and their leading zeroes are preserved.</p><p>Every selected row means <strong>${state.mode === "returns" ? "Returned" : "Issued"}</strong>. Missing voters keep their earlier status.</p>${state.binding.sourceAsOf ? `<p>Original report date: ${e(state.binding.sourceAsOf)}</p><input name="sourceAsOf" type="hidden" value="${e(state.binding.sourceAsOf)}">` : field("sourceAsOf", "Official report date or timestamp", state.sourceAsOf || "", { required: true, extra: 'placeholder="YYYY-MM-DD or 2026-10-24T12:00:00-07:00"' }) + "<p>Use the county date alone when no time is supplied. A timestamp must include its time zone. Never add a time to work around same-date reports.</p>"}${conflictReview}<label class="pt-workspace-check"><input type="checkbox" name="preparedReviewed" required>I checked the selected count and this report's meaning.</label><div class="pt-actions">${submit("Upload prepared list and review columns")}${cancelButton}</div></form>${reviewReturnsButton()}`;
+      return `<form class="pt-card" data-ballot-form="prepare-upload"><h2>Review prepared ${state.mode === "returns" ? "returns" : state.mode === "sent" ? "newly sent ballots" : "sent ballots"}</h2>${reviewedSelection}<p>${count(receipt.inputRows)} source records · ${count(receipt.selectedRows)} selected · ${count(receipt.excludedRows)} excluded</p><p>${count(receipt.duplicateRows || 0)} repeated IDs were removed.</p>${state.mode === "returns" ? `<p>${count(receipt.matchedUnique || receipt.selectedRows)} unique IDs matched this election; ${count(receipt.unknownRows || 0)} rows outside this election were excluded.</p>` : ""}${returnSummary(receipt)}${sentSummary(receipt)}<p>${(state.prepared.blob.size / 1000000).toFixed(2)} MB prepared. Only this list will upload. Official IDs and their leading zeroes are preserved.</p><p>Every selected row means <strong>${state.mode === "returns" ? "Returned" : "Issued"}</strong>. Missing voters keep their earlier status.</p>${state.binding.sourceAsOf ? `<p>Original report date: ${e(state.binding.sourceAsOf)}</p><input name="sourceAsOf" type="hidden" value="${e(state.binding.sourceAsOf)}">` : field("sourceAsOf", "Official report date or timestamp", state.sourceAsOf || "", { required: true, extra: 'placeholder="YYYY-MM-DD or 2026-10-24T12:00:00-07:00"' }) + "<p>Use the county date alone when no time is supplied. A timestamp must include its time zone. Sent and returned reports may use the same official date; never invent a later time.</p>"}${state.mode === "sent" ? "<p>Apply daily sent additions before matching that day's returns. If returns were already applied, match the latest returns again after these additions. All county updates share the existing two-per-day and 35-per-month import limits; if today's limit is reached, continue on the next day.</p>" : ""}${conflictReview}<label class="pt-workspace-check"><input type="checkbox" name="preparedReviewed" required>I checked the selected count and this report's meaning.</label><div class="pt-actions">${submit("Upload prepared list and review columns")}${cancelButton}</div></form>${reviewReturnsButton()}`;
     }
     if (state.stage === "review") {
       const choices = [
@@ -673,9 +795,9 @@ export function createBallotPreparation({
                 "",
               )}<label class="pt-workspace-check"><input type="checkbox" name="statusMeaningsReviewed" required>I reviewed how every county status will be handled.</label><p>Only received voter IDs will upload. Voided and excluded rows preserve previous ballot history. Conflicting received/voided records will be counted in the review before upload.</p><button class="pt-btn pt-btn--secondary" type="submit" name="readStatuses" value="on" formnovalidate${busy ? " disabled" : ""}>Read status codes again</button></section>`
           : "";
-      return `<form class="pt-card" data-ballot-form="prepare-review"><h2>Review county columns</h2><p>${e(state.file.name)} · ${e(state.preview.delimiter)} · ${e(state.preview.encoding)}</p><div class="pt-workspace-table-wrap"><table class="pt-workspace-table"><thead><tr>${state.preview.headers.map((header) => `<th>${e(header)}</th>`).join("")}</tr></thead><tbody>${state.preview.sample.map((row) => `<tr>${row.map((value) => `<td>${e(value)}</td>`).join("")}</tr>`).join("")}</tbody></table></div><div class="pt-fields">${select("idColumn", "Official voter ID column", choices, state.returnColumns?.idColumn || "", true)}${state.mode === "baseline" ? select("districtColumn", "Congressional district column", choices, "", true) + field("districtValue", "Exact district value", "", { required: true }) + select("partyColumn", "Party column", choices, "", true) + field("partyValue", "Exact party values (comma-separated)", "", { required: true, extra: 'placeholder="IND, PND"' }) : returnFields}</div><p>${state.mode === "returns" ? "Returns will match official IDs against every voter retained in this election, including voters already returned. Review status codes before matching; unmatched IDs will be excluded." : "The district must match exactly and any one of the listed party values must match exactly. Separate party values with commas. No county codes are inferred."}</p><label class="pt-workspace-check"><input type="checkbox" name="headersReviewed" required>I confirmed this is the county header row and selected its official voter ID.</label>${statusMeanings}<div class="pt-actions">${submit(state.mode === "returns" ? (review ? "Match returns to this election" : "Read return statuses") : "Prepare matching voters")}${cancelButton}</div></form>`;
+      return `<form class="pt-card" data-ballot-form="prepare-review"><h2>Review county columns</h2><p>${e(state.file.name)} · ${e(state.preview.delimiter)} · ${e(state.preview.encoding)}</p><div class="pt-workspace-table-wrap"><table class="pt-workspace-table"><thead><tr>${state.preview.headers.map((header) => `<th>${e(header)}</th>`).join("")}</tr></thead><tbody>${state.preview.sample.map((row) => `<tr>${row.map((value) => `<td>${e(value)}</td>`).join("")}</tr>`).join("")}</tbody></table></div><div class="pt-fields">${state.mode === "sent" ? '<input type="hidden" name="idColumn" value="VOTERID"><p>Official voter ID column: <strong>VOTERID</strong></p>' : select("idColumn", "Official voter ID column", choices, state.returnColumns?.idColumn || "", true)}${state.mode === "baseline" ? select("districtColumn", "Congressional district column", choices, "", true) + field("districtValue", "Exact district value", "", { required: true }) + select("partyColumn", "Party column", choices, "", true) + field("partyValue", "Exact party values (comma-separated)", "", { required: true, extra: 'placeholder="IND, PND"' }) : returnFields}</div><p>${state.mode === "returns" ? "Returns will match official IDs against every voter retained in this election, including voters already returned. Review status codes before matching; unmatched IDs will be excluded." : state.mode === "sent" ? "This election's sent additions are fixed to CONDIST 8, PARTY IND or PND, and BALSTATUS S. ELECTDATE must identify the selected election. X records are excluded. Blank or unfamiliar status codes stop preparation for review. Existing voter IDs will be skipped; all original master columns must be present." : "The district must match exactly and any one of the listed party values must match exactly. Separate party values with commas. No county codes are inferred."}</p><label class="pt-workspace-check"><input type="checkbox" name="headersReviewed" required>I confirmed this is the county header row and selected its official voter ID.</label>${statusMeanings}<div class="pt-actions">${submit(state.mode === "returns" ? (review ? "Match returns to this election" : "Read return statuses") : state.mode === "sent" ? "Prepare new eligible voters" : "Prepare matching voters")}${cancelButton}</div></form>`;
     }
-    return `<form class="pt-card" data-ballot-form="prepare-source"><h2>${context().snapshotId ? "Prepare a county returns file" : "Prepare the county sent-ballot file"}</h2><label class="pt-field"><span>County TXT, CSV or TSV file</span><input type="file" name="file" accept=".txt,.csv,.tsv" required></label><div class="pt-fields">${select(
+    return `<form class="pt-card" data-ballot-form="prepare-source"><h2>${context().mode === "sent" ? "Prepare newly sent ballots" : context().snapshotId ? "Prepare a county returns file" : "Prepare the county sent-ballot file"}</h2>${context().mode === "sent" ? "<p>Add only new CD8 IND/PND voters from a county sent-ballot report. This keeps the existing list and previous returns. Each prepared sent update supports at most 5,000 new voters and 5 MB, within this election's total voter and storage limits.</p>" : ""}<label class="pt-field"><span>County TXT, CSV or TSV file</span><input type="file" name="file" accept=".txt,.csv,.tsv" required></label><div class="pt-fields">${select(
       "delimiter",
       "File separator",
       [

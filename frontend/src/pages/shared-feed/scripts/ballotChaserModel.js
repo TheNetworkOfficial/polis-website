@@ -54,7 +54,19 @@ export function ballotPreparationMessage(error) {
     ballot_preparation_work_limit:
       "This update stopped at its processing limit and needs an organization administrator's review. Retrying does not reset the limit. The last published list remains available.",
     ballot_preparation_cohort_limit:
-      "This change falls outside the fixed voter cohort allowed for this workflow. Ask an organization administrator to review it.",
+      "This change exceeds this organization's controlled election, retained-voter or storage capacity. The published list remains available. Ask an organization administrator to review capacity before another update.",
+    ballot_sent_updates_unavailable:
+      "Daily sent-ballot additions are not enabled for this election. Refresh Ballot Chaser and check the selected election.",
+    ballot_sent_source_limit:
+      "This prepared sent-ballot update exceeds the 5 MB limit. The published list is unchanged. Ask an organization administrator to review capacity.",
+    ballot_sent_columns_invalid:
+      "The sent-ballot file must contain the same county columns as the original master, including VOTERID, CONDIST, PARTY, BALSTATUS and ELECTDATE. Choose the correct county sent report and prepare it again.",
+    ballot_sent_voter_review:
+      "A new voter does not match this election's CD8 IND/PND sent-ballot selection. The published list is unchanged. Review the selected county file and its election date before continuing.",
+    ballot_preparation_history_review:
+      "The saved county-update history needs review. The published list remains unchanged; do not start over or re-upload the master.",
+    ballot_snapshot_out_of_order:
+      "Check the county report date against the latest report for this file type. Do not invent a later date or time. The published list remains unchanged.",
     ballot_preparation_unavailable:
       "County-file preparation is not enabled for this organization. Ask an organization administrator to review access.",
     ballot_preparation_policy_required:

@@ -13,6 +13,37 @@ const model = await import(
   `data:text/javascript;base64,${Buffer.from(source).toString("base64")}`
 );
 
+test("daily sent errors explain recovery while protecting the published voter list", () => {
+  assert.match(
+    model.ballotPreparationMessage("ballot_sent_updates_unavailable"),
+    /Refresh Ballot Chaser/,
+  );
+  assert.match(
+    model.ballotPreparationMessage("ballot_sent_source_limit"),
+    /5 MB limit/,
+  );
+  assert.match(
+    model.ballotPreparationMessage("ballot_sent_columns_invalid"),
+    /ELECTDATE/,
+  );
+  assert.match(
+    model.ballotPreparationMessage("ballot_sent_voter_review"),
+    /published list is unchanged/,
+  );
+  assert.match(
+    model.ballotPreparationMessage("ballot_preparation_history_review"),
+    /do not start over or re-upload the master/,
+  );
+  assert.match(
+    model.ballotPreparationMessage("ballot_snapshot_out_of_order"),
+    /Do not invent a later date or time/,
+  );
+  assert.doesNotMatch(
+    model.ballotPreparationMessage("ballot_preparation_cohort_limit"),
+    /fixed voter cohort|trim|start over/i,
+  );
+});
+
 test("source use remains unreviewed until an explicit permitted purpose is chosen", () => {
   assert.deepEqual(model.ballotSourceUsePolicy(), {
     permittedPurpose: "unreviewed",

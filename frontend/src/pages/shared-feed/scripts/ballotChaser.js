@@ -9,6 +9,7 @@ import {
   createBallotPreparation,
   preparedReportDate,
   ballotPreparationCapacity,
+  ballotSentPreparationPolicy,
 } from "./ballotPreparation";
 import { ballotPreparationPolicyLimits } from "./ballotPreparationModel";
 import { readBallotTextingAccess } from "./textingBallotRecipients";
@@ -100,6 +101,25 @@ export function createBallotChaser({
   const can = (name) => view.schema?.capabilities?.[name] === true;
   const boundedElection = () =>
     view.election?.preparationPolicy?.version === "bounded_v1";
+  const sentElectionEligible = () =>
+    boundedElection() &&
+    view.election.preparationPolicy.maxRows === 125000 &&
+    view.election.storageMode === "register" &&
+    view.election.state === "AZ" &&
+    String(view.election.county || "")
+      .trim()
+      .toLowerCase() === "maricopa";
+  const sentUpdatesAllowed = () =>
+    sentElectionEligible() &&
+    can("import") &&
+    can("export") &&
+    Boolean(view.dashboard?.snapshotId) &&
+    Boolean(
+      ballotSentPreparationPolicy(
+        view.preparationAvailability?.sentUpdates,
+        view.election?.preparationColumns,
+      ),
+    );
   const preparation = createBallotPreparation({
     request: (url, options) => {
       const prefix = path("");
@@ -118,7 +138,8 @@ export function createBallotChaser({
         base: path(""),
         electionId: view.electionId,
         snapshotId: view.dashboard?.snapshotId || null,
-        mode: view.resumePreparedImport?.preparation?.mode,
+        mode:
+          view.resumePreparedImport?.preparation?.mode || view.preparationMode,
         sourceAsOf: view.resumePreparedImport?.sourceAsOf,
         allowed:
           can("import") &&
@@ -127,6 +148,12 @@ export function createBallotChaser({
           view.election.preparationPolicy.enabled === true,
         limits,
         canExport: can("export"),
+        sentUpdates: sentElectionEligible()
+          ? view.preparationAvailability?.sentUpdates
+          : undefined,
+        preparationColumns: view.election?.preparationColumns,
+        retainedRows: view.dashboard?.total,
+        electionDate: view.election?.electionDate,
       };
     },
   });
@@ -257,6 +284,7 @@ export function createBallotChaser({
   async function selectElection(electionId) {
     preparation.reset();
     view.resumePreparedImport = null;
+    view.preparationMode = null;
     exports.reset();
     clearTimeout(timer);
     contacts?.dispose?.();
@@ -573,7 +601,7 @@ export function createBallotChaser({
       Number.isSafeInteger(d.returned)
         ? Math.max(0, Math.min(100, Math.round((d.returned / d.total) * 100)))
         : null;
-    return `<section class="bc-dashboard" aria-label="Ballot progress"><div class="bc-progress-card pt-card"><div><span class="pt-eyebrow">EVERY BALLOT COUNTS</span><h2>${ratio == null ? "Your first update starts here" : `${ratio}% returned`}</h2><p>${d.sourceAsOf ? `County report as of ${e(reportDate(d.sourceAsOf))}` : "Upload the original base file, then add each new county report."}</p>${d.previousSourceAsOf ? `<small>Compared with ${e(reportDate(d.previousSourceAsOf))}</small>` : ""}</div>${ratio == null ? "" : `<progress aria-label="Ballots returned" value="${ratio}" max="100">${ratio}%</progress>`}</div><div class="bc-stats">${stat("Still to return", d.outstanding)}${stat("Accepted", d.accepted ?? d.statusCounts?.accepted)}${stat("Needs follow-up", d.needsFollowup ?? (["unknown", "cure_required", "rejected"].every((key) => Number.isSafeInteger(d.statusCounts?.[key])) ? ["unknown", "cure_required", "rejected"].reduce((sum, key) => sum + d.statusCounts[key], 0) : undefined))}${stat("Returned since last update", d.newlyReturned)}${stat("Returned after org outreach", d.outreachThenReturned, "Associated with recorded outreach; this does not prove outreach caused the return.")}${stat("Total ballots returned", d.returned)}</div>${d.snapshotId ? `<details class="pt-workspace-details"><summary>About these results</summary><p class="bc-impact-note"><strong>Newly found already returned:</strong> ${count(d.newlyDiscoveredReturned)}. These people were not previously recorded as awaiting a return.</p><p class="bc-impact-note">${count(d.textOutreachThenReturned)} after a sent text · ${count(d.doorOutreachThenReturned)} after a conversation or literature drop. People reached in both channels count once in the combined total.</p><p class="bc-impact-note">A confirmed conversation or literature drop credits all selected voters at the exact household or unit; it does not confirm an individual conversation with each voter.</p><p class="bc-impact-note">When no exact return time is supplied, outreach is compared with the first report showing a return.</p><p class="bc-impact-note">Returned means physically reported returned. Accepted is a separate county decision; cure, rejected and unknown cases need follow-up.</p></details>` : ""}<div class="pt-actions">${b("contacts", (view.chaseView || "outstanding") === "outstanding" ? "Show ballots not returned" : "Open ballot list", "", false, !d.snapshotId)}${can("import") ? b("upload-open", d.snapshotId ? "Upload next county report" : "Upload base file", "", true) : ""}${can("manage") ? b("questions", "Ballot chasing questions", "", true) : ""}${b("refresh", "Refresh results", "", true)}</div>${listPicker()}</section>`;
+    return `<section class="bc-dashboard" aria-label="Ballot progress"><div class="bc-progress-card pt-card"><div><span class="pt-eyebrow">EVERY BALLOT COUNTS</span><h2>${ratio == null ? "Your first update starts here" : `${ratio}% returned`}</h2><p>${d.sourceAsOf ? `County report as of ${e(reportDate(d.sourceAsOf))}` : "Upload the original base file, then add each new county report."}</p>${d.previousSourceAsOf ? `<small>Compared with ${e(reportDate(d.previousSourceAsOf))}</small>` : ""}</div>${ratio == null ? "" : `<progress aria-label="Ballots returned" value="${ratio}" max="100">${ratio}%</progress>`}</div><div class="bc-stats">${stat("Still to return", d.outstanding)}${stat("Accepted", d.accepted ?? d.statusCounts?.accepted)}${stat("Needs follow-up", d.needsFollowup ?? (["unknown", "cure_required", "rejected"].every((key) => Number.isSafeInteger(d.statusCounts?.[key])) ? ["unknown", "cure_required", "rejected"].reduce((sum, key) => sum + d.statusCounts[key], 0) : undefined))}${stat("Returned since last update", d.newlyReturned)}${stat("Returned after org outreach", d.outreachThenReturned, "Associated with recorded outreach; this does not prove outreach caused the return.")}${stat("Total ballots returned", d.returned)}</div>${d.snapshotId ? `<details class="pt-workspace-details"><summary>About these results</summary><p class="bc-impact-note"><strong>Newly found already returned:</strong> ${count(d.newlyDiscoveredReturned)}. These people were not previously recorded as awaiting a return.</p><p class="bc-impact-note">${count(d.textOutreachThenReturned)} after a sent text · ${count(d.doorOutreachThenReturned)} after a conversation or literature drop. People reached in both channels count once in the combined total.</p><p class="bc-impact-note">A confirmed conversation or literature drop credits all selected voters at the exact household or unit; it does not confirm an individual conversation with each voter.</p><p class="bc-impact-note">When no exact return time is supplied, outreach is compared with the first report showing a return.</p><p class="bc-impact-note">Returned means physically reported returned. Accepted is a separate county decision; cure, rejected and unknown cases need follow-up.</p></details>` : ""}<div class="pt-actions">${b("contacts", (view.chaseView || "outstanding") === "outstanding" ? "Show ballots not returned" : "Open ballot list", "", false, !d.snapshotId)}${can("import") ? b("upload-open", d.snapshotId ? "Upload next county report" : "Upload base file", "", true) : ""}${sentUpdatesAllowed() ? b("sent-open", "Add newly sent ballots", "", true) : ""}${can("manage") ? b("questions", "Ballot chasing questions", "", true) : ""}${b("refresh", "Refresh results", "", true)}</div>${listPicker()}</section>`;
   }
   function listPicker() {
     return `<form class="bc-election-picker" data-ballot-form="contacts-view">${select("chaseView", "Ballot list", Object.entries(ballotViews), view.chaseViewDraft || view.chaseView || "outstanding")}<button type="submit" class="pt-btn"${view.busy ? " disabled" : ""}>Open list</button></form>`;
@@ -643,10 +671,18 @@ export function createBallotChaser({
     ];
     if (boundedElection()) {
       const meaning =
-        job.preparation?.mode === "returns" || job.kind === "snapshot"
-          ? "returned"
-          : "issued";
-      return `<form class="pt-card" data-ballot-form="mapping"><h2>Review prepared county report</h2><p>${count(headers.length)} county columns are retained in the report. This workflow does not create Contact Book people.</p>${select("voterIdColumn", "Official voter ID column", choices, meaning === "returned" ? "Voter ID" : profile.voterIdColumn || "", true)}<input type="hidden" name="rowStatusMeans" value="${meaning}"><p>Every selected row means <strong>${meaning === "returned" ? "Returned" : "Issued"}</strong>. Missing voters keep their earlier status. Review the official report date and the complete-file results before applying.</p><button class="pt-btn" type="submit"${view.busy ? " disabled" : ""}>Review this report</button></form>`;
+        job.preparation?.mode === "sent"
+          ? "issued"
+          : job.preparation?.mode === "returns" || job.kind === "snapshot"
+            ? "returned"
+            : "issued";
+      const voterIdColumn =
+        job.preparation?.mode === "sent"
+          ? "VOTERID"
+          : meaning === "returned"
+            ? "Voter ID"
+            : profile.voterIdColumn || "";
+      return `<form class="pt-card" data-ballot-form="mapping"><h2>Review prepared county report</h2><p>${count(headers.length)} county columns are retained in the report. This workflow does not create Contact Book people.</p>${select("voterIdColumn", "Official voter ID column", choices, voterIdColumn, true)}<input type="hidden" name="rowStatusMeans" value="${meaning}"><p>Every selected row means <strong>${meaning === "returned" ? "Returned" : "Issued"}</strong>. ${job.preparation?.mode === "sent" ? "Only new voters are added; existing voters and prior returns remain unchanged." : "Missing voters keep their earlier status."} Review the official report date and the complete-file results before applying.</p><button class="pt-btn" type="submit"${view.busy ? " disabled" : ""}>Review this report</button></form>`;
     }
     const sampleRows = list(job.sampleRows);
     const rawStatuses = [
@@ -841,6 +877,19 @@ export function createBallotChaser({
     else if (operation === "upload-open") {
       preparation.reset();
       view.resumePreparedImport = null;
+      view.preparationMode = null;
+      view.showUpload = true;
+      view.job = null;
+      view.rows = null;
+    } else if (operation === "sent-open") {
+      if (!sentUpdatesAllowed())
+        throw new Error(
+          "New sent-ballot additions are not available for this election's current access. Refresh Ballot Chaser.",
+        );
+      preparation.reset();
+      view.resumePreparedImport = null;
+      view.preparationMode = "sent";
+      view.uploadOperationId = null;
       view.showUpload = true;
       view.job = null;
       view.rows = null;
@@ -850,6 +899,7 @@ export function createBallotChaser({
           "Open the paused upload before preparing its source again.",
         );
       preparation.reset();
+      view.preparationMode = null;
       view.resumePreparedImport = view.job;
       view.job = null;
       view.showUpload = true;
@@ -859,6 +909,8 @@ export function createBallotChaser({
       view.job = null;
       view.rows = null;
       view.showUpload = false;
+      view.preparationMode = null;
+      view.resumePreparedImport = null;
       view.editingMapping = false;
     } else if (operation === "mapping-edit") {
       if (
@@ -1196,6 +1248,7 @@ export function createBallotChaser({
       );
       view.uploadOperationId = null;
       view.resumePreparedImport = null;
+      view.preparationMode = null;
       view.showUpload = false;
       if (prepared)
         view.mappingDraft = {
