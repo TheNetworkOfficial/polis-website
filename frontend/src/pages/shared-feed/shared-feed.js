@@ -7,6 +7,7 @@ import "./css/texting-workspace.css";
 import "./css/coalition-workspace.css";
 import "./css/coalition-features.css";
 import { createCoalitionPeopleInteractions } from "./scripts/coalitionPeoplePresentation.js";
+window.__POLIS_GEOCODE_COHORT_BUNDLE__ = true;
 const coalitionPeopleInteractions = createCoalitionPeopleInteractions();
 import "./css/coalition-rooms.css";
 import "./css/organization-publishing.css";

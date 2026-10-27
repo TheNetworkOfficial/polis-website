@@ -1149,6 +1149,13 @@ module.exports = {
   },
   plugins: [
     new CleanWebpackPlugin(),
+    new StaticTextAssetPlugin({
+      sourcePath: path.resolve(
+        __dirname,
+        "src/assets/runtime/geocode-cohort-entry.js",
+      ),
+      filename: "scripts/geocode-cohort-entry.js",
+    }),
     ...[
       "geocoding-addendum.html",
       "geocode-subscription-credit-terms.html",

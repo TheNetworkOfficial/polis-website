@@ -27,6 +27,52 @@ const packs = [
   currency: "usd",
 }));
 
+test("billing review and organization closure prevent new commitments while preserving recovery controls", async ({
+  page,
+}) => {
+  const f = await fixture(page, { paid: true });
+  f.state.subscription.financialReview = {
+    status: "required",
+    reason: "payment_reversed",
+  };
+  f.state.subscription.closureHold = true;
+  // A stale client flag cannot offer a payment while the explicit holds exist.
+  f.state.subscription.checkoutEnabled = true;
+  f.state.subscription.pendingChange = {
+    checkoutUrl: "https://checkout.stripe.com/c/pay/local-held",
+  };
+  await f.open();
+  const subscription = page.getByRole("region", {
+    name: "Geocoding subscription",
+  });
+  await expect(subscription.getByText(/Billing needs review/)).toBeVisible();
+  await expect(
+    subscription.getByText(
+      /Reopening the organization does not automatically restart/,
+    ),
+  ).toBeVisible();
+  await expect(
+    subscription.getByRole("button", {
+      name: "Complete pending payment",
+      exact: true,
+    }),
+  ).toBeDisabled();
+  await expect(
+    subscription.getByRole("button", {
+      name: "Verify subscription status",
+      exact: true,
+    }),
+  ).toBeEnabled();
+  await expect(
+    subscription.getByRole("button", {
+      name: "Update payment method",
+      exact: true,
+    }),
+  ).toBeEnabled();
+  expect(f.payments).toEqual([]);
+  expect(f.errors).toEqual([]);
+});
+
 async function fixture(
   page,
   {

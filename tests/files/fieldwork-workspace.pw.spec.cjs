@@ -988,6 +988,7 @@ test("household pins expose partial results and recover from independent load er
   page,
 }) => {
   const fixture = await mockFieldworkWorkspace(page);
+  fixture.householdMapEnabled = true;
   fixture.households = [
     {
       kind: "household",
@@ -1035,5 +1036,27 @@ test("household pins expose partial results and recover from independent load er
       exact: true,
     }),
   ).toBeHidden();
+  expect(fixture.errors).toEqual([]);
+});
+
+test("disabled household layer leaves ordinary voter pins and list available without a retry warning", async ({
+  page,
+}) => {
+  const fixture = await mockFieldworkWorkspace(page);
+  fixture.failHouseholds = true;
+  await page.goto(`${BASE_URL}${COALITION_PATH}/voter-map`);
+  await ready(page);
+  await expect(workspace(page).locator(".map-record").first()).toBeVisible();
+  await expect(
+    workspace(page).getByText(
+      "Household addresses could not be loaded. Retry the map.",
+      { exact: true },
+    ),
+  ).toHaveCount(0);
+  expect(
+    fixture.requests.filter((request) =>
+      request.path.endsWith("/household-map"),
+    ),
+  ).toEqual([]);
   expect(fixture.errors).toEqual([]);
 });

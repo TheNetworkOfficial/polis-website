@@ -1150,40 +1150,41 @@ export function createCoalitionFieldWork({
       if (queryKey !== state.mapRequestVersion) return;
       state.households = [];
       state.householdNotice = "";
-      try {
-        const householdPayload = await call(
-          `/api/contact-book/scopes/${encodeURIComponent(`coalition:${current().coalitionId}`)}/household-map`,
-          {
-            method: "POST",
-            body: {
-              bounds: {
-                west: bbox[0],
-                south: bbox[1],
-                east: bbox[2],
-                north: bbox[3],
+      if (state.access?.capabilities?.householdMap === true)
+        try {
+          const householdPayload = await call(
+            `/api/contact-book/scopes/${encodeURIComponent(`coalition:${current().coalitionId}`)}/household-map`,
+            {
+              method: "POST",
+              body: {
+                bounds: {
+                  west: bbox[0],
+                  south: bbox[1],
+                  east: bbox[2],
+                  north: bbox[3],
+                },
               },
             },
-          },
-        );
-        guard(ticket);
-        if (queryKey !== state.mapRequestVersion) return;
-        state.householdNotice =
-          householdPayload.complete === false || householdPayload.zoomRequired
-            ? "Household address results are partial. Zoom in for more detail."
-            : "";
-        state.households = rows(householdPayload, ["markers"]).filter(
-          (row) => row.kind === "household" && fieldPoint(row),
-        );
-      } catch (error) {
-        if (error.stale) throw error;
-        // The separately deployed household capability may not yet be enabled.
-        // Never retain old markers after a failed current-access query.
-        if (ticket === generation && queryKey === state.mapRequestVersion) {
-          state.households = [];
+          );
+          guard(ticket);
+          if (queryKey !== state.mapRequestVersion) return;
           state.householdNotice =
-            "Household addresses could not be loaded. Retry the map.";
+            householdPayload.complete === false || householdPayload.zoomRequired
+              ? "Household address results are partial. Zoom in for more detail."
+              : "";
+          state.households = rows(householdPayload, ["markers"]).filter(
+            (row) => row.kind === "household" && fieldPoint(row),
+          );
+        } catch (error) {
+          if (error.stale) throw error;
+          // The separately deployed household capability may not yet be enabled.
+          // Never retain old markers after a failed current-access query.
+          if (ticket === generation && queryKey === state.mapRequestVersion) {
+            state.households = [];
+            state.householdNotice =
+              "Household addresses could not be loaded. Retry the map.";
+          }
         }
-      }
       state.mapDataError = "";
       state.points = rows(payload, ["points", "items", "records"]).filter(
         (row) => row.kind !== "cluster" && row.recordId && fieldPoint(row),

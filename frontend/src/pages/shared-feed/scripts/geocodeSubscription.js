@@ -60,6 +60,13 @@ export function createGeocodeSubscription({
       throw new Error(
         "Accept the current geocoding agreement before managing a plan.",
       );
+    if (
+      payment &&
+      (s.subscription?.financialReview || s.subscription?.closureHold)
+    )
+      throw new Error(
+        "Plan payments are paused pending billing or organization review. Existing purchased credits are retained.",
+      );
     return s;
   };
   const resolveOperation = () => {
@@ -169,7 +176,9 @@ export function createGeocodeSubscription({
         canManage &&
         s.status.rights?.accepted &&
         s.status.activated !== false &&
-        sub.checkoutEnabled;
+        sub.checkoutEnabled &&
+        !sub.financialReview &&
+        !sub.closureHold;
       const plan = sub.plans?.find((value) => value.id === sub.planId);
       const preview = s.subscriptionPreview;
       const draft = s.subscriptionDraft || {};
@@ -181,6 +190,8 @@ export function createGeocodeSubscription({
           ? `90-day pilot · ${sub.status === "expired" ? "expired" : "ends"} ${date(sub.pilotEndsAt)}`
           : `${plan?.name || "No subscription"} · ${label(sub.status)}`;
       return `<section class="pt-card" aria-label="Geocoding subscription"><h3>Geocoding plan</h3><p role="status">${e(current)}</p><p>${count(sub.dailyCredits)} included credits per day${sub.paidThrough ? ` · Paid through ${e(date(sub.paidThrough))}` : ""}. Unused daily credits do not roll over. New daily allowances stop when the pilot or paid period ends, with no grace period. Credits already granted today remain until 00:00 UTC.</p>
+      ${sub.financialReview ? '<p role="alert">Billing needs review. New included-credit grants and plan payments are paused. Credits already issued today retain their UTC expiry, and independently valid purchased credits are retained. Contact lux@polisapp.io for assistance.</p>' : ""}
+      ${sub.closureHold ? '<p role="status">Organization billing is paused for closure review. Reopening the organization does not automatically restart its subscription or geocoding.</p>' : ""}
       ${sub.pendingChange ? `<p role="status">${e(label(sub.pendingChange.kind))} ${e(label(sub.pendingChange.status))}${sub.pendingChange.planId ? ` · ${e(sub.plans?.find((value) => value.id === sub.pendingChange.planId)?.name || sub.pendingChange.planId)}` : ""}${sub.pendingChange.effectiveAt ? ` · Effective ${e(date(sub.pendingChange.effectiveAt))}` : ""}.</p>` : ""}
       ${sub.cancelAtPeriodEnd ? `<p>Your plan ends at the end of the paid period. It will not renew.</p>` : ""}
       ${s.subscriptionNotice ? `<p role="status">${e(s.subscriptionNotice)}</p>` : ""}
@@ -196,7 +207,7 @@ export function createGeocodeSubscription({
       ${s.subscriptionResumeReview ? `<p>Keep ${e(plan?.name || "your current plan")} renewing at its current monthly price and remove the scheduled change?</p>${b("subscription-resume-confirm", "Confirm continued renewal")}${b("subscription-discard", "Keep scheduled change", { secondary: true })}` : ""}
       ${s.subscriptionCancelReview ? `<p>Cancel renewal at ${e(date(sub.paidThrough))}? Your current paid period remains available.</p>${b("subscription-cancel-confirm", "Confirm cancellation at period end")}${b("subscription-discard", "Keep current plan", { secondary: true })}` : ""}
       ${s.subscriptionOperation ? `<p role="status">A billing request is awaiting confirmation. Verify its status before starting another request.</p>${b("subscription-retry", "Retry billing request", { secondary: true })}` : ""}
-      ${b("subscription-refresh", "Verify subscription status", { secondary: true })}${sub.source === "stripe" ? b("subscription-portal", "Update payment method", { secondary: true }) : ""}${sub.pendingChange?.checkoutUrl ? b("subscription-payment", "Complete pending payment", { disabled: busy() || !s.status.rights?.accepted }) : ""}`
+      ${b("subscription-refresh", "Verify subscription status", { secondary: true })}${sub.source === "stripe" ? b("subscription-portal", "Update payment method", { secondary: true }) : ""}${sub.pendingChange?.checkoutUrl ? b("subscription-payment", "Complete pending payment", { disabled: busy() || !s.status.rights?.accepted || Boolean(sub.financialReview) || sub.closureHold }) : ""}`
           : "<p>An organization owner or administrator manages this plan.</p>"
       }</section>`;
     },

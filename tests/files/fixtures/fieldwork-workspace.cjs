@@ -245,6 +245,7 @@ async function mockFieldworkWorkspace(page, options = {}) {
     capabilities: {
       territoryAuthoringAccess: admin && data.authoring,
       territoryDevelopmentAccess: false,
+      householdMap: data.householdMapEnabled === true,
     },
     canManageCanvassingConfiguration: admin,
     canManageCta: admin,
