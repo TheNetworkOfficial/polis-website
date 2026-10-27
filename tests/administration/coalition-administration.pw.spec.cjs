@@ -1370,6 +1370,8 @@ test("same-actor credential renewal replaces a pending outreach read and keeps l
     await page.clock.setFixedTime(FIXED_TIME + 2000);
     await page.evaluate(() => window.dispatchEvent(new Event("focus")));
     await expect.poll(templateReads).toBe(beforeRefresh + 1);
+    fixture.templates[COALITION_ID].phoneCall.title =
+      "Shared copy changed during credential renewal";
     await rotateSession(page, fixture, {
       actor: "alex",
       role: "admin",
@@ -1378,6 +1380,9 @@ test("same-actor credential renewal replaces a pending outreach read and keeps l
     await expect.poll(templateReads).toBe(beforeRefresh + 2);
     await expect(field(page, "scriptTitle")).toHaveValue(
       "Keep the already loaded outreach draft",
+    );
+    await expect(app(page).locator("[role='alert']")).toContainText(
+      "updated elsewhere",
     );
     const oldRefresh = lateResponse("Explicit reload remains usable");
     olderRefresh.resolve();
