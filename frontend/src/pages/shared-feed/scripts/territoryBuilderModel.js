@@ -422,6 +422,29 @@ export function createTerritoryBuilderModel({
     guard(key, version);
     return decodeTerritoryBuilderGeometry(result);
   }
+  async function refreshFieldHandoff() {
+    const handoff = state.published?.fieldHandoff || state.fieldHandoff;
+    if (!handoff?.id || !current()) return;
+    const key = state.key,
+      version = epoch,
+      scope = context();
+    try {
+      const result = await request(
+        `/api/contact-book/scopes/${encodeURIComponent(`${scope.scopeType === "organization" ? "coalition" : scope.scopeType}:${scope.scopeId}`)}/data-rights/field-handoffs/${encodeURIComponent(handoff.id)}`,
+        {
+          auth: true,
+          headers: { "X-Polis-Expected-Actor": scope.userId },
+          beforeRequest: () => guard(key, version),
+        },
+      );
+      guard(key, version);
+      state.fieldHandoff = result.fieldHandoff || result;
+      if (state.published) state.published.fieldHandoff = state.fieldHandoff;
+    } catch (error) {
+      if (current() && version === epoch) state.error = failureMessage(error);
+    }
+    if (current() && version === epoch) notify();
+  }
   function clearViewport() {
     discardPendingViewport();
     viewportEpoch++;
@@ -643,6 +666,7 @@ export function createTerritoryBuilderModel({
           "Complete territory planning data is unavailable. Try again.",
         );
       state.bootstrap = payload;
+      state.fieldHandoff = payload.fieldHandoff || null;
       receiveSource(payload.source);
       state.revision = payload.revision;
       state.draft = payload.draft ? copy(payload.draft) : emptyDraft();
@@ -852,6 +876,7 @@ export function createTerritoryBuilderModel({
     select,
     setCount,
     refreshSource,
+    refreshFieldHandoff,
     viewport,
     get state() {
       return state;

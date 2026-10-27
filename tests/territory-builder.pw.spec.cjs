@@ -2,6 +2,11 @@ const { test, expect } = require("@playwright/test");
 const fs = require("node:fs");
 const path = require("node:path");
 const BASE = "http://127.0.0.1:9086";
+const {
+  mockFieldworkWorkspace,
+  COALITION_PATH,
+} = require("./files/fixtures/fieldwork-workspace.cjs");
+const CANDIDATE_BUILDER = `${BASE}/candidate/voter-map/territories/admin?candidateId=candidate-fixture`;
 const SNAPSHOT = "a".repeat(64);
 const ARTIFACTS =
   process.env.TERRITORY_BUILDER_ARTIFACTS ||
@@ -309,6 +314,8 @@ async function fixture(
           username: "alex",
         },
       });
+    if (pathname === "/api/me/policy-acceptance")
+      return json({ ok: true, accepted: true });
     if (pathname === "/api/search/results")
       return json({
         items: [
@@ -346,6 +353,11 @@ async function fixture(
           territories: [],
           canManageTerritories: true,
           canManageCta: true,
+          scope: "full",
+          capabilities: {
+            territoryAuthoringAccess: true,
+            territoryDevelopmentAccess: false,
+          },
         },
       });
     if (pathname === "/api/candidateDashboard/candidates")
@@ -391,9 +403,7 @@ async function fixture(
   };
 }
 const open = async (page) => {
-  await page.goto(
-    `${BASE}/coalitions/territory-fixture/voter-map/territories/admin`,
-  );
+  await page.goto(CANDIDATE_BUILDER);
   await expect(
     page.getByRole("heading", { name: "Where are we working?" }),
   ).toBeVisible();
@@ -430,7 +440,127 @@ const assign = async (page, name) => {
     .click();
 };
 
-test("existing coalition flow: optional filters, server cuts, named staff, review and one publish", async ({
+test("legacy coalition builder URL opens current Field Work wizard and preserves explicit publish and field-data readiness", async ({
+  page,
+}) => {
+  const capture = await mockFieldworkWorkspace(page);
+  await page.route(
+    "**/data-rights/field-handoffs/published-field-data",
+    (route) =>
+      route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          ok: true,
+          fieldHandoff: {
+            id: "published-field-data",
+            status: "complete_with_review",
+            committed: 5,
+            review: 1,
+            excluded: 0,
+          },
+        }),
+      }),
+  );
+  await page.goto(`${BASE}${COALITION_PATH}/voter-map/territories/admin`);
+  const dialog = page.locator(".polis-field-work dialog[open]");
+  await expect(
+    dialog.getByRole("heading", { name: "New territory", exact: true }),
+  ).toBeVisible();
+  await expect(page.locator(".territory-builder")).toHaveCount(0);
+  await dialog
+    .getByRole("textbox", { name: "Plan name", exact: true })
+    .fill("Reviewed coalition plan");
+  await dialog
+    .getByRole("combobox", { name: "Source area", exact: true })
+    .selectOption("0");
+  await dialog.getByRole("button", { name: "Continue", exact: true }).click();
+  await dialog.locator(".advanced-settings summary").click();
+  const dnk = dialog.getByLabel("Exclude do-not-knock addresses", {
+    exact: true,
+  });
+  const danger = dialog.getByLabel("Exclude reported-danger addresses", {
+    exact: true,
+  });
+  await expect(dnk).toBeChecked();
+  await expect(danger).toBeChecked();
+  await dnk.uncheck();
+  await danger.uncheck();
+  await dialog
+    .getByRole("spinbutton", { name: "Number of territories", exact: true })
+    .fill("2");
+  await dialog
+    .getByRole("button", { name: "Generate territories", exact: true })
+    .click();
+  await expect(dialog.locator("select[name=selected] option")).toHaveCount(2);
+  await dialog
+    .getByRole("button", { name: "Review plan", exact: true })
+    .click();
+  const publish = dialog.getByRole("button", {
+    name: "Publish territories",
+    exact: true,
+  });
+  await expect(publish).toBeDisabled();
+  for (const select of await dialog.locator("[data-fwb-assignee]").all()) {
+    await expect(select).toContainText("Sam");
+    await select.selectOption("sam");
+  }
+  await expect(publish).toBeEnabled();
+  capture.fieldHandoff = {
+    id: "published-field-data",
+    status: "pending",
+    committed: 0,
+    review: 0,
+    excluded: 0,
+  };
+  await publish.click();
+  await expect(
+    dialog.getByRole("heading", { name: "Territories published", exact: true }),
+  ).toBeVisible();
+  await expect(dialog).toContainText(
+    "Operational field data is still being prepared",
+  );
+  fs.mkdirSync(ARTIFACTS, { recursive: true });
+  await page.screenshot({
+    path: path.join(ARTIFACTS, "coalition-published-pending.png"),
+    fullPage: true,
+  });
+  await dialog
+    .getByRole("button", { name: "Refresh field data status", exact: true })
+    .click();
+  await expect(dialog).toContainText("some contacts need review");
+  await expect(dialog).toContainText("5 records prepared");
+  await dialog.getByRole("button", { name: "Done", exact: true }).click();
+  await expect(
+    page
+      .locator(".polis-field-work")
+      .getByRole("tab", { name: /^Territories/ }),
+  ).toHaveAttribute("aria-selected", "true");
+  await expect(
+    page.getByText("Territories published.", { exact: true }),
+  ).toBeVisible();
+  await expect(dialog).toHaveCount(0);
+  expect(
+    capture.requests.filter((row) => row.path.endsWith("/territory-builder")),
+  ).toHaveLength(1);
+  const published = capture.writes.filter((row) =>
+    row.path.endsWith("/territory-builder/publish"),
+  );
+  expect(published).toHaveLength(1);
+  expect(published[0].body.contactExclusions).toEqual({
+    excludeDoNotKnock: false,
+    excludeReportedDanger: false,
+  });
+  expect(
+    published[0].body.territories.every((row) => row.assigneeUserId === "sam"),
+  ).toBe(true);
+  expect(published[0].body.idempotencyKey).toBeTruthy();
+  expect(capture.builderActorHeaders.every((actor) => actor === "alex")).toBe(
+    true,
+  );
+  expect(capture.errors).toEqual([]);
+});
+
+test("supported standalone candidate flow: optional filters, server cuts, named staff, review and one publish", async ({
   page,
 }) => {
   const capture = await fixture(page);
@@ -469,7 +599,7 @@ test("existing coalition flow: optional filters, server cuts, named staff, revie
     .getByRole("button", { name: "Publish territories", exact: true })
     .click();
   await expect(
-    page.getByRole("heading", { name: "Territories are ready" }),
+    page.getByRole("heading", { name: "Territories are published" }),
   ).toBeVisible();
   const publish = capture.writes.filter((r) => r.pathname.endsWith("/publish"));
   expect(publish).toHaveLength(1);
@@ -618,9 +748,7 @@ test("incomplete authorized data blocks planning instead of inventing totals", a
   page,
 }) => {
   const capture = await fixture(page, { incomplete: true });
-  await page.goto(
-    `${BASE}/coalitions/territory-fixture/voter-map/territories/admin`,
-  );
+  await page.goto(CANDIDATE_BUILDER);
   await expect(
     page.getByText(/Address preparation status is unavailable/),
   ).toBeVisible();
@@ -722,39 +850,27 @@ test("existing territory tools and named person selection remain available; back
     .fill("My saved outline");
   await page.getByRole("button", { name: "Save name", exact: true }).click();
   await page
+    .getByRole("button", { name: "Check coverage", exact: true })
+    .click();
+  await page.getByRole("button", { name: /^Assign people/ }).click();
+  await assign(page, "My saved outline");
+  await expect(page.locator(".tb-territories")).toContainText("Sam Example");
+  await page
     .getByRole("button", { name: "Existing territories", exact: true })
     .click();
   await expect(
-    page.getByRole("heading", { name: "Existing territories" }),
+    page.getByRole("heading", { name: "Territory coverage" }),
   ).toBeVisible();
   await expect(page.locator(".territory-builder")).toHaveCount(0);
-  await page
-    .getByRole("button", {
-      name: "Assignments Manage staff access",
-      exact: true,
-    })
-    .click();
-  await page
-    .getByRole("button", { name: "Choose assignee", exact: true })
-    .click();
-  await page
-    .getByRole("dialog", { name: "Choose a person" })
-    .getByRole("searchbox")
-    .fill("Sam");
-  await page
-    .getByRole("button", { name: "Sam Example (@sam)", exact: true })
-    .click();
-  await expect(
-    page.getByRole("button", { name: "Sam Example (@sam)", exact: true }),
-  ).toBeVisible();
   await page
     .getByRole("button", { name: "Back to builder", exact: true })
     .click();
   await expect(page.locator(".tb-territories")).toContainText(
     "My saved outline",
   );
+  await expect(page.locator(".tb-territories")).toContainText("Sam Example");
   await expect(
-    page.getByRole("heading", { name: "Existing territories" }),
+    page.getByRole("heading", { name: "Territory coverage" }),
   ).toHaveCount(0);
   expect(capture.errors).toEqual([]);
 });

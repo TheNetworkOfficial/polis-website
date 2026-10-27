@@ -22,40 +22,42 @@ async function mockBook(
     nameParsing = false,
     previewNameAnalysis = true,
     completing = false,
+    embedded = false,
   } = {},
 ) {
   const BOOK = `/api/contact-book/scopes/${encodeURIComponent(`${scopeType}:${scopeId}`)}`;
   const token = `e30.${Buffer.from(JSON.stringify({ sub: "contact-admin", email: "admin@example.test" })).toString("base64url")}.test`;
-  await page.addInitScript(
-    ({ baseUrl, token }) => {
-      sessionStorage.setItem(
-        "sharedFeedSession.v1",
-        JSON.stringify({
-          accessToken: token,
-          idToken: token,
-          expiresAt: Date.now() + 3600000,
-        }),
-      );
-      let config;
-      Object.defineProperty(window, "__POLIS_WEB_APP__", {
-        configurable: true,
-        get: () => config,
-        set: (value) => {
-          config = {
-            ...value,
-            apiBaseUrl: baseUrl,
-            auth: {
-              ...value.auth,
-              region: "us-west-2",
-              clientId: "test",
-              enablePasswordFlow: "true",
-            },
-          };
-        },
-      });
-    },
-    { baseUrl: BASE, token },
-  );
+  if (!embedded)
+    await page.addInitScript(
+      ({ baseUrl, token }) => {
+        sessionStorage.setItem(
+          "sharedFeedSession.v1",
+          JSON.stringify({
+            accessToken: token,
+            idToken: token,
+            expiresAt: Date.now() + 3600000,
+          }),
+        );
+        let config;
+        Object.defineProperty(window, "__POLIS_WEB_APP__", {
+          configurable: true,
+          get: () => config,
+          set: (value) => {
+            config = {
+              ...value,
+              apiBaseUrl: baseUrl,
+              auth: {
+                ...value.auth,
+                region: "us-west-2",
+                clientId: "test",
+                enablePasswordFlow: "true",
+              },
+            };
+          },
+        });
+      },
+      { baseUrl: BASE, token },
+    );
   const calls = [],
     errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
@@ -157,6 +159,7 @@ async function mockBook(
   await page.route("**/*", async (route) => {
     const request = route.request(),
       url = new URL(request.url());
+    if (embedded && !url.pathname.startsWith(BOOK)) return route.fallback();
     if (url.origin !== BASE) return route.abort();
     if (!url.pathname.startsWith("/api/")) return route.continue();
     const path = url.pathname,
@@ -171,6 +174,16 @@ async function mockBook(
       return respond({
         accepted: true,
         policySetVersion: "2026-10-23-v1",
+      });
+    if (scopeType === "coalition" && path === `/api/coalitions/${scopeId}`)
+      return respond({
+        coalition: {
+          coalitionId: scopeId,
+          name: "Fixture organization",
+          orgKind: "coalition",
+          status: "active",
+        },
+        membership: { roleKey: "admin", status: "active", permissions: [] },
       });
     if (path === "/api/geo/cities")
       return respond({

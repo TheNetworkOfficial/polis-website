@@ -323,6 +323,15 @@ function currentCoalitionFieldWorkContext() {
     membership,
     enabled: coalition.voterMapEnabled === true,
     access: matching ? detail.voterMapAccess?.raw : null,
+    ...(section === "territories/admin" &&
+    pendingBallotTerritories?.actorUserId ===
+      getAuthenticatedUser(state.auth.session)?.userId &&
+    pendingBallotTerritories.scopeKey === `coalition:${coalitionId}`
+      ? {
+          contactSelectionId: pendingBallotTerritories.contactSelectionId,
+          ballotChase: pendingBallotTerritories.ballotChase,
+        }
+      : {}),
     view:
       section === "territories/admin" || section === "territory-admin"
         ? "builder"

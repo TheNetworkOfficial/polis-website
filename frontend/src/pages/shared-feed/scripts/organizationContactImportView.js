@@ -25,6 +25,7 @@ function illustration(done = false) {
 export function renderContactImport({
   s,
   canImport,
+  canDownloadOriginal = false,
   busy,
   b,
   details,
@@ -161,10 +162,13 @@ export function renderContactImport({
       b("panel", "Back to contacts", { value: "contacts", secondary: true }),
     ) +
     `<ol class="pt-import-steps" aria-label="Import steps"><li${!review && !complete ? ' aria-current="step"' : ""}>1 Choose</li><li${review ? ' aria-current="step"' : ""}>2 Review</li><li${s.importSaving || complete ? ' aria-current="step"' : ""}>3 Import</li></ol>` +
+    (s.originalProgress
+      ? `<p role="status">${e(s.originalProgress)}</p>`
+      : "") +
     content +
     details(
       "Source history",
-      `<section class="pt-card">${list(s.imports).length ? s.imports.map((job) => `<article class="pt-row"><div><strong>${e(job.name || "Contact import")}</strong><p>${e(job.status)} · ${count(job.accepted || 0)} accepted · ${count(job.conflicts || 0)} need review</p></div><div class="pt-actions">${canImport && job.status === "open" ? b("import-resume", "Resume", { secondary: true, value: job.importId }) : canImport && job.status === "completing" ? b("import-finalize", "Finish import", { secondary: true, value: job.importId }) : ""}${b("import-report", "Review records", { secondary: true, value: job.importId })}</div></article>`).join("") : '<p class="pt-muted">Your imports will appear here.</p>'}${s.importCursor ? b("imports-more", "More imports", { secondary: true }) : ""}</section>`,
+      `<section class="pt-card">${list(s.imports).length ? s.imports.map((job) => `<article class="pt-row"><div><strong>${e(job.name || "Contact import")}</strong><p>${e(job.status)} · ${count(job.accepted || 0)} accepted · ${count(job.conflicts || 0)} need review</p></div><div class="pt-actions">${canImport && job.status === "open" ? b("import-resume", "Resume", { secondary: true, value: job.importId }) : canImport && job.status === "completing" ? b("import-finalize", "Finish import", { secondary: true, value: job.importId }) : ""}${b("import-report", "Review records", { secondary: true, value: job.importId })}${canDownloadOriginal && job.originalId ? b("original-download", "Download original file", { secondary: true, value: job.originalId }) : ""}</div></article>`).join("") : '<p class="pt-muted">Your imports will appear here.</p>'}${s.importCursor ? b("imports-more", "More imports", { secondary: true }) : ""}</section>`,
     ) +
     importReport()
   );

@@ -789,3 +789,27 @@ test("revocation from an older camera cancels the newest queued view and any pen
   assert.equal(h.model.state.review, null);
   assert.deepEqual(h.model.state.points, []);
 });
+
+test("published operational field data resumes independently of geometry and stays actor fenced", async () => {
+  let resolve;
+  const h = harness((path) =>
+    path.includes("/field-handoffs/")
+      ? new Promise((done) => (resolve = done))
+      : {
+          ...bootstrap(),
+          published: true,
+          fieldHandoff: { id: "handoff", status: "pending" },
+        },
+  );
+  await h.model.load();
+  assert.equal(h.model.state.fieldHandoff.status, "pending");
+  const refresh = h.model.refreshFieldHandoff();
+  assert.equal(
+    h.calls.at(-1).path,
+    "/api/contact-book/scopes/coalition%3Aorg-a/data-rights/field-handoffs/handoff",
+  );
+  h.setContext({ scopeType: "coalition", scopeId: "other", userId: "actor-b" });
+  resolve({ fieldHandoff: { id: "handoff", status: "complete" } });
+  await refresh;
+  assert.equal(h.model.state.fieldHandoff.status, "pending");
+});

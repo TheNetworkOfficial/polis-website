@@ -1561,6 +1561,18 @@ html[data-polis-theme-resolved="dark"] #shared-feed-app .polis-field-work {
   cursor: pointer;
 }
 
+#shared-feed-app .polis-field-work .field-household-marker {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 2px solid var(--primary);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 24px;
+  cursor: pointer;
+}
+
 #shared-feed-app
   .polis-field-work
   .field-voter-marker[data-status="remaining"] {

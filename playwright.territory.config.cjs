@@ -1,4 +1,5 @@
 const base = require("./playwright.config.cjs");
+process.env.POLIS_TEST_BASE_URL ||= "http://127.0.0.1:9086";
 const path = require("node:path");
 const artifacts =
   process.env.TERRITORY_BUILDER_ARTIFACTS ||

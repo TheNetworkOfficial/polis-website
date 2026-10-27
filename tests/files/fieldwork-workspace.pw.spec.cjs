@@ -983,3 +983,57 @@ test("rotating the same member's credentials reloads access and preserves only t
   ).toEqual([]);
   expect(fixture.errors).toEqual([]);
 });
+
+test("household pins expose partial results and recover from independent load errors", async ({
+  page,
+}) => {
+  const fixture = await mockFieldworkWorkspace(page);
+  fixture.households = [
+    {
+      kind: "household",
+      contactId: "household-fixture",
+      lat: 46.863,
+      lng: -114.006,
+      address: { addressLine1: "100 Fixture Lane" },
+      reviewRequired: true,
+    },
+  ];
+  fixture.partialHouseholds = true;
+  await page.goto(`${BASE_URL}${COALITION_PATH}/voter-map`);
+  await ready(page);
+  await expect(
+    workspace(page).getByRole("button", {
+      name: "Household: 100 Fixture Lane, needs review",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(workspace(page).locator("[data-fw-count]")).toContainText(
+    "Household address results are partial",
+  );
+  fixture.failHouseholds = true;
+  await workspace(page)
+    .getByRole("button", { name: "Refresh household addresses", exact: true })
+    .click();
+  await expect(workspace(page).locator("[data-fw-count]")).toContainText(
+    "Household addresses could not be loaded",
+  );
+  await expect(workspace(page).locator(".field-household-marker")).toHaveCount(
+    0,
+  );
+  await expect(workspace(page).locator(".map-record").first()).toBeVisible();
+  fixture.failHouseholds = false;
+  fixture.partialHouseholds = false;
+  await workspace(page)
+    .getByRole("button", { name: "Refresh household addresses", exact: true })
+    .click();
+  await expect(workspace(page).locator(".field-household-marker")).toHaveCount(
+    1,
+  );
+  await expect(
+    workspace(page).getByRole("button", {
+      name: "Refresh household addresses",
+      exact: true,
+    }),
+  ).toBeHidden();
+  expect(fixture.errors).toEqual([]);
+});

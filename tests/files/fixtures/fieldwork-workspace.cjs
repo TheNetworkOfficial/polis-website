@@ -434,6 +434,19 @@ async function mockFieldworkWorkspace(page, options = {}) {
       if (actor !== "alex")
         return reply({ error: "expected_actor_mismatch" }, 403);
     }
+    if (
+      path ===
+      `/api/contact-book/scopes/${encodeURIComponent(`coalition:${COALITION_ID}`)}/household-map`
+    ) {
+      if (data.failHouseholds)
+        return reply({ error: "household_map_unavailable" }, 503);
+      return reply({
+        ok: true,
+        markers: data.households || [],
+        complete: !data.partialHouseholds,
+        zoomRequired: !!data.partialHouseholds,
+      });
+    }
     if (path === "/api/coalitions")
       return reply({ items: [{ coalition, membership }] });
     if (path === API) return reply({ coalition, membership });
@@ -812,6 +825,9 @@ async function mockFieldworkWorkspace(page, options = {}) {
           points: [],
           staff: clone(PEOPLE),
           draft: clone(data.builderDraft),
+          ...(data.fieldHandoff
+            ? { fieldHandoff: clone(data.fieldHandoff) }
+            : {}),
           existingTerritories: data.territories.map((t) => ({
             ...t,
             builderManaged: !!t.builderId,
@@ -933,6 +949,9 @@ async function mockFieldworkWorkspace(page, options = {}) {
         draft: clone(data.builderDraft),
         territories: clone(body.territories),
         published: path.endsWith("/publish"),
+        ...(path.endsWith("/publish") && data.fieldHandoff
+          ? { fieldHandoff: clone(data.fieldHandoff) }
+          : {}),
       });
     }
     if (method !== "GET" && path.startsWith(API)) {

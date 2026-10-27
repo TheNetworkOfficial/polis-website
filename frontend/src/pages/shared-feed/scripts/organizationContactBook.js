@@ -1,4 +1,6 @@
 import "../css/organization-contacts.css";
+import { createOrganizationGeocodeCredits } from "./organizationGeocodeCredits";
+import { archiveContactOriginal } from "./organizationContactOriginal";
 import {
   ballotViews,
   ballotStatusLabels,
@@ -112,10 +114,12 @@ export function createOrganizationContactBook(
     cityAbort = null,
     cityGeneration = 0,
     disposed = false,
-    importScanGeneration = 0;
+    importScanGeneration = 0,
+    originalUploadAbort = null;
   const dispose = () => {
     disposed = true;
     importScanGeneration++;
+    originalUploadAbort?.abort();
     queryGeneration++;
     queryAbort?.abort();
     cityAbort?.abort();
@@ -164,6 +168,44 @@ export function createOrganizationContactBook(
       ((state().query.ballotChase.view || "outstanding") !== "outstanding" ||
         r.context?.().scopeType !== "coalition")
     ) && state().schema?.capabilities?.[name] === true;
+  const geocodeCredits = createOrganizationGeocodeCredits({
+    api,
+    state,
+    prefix,
+    ownerKey: () => {
+      const c = r.context?.() || {};
+      return `${c.userId || c.actorUserId || ""}:${c.scopeType || "coalition"}:${c.scopeId || c.organizationId || ""}`;
+    },
+    busy: () => r.busy(),
+    selectedIds: () => [...state().includeIds],
+    selectionKey: () => selectionSpec(),
+    prepareSelection: async () => {
+      if (state().selection?.status !== "ready") await prepareSelection();
+      if (state().selection?.status !== "ready")
+        throw new Error(
+          "The complete selection is preparing. Review costs again once it is ready.",
+        );
+      return { selectionId: state().selection.selectionId };
+    },
+    afterMutation: async () => {
+      invalidateSelection();
+      await query({ refresh: true });
+    },
+    continueDestination: async (destination) => {
+      const selection = (
+        await api(
+          `/selections/${id(destination.refreshedSelectionId || destination.continuation?.selectionId)}`,
+        )
+      ).selection;
+      if (!selection || selection.status !== "ready")
+        throw new Error("The refreshed selection is not ready yet.");
+      if (!r.beginBallotTerritories)
+        throw new Error(
+          "Open this selection from Ballot Chaser to build territories.",
+        );
+      await r.beginBallotTerritories(selection);
+    },
+  });
   const b = (action, text, options = {}) =>
     button(`${prefix}-${action}`, text, { disabled: r.busy(), ...options });
   const formName = (suffix) => `${prefix}-${suffix}`;
@@ -207,6 +249,7 @@ export function createOrganizationContactBook(
   ];
   const invalidateSelection = () => {
     const s = state();
+    geocodeCredits.invalidateQuote();
     selectionProgress.reset();
     s.selection = null;
     s.selectionOperationId = null;
@@ -738,6 +781,11 @@ export function createOrganizationContactBook(
   }
   async function load({ selection } = {}) {
     await schema();
+    if (mode === "book") {
+      await geocodeCredits.load().catch(() => {});
+      if (new URLSearchParams(window.location.search).get("geocoding") === "1")
+        state().geocodeCredits.open = true;
+    }
     const s = state();
     if (!can("read")) return;
     s.views ||= [];
@@ -2216,6 +2264,35 @@ export function createOrganizationContactBook(
     const s = state(),
       file = s.file,
       generation = ++importScanGeneration;
+    if (
+      s.schema?.capabilities?.originalFileArchive &&
+      s.archivedFile !== file
+    ) {
+      originalUploadAbort?.abort();
+      originalUploadAbort = new AbortController();
+      s.originalFile = await archiveContactOriginal(file, {
+        api,
+        signal: originalUploadAbort.signal,
+        pending: s.pendingOriginal,
+        remember: (original) => {
+          s.pendingOriginal = original;
+        },
+        progress: (message) => {
+          s.originalProgress = message;
+          r.changed();
+        },
+        guard: () => {
+          r.guard();
+          if (
+            disposed ||
+            generation !== importScanGeneration ||
+            s.file !== file
+          )
+            throw new Error("File selection changed.");
+        },
+      });
+      s.archivedFile = file;
+    }
     return reviewContactFile(file, s.delimiter, s.encoding, {
       mapping: s.importDraft?.mapping || s.importPayload?.mapping,
       guessField,
@@ -2277,6 +2354,7 @@ export function createOrganizationContactBook(
     return renderContactImport({
       s: state(),
       canImport: can("import"),
+      canDownloadOriginal: can("manage") && can("export"),
       busy: r.busy(),
       b,
       details,
@@ -2373,7 +2451,7 @@ export function createOrganizationContactBook(
       return `<div class="pt-contact-book">${importPanel()}</div>`;
     const showingDetail = s.detail || s.detailNew;
     const main = `${mode === "book" ? `<div class="pt-cb-breadcrumb">Organization ${icon("right")} <span>Contact book</span></div><header class="pt-cb-heading"><div><h1>Contact book</h1><p>${s.query.ballotChase ? `${ballotViews[s.query.ballotChase.view] || "Outstanding"} · County report ${e(s.query.ballotChase.sourceAsOf ? ballotReportDate(s.query.ballotChase.sourceAsOf) : "published")}. Filters narrow this list.` : "Your people, together in one place."}</p></div><div class="pt-actions">${typeof r.openBallotChaser === "function" && can("ballotChaser") ? b("ballot-chaser", s.query.ballotChase ? "Ballot progress" : "GOTV / Ballot Chaser", { secondary: true }) : ""}${can("import") || can("edit") ? tool("overlay", "Add contacts", "plus", { value: "add", primary: true }) : ""}${tool("overlay", "More contact tools", "more", { value: "more", extra: 'aria-label="More contact tools"' })}</div></header>` : '<header class="pt-cb-heading"><div><h2>Choose campaign recipients</h2><p>Filter across your contact book, then select matching contacts or individual people.</p></div></header>'}${renderRows()}`;
-    return `<div class="pt-contact-book"><div${s.overlay || showingDetail ? ' inert aria-hidden="true"' : ""}>${main}</div>${showingDetail ? dialog(s.detailNew ? "Add a contact" : "Contact details", detail()) : overlayPanel()}</div>`;
+    return `<div class="pt-contact-book"><div${s.overlay || showingDetail ? ' inert aria-hidden="true"' : ""}>${mode === "book" ? geocodeCredits.render() : ""}${main}</div>${showingDetail ? dialog(s.detailNew ? "Add a contact" : "Contact details", detail()) : overlayPanel()}</div>`;
   }
   function normalizedSimpleFilters() {
     return Object.fromEntries(
@@ -2605,6 +2683,7 @@ export function createOrganizationContactBook(
   }
   async function submit(kind, form) {
     if (!kind.startsWith(`${prefix}-`)) return false;
+    if (await geocodeCredits.submit(kind, form)) return true;
     const s = state(),
       data = new FormData(form),
       operationId = uuid();
@@ -2866,6 +2945,9 @@ export function createOrganizationContactBook(
         ? s.importPayload
         : {
             name: data.get("name"),
+            ...(s.originalFile && s.archivedFile === s.file
+              ? { originalId: s.originalFile.id }
+              : {}),
             columns: s.filePreview.headers,
             mapping,
             sourceNamespace: data.get("sourceNamespace") || importNamespace(),
@@ -2884,6 +2966,37 @@ export function createOrganizationContactBook(
         );
       s.importOperationId ||= uuid();
       if (!s.importJob) {
+        if (s.originalFile && s.archivedFile === s.file) {
+          const verificationKey = JSON.stringify([
+            s.originalFile.id,
+            s.filePreview.headers,
+            s.delimiter,
+            s.encoding,
+          ]);
+          let verification;
+          if (s.originalVerificationKey !== verificationKey) {
+            verification = (
+              await api(`/import-originals/${id(s.originalFile.id)}/verify`, {
+                columns: s.filePreview.headers,
+                delimiter: s.delimiter || ",",
+                encoding: s.encoding || "utf-8",
+              })
+            ).verification;
+            s.originalVerificationKey = verificationKey;
+          } else
+            verification = (
+              await api(`/import-originals/${id(s.originalFile.id)}`)
+            ).original?.verification;
+          if (verification?.status !== "ready") {
+            s.originalProgress =
+              verification?.status === "review"
+                ? "Original file verification needs review. Choose the unchanged source file again."
+                : "Original file verification is processing. Retry Import contacts once verification finishes.";
+            throw new Error(s.originalProgress);
+          }
+          s.originalProgress =
+            "Original file verified and retained exclusively for your organization.";
+        }
         s.importPayload = payload;
         s.importJob = {
           ...(
@@ -3069,6 +3182,7 @@ export function createOrganizationContactBook(
   }
   async function action(name, value) {
     if (!name.startsWith(`${prefix}-`)) return false;
+    if (await geocodeCredits.action(name, value)) return true;
     const s = state(),
       op = name.slice(prefix.length + 1);
     if (localAction(name, value)) return true;
@@ -3086,7 +3200,10 @@ export function createOrganizationContactBook(
         throw new Error(
           "Wait for the complete contact selection before building territories.",
         );
-      await r.beginBallotTerritories(s.selection);
+      if (s.geocodeCredits?.status?.enabled) {
+        await geocodeCredits.review("territory_wizard");
+        s.overlay = null;
+      } else await r.beginBallotTerritories(s.selection);
     } else if (op === "refresh") await query({ refresh: true });
     else if (op === "page-size") {
       if (!contactPageSizes.includes(s.pageSize)) s.pageSize = 50;
@@ -3333,6 +3450,12 @@ export function createOrganizationContactBook(
       s.importCompleted = { rows, publication: completed.publication };
       await schema();
       await loadImports();
+    } else if (op === "original-download") {
+      const result = await api(`/import-originals/${id(value)}/download`, {});
+      const url = new URL(result.downloadUrl);
+      if (url.protocol !== "https:")
+        throw new Error("The original file download could not be verified.");
+      window.location.assign(url.href);
     } else if (op === "import-resume") {
       const job = (await api(`/imports/${id(value)}`)).import;
       if (job.status !== "open")
@@ -3705,6 +3828,7 @@ export function createOrganizationContactBook(
     return true;
   }
   function change(target) {
+    if (geocodeCredits.capture(target)) return false;
     const name = target.dataset.contactChange,
       s = state();
     if (

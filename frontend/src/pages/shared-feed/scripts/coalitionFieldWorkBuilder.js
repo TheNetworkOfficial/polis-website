@@ -164,7 +164,22 @@ export function createCoalitionFieldWorkBuilder({
     render();
   }
   function title() {
+    if (step === 4) return "Territories published";
     return editing ? "Edit territory boundary" : "New territory";
+  }
+  function handoffMarkup(state) {
+    const handoff = state.published?.fieldHandoff || state.fieldHandoff;
+    if (!handoff) return "";
+    const complete = ["complete", "complete_with_review"].includes(
+      handoff.status,
+    );
+    const message =
+      handoff.status === "complete"
+        ? "Operational field data is ready."
+        : handoff.status === "complete_with_review"
+          ? "Operational field data is prepared; some contacts need review."
+          : "Operational field data is still being prepared. The worker will continue after this window closes.";
+    return `<div class="note-box${complete ? "" : " warning"}" role="status"><strong>${e(message)}</strong><p>${Number(handoff.committed) || 0} records prepared · ${Number(handoff.review) || 0} need review · ${Number(handoff.excluded) || 0} excluded.</p>${action("Refresh field data status", "refresh-handoff")}</div>`;
   }
   function action(label, key, extra = "", primary = false) {
     return `<button type="button" class="${primary ? "primary-button" : "secondary-button"}" data-fwb-action="${key}"${model.state.busy ? " disabled" : ""} ${extra}>${label}</button>`;
@@ -177,11 +192,16 @@ export function createCoalitionFieldWorkBuilder({
     }
     const node = d(),
       state = model.state,
-      draft = state.draft;
+      draft = state.draft,
+      safetyExpanded = node.querySelector(".advanced-settings")?.open === true;
     if (canvas) canvas.remove();
     node.className = "create-dialog";
     node.setAttribute("aria-labelledby", "fw-builder-title");
     const busy = Boolean(state.busy || state.loading);
+    if (step === 4) {
+      node.innerHTML = `<header class="dialog-header"><h2 id="fw-builder-title">Territories published</h2></header><div class="dialog-body">${state.error ? `<p role="alert">${e(state.error)}</p>` : ""}${handoffMarkup(state)}</div><footer class="dialog-footer">${action("Done", "close", "", true)}</footer>`;
+      return;
+    }
     const steps = ["Choose an area", "Shape territories", "Review & publish"];
     let content;
     if (state.loading || !initialized)
@@ -194,6 +214,12 @@ export function createCoalitionFieldWorkBuilder({
     else
       content = `<ol class="builder-stepper">${steps.map((label, index) => `<li class="${index + 1 === step ? "is-active" : index + 1 < step ? "is-complete" : ""}"><em>${index + 1}</em><span>${label}</span></li>`).join("")}</ol>${state.error ? `<div class="note-box warning" role="alert">${e(state.error)}${state.conflict ? action("Reload saved plan", "reload") : ""}</div>` : ""}${step === 1 ? areaMarkup(state) : step === 2 ? shapeMarkup(state) : reviewMarkup(state)}${!sourceReady(state) ? `<div class="note-box warning" role="status"><strong>Address data is being prepared</strong><p>${e(state.source?.message || "You can keep editing your area or save the draft. Preview and publication become available when the current source is ready.")}</p>${action("Refresh addresses", "refresh-source")}</div>` : ""}${state.notice ? `<p role="status">${e(state.notice)}</p>` : ""}`;
     node.innerHTML = `<header class="dialog-header"><div><span class="eyebrow">Territory planning</span><h2 id="fw-builder-title">${e(title())}</h2><p>${editing ? "Update your saved field plan and review its assignments." : "Build a clear field plan from an area your coalition can manage."}</p></div><button type="button" class="icon-button" data-fwb-action="close" aria-label="Close ${e(title())}"${busy ? " disabled" : ""}>${closeIcon}</button></header><form data-fwb-form><div class="dialog-body">${formError ? `<p role="alert">${e(formError)}</p>` : ""}${content}</div><footer class="dialog-footer">${step === 1 ? action("Cancel", "close") : action("Back", "back")}${state.loaded && initialized && !initialError ? action("Save draft", "save") : ""}${!state.loaded || !initialized || initialError ? "" : `<button type="submit" class="primary-button"${busy || state.conflict || (step > 1 && !sourceReady(state)) || (step === 3 && Boolean(publishBlockReason(state))) ? " disabled" : ""}>${busy ? "Working…" : step === 1 ? "Continue" : step === 2 ? "Review plan" : "Publish territories"}</button>`}</footer></form>`;
+    if (safetyExpanded && node.querySelector(".advanced-settings"))
+      node.querySelector(".advanced-settings").open = true;
+    if (state.fieldHandoff)
+      node
+        .querySelector(".dialog-body")
+        ?.insertAdjacentHTML("afterbegin", handoffMarkup(state));
     if (busy)
       node.querySelectorAll("input,select,textarea").forEach((field) => {
         field.disabled = true;
@@ -453,9 +479,11 @@ export function createCoalitionFieldWorkBuilder({
     if (model.state.busy || node.disabled) return;
     const key = node.dataset.fwbAction;
     if (key === "close") {
+      const published = step === 4;
       d()?.close();
       close();
       onClose?.();
+      if (published) await onPublished?.();
     } else if (key === "back") {
       step = Math.max(1, step - 1);
       render();
@@ -470,6 +498,7 @@ export function createCoalitionFieldWorkBuilder({
       initialized = true;
       render();
     } else if (key === "refresh-source") await model.refreshSource();
+    else if (key === "refresh-handoff") await model.refreshFieldHandoff();
     else if (key === "generate") await generate();
     else if (key === "undo") model.undo();
     else if (key === "undo-point") {
@@ -614,6 +643,11 @@ export function createCoalitionFieldWorkBuilder({
           render();
         }
       } else if (await model.run("publish")) {
+        if (model.state.published?.fieldHandoff) {
+          step = 4;
+          render();
+          return;
+        }
         d()?.close();
         close();
         onClose?.();

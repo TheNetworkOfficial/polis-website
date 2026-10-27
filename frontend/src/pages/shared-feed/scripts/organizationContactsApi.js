@@ -1,3 +1,5 @@
+import { geocodeErrors, geocodeReadPost } from "./geocodeUi";
+
 const ordered = (value) =>
   Array.isArray(value)
     ? value.map(ordered)
@@ -123,7 +125,9 @@ export function createOrganizationContactsApi({
       throw new DOMException("Search cancelled", "AbortError");
     const verb = method || (body === undefined ? "GET" : "POST");
     if (
-      (verb !== "GET" && !["/query", "/import-preview"].includes(suffix)) ||
+      (verb !== "GET" &&
+        !["/query", "/import-preview"].includes(suffix) &&
+        !geocodeReadPost(suffix)) ||
       suffix === "/schema"
     )
       invalidate();
@@ -144,6 +148,7 @@ export function createOrganizationContactsApi({
       if (error?.name !== "AbortError") invalidate();
       const code = error?.payload?.error || error?.code || error?.message;
       const messages = {
+        ...geocodeErrors,
         contact_import_row_changed:
           "A previously saved record differs in this file. Reselect the original unchanged file to resume; the existing import remains saved.",
         contact_selection_duplicate_endpoints:

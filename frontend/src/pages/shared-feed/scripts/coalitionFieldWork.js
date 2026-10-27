@@ -110,6 +110,8 @@ export function createCoalitionFieldWork({
     listError: "",
     listLoading: false,
     points: [],
+    households: [],
+    householdNotice: "",
     clusters: [],
     mapLoading: false,
     mapError: "",
@@ -127,6 +129,7 @@ export function createCoalitionFieldWork({
     pending: "",
     notice: "",
     dialog: null,
+    builderEntryHandled: false,
     dialogError: "",
     manual: {},
     duplicate: null,
@@ -138,7 +141,7 @@ export function createCoalitionFieldWork({
   const current = () => context?.() || null;
   const identity = (c = current()) =>
     c?.userId && c?.coalitionId
-      ? `${c.userId}|${c.sessionKey || ""}|${c.coalitionId}`
+      ? `${c.userId}|${c.sessionKey || ""}|${c.coalitionId}|${c.contactSelectionId || ""}|${c.ballotChase?.snapshotId || ""}`
       : "";
   const endpoint = (suffix = "") =>
     `/api/coalitions/${encodeURIComponent(current().coalitionId)}${suffix}`;
@@ -344,6 +347,7 @@ export function createCoalitionFieldWork({
       ].join("|");
     if (state.routeSignature !== routeSignature) {
       state.routeSignature = routeSignature;
+      state.builderEntryHandled = false;
       if (c?.view && c.view !== "builder") state.view = c.view;
       if (c?.layout) state.layout = c.layout;
       if (state.loaded && c?.dataAction === "add")
@@ -359,9 +363,12 @@ export function createCoalitionFieldWork({
           if (
             state.key === identity() &&
             state.routeSignature === routeSignature &&
+            !state.builderEntryHandled &&
             canAuthor()
-          )
+          ) {
+            state.builderEntryHandled = true;
             void builder.open();
+          }
         });
     }
     return key;
@@ -536,8 +543,17 @@ export function createCoalitionFieldWork({
         state.loaded = true;
         if (current()?.dataAction === "add")
           setTimeout(() => dataDialog("add"), 0);
-        if (current()?.view === "builder" && canAuthor())
-          setTimeout(() => void builder.open(), 0);
+        if (
+          current()?.view === "builder" &&
+          canAuthor() &&
+          !state.builderEntryHandled
+        ) {
+          state.builderEntryHandled = true;
+          setTimeout(() => {
+            if (ticket === generation && current()?.view === "builder")
+              void builder.open();
+          }, 0);
+        }
       } catch (error) {
         if (error.stale) return;
         state.error = error.message || "Field work could not be loaded.";
@@ -676,6 +692,28 @@ export function createCoalitionFieldWork({
         .join(""),
     )}</span><span>${e(rosterLabel(id))}</span></span>`;
   }
+  function visibleHouseholds() {
+    if (state.outreach !== "all") return [];
+    const query = state.query.trim().toLowerCase();
+    return state.households.filter((row) => {
+      if (
+        query &&
+        !Object.values(row.address || {})
+          .join(" ")
+          .toLowerCase()
+          .includes(query)
+      )
+        return false;
+      if (state.area === "all") return true;
+      return state.territories.some(
+        (territory) =>
+          (state.area === "mine"
+            ? myIds().includes(territory.territoryId)
+            : territory.territoryId === state.area) &&
+          fieldInTerritory(row, territory),
+      );
+    });
+  }
   function results() {
     const records =
       state.layout === "map"
@@ -729,7 +767,7 @@ export function createCoalitionFieldWork({
     void mountMiniMaps();
   }
   function mapMarkup() {
-    return `<section class="panel">${header("Your field map", "Find voters, plan territories, and give your team a clear place to start.", `<div class="view-toggle" role="group" aria-label="Voter view">${["map", "list"].map((layout) => `<button type="button" data-fw-action="layout" data-layout="${layout}" aria-pressed="${state.layout === layout}">${icon(layout)}${layout === "map" ? "Map" : "List"}</button>`).join("")}</div>`)}<div class="field-toolbar"><label class="field search-field"><span>Find a voter or address</span><div class="search-input">${icon("search")}<input type="search" data-fw-search value="${e(state.query)}" placeholder="Search name or street" /></div></label><label class="field"><span>Territory</span><select data-fw-area><option value="all"${state.area === "all" ? " selected" : ""}>All accessible areas</option><option value="mine"${state.area === "mine" ? " selected" : ""}>My assigned areas</option>${state.territories.map((t) => `<option value="${e(t.territoryId)}"${state.area === t.territoryId ? " selected" : ""}>${e(t.name)}</option>`).join("")}</select></label><label class="field"><span>Outreach status</span><select data-fw-outreach>${[["all", "All outreach"], ...Object.entries(fieldStatusLabels).filter(([key]) => key !== "unknown")].map(([key, label]) => `<option value="${key}"${state.outreach === key ? " selected" : ""}>${label}</option>`).join("")}</select></label></div><div class="field-toolbar-summary"><span data-fw-count></span><div class="note-actions">${isAdmin() ? '<button type="button" class="text-button" data-fw-action="manage-data">Manage voter data</button>' : ""}<button type="button" class="text-button" data-fw-action="clear-filters">Clear filters</button></div></div>${readinessNotice()}<div data-fw-results></div><footer class="field-context"><p>${icon("calendar")} <strong>${e(state.progress?.round?.label || state.progress?.round?.name || "Coalition field calendar")}</strong>${state.progress?.round?.startsAt ? ` · ${date(state.progress.round.startsAt)}` : ""}</p><button type="button" class="text-button" data-fw-action="destination" data-destination="calendar">Open in Calendar ${icon("arrow")}</button></footer></section>`;
+    return `<section class="panel">${header("Your field map", "Find voters, plan territories, and give your team a clear place to start.", `<div class="view-toggle" role="group" aria-label="Voter view">${["map", "list"].map((layout) => `<button type="button" data-fw-action="layout" data-layout="${layout}" aria-pressed="${state.layout === layout}">${icon(layout)}${layout === "map" ? "Map" : "List"}</button>`).join("")}</div>`)}<div class="field-toolbar"><label class="field search-field"><span>Find a voter or address</span><div class="search-input">${icon("search")}<input type="search" data-fw-search value="${e(state.query)}" placeholder="Search name or street" /></div></label><label class="field"><span>Territory</span><select data-fw-area><option value="all"${state.area === "all" ? " selected" : ""}>All accessible areas</option><option value="mine"${state.area === "mine" ? " selected" : ""}>My assigned areas</option>${state.territories.map((t) => `<option value="${e(t.territoryId)}"${state.area === t.territoryId ? " selected" : ""}>${e(t.name)}</option>`).join("")}</select></label><label class="field"><span>Outreach status</span><select data-fw-outreach>${[["all", "All outreach"], ...Object.entries(fieldStatusLabels).filter(([key]) => key !== "unknown")].map(([key, label]) => `<option value="${key}"${state.outreach === key ? " selected" : ""}>${label}</option>`).join("")}</select></label></div><div class="field-toolbar-summary"><span data-fw-count></span><div class="note-actions"><button type="button" class="text-button" data-fw-action="retry-households" data-fw-household-retry hidden>Refresh household addresses</button><button type="button" class="text-button" data-fw-action="geocode-credits">Geocode credits</button>${isAdmin() ? '<button type="button" class="text-button" data-fw-action="manage-data">Manage voter data</button>' : ""}<button type="button" class="text-button" data-fw-action="clear-filters">Clear filters</button></div></div>${readinessNotice()}<div data-fw-results></div><footer class="field-context"><p>${icon("calendar")} <strong>${e(state.progress?.round?.label || state.progress?.round?.name || "Coalition field calendar")}</strong>${state.progress?.round?.startsAt ? ` · ${date(state.progress.round.startsAt)}` : ""}</p><button type="button" class="text-button" data-fw-action="destination" data-destination="calendar">Open in Calendar ${icon("arrow")}</button></footer></section>`;
   }
   function readinessNotice() {
     const access = state.progress?.access;
@@ -758,6 +796,16 @@ export function createCoalitionFieldWork({
     const records = results();
     q("[data-fw-count]").textContent =
       `${records.length.toLocaleString()} loaded voter record${records.length === 1 ? "" : "s"} in this view${state.mapPartial ? " · Partial map results: zoom in for more detail" : ""}`;
+    if (state.layout === "map" && state.households.length)
+      q("[data-fw-count]").textContent +=
+        ` · ${visibleHouseholds().length} household addresses`;
+    if (visibleHouseholds().length > 200)
+      q("[data-fw-count]").textContent +=
+        " - Showing 200 household pins; zoom in for more detail";
+    if (state.householdNotice)
+      q("[data-fw-count]").textContent += ` · ${state.householdNotice}`;
+    const householdRetry = q("[data-fw-household-retry]");
+    if (householdRetry) householdRetry.hidden = !state.householdNotice;
     if (mapCanvas) mapCanvas.remove();
     if (state.layout === "list")
       target.innerHTML = `${state.listError ? errorBox(state.listError, "retry-voters") : ""}${records.length ? `<table class="field-table"><thead><tr><th>Voter</th><th>Outreach</th><th>Area</th><th><span class="sr-only">Details</span></th></tr></thead><tbody>${records.map((row) => `<tr><td><button type="button" class="text-button" data-fw-action="voter" data-id="${e(row.recordId)}"><strong>${e(row.name)}</strong><small>${e(row.addressLine1)}</small></button></td><td data-label="Outreach">${badge(fieldStatusLabels[row.status], row.status)}</td><td data-label="Area">${e(state.territories.find((t) => fieldInTerritory(row, t))?.name || row.city || "Unmapped")}</td><td>${button(icon("arrow"), "voter", `data-id="${e(row.recordId)}" aria-label="View ${e(row.name)}"`)}</td></tr>`).join("")}</tbody></table>` : state.listLoading ? empty("Loading voter records", "Checking the current filters.") : state.listError ? "" : empty("No matching voters", "Try another name, street, territory, or outreach filter.", button("Clear filters", "clear-filters"))}<footer class="field-context"><p>${state.nextCursor ? "More records are available. Area and outreach filters apply to the records loaded so far." : "Showing all returned records for the current search."}</p>${state.nextCursor ? button(state.listLoading ? "Loading…" : "Load more voters", "load-more", state.listLoading ? "disabled" : "") : ""}</footer>`;
@@ -773,6 +821,18 @@ export function createCoalitionFieldWork({
           "",
         )}</div><div class="field-map-message" data-fw-map-message hidden></div></div></div><aside class="map-side-list" aria-label="Voters in this view"><div class="map-side-heading"><div><h3>Voters in this view</h3><p>${records.length} loaded records · Select for details</p></div><button type="button" class="icon-button" aria-label="Show voter list" data-fw-action="layout" data-layout="list">${icon("list")}</button></div>${state.listError ? errorBox("Voter records could not be loaded. " + state.listError, "retry-voters") : ""}${state.mapDataError ? errorBox("Map records could not be loaded. " + state.mapDataError, "retry-map") : records.map(recordButton).join("") || empty(state.mapLoading ? "Loading map records" : "No voters in this view", state.mapLoading ? "Retrieving the current map area." : "Move the map, clear filters, or switch to the voter list.", button("Clear filters", "clear-filters"))}</aside></div>`;
     if (state.layout === "map") {
+      const side = q(".map-side-list");
+      if (side && visibleHouseholds().length) {
+        side.insertAdjacentHTML(
+          "beforeend",
+          `<div class="map-side-heading"><h3>Household addresses</h3></div>${visibleHouseholds()
+            .map(
+              (row) =>
+                `<button type="button" class="field-record-button" data-fw-action="destination" data-destination="contacts" data-contact-id="${e(row.contactId)}"><strong>${e(row.address?.addressLine1 || "Household address")}</strong><small>${e(row.address?.city || "")}${row.reviewRequired ? " · Address needs review" : ""}</small></button>`,
+            )
+            .join("")}`,
+        );
+      }
       mountMap();
       renderMapMessage();
       updateMapMarkers();
@@ -1068,6 +1128,7 @@ export function createCoalitionFieldWork({
     if (bbox[2] - bbox[0] > 8 || bbox[3] - bbox[1] > 8) {
       state.mapMessage = "Zoom in to load voters in this area.";
       state.points = [];
+      state.households = [];
       state.clusters = [];
       renderMapMessage();
       renderResults();
@@ -1087,6 +1148,42 @@ export function createCoalitionFieldWork({
       const payload = await call(endpoint(`/voter-map/query?${params}`));
       guard(ticket);
       if (queryKey !== state.mapRequestVersion) return;
+      state.households = [];
+      state.householdNotice = "";
+      try {
+        const householdPayload = await call(
+          `/api/contact-book/scopes/${encodeURIComponent(`coalition:${current().coalitionId}`)}/household-map`,
+          {
+            method: "POST",
+            body: {
+              bounds: {
+                west: bbox[0],
+                south: bbox[1],
+                east: bbox[2],
+                north: bbox[3],
+              },
+            },
+          },
+        );
+        guard(ticket);
+        if (queryKey !== state.mapRequestVersion) return;
+        state.householdNotice =
+          householdPayload.complete === false || householdPayload.zoomRequired
+            ? "Household address results are partial. Zoom in for more detail."
+            : "";
+        state.households = rows(householdPayload, ["markers"]).filter(
+          (row) => row.kind === "household" && fieldPoint(row),
+        );
+      } catch (error) {
+        if (error.stale) throw error;
+        // The separately deployed household capability may not yet be enabled.
+        // Never retain old markers after a failed current-access query.
+        if (ticket === generation && queryKey === state.mapRequestVersion) {
+          state.households = [];
+          state.householdNotice =
+            "Household addresses could not be loaded. Retry the map.";
+        }
+      }
       state.mapDataError = "";
       state.points = rows(payload, ["points", "items", "records"]).filter(
         (row) => row.kind !== "cluster" && row.recordId && fieldPoint(row),
@@ -1136,6 +1233,34 @@ export function createCoalitionFieldWork({
     markers.forEach((marker) => marker.remove());
     markers = [];
     map.getSource?.("field-territories")?.setData(mapData());
+    visibleHouseholds()
+      .slice(0, 200)
+      .forEach((row) => {
+        const node = document.createElement("button");
+        node.type = "button";
+        node.className = "field-household-marker";
+        node.textContent = "⌂";
+        node.setAttribute(
+          "aria-label",
+          `Household: ${row.address?.addressLine1 || "address"}${row.reviewRequired ? ", needs review" : ""}`,
+        );
+        node.addEventListener("click", (event) => {
+          event.stopPropagation();
+          navigate(
+            `/workspace/coalition/${encodeURIComponent(current().coalitionId)}/people/contacts?contactId=${encodeURIComponent(row.contactId)}`,
+          );
+        });
+        markers.push(
+          new mapLibrary.Marker({ element: node })
+            .setLngLat([row.lng, row.lat])
+            .addTo(map),
+        );
+        node.setAttribute("role", "button");
+        node.setAttribute(
+          "aria-label",
+          `Household: ${row.address?.addressLine1 || "address"}${row.reviewRequired ? ", needs review" : ""}`,
+        );
+      });
     state.territories.forEach((row) => {
       const bounds = fieldBounds([row]);
       if (!bounds) return;
@@ -1673,6 +1798,8 @@ export function createCoalitionFieldWork({
       render();
       if (state.dialog === "assignment")
         assignmentDialog(state.assignmentTerritoryId);
+    } else if (action === "retry-households") {
+      await queryMap(true);
     } else if (action === "retry-map") {
       state.mapError = "";
       state.mapQuerySignature = "";
@@ -1729,6 +1856,10 @@ export function createCoalitionFieldWork({
           renderVoterDialog();
         }
       }
+    } else if (action === "geocode-credits") {
+      navigate(
+        `/workspace/coalition/${encodeURIComponent(current().coalitionId)}/people/contacts?geocoding=1`,
+      );
     } else if (action === "destination") {
       const base = `/coalitions/${encodeURIComponent(current().coalitionId)}`,
         destination = node.dataset.destination;
@@ -1824,6 +1955,12 @@ export function createCoalitionFieldWork({
             scopeType: "coalition",
             scopeId: current().coalitionId,
             sessionKey: current().sessionKey,
+            ...(current().contactSelectionId && current().ballotChase
+              ? {
+                  contactSelectionId: current().contactSelectionId,
+                  ballotChase: current().ballotChase,
+                }
+              : {}),
           }
         : null,
     request: call,
@@ -1836,6 +1973,7 @@ export function createCoalitionFieldWork({
       state.dialog = null;
     },
     onPublished: async () => {
+      state.view = "territories";
       await load({ refresh: true });
       notice("Territories published.");
     },

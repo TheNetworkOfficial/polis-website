@@ -131,6 +131,7 @@ export function createTerritoryBuilder({
       <nav class="tb-steps" aria-label="Territory setup" data-tb-steps></nav>
       <div class="tb-filters" role="group" aria-label="Address exclusions" data-tb-filters></div>
       <div class="tb-alert" role="alert" data-tb-error hidden></div>
+      <div class="tb-alert" role="status" data-tb-handoff hidden></div>
       <div class="tb-workspace"><div class="tb-map-wrap"><div class="tb-map" data-tb-map aria-label="Territory planning map"></div><div class="tb-map-top"><span data-tb-map-title></span>${button("fit", icon("fit"), { title: "Fit map" })}</div><div class="tb-map-tools" data-tb-tools></div><div class="tb-map-hint" role="status" data-tb-hint></div><div class="tb-map-bottom"><span>● Address locations</span><div>${button("zoom-out", "−", { title: "Zoom out" })}${button("zoom-in", "+", { title: "Zoom in" })}</div></div></div>
       <aside class="tb-panel" aria-label="Territory controls" data-tb-panel></aside></div>
       <footer class="tb-footer"><div data-tb-status role="status" aria-live="polite"></div><div data-tb-next></div></footer>
@@ -219,6 +220,11 @@ export function createTerritoryBuilder({
         : s.bootstrap?.published
           ? "Published"
           : "Draft";
+    const handoff = s.published?.fieldHandoff || s.fieldHandoff;
+    q("[data-tb-handoff]").hidden = !handoff || Boolean(s.published);
+    q("[data-tb-handoff]").innerHTML = handoff
+      ? `${handoff.status === "complete" ? "Operational field data is ready." : handoff.status === "complete_with_review" ? `Field data preparation finished; ${e(handoff.review || 0)} contacts need review.` : `Operational field data: ${e(handoff.status || "preparing")}.`}${!["complete", "complete_with_review"].includes(handoff.status) ? button("field-handoff", "Refresh field data status") : ""}`
+      : "";
     q("[data-tb-save]").innerHTML = button(
       "save",
       s.busy === "draft" ? "Saving…" : "Save draft",
@@ -387,7 +393,8 @@ export function createTerritoryBuilder({
     return `<span class="tb-eyebrow">Put names on the map</span><h3>Who’s taking each area?</h3><p>Choose from people with map clearance.</p>${!s.bootstrap.staff.length ? '<p class="tb-subtle">No eligible people are available yet.</p>' : ""}<div class="tb-territories">${territoryRows(s, true)}</div>${button("assign-available", `${icon("users")}Assign available people`, { disabled: !s.bootstrap.staff.length })}<hr class="tb-rule"><div class="tb-small-row"><span>Starts</span>${button("schedule", `${e(start)} ⌄`)}</div><div class="tb-small-row"><span>Access</span><span>Assigned area only</span></div>${button("team-access", "View team clearance →")}`;
   }
   function publishedPanel(s) {
-    return `<h3>Territories are ready</h3><p>Your published boundaries and staff assignments are saved.</p><div class="tb-stat"><strong>${s.draft.territories.length}</strong><span>territories published</span></div>${button("back", "Return to voter map", { primary: true })}`;
+    const handoff = s.published.fieldHandoff;
+    return `<h3>Territories are published</h3><p>Your published boundaries and staff assignments are saved.</p>${handoff ? `<p role="status">${handoff.status === "complete" ? "Operational field data is ready." : handoff.status === "complete_with_review" ? `Field data preparation finished; ${e(handoff.review || 0)} contacts need review.` : `Operational field data: ${e(handoff.status || "preparing")}. Contact data is still being prepared.`}</p>${!["complete", "complete_with_review"].includes(handoff.status) ? button("field-handoff", "Refresh field data status") : ""}` : ""}<div class="tb-stat"><strong>${s.draft.territories.length}</strong><span>territories published</span></div>${button("back", "Return to voter map", { primary: true })}`;
   }
   function renderReview() {
     const s = model.state;
@@ -694,6 +701,10 @@ export function createTerritoryBuilder({
         reviewOpen = false;
         render();
       }
+      return;
+    }
+    if (action === "field-handoff") {
+      await model.refreshFieldHandoff();
       return;
     }
     if (action === "area" || action === "boundary") {
