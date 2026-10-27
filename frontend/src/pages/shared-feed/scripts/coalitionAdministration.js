@@ -1289,6 +1289,7 @@ export function createCoalitionAdministration({
     generation++;
     loadSequence++;
     flight = null;
+    state.scriptsLoading = false;
     if (state.writeIntent?.dispatched)
       state.uncertainties[state.writeIntent.kind] = state.writeIntent;
     state.writeIntent = null;

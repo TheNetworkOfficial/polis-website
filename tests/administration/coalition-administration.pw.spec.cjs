@@ -1291,3 +1291,121 @@ test("browser Back and Forward protect unsaved drafts and a pending save without
   expect(profileWrites(fixture)).toHaveLength(1);
   expect(fixture.profileApplications).toHaveLength(1);
 });
+
+test("same-actor credential renewal replaces a pending outreach read and keeps late responses from trapping or rolling back templates", async ({
+  page,
+}) => {
+  const fixture = await enter(page);
+  const gates = [];
+  const gate = () => {
+    const pending = deferred();
+    gates.push(pending);
+    return pending;
+  };
+  const templateReads = () =>
+    fixture.requests.filter(
+      (row) => row.path.endsWith("/outreach-templates") && row.method === "GET",
+    ).length;
+  const lateResponse = (title) =>
+    page.waitForResponse(
+      async (response) =>
+        response.url().endsWith("/outreach-templates") &&
+        (await response.json()).templates?.phoneCall?.title === title,
+    );
+  const settle = () =>
+    page.evaluate(
+      () =>
+        new Promise((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(resolve)),
+        ),
+    );
+  try {
+    await field(page, "name").fill("Profile survives pending outreach renewal");
+    const original = gate();
+    fixture.nextScriptReadGate = original.promise;
+    await action(page, "tab", '[data-tab="outreach"]').click();
+    await expect(app(page)).toContainText("Loading outreach templates");
+    await expect.poll(templateReads).toBe(1);
+    fixture.templates[COALITION_ID].phoneCall.title =
+      "Replacement response after renewal";
+    const replacement = gate();
+    fixture.nextScriptReadGate = replacement.promise;
+    await rotateSession(page, fixture, {
+      actor: "alex",
+      role: "admin",
+      version: "renewed-during-initial-outreach-read",
+    });
+    await expect.poll(templateReads).toBe(2);
+    replacement.resolve();
+    await expect(field(page, "scriptTitle")).toHaveValue(
+      "Replacement response after renewal",
+    );
+    await expect(field(page, "scriptTitle")).toBeEnabled();
+    const oldInitial = lateResponse("Community conversation");
+    original.resolve();
+    await (await oldInitial).finished();
+    await settle();
+    await expect(field(page, "scriptTitle")).toHaveValue(
+      "Replacement response after renewal",
+    );
+    await expect(
+      app(page).getByRole("heading", {
+        name: "Loading outreach templates",
+        exact: true,
+      }),
+    ).toHaveCount(0);
+
+    fixture.templates[COALITION_ID].phoneCall.title =
+      "Explicit reload remains usable";
+    await action(page, "refresh-scripts").click();
+    await expect(field(page, "scriptTitle")).toHaveValue(
+      "Explicit reload remains usable",
+    );
+    await field(page, "scriptTitle").fill(
+      "Keep the already loaded outreach draft",
+    );
+    const olderRefresh = gate();
+    fixture.nextScriptReadGate = olderRefresh.promise;
+    const beforeRefresh = templateReads();
+    await page.clock.setFixedTime(FIXED_TIME + 2000);
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect.poll(templateReads).toBe(beforeRefresh + 1);
+    await rotateSession(page, fixture, {
+      actor: "alex",
+      role: "admin",
+      version: "renewed-during-dirty-outreach-refresh",
+    });
+    await expect.poll(templateReads).toBe(beforeRefresh + 2);
+    await expect(field(page, "scriptTitle")).toHaveValue(
+      "Keep the already loaded outreach draft",
+    );
+    const oldRefresh = lateResponse("Explicit reload remains usable");
+    olderRefresh.resolve();
+    await (await oldRefresh).finished();
+    await settle();
+    await expect(field(page, "scriptTitle")).toHaveValue(
+      "Keep the already loaded outreach draft",
+    );
+    await expect(field(page, "scriptTitle")).toBeEnabled();
+    fixture.templates[COALITION_ID].phoneCall.title =
+      "Latest shared template after another reload";
+    await action(page, "refresh-scripts").click();
+    await expect(dialog(page)).toContainText("Reload saved templates?");
+    await action(page, "close-dialog").first().click();
+    await expect(field(page, "scriptTitle")).toHaveValue(
+      "Keep the already loaded outreach draft",
+    );
+    await action(page, "refresh-scripts").click();
+    await action(page, "confirm-action").click();
+    await expect(field(page, "scriptTitle")).toHaveValue(
+      "Latest shared template after another reload",
+    );
+    await tab(page, "profile");
+    await expect(field(page, "name")).toHaveValue(
+      "Profile survives pending outreach renewal",
+    );
+    expect(fixture.writes).toEqual([]);
+  } finally {
+    for (const pending of gates) pending.resolve();
+  }
+});
