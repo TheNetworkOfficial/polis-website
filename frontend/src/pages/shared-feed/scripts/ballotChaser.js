@@ -32,6 +32,8 @@ import {
 import {
   ballotStatuses,
   ballotImportStatus,
+  ballotImportPhase,
+  unfinishedBallotUpload,
   ballotPreparationMessage,
   ballotImportControls,
   ballotAddCountyField,
@@ -129,6 +131,7 @@ export function createBallotChaser({
     },
     guard,
     changed,
+    beforeIdExport: async () => !(await resumeUnfinishedUpload()),
     context: () => {
       const limits = ballotPreparationCapacity(
         view.preparationAvailability,
@@ -285,6 +288,7 @@ export function createBallotChaser({
     preparation.reset();
     view.resumePreparedImport = null;
     view.preparationMode = null;
+    view.uploadOperationId = null;
     exports.reset();
     clearTimeout(timer);
     contacts?.dispose?.();
@@ -309,6 +313,85 @@ export function createBallotChaser({
     view.dashboard = results[0].dashboard;
     view.imports = list(results[1].items);
     view.importCursor = results[1].nextCursor;
+    view.pendingUpload = view.imports.find(uploadUnfinished) || null;
+  }
+  const uploadUnfinished = (job) =>
+    unfinishedBallotUpload(
+      job,
+      view.election?.preparationPolicy?.maxAgeMs || 86400000,
+    );
+
+  function revealReviewStep() {
+    const key = view.key,
+      version = sequence;
+    if (typeof requestAnimationFrame !== "function") return;
+    requestAnimationFrame(() => {
+      if (!current() || key !== view.key || version !== sequence) return;
+      const step = document.querySelector?.("[data-ballot-review-step]");
+      if (owned(step)) {
+        step.scrollIntoView?.({ block: "start" });
+        step.focus?.({ preventScroll: true });
+      }
+    });
+  }
+
+  async function openExistingUpload(job) {
+    if (job.electionId && job.electionId !== view.electionId)
+      await selectElection(job.electionId);
+    const sameReview =
+      view.job?.importId === job.importId &&
+      view.job.status === "awaiting_mapping" &&
+      job.status === "awaiting_mapping";
+    preparation.reset();
+    view.resumePreparedImport = null;
+    view.preparationMode = null;
+    view.showUpload = false;
+    view.uploadOperationId = null;
+    view.showContacts = false;
+    view.showDoor = false;
+    view.configuration = null;
+    view.rows = null;
+    view.editingMapping = false;
+    if (!sameReview) view.mappingDraft = {};
+    trackJob(job);
+    if (job.status === "awaiting_mapping") revealReviewStep();
+  }
+
+  /** Read scope-wide pages before admitting costly work; never restart the saved job. */
+  async function resumeUnfinishedUpload() {
+    if (!boundedElection() || !can("import")) return false;
+    const resumeId = view.resumePreparedImport?.importId;
+    const canResumeSource = (job) =>
+      job.importId === resumeId && job.status === "uploading";
+    let cursor;
+    const seen = new Set();
+    for (let page = 0; page < 20; page++) {
+      const result = await call(
+        `/imports${cursor ? `?cursor=${id(cursor)}` : ""}`,
+      );
+      for (const summary of list(result.items)) {
+        view.imports = list(view.imports).map((saved) =>
+          saved.importId === summary.importId
+            ? { ...saved, ...summary }
+            : saved,
+        );
+        if (!uploadUnfinished(summary)) continue;
+        const job = (await call(`/imports/${id(summary.importId)}`)).import;
+        if (!uploadUnfinished(job) || canResumeSource(job)) continue;
+        await openExistingUpload(job);
+        return true;
+      }
+      cursor = result.nextCursor;
+      if (!cursor) {
+        view.pendingUpload = null;
+        return false;
+      }
+      if (seen.has(cursor)) break;
+      seen.add(cursor);
+    }
+    throw new Error(
+      "The upload history could not be fully checked. Refresh Ballot Chaser before starting another file.",
+    );
   }
   async function refreshPreparationAccess() {
     const electionId = view.electionId,
@@ -353,6 +436,22 @@ export function createBallotChaser({
       if (
         current() &&
         version === sequence &&
+        boundedElection() &&
+        (error?.payload?.error || error?.code) ===
+          "ballot_preparation_job_active"
+      ) {
+        try {
+          if (await resumeUnfinishedUpload()) return;
+        } catch (recoveryError) {
+          if (current() && version === sequence)
+            view.error =
+              ballotPreparationMessage(recoveryError) || recoveryError.message;
+          return;
+        }
+      }
+      if (
+        current() &&
+        version === sequence &&
         (error?.payload?.error || error?.code) ===
           "ballot_preparation_work_limit" &&
         view.job &&
@@ -385,7 +484,18 @@ export function createBallotChaser({
     }
   }
   function trackJob(job) {
+    const needsFocus =
+      job?.status === "awaiting_mapping" &&
+      (view.job?.importId !== job.importId ||
+        view.job.status !== "awaiting_mapping");
     view.job = job;
+    view.imports = list(view.imports).map((saved) =>
+      saved.importId === job?.importId ? { ...saved, ...job } : saved,
+    );
+    if (uploadUnfinished(job)) view.pendingUpload = job;
+    else if (view.pendingUpload?.importId === job?.importId)
+      view.pendingUpload = null;
+    if (needsFocus) revealReviewStep();
     const generation = ++jobGeneration;
     clearTimeout(timer);
     if (stages.has(job?.status)) {
@@ -595,6 +705,32 @@ export function createBallotChaser({
     if (!sentUpdatesAllowed()) return "";
     return `<section aria-label="County file uploads"><h3>Choose a county file</h3><p>Have both files? Add sent ballots first, then match returned ballots.</p><div class="pt-fields"><article class="pt-card"><h4>Sent ballots — EV32</h4><p>Add new CD8 IND/PND voters from a county sent-ballot file. County code <strong>S</strong> means sent.</p>${b("sent-open", "Upload sent-ballot file")}</article><article class="pt-card"><h4>Returned ballots — EV33</h4><p>Match received ballots to voters already on this list. County code <strong>R</strong> means received; <strong>X</strong> means voided.</p>${b("upload-open", "Upload returned-ballot file")}</article></div></section>`;
   }
+  function pendingUploadNotice() {
+    const job = view.pendingUpload;
+    if (!boundedElection() || !can("import") || !uploadUnfinished(job))
+      return "";
+    const waiting = job.status === "awaiting_mapping";
+    const ready =
+      job.status === "review_ready" && !Number(job.counts?.conflicts);
+    const title = waiting
+      ? "Your uploaded file is waiting for column review"
+      : ready
+        ? "Your county update is ready to apply"
+        : stages.has(job.status)
+          ? "Your county-file update is processing"
+          : "Your county-file upload needs attention";
+    const next = waiting
+      ? "Continue with the file already uploaded. Review its columns; do not upload it again."
+      : ready
+        ? "Review the results, then choose Apply reviewed county update."
+        : "Open the existing update to see its current status and next action.";
+    const open =
+      view.job?.importId === job.importId &&
+      !view.configuration &&
+      !view.showDoor &&
+      !view.showContacts;
+    return `<section class="pt-card" role="status"><h2>${e(title)}</h2><p>${e(next)}</p>${open ? "" : b("job", waiting ? "Resume review" : ready ? "Review update" : "Open existing update", job.importId)}</section>`;
+  }
   function dashboard() {
     const d = view.dashboard || {};
     const stat = (title, value, detail = "") =>
@@ -686,7 +822,7 @@ export function createBallotChaser({
           : meaning === "returned"
             ? "Voter ID"
             : profile.voterIdColumn || "";
-      return `<form class="pt-card" data-ballot-form="mapping"><h2>Review prepared county report</h2><p>${count(headers.length)} county columns are retained in the report. This workflow does not create Contact Book people.</p>${select("voterIdColumn", "Official voter ID column", choices, voterIdColumn, true)}<input type="hidden" name="rowStatusMeans" value="${meaning}"><p>Every selected row means <strong>${meaning === "returned" ? "Returned" : "Issued"}</strong>. ${job.preparation?.mode === "sent" ? "Only new voters are added; existing voters and prior returns remain unchanged." : "Missing voters keep their earlier status."} Review the official report date and the complete-file results before applying.</p><button class="pt-btn" type="submit"${view.busy ? " disabled" : ""}>Review this report</button></form>`;
+      return `<form class="pt-card" data-ballot-form="mapping" data-ballot-review-step tabindex="-1"><h2>Review prepared county report</h2><p>Next: confirm the official voter ID column, then choose <strong>Review this report</strong>. Applying the update is a separate confirmation.</p>${select("voterIdColumn", "Official voter ID column", choices, voterIdColumn, true)}<input type="hidden" name="rowStatusMeans" value="${meaning}"><div class="pt-actions"><button class="pt-btn" type="submit"${view.busy ? " disabled" : ""}>Review this report</button></div><p>${count(headers.length)} county columns are retained in the report. This workflow does not create Contact Book people.</p><p>Every selected row means <strong>${meaning === "returned" ? "Returned" : "Issued"}</strong>. ${job.preparation?.mode === "sent" ? "Only new voters are added; existing voters and prior returns remain unchanged." : "Missing voters keep their earlier status."} Review the official report date and the complete-file results before applying.</p></form>`;
     }
     const sampleRows = list(job.sampleRows);
     const rawStatuses = [
@@ -769,6 +905,10 @@ export function createBallotChaser({
     if (!job) return view.showUpload ? uploadForm() : "";
     const c = job.counts || {},
       controls = ballotImportControls(job, view.editingMapping);
+    const phase = boundedElection()
+      ? ballotImportPhase(job)
+      : ballotImportStatus(job.status);
+    const detail = ballotImportStatus(job.status);
     const importError = job.boundedHeld
       ? ballotPreparationMessage(job.reason || job.error) ||
         "This update is held for an organization administrator's review. The last published list remains available."
@@ -776,10 +916,10 @@ export function createBallotChaser({
         (boundedElection() && job.error
           ? "This county report needs an organization administrator's review. The last published list remains available."
           : job.error);
-    return `<section class="pt-card"><h2>${e(job.fileName || "County report")}</h2><p role="status">${e(ballotImportStatus(job.status))}${job.sourceAsOf ? ` · ${e(reportDate(job.sourceAsOf))}` : ""}</p><p>${count(c.rows)} records · ${count(view.election?.storageMode === "register" ? (c.newVoters ?? c.newContacts) : c.newContacts)} ${view.election?.storageMode === "register" ? "records added" : "new people"} · ${count(view.election?.storageMode === "register" ? (c.updatedVoters ?? c.updatedContacts) : c.updatedContacts)} updated · ${count(c.unchanged)} unchanged · ${count(c.duplicateRows)} repeated records · ${count(c.conflicts)} need review</p>${job.processingPhase && !job.boundedHeld ? `<p role="status">${e({ preparing_previous: "Preparing your previous list", partitioning: "Reading your file", comparing: "Comparing county updates", applying: "Publishing results" }[job.processingPhase] || "Processing your file")}${Number.isSafeInteger(job.totalRows) ? ` · ${count(job[{ partitioning: "partitionedRows", comparing: "stagedRows", applying: "appliedRows", preparing_previous: "preparedPreviousRows" }[job.processingPhase]])} of ${count(job.totalRows)} rows` : ""}</p>` : ""}${importError ? notice(job.boundedHeld ? "Update held for review" : "Update needs attention", importError) : ""}<div class="pt-actions">${controls.advance ? b("advance", "Continue / retry update", "", true, !can("import")) : ""}${b("job-refresh", "Check progress", "", true, view.editingMapping)}${b("rows", "Review record outcomes", "", true)}${controls.apply ? b("apply", "Apply reviewed county update", "", false, !can("import") || Number(c.conflicts) > 0) : ""}${controls.remap && can("import") ? b("mapping-edit", "Edit mapping", "", true) : ""}${view.editingMapping && !job.boundedHeld ? b("mapping-cancel", "Cancel mapping changes", "", true) : ""}${b("job-close", "Back to dashboard", "", true)}${job.status === "uploading" && boundedElection() ? b("prepare-resume", "Prepare the original county file to resume", "", true) : ""}</div>${job.status === "uploading" && !boundedElection() ? `<form data-ballot-form="resume"><label class="pt-field"><span>Original spreadsheet</span><input name="file" type="file" accept=".csv,.tsv,.xlsx" required></label><button class="pt-btn" type="submit"${view.busy ? " disabled" : ""}>Resume upload</button></form>` : ""}${job.status === "review_ready" ? "<p>The full report has been staged. Review its outcomes before applying. The previous completed report stays active until publication finishes.</p>" : ""}</section>${controls.mapping ? mappingForm() : ""}${view.rows ? `<section class="pt-card"><h3>Record outcomes</h3>${view.rows.map(recordOutcome).join("")}${view.rowCursor ? b("rows-more", "More record outcomes", "", true) : ""}</section>` : ""}`;
+    return `${controls.mapping ? mappingForm() : ""}<section class="pt-card"><h2>${e(job.fileName || "County report")}</h2><p role="status">${e(phase)}${phase !== detail ? ` · ${e(detail)}` : ""}${job.sourceAsOf ? ` · ${e(reportDate(job.sourceAsOf))}` : ""}</p>${job.status === "awaiting_mapping" ? "<p>Upload received. Review its columns before records are counted.</p>" : `<p>${count(c.rows)} records · ${count(view.election?.storageMode === "register" ? (c.newVoters ?? c.newContacts) : c.newContacts)} ${view.election?.storageMode === "register" ? "records added" : "new people"} · ${count(view.election?.storageMode === "register" ? (c.updatedVoters ?? c.updatedContacts) : c.updatedContacts)} updated · ${count(c.unchanged)} unchanged · ${count(c.duplicateRows)} repeated records · ${count(c.conflicts)} need review</p>`}${job.processingPhase && !job.boundedHeld ? `<p role="status">${e({ preparing_previous: "Preparing your previous list", partitioning: "Reading your file", comparing: "Comparing county updates", applying: "Publishing results" }[job.processingPhase] || "Processing your file")}${Number.isSafeInteger(job.totalRows) ? ` · ${count(job[{ partitioning: "partitionedRows", comparing: "stagedRows", applying: "appliedRows", preparing_previous: "preparedPreviousRows" }[job.processingPhase]])} of ${count(job.totalRows)} rows` : ""}</p>` : ""}${importError ? notice(job.boundedHeld ? "Update held for review" : "Update needs attention", importError) : ""}<div class="pt-actions">${controls.advance && job.status !== "review_ready" ? b("advance", "Continue / retry update", "", true, !can("import")) : ""}${b("job-refresh", "Check progress", "", true, view.editingMapping)}${b("rows", "Review record outcomes", "", true)}${controls.apply ? b("apply", "Apply reviewed county update", "", false, !can("import") || Number(c.conflicts) > 0) : ""}${controls.remap && can("import") ? b("mapping-edit", "Edit mapping", "", true) : ""}${view.editingMapping && !job.boundedHeld ? b("mapping-cancel", "Cancel mapping changes", "", true) : ""}${b("job-close", "Back to dashboard", "", true)}${job.status === "uploading" && boundedElection() ? b("prepare-resume", "Prepare the original county file to resume", "", true) : ""}</div>${job.status === "uploading" && !boundedElection() ? `<form data-ballot-form="resume"><label class="pt-field"><span>Original spreadsheet</span><input name="file" type="file" accept=".csv,.tsv,.xlsx" required></label><button class="pt-btn" type="submit"${view.busy ? " disabled" : ""}>Resume upload</button></form>` : ""}${job.status === "review_ready" ? "<p>The full report has been staged. Review its outcomes before applying. The previous completed report stays active until publication finishes.</p>" : ""}</section>${view.rows ? `<section class="pt-card"><h3>Record outcomes</h3>${view.rows.map(recordOutcome).join("")}${view.rowCursor ? b("rows-more", "More record outcomes", "", true) : ""}</section>` : ""}`;
   }
   function history() {
-    return `<section class="pt-card"><h2>Update history</h2>${view.imports.length ? view.imports.map((job) => `<article class="bc-history"><div><strong>${e(job.fileName || "County report")}</strong><p>${e(reportDate(job.sourceAsOf || ""))} · ${e(ballotImportStatus(job.status))}</p></div>${b("job", job.boundedHeld ? "View held update" : closed(job) ? "View outcomes" : "Review / resume", job.importId, true)}</article>`).join("") : "<p>Your reports will appear here.</p>"}${view.importCursor ? b("imports-more", "More updates", "", true) : ""}</section>`;
+    return `<section class="pt-card"><h2>Update history</h2>${view.imports.length ? view.imports.map((job) => `<article class="bc-history"><div><strong>${e(job.fileName || "County report")}</strong><p>${e(reportDate(job.sourceAsOf || ""))} · ${e(boundedElection() ? ballotImportPhase(job) : ballotImportStatus(job.status))}</p></div>${b("job", job.boundedHeld ? "View held update" : closed(job) ? "View outcomes" : "Review / resume", job.importId, true)}</article>`).join("") : "<p>Your reports will appear here.</p>"}${view.importCursor ? b("imports-more", "More updates", "", true) : ""}</section>`;
   }
   async function loadConfiguration(roundId = "") {
     const key = view.key,
@@ -820,6 +960,28 @@ export function createBallotChaser({
         "",
       )}<div class="pt-actions">${b("question-add", "Add question", "", true, view.questionDraft.length >= 40)}<button type="submit" class="pt-btn"${view.busy ? " disabled" : ""}>Save round questions</button>${b("questions-close", "Back to dashboard", "", true)}</div></form>`;
   }
+  function electionWorkspace() {
+    if (!view.electionId) return "";
+    const prioritize =
+      boundedElection() && !view.showDoor && !view.configuration;
+    return (
+      pendingUploadNotice() +
+      (prioritize ? importPanel() : "") +
+      dashboard() +
+      sourcePolicyPanel() +
+      ((view.chaseView || "outstanding") === "outstanding"
+        ? b("door", "Record DoorKnocker outreach", "", true)
+        : "") +
+      (view.showDoor
+        ? door.render()
+        : view.configuration
+          ? questionsPanel()
+          : prioritize
+            ? ""
+            : importPanel()) +
+      (can("import") ? history() : "")
+    );
+  }
   function render() {
     if (!current()) return "";
     const navigation = `<nav class="bc-nav" aria-label="Organization work"><a href="/workspace/${id(context().scopeType)}/${id(context().scopeId)}/people/contacts">Contact book</a><span aria-current="page">Ballot Chaser</span></nav>`;
@@ -839,7 +1001,7 @@ export function createBallotChaser({
                   view.electionId,
                 )}<button class="pt-btn pt-btn--secondary" type="submit"${view.busy ? " disabled" : ""}>Open election</button>${view.electionCursor ? b("elections-more", "More elections", "", true) : ""}${can("import") ? b("election-new", "Add election", "", true) : ""}</form>`
               : ""
-          }${view.showElection || !view.elections.length ? (can("import") ? electionForm() : notice("No ballot elections yet", "An organization contact manager can add the county file.")) : ""}${view.electionId ? dashboard() + sourcePolicyPanel() + ((view.chaseView || "outstanding") === "outstanding" ? b("door", "Record DoorKnocker outreach", "", true) : "") + (view.showDoor ? door.render() : view.configuration ? questionsPanel() : importPanel()) + (can("import") ? history() : "") : ""}`;
+          }${view.showElection || !view.elections.length ? (can("import") ? electionForm() : notice("No ballot elections yet", "An organization contact manager can add the county file.")) : ""}${electionWorkspace()}`;
     return `<section class="texting-workspace pt-workspace ballot-chaser" data-ballot-key="${e(view.key)}" aria-busy="${view.busy ? "true" : "false"}">${navigation}${view.error ? notice("Needs attention", view.error) : ""}${view.message ? notice(view.message) : ""}${view.uploadProgress ? `<section class="pt-card" aria-label="File upload"><progress aria-label="Upload progress" ${view.checkingFile ? "" : `value="${view.uploadProgress.loaded}" max="${view.uploadProgress.total}"`}></progress><p>${view.checkingFile ? "Checking file" : `${(view.uploadProgress.loaded / 1048576).toFixed(1)} of ${(view.uploadProgress.total / 1048576).toFixed(1)} MB uploaded`}</p></section>` : ""}${body}</section>`;
   }
   async function action(name, value) {
@@ -879,6 +1041,7 @@ export function createBallotChaser({
     } else if (operation === "election-new")
       view.showElection = !view.showElection;
     else if (operation === "upload-open") {
+      if (await resumeUnfinishedUpload()) return;
       preparation.reset();
       view.resumePreparedImport = null;
       view.preparationMode = null;
@@ -886,6 +1049,7 @@ export function createBallotChaser({
       view.job = null;
       view.rows = null;
     } else if (operation === "sent-open") {
+      if (await resumeUnfinishedUpload()) return;
       if (!sentUpdatesAllowed())
         throw new Error(
           "New sent-ballot additions are not available for this election's current access. Refresh Ballot Chaser.",
@@ -938,12 +1102,10 @@ export function createBallotChaser({
       trackJob(view.job);
     } else if (operation === "job" || operation === "job-refresh") {
       if (view.editingMapping) return;
-      trackJob(
+      await openExistingUpload(
         (await call(`/imports/${id(value || view.job.importId)}`)).import,
       );
-      view.showUpload = false;
-      view.rows = null;
-      view.mappingDraft = {};
+      if (view.job.status === "complete") await refreshElection();
     } else if (["advance", "apply"].includes(operation)) {
       if (view.editingMapping)
         throw new Error("Finish or cancel the mapping changes first.");
@@ -1139,11 +1301,13 @@ export function createBallotChaser({
     }
     if (type === "prepare-source") {
       await refreshPreparationAccess();
+      if (await resumeUnfinishedUpload()) return;
       await preparation.inspect(file, data);
       return;
     }
     if (type === "prepare-review") {
       await refreshPreparationAccess();
+      if (await resumeUnfinishedUpload()) return;
       await preparation.prepare(data);
       return;
     }
@@ -1159,6 +1323,7 @@ export function createBallotChaser({
         );
       data.set("sourceAsOf", preparedReportDate(data.get("sourceAsOf")));
       await refreshPreparationAccess();
+      if (await resumeUnfinishedUpload()) return;
       prepared = preparation.ready(data);
       file = prepared.file;
       data.set("kind", prepared.mode === "baseline" ? "base" : "snapshot");
