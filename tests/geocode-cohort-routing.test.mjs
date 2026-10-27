@@ -30,6 +30,9 @@ test("routing upgrades dashboard and ordinary organization entries while preserv
   assert.equal(result.proof.bridgeProxyLocations, 2);
   assert.ok(result.candidate.includes("v=unrelated-version"));
   assert.ok(result.candidate.includes("default /old;"));
+  assert.ok(result.candidate.includes("location = /terms {"));
+  assert.ok(result.candidate.includes("location = /privacy-policy {"));
+  assert.ok(result.candidate.includes("location = /footer {"));
   const route = new RegExp(cohortPattern);
   for (const scope of ["ns7aq23r", "wnkwaes5"])
     for (const prefix of ["workspace/coalition", "coalitions", "organizations"])
@@ -64,6 +67,16 @@ test("routing preparation rejects unrecognized baselines and invalid release tar
   );
   assert.throws(
     () => prepareRouting({ baseline, version, release: "/var/www/other" }),
+    /invalid/,
+  );
+  assert.throws(
+    () =>
+      prepareRouting({
+        baseline,
+        version,
+        release: `/var/www/polis-website-releases/${version}`,
+        publicAssets: ["/scripts/unrelated.js"],
+      }),
     /invalid/,
   );
 });

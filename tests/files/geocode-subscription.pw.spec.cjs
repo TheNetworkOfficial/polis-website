@@ -73,6 +73,34 @@ test("billing review and organization closure prevent new commitments while pres
   expect(f.errors).toEqual([]);
 });
 
+test("reopened organization keeps included credits paused and offers only explicit billing resumption", async ({
+  page,
+}) => {
+  const f = await fixture(page, { paid: true });
+  f.state.subscription.subscriptionRestartRequired = true;
+  f.state.subscription.cancelAtPeriodEnd = true;
+  await f.open();
+  const subscription = page.getByRole("region", {
+    name: "Geocoding subscription",
+  });
+  await expect(
+    subscription.getByText(/Included credits remain paused after reopening/),
+  ).toBeVisible();
+  await expect(
+    subscription.getByRole("button", {
+      name: "Keep current plan renewing",
+      exact: true,
+    }),
+  ).toBeEnabled();
+  expect(
+    f.calls.filter((call) =>
+      ["/subscription/resume", "/subscription/checkout"].includes(call.path),
+    ),
+  ).toEqual([]);
+  expect(f.payments).toEqual([]);
+  expect(f.errors).toEqual([]);
+});
+
 async function fixture(
   page,
   {

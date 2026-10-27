@@ -6,12 +6,22 @@ const hash = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const cohortPattern =
   "^/(?:workspace/coalition|coalitions|organizations)/(?:ns7aq23r|wnkwaes5)(?:/.*)?/?$";
 
-function prepareRouting({ baseline, version, release }) {
+function prepareRouting({ baseline, version, release, publicAssets = [] }) {
   if (
     !/^polis-geocode-gates-20261027-[a-f0-9]{7,40}$/.test(version) ||
     release !== `/var/www/polis-website-releases/${version}`
   )
     throw Error("geocode_routing_release_invalid");
+  if (
+    !Array.isArray(publicAssets) ||
+    publicAssets.some(
+      (asset) =>
+        !/^\/(?:scripts|css)\/(?:main|terms|privacyPolicy)\.[a-f0-9]+\.(?:js|css)$/.test(
+          asset,
+        ),
+    )
+  )
+    throw Error("geocode_routing_public_asset_invalid");
   let candidate = baseline;
   const deltas = [];
   function replace(before, after) {
@@ -60,7 +70,23 @@ function prepareRouting({ baseline, version, release }) {
   }
   const bridge = `    # Scoped navigation bridge; old asset/version mappings remain intact.\n    location = /scripts/geocode-cohort-entry.js {\n        root $polis_setup_js_root_20261018;\n        default_type application/javascript;\n        try_files $uri =404;\n    }\n\n`;
   const assetAnchor = "    location = /css/shared-feed.css {";
-  replace(assetAnchor, bridge + assetAnchor);
+  const notices = ["terms", "privacy-policy", "footer"]
+    .map(
+      (name) =>
+        `    location = /${name} {\n        root ${release}/frontend/dist;\n        try_files /${name}.html =404;\n    }\n    location = /${name}.html {\n        root ${release}/frontend/dist;\n        try_files $uri =404;\n    }\n    location = /${name}/ { return 302 /${name}; }\n`,
+    )
+    .join("\n");
+  const exactAssets = [...new Set(publicAssets)]
+    .filter((asset) => !baseline.includes(`location = ${asset} {`))
+    .map(
+      (asset) =>
+        `    location = ${asset} {\n        root ${release}/frontend/dist;\n        try_files $uri =404;\n    }\n`,
+    )
+    .join("\n");
+  replace(
+    assetAnchor,
+    bridge + notices + "\n" + exactAssets + "\n" + assetAnchor,
+  );
   let restored = candidate;
   for (const delta of [...deltas].reverse())
     restored = restored.replace(delta.after, delta.before);
@@ -75,6 +101,8 @@ function prepareRouting({ baseline, version, release }) {
       bridgeProxyLocations: blocks.length,
       cohortPattern,
       existingAssetMappingsPreserved: true,
+      publicNoticeRoutes: ["/terms", "/privacy-policy", "/footer"],
+      publicAssetPaths: [...new Set(publicAssets)],
       serviceRestartRequired: false,
     },
   };
@@ -109,10 +137,19 @@ if (require.main === module) {
   )
     throw Error("D_drive_output_required");
   const baseline = fs.readFileSync(args.baseline, "utf8");
+  const dist = path.resolve(__dirname, "../frontend/dist");
+  const publicAssets = ["terms.html", "privacy-policy.html"].flatMap((name) =>
+    [
+      ...fs
+        .readFileSync(path.join(dist, name), "utf8")
+        .matchAll(/(?:src|href)="((?:scripts|css)\/[^"]+)"/g),
+    ].map((match) => "/" + match[1]),
+  );
   const result = prepareRouting({
     baseline,
     version: args.version,
     release: `/var/www/polis-website-releases/${args.version}`,
+    publicAssets,
   });
   fs.mkdirSync(args.output, { recursive: true });
   for (const [file, contents] of Object.entries({
