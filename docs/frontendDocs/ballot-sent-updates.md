@@ -3,9 +3,13 @@
 This website workflow requires the backend's `sentUpdates` capability. Source
 changes alone do not enable it. No mobile release or new election is required.
 
-After the first master is published, **Add newly sent ballots** opens a separate
-sent-file preparation flow. The existing **Upload next county report** action
-continues to prepare returns. Sent and returned files are never interchangeable.
+After the first master is published, the controlled dashboard shows two labeled
+choices: **Sent ballots — EV32**, with **Upload sent-ballot file**, and
+**Returned ballots — EV33**, with **Upload returned-ballot file**. Add sent
+ballots first, then match returns. Each preparation screen identifies its
+workflow. A return-status review containing S explains how to return to the
+sent upload; it leaves the status meaning unselected. Sent and returned files
+are never interchangeable.
 
 The sent file must include the original master columns, including `VOTERID`,
 `CONDIST`, `PARTY`, `BALSTATUS`, and `ELECTDATE`. Source columns may be reordered;

@@ -748,7 +748,8 @@ test("new sent voters use the published all-ID list and fixed selection while pr
     preparedReceipt: { existingRows: 1, outsideRows: 2, voidedRows: 1 },
   });
   h.setContext({ limits: { maxRows: 125000 } });
-  assert.match(h.controller.render(), /Prepare newly sent ballots/);
+  assert.match(h.controller.render(), /Upload sent-ballot file/);
+  assert.match(h.controller.render(), /Sent ballots — add new voters/);
   assert.match(h.controller.render(), /5,000 new voters and 5 MB/);
   await h.controller.inspect(file(), sourceForm());
   const html = h.controller.render();
@@ -776,6 +777,37 @@ test("new sent voters use the published all-ID list and fixed selection while pr
   assert.match(h.controller.render(), /Existing voters, previous returns/);
   assert.match(h.controller.render(), /two-per-day and 35-per-month/);
   assert.match(h.controller.render(), /latest returns again/);
+});
+
+test("a sent code in the returns workflow explains the separate upload without changing its meaning", async () => {
+  const h = fixture({
+    returns: true,
+    returnStatuses: [{ value: "S", count: 262 }],
+  });
+  h.setContext({
+    sentUpdates: sentPolicy(),
+    preparationColumns: [...sentColumns],
+    electionDate: "2026-11-03",
+  });
+  assert.match(h.controller.render(), /Upload returned-ballot file/);
+  assert.match(
+    h.controller.render(),
+    /Returned ballots — match received ballots/,
+  );
+  assert.match(
+    h.controller.render(),
+    /EV33 reports use R for received and X for voided/,
+  );
+  await h.controller.inspect(file(), sourceForm());
+  await h.controller.prepare(statusForm());
+  const html = h.controller.render();
+  assert.match(html, /Review returned-ballot columns/);
+  assert.match(html, /This file includes sent ballots \(S\)/);
+  assert.match(html, /Cancel preparation/);
+  assert.match(html, /Upload sent-ballot file/);
+  assert.match(html, /S means Sent; do not mark it as Returned/);
+  assert.deepEqual(h.controller.state().returnMeanings, [""]);
+  assert.equal(h.calls.length, 0);
 });
 
 test("missing sent capability, snapshot or export permission cannot start preparation", async () => {
