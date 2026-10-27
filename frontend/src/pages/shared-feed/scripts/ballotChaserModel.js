@@ -36,6 +36,36 @@ export function ballotImportStatus(status) {
   return Object.hasOwn(captions, status) ? captions[status] : "Check progress";
 }
 
+/** A saved upload can be waiting for a person rather than using server time. */
+export function ballotImportPhase(job) {
+  if (job?.boundedHeld || job?.status === "needs_review")
+    return "Needs attention";
+  if (job?.status === "awaiting_mapping") return "Waiting for your review";
+  if (["inspecting", "reviewing", "applying"].includes(job?.status))
+    return "Processing";
+  if (job?.status === "review_ready")
+    return Number(job.counts?.conflicts) > 0
+      ? "Waiting for your review"
+      : "Ready to apply";
+  if (job?.status === "complete") return "Complete";
+  return ballotImportStatus(job?.status);
+}
+
+/** Match the existing bounded admission policy without trapping expired work. */
+export function unfinishedBallotUpload(job, maxAgeMs = 86400000) {
+  if (
+    !job?.importId ||
+    !job.status ||
+    job.boundedHeld ||
+    ["complete", "ready", "cancelled", "failed", "needs_review"].includes(
+      job.status,
+    )
+  )
+    return false;
+  const created = Date.parse(job.createdAt);
+  return !Number.isFinite(created) || Date.now() - created < maxAgeMs;
+}
+
 /** Server policy failures expose a useful next step without internal job details. */
 export function ballotPreparationMessage(error) {
   const code =
@@ -46,7 +76,7 @@ export function ballotPreparationMessage(error) {
     ballot_preparation_usage_limit:
       "This organization has reached its county-file processing limit. Ask an organization administrator to review usage before starting another update.",
     ballot_preparation_job_active:
-      "Another county-file job is still running. Check its progress before starting another update.",
+      "An unfinished county-file operation needs attention. Resume the existing upload or check the current voter-ID export before starting another file.",
     ballot_preparation_job_busy:
       "This county-file job is being processed. Check its progress before making changes.",
     ballot_preparation_admission_changed:

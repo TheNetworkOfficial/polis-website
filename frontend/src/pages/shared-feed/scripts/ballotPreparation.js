@@ -116,6 +116,7 @@ export function createBallotPreparation({
   guard,
   changed,
   context,
+  beforeIdExport = async () => true,
   createWorker = workerFactory,
   transport = fetch,
   pause = (milliseconds, signal) =>
@@ -309,6 +310,8 @@ export function createBallotPreparation({
     return result;
   }
   async function retainedIds(version) {
+    if ((await beforeIdExport()) === false) return null;
+    check(version);
     const ctx = bound(),
       started = Date.now(),
       limits = preparationLimits(ctx),
@@ -597,6 +600,7 @@ export function createBallotPreparation({
       const retained = ["returns", "sent"].includes(state.mode)
         ? await retainedIds(version)
         : undefined;
+      if (retained === null) return;
       const prepared = await runWorker(
         "prepare",
         state.file,
