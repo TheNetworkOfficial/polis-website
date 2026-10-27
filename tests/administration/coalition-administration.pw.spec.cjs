@@ -987,12 +987,20 @@ test("organization navigation keeps workspace context and asks before leaving un
     (row) => !/All coalitions|Exit workspace|Open app/u.test(row.text),
   );
   expect(workspaceLinks.length).toBeGreaterThan(8);
-  for (const row of workspaceLinks)
-    expect(row.href).toMatch(
-      new RegExp(
-        `^(?:${COALITION_PATH}(?:/|$)|/workspace/coalition/${COALITION_ID}/|/organizations/${COALITION_ID}/|/text-banking\\?coalitionId=${COALITION_ID})`,
-      ),
-    );
+  for (const row of workspaceLinks) {
+    const target = new URL(row.href, BASE_URL);
+    expect(target.origin).toBe(new URL(BASE_URL).origin);
+    if (target.pathname === "/voter-guides")
+      expect(target.searchParams.get("publisherKey")).toBe(
+        `coalition:${COALITION_ID}`,
+      );
+    else
+      expect(row.href).toMatch(
+        new RegExp(
+          `^(?:${COALITION_PATH}(?:/|$)|/workspace/coalition/${COALITION_ID}/|/organizations/${COALITION_ID}/|/text-banking\\?coalitionId=${COALITION_ID})`,
+        ),
+      );
+  }
   await field(page, "name").fill("Keep when cancelled");
   await page
     .locator(`.coalition-ui-sidebar [data-route="${COALITION_PATH}/members"]`)
