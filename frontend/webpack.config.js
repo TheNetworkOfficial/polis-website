@@ -1149,6 +1149,23 @@ module.exports = {
   },
   plugins: [
     new CleanWebpackPlugin(),
+    ...[
+      "geocoding-addendum.html",
+      "geocode-subscription-credit-terms.html",
+      "geocoding-privacy-supplement.html",
+      "geocoding-retention-and-closure.html",
+      "legal.css",
+    ].map(
+      (filename) =>
+        new StaticTextAssetPlugin({
+          sourcePath: path.resolve(
+            __dirname,
+            "src/assets/legal/geocoding/2026-10-27-beta-1",
+            filename,
+          ),
+          filename: `legal/geocoding/2026-10-27-beta-1/${filename}`,
+        }),
+    ),
     new StaticTextAssetPlugin({
       sourcePath: path.resolve(__dirname, "src/_redirects"),
       filename: "_redirects",

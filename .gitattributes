@@ -1,2 +1,3 @@
 frontend/src/assets/text-banking/*.pdf binary
 tests/texting/fixtures/setup-v1/*.json text eol=lf
+frontend/src/assets/legal/geocoding/2026-10-27-beta-1/* -text
