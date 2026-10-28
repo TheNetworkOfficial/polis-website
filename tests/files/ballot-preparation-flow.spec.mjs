@@ -775,7 +775,7 @@ test("new sent voters use the published all-ID list and fixed selection while pr
   assert.equal(prepared.file.name, "prepared-sent-ballots.csv");
   assert.match(h.controller.render(), /already tracked rows skipped/);
   assert.match(h.controller.render(), /Existing voters, previous returns/);
-  assert.match(h.controller.render(), /two-per-day and 35-per-month/);
+  assert.match(h.controller.render(), /two-per-day and 50-per-month/);
   assert.match(h.controller.render(), /latest returns again/);
 });
 
