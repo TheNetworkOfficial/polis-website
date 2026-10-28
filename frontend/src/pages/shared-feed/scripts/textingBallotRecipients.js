@@ -37,6 +37,36 @@ const submissionFor = (seed, phoneFieldId, operationId) => ({
   phoneFieldId,
 });
 
+const reviewFailed = (job) =>
+  job?.status === "needs_review" &&
+  (job.reason !== "prompt_campaign_no_eligible_recipients" ||
+    !!job.failureCode);
+function reviewFailureNotice(job) {
+  if (!reviewFailed(job))
+    return notice(
+      "No recipients ready",
+      "Review the held reasons or choose another phone column from a fresh ballot list.",
+    );
+  if (staleCodes.has(job.failureCode))
+    return notice(
+      "Review paused",
+      "The ballot list, contact information or access changed before review finished. Reopen Ballot Chaser, choose Outstanding, and select the voters again. These are not completed eligibility results.",
+    );
+  if (
+    ["contact_book_permission_denied", "contact_book_access_denied"].includes(
+      job.failureCode,
+    )
+  )
+    return notice(
+      "Review paused",
+      "Access changed before review finished. Reopen Ballot Chaser and check your access before choosing recipients again. These are not completed eligibility results.",
+    );
+  return notice(
+    "Recipient review failed",
+    "The server could not complete this review. This does not mean there are no usable recipients. After the issue is resolved, reopen Ballot Chaser and choose a fresh Outstanding list. Check progress cannot restart this failed review.",
+  );
+}
+
 /** A scoped read never sets up access, prepares a provider audience or sends. */
 export async function readBallotTextingAccess({ request, scopeKey, guard }) {
   guard();
@@ -448,7 +478,7 @@ export function createTextingBallotRecipients(
       ${!state.phoneFields?.length && !state.loading ? notice("No phone column", "This county report has no phone column available for texting.") : ""}
       ${state.loading || job?.status === "building" ? '<p role="status">Checking phone numbers…</p>' : ""}
       ${
-        job && job.status !== "building"
+        job && job.status !== "building" && !reviewFailed(job)
           ? `<p class="pt-muted">${count(job.count)} voters reviewed</p><div class="pt-grid pt-grid--three">${[
               ["Eligible now", job.eligibleCount],
               ["Consent review", job.consentReviewableCount],
@@ -484,8 +514,8 @@ export function createTextingBallotRecipients(
             }`
           : ""
       }
-      ${job?.status === "ready" ? `<label class="pt-workspace-check"><input type="checkbox" data-workspace-ballot-reviewed${reviewed() ? " checked" : ""}${!capable() || state.loading ? " disabled" : ""}>I reviewed these recipients</label><p class="pt-muted">${job.consentReviewableCount ? "Sender consent must be verified before preparation. " : "Held voters are excluded. "}Saving creates a draft.</p>` : job?.status === "needs_review" ? notice("No recipients ready", "Review the held reasons or choose another phone column from a fresh ballot list.") : ""}
-      ${state.submission && !job ? button("ballot-recipients-review", "Check this request", { secondary: true, disabled: state.loading || !capable() }) : job ? button("ballot-recipients-refresh", "Check progress", { secondary: true, disabled: state.loading || !capable() }) : ""}
+      ${job?.status === "ready" ? `<label class="pt-workspace-check"><input type="checkbox" data-workspace-ballot-reviewed${reviewed() ? " checked" : ""}${!capable() || state.loading ? " disabled" : ""}>I reviewed these recipients</label><p class="pt-muted">${job.consentReviewableCount ? "Sender consent must be verified before preparation. " : "Held voters are excluded. "}Saving creates a draft.</p>` : job?.status === "needs_review" ? reviewFailureNotice(job) : ""}
+      ${state.submission && !job ? button("ballot-recipients-review", "Check this request", { secondary: true, disabled: state.loading || !capable() }) : job && job.status !== "needs_review" ? button("ballot-recipients-refresh", "Check progress", { secondary: true, disabled: state.loading || !capable() }) : ""}
     </section>`;
   }
   return {

@@ -553,3 +553,116 @@ test("each required fresh book capability independently blocks recipient review"
     assert.match(h.controller.render(), /Access changed/);
   }
 });
+
+const stoppedReview = (extra = {}) =>
+  ready({
+    status: "needs_review",
+    reason: "contact_background_review_required",
+    count: 0,
+    eligibleCount: 0,
+    consentReviewableCount: 0,
+    recipientCount: 0,
+    excludedCount: 0,
+    heldCounts: {},
+    samples: [],
+    manifestSha256: undefined,
+    ...extra,
+  });
+
+test("a failed zero-progress review is not an empty eligibility result or a restartable progress check", async () => {
+  const h = harness();
+  h.job(stoppedReview());
+  await h.controller.load({ selection: seed });
+  await h.controller.action("ballot-recipients-review");
+  const html = h.controller.render();
+  assert.match(html, /Recipient review failed/);
+  assert.match(html, /does not mean there are no usable recipients/);
+  assert.match(html, /fresh Outstanding list/);
+  assert.doesNotMatch(
+    html,
+    /No recipients ready|0 voters reviewed|Eligible now/,
+  );
+  assert.doesNotMatch(
+    html,
+    /data-workspace-action="ballot-recipients-refresh"/,
+  );
+  h.controller.change({
+    dataset: { workspaceBallotReviewed: "" },
+    checked: true,
+  });
+  assert.equal(h.controller.reviewed(), false);
+  await assert.rejects(h.controller.bindCampaign("draft-one"));
+  assert.equal(
+    h.calls.filter(
+      (call) => call.body && call.path.endsWith("/texting-selections"),
+    ).length,
+    1,
+  );
+});
+
+test("genuine no-eligible results keep reviewed counts and phone holds, including an empty query", async () => {
+  for (const count of [0, 3]) {
+    const h = harness();
+    h.job(
+      stoppedReview({
+        reason: "prompt_campaign_no_eligible_recipients",
+        count,
+        excludedCount: count,
+        heldCounts: count ? { invalid_phone: count } : {},
+      }),
+    );
+    await h.controller.load({ selection: seed });
+    await h.controller.action("ballot-recipients-review");
+    const html = h.controller.render();
+    assert.match(html, /No recipients ready/);
+    assert.match(html, new RegExp(`${count} voters reviewed`));
+    if (count) assert.match(html, /Invalid phone/);
+    assert.doesNotMatch(html, /Recipient review failed/);
+    assert.equal(h.controller.reviewed(), false);
+  }
+});
+
+test("reported book, snapshot and access changes require a fresh selection without showing eligibility totals", async () => {
+  for (const failureCode of [
+    "contact_book_changed",
+    "ballot_snapshot_changed",
+    "ballot_publication_pending",
+    "contact_selection_access_changed",
+    "contact_book_permission_denied",
+  ]) {
+    const h = harness();
+    h.job(stoppedReview({ failureCode }));
+    await h.controller.load({ selection: seed });
+    await h.controller.action("ballot-recipients-review");
+    const html = h.controller.render();
+    assert.match(html, /Review paused/);
+    assert.match(html, /Reopen Ballot Chaser/);
+    assert.doesNotMatch(
+      html,
+      /No recipients ready|0 voters reviewed|Eligible now/,
+    );
+    assert.equal(h.controller.reviewed(), false);
+    await assert.rejects(h.controller.bindCampaign("draft-one"));
+    assert.equal(
+      h.calls.some((call) => call.path.endsWith("/campaign")),
+      false,
+    );
+  }
+});
+
+test("unknown worker details are not exposed or mistaken for completed no-eligible results", async () => {
+  const h = harness();
+  h.job(
+    stoppedReview({
+      reason: "prompt_campaign_no_eligible_recipients",
+      failureCode: "private-file-detail-123",
+    }),
+  );
+  await h.controller.load({ selection: seed });
+  await h.controller.action("ballot-recipients-review");
+  assert.match(h.controller.render(), /Recipient review failed/);
+  assert.doesNotMatch(
+    h.controller.render(),
+    /private-file-detail-123|No recipients ready|0 voters reviewed/,
+  );
+});
