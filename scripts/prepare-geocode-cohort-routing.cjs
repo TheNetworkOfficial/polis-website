@@ -34,6 +34,13 @@ function prepareRouting({
     workerAssets.length !== 2 ||
     !/^\/\d+\.js$/.test(workerAssets[0]?.path || "") ||
     workerAssets[1]?.path !== `${workerAssets[0].path}.LICENSE.txt` ||
+    (workerAssets.some((asset) => asset.publicPath !== undefined) &&
+      (!/^\/polis-[a-z0-9]+(?:-[a-z0-9]+)*\/\d+\.js$/.test(
+        workerAssets[0]?.publicPath || "",
+      ) ||
+        !workerAssets[0].publicPath.endsWith(workerAssets[0].path) ||
+        workerAssets[1]?.publicPath !==
+          `${workerAssets[0].publicPath}.LICENSE.txt`)) ||
     workerAssets.some(
       (asset) =>
         !Number.isSafeInteger(asset.bytes) ||
@@ -46,7 +53,7 @@ function prepareRouting({
   // Replacing it requires an explicit review; retaining it would undo the fix.
   if (
     workerAssets.some((asset) =>
-      baseline.includes(`location = ${asset.path} {`),
+      baseline.includes(`location = ${asset.publicPath || asset.path} {`),
     )
   )
     throw Error("geocode_routing_worker_route_collision_requires_review");
@@ -104,13 +111,15 @@ function prepareRouting({
         `    location = /${name} {\n        root ${release}/frontend/dist;\n        try_files /${name}.html =404;\n    }\n    location = /${name}.html {\n        root ${release}/frontend/dist;\n        try_files $uri =404;\n    }\n    location = /${name}/ { return 302 /${name}; }\n`,
     )
     .join("\n");
-  const exactAssets = [
-    ...new Set([...publicAssets, ...workerAssets.map((asset) => asset.path)]),
-  ]
+  const workerRoutes = new Map(
+    workerAssets.map((asset) => [asset.publicPath || asset.path, asset.path]),
+  );
+  const exactAssets = [...new Set([...publicAssets, ...workerRoutes.keys()])]
     .filter((asset) => !baseline.includes(`location = ${asset} {`))
-    .map(
-      (asset) =>
-        `    location = ${asset} {\n        root ${release}/frontend/dist;\n        try_files $uri =404;\n    }\n`,
+    .map((asset) =>
+      workerRoutes.has(asset) && workerRoutes.get(asset) !== asset
+        ? `    location = ${asset} {\n        alias ${release}/frontend/dist${workerRoutes.get(asset)};\n        default_type ${asset.endsWith(".js") ? "application/javascript" : "text/plain"};\n    }\n`
+        : `    location = ${asset} {\n        root ${release}/frontend/dist;\n        try_files $uri =404;\n    }\n`,
     )
     .join("\n");
   replace(

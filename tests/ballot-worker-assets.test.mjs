@@ -78,3 +78,49 @@ test("missing or changed staged assets cannot pass with a valid local inventory"
     /stage_missing/,
   );
 });
+
+test("scoped worker URL retains physical staging paths and exact worker bytes", (t) => {
+  const dir = fixture(t);
+  fs.writeFileSync(
+    path.join(dir, "scripts/shared-feed.js"),
+    'var e={u:e=>e+".js"};new Worker(new URL("/polis-household-assets-20261028/"+e.u(570),e.b))',
+  );
+  const inventory = inspectBallotWorkerAssets(dir);
+  assert.deepEqual(
+    inventory.files.map(({ path, publicPath }) => ({ path, publicPath })),
+    [
+      {
+        path: "/570.js",
+        publicPath: "/polis-household-assets-20261028/570.js",
+      },
+      {
+        path: "/570.js.LICENSE.txt",
+        publicPath: "/polis-household-assets-20261028/570.js.LICENSE.txt",
+      },
+    ],
+  );
+  assert.equal(verifyStagedBallotWorkerAssets(inventory, dir), true);
+});
+
+test("unreviewed worker origins, traversal, and extra unmatched workers fail closed", (t) => {
+  const dir = fixture(t);
+  for (const prefix of [
+    "https://other.invalid/",
+    "/polis-household/../",
+    "//polis-household/",
+  ]) {
+    fs.writeFileSync(
+      path.join(dir, "scripts/shared-feed.js"),
+      `var e={u:e=>e+".js"};new Worker(new URL("${prefix}"+e.u(570),e.b))`,
+    );
+    assert.throws(
+      () => inspectBallotWorkerAssets(dir),
+      /linker_requires_review/,
+    );
+  }
+  fs.writeFileSync(
+    path.join(dir, "scripts/shared-feed.js"),
+    'var e={u:e=>e+".js"};new Worker(new URL(e.p+e.u(570),e.b));new Worker("/unreviewed.js")',
+  );
+  assert.throws(() => inspectBallotWorkerAssets(dir), /linker_requires_review/);
+});

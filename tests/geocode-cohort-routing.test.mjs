@@ -123,3 +123,44 @@ test("county processor routes and stage inventory are mandatory and cannot retai
     /worker_route_collision_requires_review/,
   );
 });
+
+test("scoped worker routes leave an incumbent numeric worker alias intact", () => {
+  const incumbent = "location = /570.js {\n    alias /old/processor.js;\n}\n";
+  const scopedWorkers = workerAssets.map((asset) => ({
+    ...asset,
+    publicPath: `/polis-household-assets-20261028${asset.path}`,
+  }));
+  const input = {
+    baseline: baseline + incumbent,
+    version,
+    release: `/var/www/polis-website-releases/${version}`,
+    workerAssets: scopedWorkers,
+  };
+  const result = prepareRouting(input);
+  assert.ok(result.candidate.endsWith(incumbent));
+  assert.ok(
+    result.candidate.includes(
+      "location = /polis-household-assets-20261028/570.js {",
+    ),
+  );
+  assert.ok(
+    result.candidate.includes(`alias ${input.release}/frontend/dist/570.js;`),
+  );
+  assert.ok(
+    result.candidate.includes(
+      "location = /polis-household-assets-20261028/570.js.LICENSE.txt {",
+    ),
+  );
+  assert.deepEqual(result.proof.requiredStageAssets, scopedWorkers);
+  assert.throws(
+    () =>
+      prepareRouting({
+        ...input,
+        workerAssets: [
+          { ...scopedWorkers[0], publicPath: "/polis-household/../570.js" },
+          scopedWorkers[1],
+        ],
+      }),
+    /worker_inventory_required/,
+  );
+});

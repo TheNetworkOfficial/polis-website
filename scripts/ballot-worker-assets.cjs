@@ -12,14 +12,20 @@ function inspectBallotWorkerAssets(dist) {
   );
   const references = [
     ...bundle.matchAll(
-      /new Worker\(new URL\(([$\w]+)\.p\+\1\.u\((\d+)\),\1\.b\)\)/g,
+      /new Worker\(new URL\((?:([$\w]+)\.p|"(\/polis-[a-z0-9]+(?:-[a-z0-9]+)*\/)")\+([$\w]+)\.u\((\d+)\),\3\.b\)\)/g,
     ),
   ];
   // This release uses Webpack's numeric chunk fallback. A changed linker must
   // receive its own reviewed resolver instead of silently skipping the worker.
-  if (references.length !== 1 || !/u:([$\w]+)=>\1\+"\.js"/.test(bundle))
+  if (
+    references.length !== 1 ||
+    (references[0][1] && references[0][1] !== references[0][3]) ||
+    [...bundle.matchAll(/new Worker\(/g)].length !== 1 ||
+    !/u:([$\w]+)=>\1\+"\.js"/.test(bundle)
+  )
     throw Error("ballot_worker_linker_requires_review");
-  const worker = `/${references[0][2]}.js`;
+  const worker = `/${references[0][4]}.js`;
+  const publicPrefix = references[0][2];
   const files = [worker, `${worker}.LICENSE.txt`].map((asset) => {
     let raw;
     try {
@@ -31,7 +37,12 @@ function inspectBallotWorkerAssets(dist) {
       throw Error(`ballot_worker_asset_invalid:${asset}`);
     if (asset === worker)
       new vm.Script(raw.toString("utf8"), { filename: asset });
-    return { path: asset, bytes: raw.length, sha256: hash(raw) };
+    return {
+      path: asset,
+      ...(publicPrefix ? { publicPath: publicPrefix + asset.slice(1) } : {}),
+      bytes: raw.length,
+      sha256: hash(raw),
+    };
   });
   return { sharedFeedSha256: hash(bundle), files };
 }

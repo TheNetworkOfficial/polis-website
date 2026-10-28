@@ -7,6 +7,16 @@ const path = require("path");
 const rootPackage = require("../package.json");
 const frontendPackage = require("./package.json");
 
+// Scoped releases must not replace another bundle's numeric worker alias.
+const workerPublicPath = process.env.POLIS_WEB_WORKER_PUBLIC_PATH || "";
+if (
+  workerPublicPath &&
+  !/^\/polis-[a-z0-9]+(?:-[a-z0-9]+)*\/$/.test(workerPublicPath)
+)
+  throw new Error(
+    "POLIS_WEB_WORKER_PUBLIC_PATH must be a scoped /polis-release/ path.",
+  );
+
 const deleteAccountUrl = process.env.DELETE_ACCOUNT_PUBLIC_URL || "";
 const webAppApiBaseUrl =
   process.env.VIDEO_BACKEND_BASE_URL || process.env.CTA_API_BASE_URL || "";
@@ -1102,6 +1112,7 @@ module.exports = {
   },
   output: {
     path: path.resolve(__dirname, "dist"),
+    ...(workerPublicPath ? { workerPublicPath } : {}),
     filename: (pathData) =>
       pathData.chunk?.name === "shared-feed"
         ? "scripts/shared-feed.js"
