@@ -2,11 +2,18 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
+const { inspectBallotWorkerAssets } = require("./ballot-worker-assets.cjs");
 const hash = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const cohortPattern =
   "^/(?:workspace/coalition|coalitions|organizations)/(?:ns7aq23r|wnkwaes5)(?:/.*)?/?$";
 
-function prepareRouting({ baseline, version, release, publicAssets = [] }) {
+function prepareRouting({
+  baseline,
+  version,
+  release,
+  publicAssets = [],
+  workerAssets,
+}) {
   if (
     !/^polis-geocode-gates-20261027-[a-f0-9]{7,40}$/.test(version) ||
     release !== `/var/www/polis-website-releases/${version}`
@@ -22,6 +29,27 @@ function prepareRouting({ baseline, version, release, publicAssets = [] }) {
     )
   )
     throw Error("geocode_routing_public_asset_invalid");
+  if (
+    !Array.isArray(workerAssets) ||
+    workerAssets.length !== 2 ||
+    !/^\/\d+\.js$/.test(workerAssets[0]?.path || "") ||
+    workerAssets[1]?.path !== `${workerAssets[0].path}.LICENSE.txt` ||
+    workerAssets.some(
+      (asset) =>
+        !Number.isSafeInteger(asset.bytes) ||
+        asset.bytes < 1 ||
+        !/^[a-f0-9]{64}$/.test(asset.sha256),
+    )
+  )
+    throw Error("geocode_routing_worker_inventory_required");
+  // An old numeric compatibility alias may point at a different processor.
+  // Replacing it requires an explicit review; retaining it would undo the fix.
+  if (
+    workerAssets.some((asset) =>
+      baseline.includes(`location = ${asset.path} {`),
+    )
+  )
+    throw Error("geocode_routing_worker_route_collision_requires_review");
   let candidate = baseline;
   const deltas = [];
   function replace(before, after) {
@@ -76,7 +104,9 @@ function prepareRouting({ baseline, version, release, publicAssets = [] }) {
         `    location = /${name} {\n        root ${release}/frontend/dist;\n        try_files /${name}.html =404;\n    }\n    location = /${name}.html {\n        root ${release}/frontend/dist;\n        try_files $uri =404;\n    }\n    location = /${name}/ { return 302 /${name}; }\n`,
     )
     .join("\n");
-  const exactAssets = [...new Set(publicAssets)]
+  const exactAssets = [
+    ...new Set([...publicAssets, ...workerAssets.map((asset) => asset.path)]),
+  ]
     .filter((asset) => !baseline.includes(`location = ${asset} {`))
     .map(
       (asset) =>
@@ -103,6 +133,8 @@ function prepareRouting({ baseline, version, release, publicAssets = [] }) {
       existingAssetMappingsPreserved: true,
       publicNoticeRoutes: ["/terms", "/privacy-policy", "/footer"],
       publicAssetPaths: [...new Set(publicAssets)],
+      requiredStageAssets: workerAssets,
+      stagedWorkerVerificationRequired: true,
       serviceRestartRequired: false,
     },
   };
@@ -150,6 +182,7 @@ if (require.main === module) {
     version: args.version,
     release: `/var/www/polis-website-releases/${args.version}`,
     publicAssets,
+    workerAssets: inspectBallotWorkerAssets(dist).files,
   });
   fs.mkdirSync(args.output, { recursive: true });
   for (const [file, contents] of Object.entries({

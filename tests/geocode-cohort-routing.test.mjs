@@ -4,6 +4,10 @@ import { createRequire } from "node:module";
 const { prepareRouting, cohortPattern } = createRequire(import.meta.url)(
   "../scripts/prepare-geocode-cohort-routing.cjs",
 );
+const workerAssets = [
+  { path: "/570.js", bytes: 100, sha256: "a".repeat(64) },
+  { path: "/570.js.LICENSE.txt", bytes: 10, sha256: "b".repeat(64) },
+];
 const version = "polis-geocode-gates-20261027-abcdef0";
 const block = `    location ~ ^/(feed|coalitions)(/.*)?$ {
         sub_filter_once on;
@@ -22,6 +26,7 @@ const baseline = `map $arg_v $polis_combined_css_root_20261024 {\n    default /o
 test("routing upgrades dashboard and ordinary organization entries while preserving incumbent assets and exact rollback", () => {
   const result = prepareRouting({
     baseline,
+    workerAssets,
     version,
     release: `/var/www/polis-website-releases/${version}`,
   });
@@ -60,23 +65,61 @@ test("routing preparation rejects unrecognized baselines and invalid release tar
     () =>
       prepareRouting({
         baseline: "server {}",
+        workerAssets,
         version,
         release: `/var/www/polis-website-releases/${version}`,
       }),
     /ambiguous/,
   );
   assert.throws(
-    () => prepareRouting({ baseline, version, release: "/var/www/other" }),
+    () =>
+      prepareRouting({
+        baseline,
+        workerAssets,
+        version,
+        release: "/var/www/other",
+      }),
     /invalid/,
   );
   assert.throws(
     () =>
       prepareRouting({
         baseline,
+        workerAssets,
         version,
         release: `/var/www/polis-website-releases/${version}`,
         publicAssets: ["/scripts/unrelated.js"],
       }),
     /invalid/,
+  );
+});
+
+test("county processor routes and stage inventory are mandatory and cannot retain an old numeric alias", () => {
+  const input = {
+    baseline,
+    version,
+    release: `/var/www/polis-website-releases/${version}`,
+    workerAssets,
+  };
+  const result = prepareRouting(input);
+  assert.ok(result.candidate.includes("location = /570.js {"));
+  assert.ok(result.candidate.includes("location = /570.js.LICENSE.txt {"));
+  assert.deepEqual(result.proof.requiredStageAssets, workerAssets);
+  assert.equal(result.proof.stagedWorkerVerificationRequired, true);
+  assert.throws(
+    () => prepareRouting({ ...input, workerAssets: undefined }),
+    /worker_inventory_required/,
+  );
+  assert.throws(
+    () => prepareRouting({ ...input, workerAssets: [workerAssets[0]] }),
+    /worker_inventory_required/,
+  );
+  assert.throws(
+    () =>
+      prepareRouting({
+        ...input,
+        baseline: baseline + "location = /570.js {\n}",
+      }),
+    /worker_route_collision_requires_review/,
   );
 });
