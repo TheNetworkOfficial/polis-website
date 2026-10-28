@@ -22,6 +22,11 @@ export function contactDisplayName(contact, fallback = "Contact") {
 }
 
 export function householdAddressStatus(contact) {
+  if (
+    contact?.locationStatus === "located" &&
+    contact?.fields?.addressResolution?.status === "matched"
+  )
+    return "Geocoded address";
   return contact?.fields?.addressResolution?.status === "verified"
     ? "Verified address"
     : "Address not yet verified";

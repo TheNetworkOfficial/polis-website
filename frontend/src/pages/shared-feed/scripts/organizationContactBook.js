@@ -47,6 +47,11 @@ import {
 } from "./organizationContactNameReview";
 import { renderContactImport } from "./organizationContactImportView";
 import {
+  renderHouseholdContacts,
+  householdOperation,
+  householdPersonFields,
+} from "./organizationHouseholdContacts";
+import {
   contactPageSizes,
   simpleContactFields,
   contactDistrictLabel,
@@ -1792,12 +1797,12 @@ export function createOrganizationContactBook(
       add: [
         "Add contacts",
         () =>
-          `<div class="pt-cb-menu">${can("import") ? tool("panel", "Upload a file", "plus", { value: "imports" }) : ""}${can("edit") ? tool("new", "Add one contact", "person") : ""}<p class="pt-cb-hint">Every upload joins this organization’s contact book. Nothing is automatically shared with a texting provider.</p></div>`,
+          `<div class="pt-cb-menu">${can("import") ? tool("panel", "Upload a file", "plus", { value: "imports" }) : ""}${can("edit") ? tool("new", "Add one contact", "person") : ""}${can("edit") && can("householdContacts") ? tool("household-new", "Add an address-only contact", "person") : ""}<p class="pt-cb-hint">Every upload joins this organization’s contact book. Nothing is automatically shared with a texting provider.</p></div>`,
       ],
       more: [
         "Contact tools",
         () =>
-          `<div class="pt-cb-menu">${can("import") ? tool("panel", "Imports", "plus", { value: "imports" }) : ""}${tool("panel", "Fields and tags", "columns", { value: "fields" })}${can("manage") ? tool("panel", "Sync status", "refresh", { value: "status" }) : ""}${tool("refresh", "Refresh contacts", "refresh")}</div>`,
+          `<div class="pt-cb-menu">${can("import") ? tool("panel", "Imports", "plus", { value: "imports" }) : ""}${tool("panel", "Fields and tags", "columns", { value: "fields" })}${can("householdContacts") ? tool("household-view", s.query.includeLinkedHouseholds ? "Hide completed household records" : "Show completed household records", "person") : ""}${can("manage") ? tool("panel", "Sync status", "refresh", { value: "status" }) : ""}${tool("refresh", "Refresh contacts", "refresh")}</div>`,
       ],
     };
     const panel = panels[s.overlay];
@@ -1948,6 +1953,31 @@ export function createOrganizationContactBook(
     const s = state(),
       contact = s.detail?.contact || { fields: {}, tags: [] },
       household = isHouseholdContact(contact);
+    if (s.detailNew && s.detailHousehold)
+      return (
+        head(
+          "CONTACT BOOK",
+          "Add an address-only contact",
+          "Add a person's details later. Property history stays with this address.",
+          b("close-detail", "Back", { secondary: true }),
+        ) +
+        `<section class="pt-card"><form data-workspace-form="${formName("household-create")}" class="pt-fields">${[
+          ["addressLine1", "Street address", true],
+          ["addressLine2", "Apartment or unit (optional)", false],
+          ["city", "City", true],
+          ["state", "State", true],
+          ["postalCode", "ZIP code", true],
+        ]
+          .map(([name, title, required]) =>
+            field(name, title, "", {
+              required,
+              max: name === "postalCode" ? 10 : 200,
+            }),
+          )
+          .join(
+            "",
+          )}<button type="submit" class="pt-btn">Save household address</button></form></section>`
+      );
     const groups = new Map();
     for (const definition of fields()) {
       if (household && !Object.hasOwn(contact.fields || {}, definition.fieldId))
@@ -1982,7 +2012,15 @@ export function createOrganizationContactBook(
           : editable
             ? '<button class="pt-btn" type="submit">Save contact</button>'
             : ""
-      }</form></section>${details(
+      }</form></section>${renderHouseholdContacts({
+        contact,
+        relationships: s.detail?.relationships,
+        candidates: s.householdCandidates,
+        search: s.householdSearch,
+        canEdit: can("edit") && can("householdContacts"),
+        button: b,
+        formName,
+      })}${details(
         "Sources",
         list(s.detail?.sources || contact.sources)
           .map(
@@ -2776,6 +2814,72 @@ export function createOrganizationContactBook(
       const result = await api("/query", { search: s.addSearch, limit: 20 });
       s.addRows = list(result.items);
       s.addCursor = result.nextCursor;
+    } else if (action === "household-search") {
+      if (
+        !can("householdContacts") ||
+        !can("edit") ||
+        !isHouseholdContact(s.detail?.contact)
+      )
+        throw new Error("Household editing is unavailable.");
+      s.householdSearch = String(data.get("search") || "").trim();
+      const result = await api("/query", {
+        search: s.householdSearch,
+        limit: 20,
+      });
+      s.householdCandidates = list(result.items).filter(
+        (row) => !isHouseholdContact(row) && row.status === "active",
+      );
+    } else if (action === "household-create") {
+      if (
+        !can("householdContacts") ||
+        !can("edit") ||
+        !s.detailNew ||
+        !s.detailHousehold
+      )
+        throw new Error("Household editing is unavailable.");
+      const fields = Object.fromEntries(
+        ["addressLine1", "addressLine2", "city", "state", "postalCode"]
+          .map((name) => [name, String(data.get(name) || "").trim()])
+          .filter(([, value]) => value),
+      );
+      const request = { recordKind: "household", fields };
+      const result = await api("/contacts", {
+        ...request,
+        operationId: householdOperation(s, request, uuid),
+      });
+      s.detail = await api(`/contacts/${id(result.contact.contactId)}`);
+      s.detailNew = false;
+      s.detailHousehold = false;
+      s.householdOperation = null;
+      await query({ refresh: true });
+      r.toast("Household address saved.");
+    } else if (action === "household-complete") {
+      if (
+        !can("householdContacts") ||
+        !can("edit") ||
+        !isHouseholdContact(s.detail?.contact)
+      )
+        throw new Error("Household editing is unavailable.");
+      const contact = s.detail.contact,
+        fields = householdPersonFields(data);
+      const request = {
+        householdId: contact.contactId,
+        expectedRevision: contact.revision,
+        fields,
+      };
+      const result = await api(
+        `/contacts/${id(contact.contactId)}/household-completion`,
+        {
+          expectedRevision: contact.revision,
+          fields,
+          operationId: householdOperation(s, request, uuid),
+        },
+      );
+      s.detail = await api(`/contacts/${id(result.contact.contactId)}`);
+      s.householdOperation = null;
+      s.householdCandidates = [];
+      await query({ refresh: true });
+      r.toast("Contact saved. Household history stays with the address.");
     } else if (action === "contact") {
       if (!can("edit") && !can("tag"))
         throw new Error("Contact editing is restricted.");
@@ -3564,12 +3668,69 @@ export function createOrganizationContactBook(
         s.bookStatus = await api("/status");
       if (value === "contacts") await query();
     } else if (op === "imports-more") await loadImports(true);
-    else if (op === "activity" || op === "activity-more") {
+    else if (op === "household-view") {
+      if (!can("householdContacts"))
+        throw new Error("Household contacts are unavailable.");
+      if (s.allMatching)
+        throw new Error("Clear the selection before changing its filters.");
+      s.query.includeLinkedHouseholds = !s.query.includeLinkedHouseholds;
+      s.overlay = null;
+      invalidateSelection();
+      await query({ refresh: true });
+    } else if (op === "household-link-person") {
+      if (
+        !can("householdContacts") ||
+        !can("edit") ||
+        !isHouseholdContact(s.detail?.contact)
+      )
+        throw new Error("Household editing is unavailable.");
+      const candidate = list(s.householdCandidates).find(
+        (row) => row.contactId === value,
+      );
+      if (!candidate || isHouseholdContact(candidate))
+        throw new Error("Find this person again before linking.");
+      const household = s.detail.contact;
+      const request = {
+        householdId: household.contactId,
+        expectedRevision: household.revision,
+        selectedContactId: candidate.contactId,
+        expectedContactRevision: candidate.revision,
+      };
       const result = await api(
-        `/contacts/${id(s.detail.contact.contactId)}/activity?kind=${id(value)}${op === "activity-more" && s.activity?.nextCursor ? `&cursor=${id(s.activity.nextCursor)}` : ""}`,
+        `/contacts/${id(household.contactId)}/household-completion`,
+        {
+          ...request,
+          operationId: householdOperation(s, request, uuid),
+        },
+      );
+      s.detail = await api(`/contacts/${id(result.contact.contactId)}`);
+      s.householdOperation = null;
+      s.householdCandidates = [];
+      await query({ refresh: true });
+      r.toast("Contact linked to this household.");
+    } else if (op === "household-journal") {
+      if (
+        !can("personal") ||
+        !list(s.detail?.relationships?.households).some(
+          (row) => row.contactId === value,
+        )
+      )
+        throw new Error("Reopen the contact before viewing household history.");
+      const result = await api(`/contacts/${id(value)}/activity?kind=journal`);
+      s.activity = { ...result, householdContactId: value };
+      (s.expanded ||= new Set()).add("Linked activity");
+    } else if (op === "activity" || op === "activity-more") {
+      const activityContactId =
+        (op === "activity-more" && s.activity?.householdContactId) ||
+        s.detail.contact.contactId;
+      const result = await api(
+        `/contacts/${id(activityContactId)}/activity?kind=${id(value)}${op === "activity-more" && s.activity?.nextCursor ? `&cursor=${id(s.activity.nextCursor)}` : ""}`,
       );
       s.activity = {
         ...result,
+        ...(op === "activity-more" && s.activity?.householdContactId
+          ? { householdContactId: s.activity.householdContactId }
+          : {}),
         items: [
           ...(op === "activity-more" ? list(s.activity?.items) : []),
           ...list(result.items),
@@ -3598,6 +3759,9 @@ export function createOrganizationContactBook(
       s.detail = await api(`/contacts/${id(value)}`);
       s.enrichmentStatus = null;
       s.detailNew = false;
+      s.detailHousehold = false;
+      s.householdCandidates = [];
+      s.householdOperation = null;
     } else if (op === "identity-choose") {
       if (isHouseholdContact(s.detail?.contact))
         throw new Error("Household identity is managed through DoorKnocker.");
@@ -3710,13 +3874,21 @@ export function createOrganizationContactBook(
         "PATCH",
       );
       await schema();
-    } else if (op === "new") {
+    } else if (op === "new" || op === "household-new") {
+      if (op === "household-new" && (!can("edit") || !can("householdContacts")))
+        throw new Error("Household editing is unavailable.");
       s.overlay = null;
       s.detailNew = true;
       s.detail = null;
+      s.detailHousehold = op === "household-new";
+      s.householdCandidates = [];
+      s.householdOperation = null;
     } else if (op === "close-detail") {
       s.detail = null;
       s.detailNew = false;
+      s.detailHousehold = false;
+      s.householdCandidates = [];
+      s.householdOperation = null;
     } else if (op === "filter-add") {
       s.advancedDirty = true;
       (s.expanded ||= new Set()).add("Filter contacts");

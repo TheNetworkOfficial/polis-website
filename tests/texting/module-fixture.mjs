@@ -16,9 +16,14 @@ export async function moduleUrl(name) {
       /^import guidelinesUrl from "[^"\n]+\.pdf";\r?\n/gm,
       'const guidelinesUrl = "/guidelines.pdf";\n',
     );
+  if (source.includes('from "../../files/scripts/sha256"'))
+    source = source.replaceAll(
+      'from "../../files/scripts/sha256"',
+      `from "${await moduleUrl("../../files/scripts/sha256")}"`,
+    );
   for (const match of [
     ...source.matchAll(
-      /from "\.\/((?:texting|organization|canvassing|ballot)\w+)"/g,
+      /from "\.\/((?:texting|organization|canvassing|ballot|geocode)\w+)"/g,
     ),
   ])
     source = source.replaceAll(match[0], `from "${await moduleUrl(match[1])}"`);

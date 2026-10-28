@@ -1060,3 +1060,69 @@ test("disabled household layer leaves ordinary voter pins and list available wit
   ).toEqual([]);
   expect(fixture.errors).toEqual([]);
 });
+
+for (const role of ["admin", "member"]) {
+  test(`household-only ${role} map and list survive independent voter failure and find linked people`, async ({
+    page,
+  }) => {
+    const fixture = await mockFieldworkWorkspace(page, {
+      role,
+      empty: true,
+      failMap: true,
+    });
+    fixture.householdMapEnabled = true;
+    fixture.households = [
+      {
+        kind: "household",
+        contactId: "household-only",
+        // Members start in My assigned areas; Alex is assigned North Cedar.
+        lat: 46.867,
+        lng: -114.007,
+        address: {
+          addressLine1: "100 Household Lane",
+          addressLine2: "Unit 2",
+          city: "Missoula",
+        },
+        linkedPeople: [
+          { contactId: "person-one", displayName: "Naomi Synthetic" },
+        ],
+        reviewRequired: false,
+      },
+    ];
+    await page.goto(`${BASE_URL}${COALITION_PATH}/voter-map`);
+    await ready(page, { records: false });
+    await expect(
+      workspace(page).locator(".field-household-marker"),
+    ).toHaveCount(1);
+    await expect(workspace(page).locator("[data-fw-count]")).toContainText(
+      "0 loaded voter records",
+    );
+    await expect(workspace(page).locator("[data-fw-count]")).toContainText(
+      "1 household addresses",
+    );
+    await expect(
+      workspace(page).getByText("Naomi Synthetic", { exact: true }),
+    ).toBeVisible();
+    await workspace(page)
+      .getByRole("button", { name: "List", exact: true })
+      .click();
+    const households = workspace(page).getByRole("region", {
+      name: "Household addresses in this map area",
+      exact: true,
+    });
+    await expect(
+      households.getByText("100 Household Lane", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      households.getByText("Naomi Synthetic", { exact: true }),
+    ).toBeVisible();
+    await workspace(page)
+      .getByRole("searchbox", { name: "Find a voter or address", exact: true })
+      .fill("Naomi");
+    await expect(
+      households.getByText("100 Household Lane", { exact: true }),
+    ).toBeVisible();
+    expect(fixture.writes).toEqual([]);
+    expect(fixture.errors).toEqual([]);
+  });
+}

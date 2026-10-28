@@ -698,7 +698,10 @@ export function createCoalitionFieldWork({
     return state.households.filter((row) => {
       if (
         query &&
-        !Object.values(row.address || {})
+        ![
+          ...Object.values(row.address || {}),
+          ...(row.linkedPeople || []).map((person) => person.displayName),
+        ]
           .join(" ")
           .toLowerCase()
           .includes(query)
@@ -790,13 +793,19 @@ export function createCoalitionFieldWork({
     const area = state.territories.find((t) => fieldInTerritory(row, t));
     return `<button type="button" class="map-record${state.selectedId === row.recordId ? " is-selected" : ""}" data-fw-action="voter" data-id="${e(row.recordId)}"><i class="map-key-dot" data-status="${e(row.status)}"></i><div><strong>${e(row.name)}</strong><p>${e(row.addressLine1 || "Address unavailable")}<br />${e(area?.name || [row.city, row.state].filter(Boolean).join(", "))}</p><small>${e(fieldStatusLabels[row.status])}</small></div>${icon("arrow")}</button>`;
   }
+  function householdButton(row) {
+    const residents = (row.linkedPeople || [])
+      .map((person) => person.displayName)
+      .filter(Boolean);
+    return `<button type="button" class="field-record-button" data-fw-action="destination" data-destination="contacts" data-contact-id="${e(row.contactId)}"><strong>${e(row.address?.addressLine1 || "Household address")}</strong><small>${e([row.address?.addressLine2, row.address?.city].filter(Boolean).join(", "))}${row.reviewRequired ? " · Address needs review" : ""}</small><small>${residents.length ? e(residents.join(", ")) : "Incomplete contact · Add a person"}</small></button>`;
+  }
   function renderResults() {
     const target = q("[data-fw-results]");
     if (!target) return;
     const records = results();
     q("[data-fw-count]").textContent =
       `${records.length.toLocaleString()} loaded voter record${records.length === 1 ? "" : "s"} in this view${state.mapPartial ? " · Partial map results: zoom in for more detail" : ""}`;
-    if (state.layout === "map" && state.households.length)
+    if (state.households.length)
       q("[data-fw-count]").textContent +=
         ` · ${visibleHouseholds().length} household addresses`;
     if (visibleHouseholds().length > 200)
@@ -825,17 +834,17 @@ export function createCoalitionFieldWork({
       if (side && visibleHouseholds().length) {
         side.insertAdjacentHTML(
           "beforeend",
-          `<div class="map-side-heading"><h3>Household addresses</h3></div>${visibleHouseholds()
-            .map(
-              (row) =>
-                `<button type="button" class="field-record-button" data-fw-action="destination" data-destination="contacts" data-contact-id="${e(row.contactId)}"><strong>${e(row.address?.addressLine1 || "Household address")}</strong><small>${e(row.address?.city || "")}${row.reviewRequired ? " · Address needs review" : ""}</small></button>`,
-            )
-            .join("")}`,
+          `<div class="map-side-heading"><h3>Household addresses</h3></div>${visibleHouseholds().map(householdButton).join("")}`,
         );
       }
       mountMap();
       renderMapMessage();
       updateMapMarkers();
+    } else if (visibleHouseholds().length) {
+      target.insertAdjacentHTML(
+        "beforeend",
+        `<section aria-label="Household addresses in this map area"><h3>Household addresses</h3><p>Address-only contacts and linked residents from the current map area. Household addresses are separate from voter records.</p>${visibleHouseholds().map(householdButton).join("")}</section>`,
+      );
     }
   }
   function miniMap(t) {
@@ -1145,29 +1154,32 @@ export function createCoalitionFieldWork({
           state.access?.assignmentTokenVersion || 0,
         ),
       });
-      const payload = await call(endpoint(`/voter-map/query?${params}`));
+      const [voterResult, householdResult] = await Promise.allSettled([
+        call(endpoint(`/voter-map/query?${params}`)),
+        state.access?.capabilities?.householdMap === true
+          ? call(
+              `/api/contact-book/scopes/${encodeURIComponent(`coalition:${current().coalitionId}`)}/household-map`,
+              {
+                method: "POST",
+                body: {
+                  bounds: {
+                    west: bbox[0],
+                    south: bbox[1],
+                    east: bbox[2],
+                    north: bbox[3],
+                  },
+                },
+              },
+            )
+          : Promise.resolve(null),
+      ]);
       guard(ticket);
       if (queryKey !== state.mapRequestVersion) return;
       state.households = [];
       state.householdNotice = "";
-      if (state.access?.capabilities?.householdMap === true)
-        try {
-          const householdPayload = await call(
-            `/api/contact-book/scopes/${encodeURIComponent(`coalition:${current().coalitionId}`)}/household-map`,
-            {
-              method: "POST",
-              body: {
-                bounds: {
-                  west: bbox[0],
-                  south: bbox[1],
-                  east: bbox[2],
-                  north: bbox[3],
-                },
-              },
-            },
-          );
-          guard(ticket);
-          if (queryKey !== state.mapRequestVersion) return;
+      if (state.access?.capabilities?.householdMap === true) {
+        if (householdResult.status === "fulfilled") {
+          const householdPayload = householdResult.value;
           state.householdNotice =
             householdPayload.complete === false || householdPayload.zoomRequired
               ? "Household address results are partial. Zoom in for more detail."
@@ -1175,7 +1187,8 @@ export function createCoalitionFieldWork({
           state.households = rows(householdPayload, ["markers"]).filter(
             (row) => row.kind === "household" && fieldPoint(row),
           );
-        } catch (error) {
+        } else {
+          const error = householdResult.reason;
           if (error.stale) throw error;
           // The separately deployed household capability may not yet be enabled.
           // Never retain old markers after a failed current-access query.
@@ -1185,6 +1198,9 @@ export function createCoalitionFieldWork({
               "Household addresses could not be loaded. Retry the map.";
           }
         }
+      }
+      if (voterResult.status === "rejected") throw voterResult.reason;
+      const payload = voterResult.value;
       state.mapDataError = "";
       state.points = rows(payload, ["points", "items", "records"]).filter(
         (row) => row.kind !== "cluster" && row.recordId && fieldPoint(row),
@@ -1220,6 +1236,7 @@ export function createCoalitionFieldWork({
         if ([401, 403].includes(Number(error.status))) {
           state.points = [];
           state.clusters = [];
+          if (Number(error.status) === 401) state.households = [];
         }
       }
     } finally {

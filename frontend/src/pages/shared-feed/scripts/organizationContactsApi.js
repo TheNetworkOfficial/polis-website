@@ -149,6 +149,22 @@ export function createOrganizationContactsApi({
       const code = error?.payload?.error || error?.code || error?.message;
       const messages = {
         ...geocodeErrors,
+        household_contacts_not_enabled:
+          "Household contacts are not enabled for this organization.",
+        household_address_required:
+          "Add a complete street address, city, state and ZIP code before linking this household.",
+        household_contact_match_changed:
+          "This contact no longer matches the household address and unit. Refresh and choose the correct person.",
+        household_existing_person_review:
+          "A person with these details is already at this address. Open that contact or choose Link an existing person.",
+        household_matching_review_required:
+          "Several household records need review before this address can be linked.",
+        household_relationship_changed:
+          "The household changed while you were saving. Refresh its details and try again.",
+        household_person_identity_required:
+          "Enter a name, phone number, or email address for this person.",
+        household_completion_fields_invalid:
+          "Use contact identity fields here. The household address and property history stay on the household.",
         contact_import_row_changed:
           "A previously saved record differs in this file. Reselect the original unchanged file to resume; the existing import remains saved.",
         contact_selection_duplicate_endpoints:
