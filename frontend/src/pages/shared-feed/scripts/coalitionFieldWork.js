@@ -1127,11 +1127,26 @@ export function createCoalitionFieldWork({
         { padding: 36, maxZoom: 16, duration: 0 },
       );
   }
-  async function queryMap(force = false) {
-    if (!map || !state.mapReady || state.key !== identity()) return;
-    const b = map.getBounds(),
-      bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()];
-    const signature = `${bbox.map((value) => value.toFixed(6)).join(",")}:${Math.round(map.getZoom())}:${state.access?.assignmentTokenVersion || 0}`;
+  async function queryMap(force = false, { retryList = false } = {}) {
+    const listRetry = retryList && state.layout === "list";
+    if (
+      (state.layout !== "map" && !listRetry) ||
+      !map ||
+      !state.mapReady ||
+      state.key !== identity()
+    )
+      return;
+    if (listRetry && !state.mapViewport) return;
+    if (!listRetry) {
+      const b = map.getBounds();
+      state.mapViewport = {
+        bbox: [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()],
+        zoom: Math.round(map.getZoom()),
+      };
+    }
+    const { bbox, zoom } = state.mapViewport,
+      queryLayout = state.layout;
+    const signature = `${bbox.map((value) => value.toFixed(6)).join(",")}:${zoom}:${state.access?.assignmentTokenVersion || 0}`;
     if (!force && state.mapQuerySignature === signature) return;
     state.mapQuerySignature = signature;
     if (bbox[2] - bbox[0] > 8 || bbox[3] - bbox[1] > 8) {
@@ -1149,7 +1164,7 @@ export function createCoalitionFieldWork({
     try {
       const params = new URLSearchParams({
         bbox: bbox.join(","),
-        zoom: String(Math.round(map.getZoom())),
+        zoom: String(zoom),
         assignmentTokenVersion: String(
           state.access?.assignmentTokenVersion || 0,
         ),
@@ -1174,7 +1189,8 @@ export function createCoalitionFieldWork({
           : Promise.resolve(null),
       ]);
       guard(ticket);
-      if (queryKey !== state.mapRequestVersion) return;
+      if (state.layout !== queryLayout || queryKey !== state.mapRequestVersion)
+        return;
       state.households = [];
       state.householdNotice = "";
       if (state.access?.capabilities?.householdMap === true) {
@@ -1229,6 +1245,7 @@ export function createCoalitionFieldWork({
       if (
         !error.stale &&
         ticket === generation &&
+        state.layout === queryLayout &&
         queryKey === state.mapRequestVersion
       ) {
         state.mapDataError =
@@ -1240,7 +1257,11 @@ export function createCoalitionFieldWork({
         }
       }
     } finally {
-      if (ticket === generation && queryKey === state.mapRequestVersion) {
+      if (
+        ticket === generation &&
+        state.layout === queryLayout &&
+        queryKey === state.mapRequestVersion
+      ) {
         state.mapLoading = false;
         renderResults();
       }
@@ -1797,8 +1818,15 @@ export function createCoalitionFieldWork({
       });
     } else if (action === "layout") {
       state.layout = node.dataset.layout;
+      if (state.layout === "list") {
+        clearTimeout(queryTimer);
+        state.mapRequestVersion = (state.mapRequestVersion || 0) + 1;
+        state.mapQuerySignature = "";
+        state.mapLoading = false;
+      }
       render();
       if (state.layout === "list") void loadVoters();
+      else if (state.mapReady) void queryMap(true);
     } else if (action === "clear-filters") {
       state.query = "";
       state.area = "all";
@@ -1817,7 +1845,7 @@ export function createCoalitionFieldWork({
       if (state.dialog === "assignment")
         assignmentDialog(state.assignmentTerritoryId);
     } else if (action === "retry-households") {
-      await queryMap(true);
+      await queryMap(true, { retryList: true });
     } else if (action === "retry-map") {
       state.mapError = "";
       state.mapQuerySignature = "";

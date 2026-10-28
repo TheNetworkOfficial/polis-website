@@ -1126,3 +1126,125 @@ for (const role of ["admin", "member"]) {
     expect(fixture.errors).toEqual([]);
   });
 }
+
+test("household list retains the mapped set after a late response and hidden map movement", async ({
+  page,
+}) => {
+  const fixture = await mockFieldworkWorkspace(page, { empty: true });
+  fixture.householdMapEnabled = true;
+  await page.addInitScript(() => {
+    let library;
+    Object.defineProperty(window, "maplibregl", {
+      configurable: true,
+      get: () => library,
+      set: (value) => {
+        const OriginalMap = value.Map;
+        value.Map = class extends OriginalMap {
+          constructor(options) {
+            super(options);
+            window.__FIELDWORK_TEST_MAP__ = this;
+          }
+        };
+        library = value;
+      },
+    });
+  });
+  const households = ["100 Household Lane", "200 Household Lane"].map(
+    (addressLine1, index) => ({
+      kind: "household",
+      contactId: `stable-household-${index}`,
+      lat: 46.867,
+      lng: -114.007,
+      address: { addressLine1, city: "Missoula" },
+    }),
+  );
+  let releasePending,
+    holdNext = false,
+    householdRequests = 0,
+    responsePartial = true,
+    responseHouseholds = households;
+  const requestedBounds = [];
+  await page.route("**/household-map", async (route) => {
+    householdRequests++;
+    requestedBounds.push(route.request().postDataJSON().bounds);
+    if (holdNext) {
+      holdNext = false;
+      await new Promise((resolve) => (releasePending = resolve));
+      return route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ markers: [], complete: true }),
+      });
+    }
+    return route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        markers: responseHouseholds,
+        complete: !responsePartial,
+      }),
+    });
+  });
+  await page.goto(`${BASE_URL}${COALITION_PATH}/voter-map`);
+  await ready(page, { records: false });
+  await expect(workspace(page).locator(".field-household-marker")).toHaveCount(
+    2,
+  );
+  holdNext = true;
+  await workspace(page)
+    .getByRole("button", { name: "Zoom in", exact: true })
+    .click();
+  await expect.poll(() => Boolean(releasePending)).toBe(true);
+  await workspace(page)
+    .getByRole("button", { name: "List", exact: true })
+    .click();
+  const region = workspace(page).getByRole("region", {
+    name: "Household addresses in this map area",
+    exact: true,
+  });
+  await expect(region.locator("[data-contact-id]")).toHaveCount(2);
+  const requestsBeforeHiddenMovement = householdRequests;
+  const pendingResponse = page.waitForResponse((response) =>
+    response.url().endsWith("/household-map"),
+  );
+  releasePending();
+  await pendingResponse;
+  // The hidden engine may emit moveend while its detached canvas is resized.
+  await page.evaluate(() => {
+    const map = window.__FIELDWORK_TEST_MAP__;
+    map.setZoom(map.getZoom() + 1);
+    map.fire("moveend");
+  });
+  await page.waitForTimeout(450);
+  expect(householdRequests).toBe(requestsBeforeHiddenMovement);
+  await expect(region.locator("[data-contact-id]")).toHaveCount(2);
+  const lastVisibleBounds = requestedBounds.at(-1);
+  responseHouseholds = households.slice(0, 1);
+  responsePartial = false;
+  await page.evaluate(() => {
+    const map = window.__FIELDWORK_TEST_MAP__;
+    window.__FIELDWORK_MAP_BOUNDS__ = map.getBounds;
+    map.getBounds = () => {
+      throw new Error("list_retry_must_not_read_hidden_map_bounds");
+    };
+  });
+  await workspace(page)
+    .getByRole("button", { name: "Refresh household addresses", exact: true })
+    .click();
+  await expect(region.locator("[data-contact-id]")).toHaveCount(1);
+  expect(requestedBounds.at(-1)).toEqual(lastVisibleBounds);
+  await page.evaluate(() => {
+    window.__FIELDWORK_TEST_MAP__.getBounds = window.__FIELDWORK_MAP_BOUNDS__;
+  });
+  responseHouseholds = households;
+  const requestsBeforeMapReturn = householdRequests;
+  await workspace(page)
+    .getByRole("button", { name: "Map", exact: true })
+    .click();
+  await expect
+    .poll(() => householdRequests)
+    .toBeGreaterThan(requestsBeforeMapReturn);
+  await expect(workspace(page).locator(".field-household-marker")).toHaveCount(
+    2,
+  );
+  expect(fixture.writes).toEqual([]);
+  expect(fixture.errors).toEqual([]);
+});
