@@ -202,13 +202,13 @@ test("saved example preview stays capped and explains when eligible examples are
   assert.match(html, /Shared phone number/);
   assert.match(
     html,
-    /This small preview does not include an eligible example\. 390,000 recipients are eligible in total\./,
+    /This small preview does not include an eligible example\. Total eligible recipients: 390,000\./,
   );
   h.job(ready({ samples: [] }));
   await h.controller.action("ballot-recipients-refresh");
   html = h.controller.render();
   assert.match(html, /No recipient examples were saved for this review/);
-  assert.match(html, /390,000 recipients are eligible in total/);
+  assert.match(html, /Total eligible recipients: 390,000/);
   assert.doesNotMatch(html, /No recipients ready/);
   assert.equal(h.controller.selection().eligibleCount, 390000);
 });

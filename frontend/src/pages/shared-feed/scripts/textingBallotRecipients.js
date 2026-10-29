@@ -85,7 +85,7 @@ function renderBallotRecipientPreview(job) {
     !samples.some((row) => ballotRecipientPreviewGroup(row) === "eligible")
       ? notice(
           "Eligible recipients",
-          `This small preview does not include an eligible example. ${count(job.eligibleCount)} recipients are eligible in total.`,
+          `This small preview does not include an eligible example. Total eligible recipients: ${count(job.eligibleCount)}.`,
         )
       : ""
   }${
