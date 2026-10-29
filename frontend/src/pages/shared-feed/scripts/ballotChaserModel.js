@@ -51,6 +51,81 @@ export function ballotImportPhase(job) {
   return ballotImportStatus(job?.status);
 }
 
+/** County report dates and later recovery never change when a file was uploaded. */
+export function ballotImportHistoryNewestFirst(items) {
+  const uploaded = (job) =>
+    typeof job?.createdAt === "string" ? Date.parse(job.createdAt) : NaN;
+  return [...items].sort((left, right) => {
+    const leftDate = uploaded(left),
+      rightDate = uploaded(right),
+      leftKnown = Number.isFinite(leftDate),
+      rightKnown = Number.isFinite(rightDate);
+    if (leftKnown !== rightKnown) return leftKnown ? -1 : 1;
+    if (leftKnown && leftDate !== rightDate) return rightDate - leftDate;
+    const leftId = String(left?.importId || ""),
+      rightId = String(right?.importId || "");
+    return leftId < rightId ? -1 : leftId > rightId ? 1 : 0;
+  });
+}
+
+/** Partial comparison counts must not look like a completed source-file count. */
+export function ballotImportHistoryRecordCount(job) {
+  const known = (value) => Number.isSafeInteger(value) && value >= 0;
+  for (const value of [job?.totalRows, job?.rowCount])
+    if (known(value)) return value;
+  return job?.status === "complete" && known(job.counts?.rows)
+    ? job.counts.rows
+    : null;
+}
+
+/** Daily county reports use a calendar date, independent of the viewer's zone. */
+export function ballotImportHistoryReportDate(value) {
+  const date = typeof value === "string" ? new Date(value) : null;
+  return !date || Number.isNaN(date.getTime())
+    ? "Not recorded"
+    : date.toLocaleDateString(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        timeZone: "UTC",
+      });
+}
+
+/** Read metadata only, within the existing 20-page safety bound per user action. */
+export async function collectBallotImportHistory(
+  loadPage,
+  { items = [], cursor = null, guard = () => {}, maxPages = 20 } = {},
+) {
+  const saved = new Map(items.map((job) => [job.importId, job])),
+    seen = new Set(cursor ? [cursor] : []),
+    pages = Math.min(20, Math.max(1, maxPages));
+  let nextCursor = cursor;
+  for (let page = 0; page < pages; page++) {
+    guard();
+    let result;
+    try {
+      result = await loadPage(nextCursor);
+    } catch (error) {
+      guard();
+      if ([401, 403].includes(error.status || error.statusCode)) throw error;
+      return { items: [...saved.values()], nextCursor, incomplete: true };
+    }
+    guard();
+    for (const job of Array.isArray(result.items) ? result.items : [])
+      saved.set(job.importId, job);
+    nextCursor = result.nextCursor || null;
+    if (!nextCursor)
+      return {
+        items: [...saved.values()],
+        nextCursor: null,
+        incomplete: false,
+      };
+    if (seen.has(nextCursor)) break;
+    seen.add(nextCursor);
+  }
+  return { items: [...saved.values()], nextCursor, incomplete: true };
+}
+
 /** Match the existing bounded admission policy without trapping expired work. */
 export function unfinishedBallotUpload(job, maxAgeMs = 86400000) {
   if (
