@@ -7,6 +7,33 @@ const { queueBlockExplanation, queueCanSkip } = await import(
   await moduleUrl("textingWorkspaceUi")
 );
 
+test("a voter who becomes ineligible is held with an actionable reason instead of a recheck loop", () => {
+  const { page, item } = fixture();
+  item.blockedReasons = ["ballot_register_destination_not_eligible"];
+  item.canSkip = true;
+  const explanation = queueBlockExplanation(item);
+  assert.equal(explanation.canRecheck, false);
+  assert.match(explanation.title, /no longer eligible/);
+  assert.match(explanation.text, /Skip this recipient/);
+  const html = page.render("send");
+  assert.match(html, /Recipient no longer eligible/);
+  assert.match(html, /data-workspace-action="queue-skip"/);
+  assert.doesNotMatch(html, /data-workspace-action="queue-recheck"/);
+});
+
+test("an eligibility hold never overrides an uncertain send outcome", () => {
+  const explanation = queueBlockExplanation({
+    state: "blocked",
+    blockedReasons: [
+      "ballot_register_destination_not_eligible",
+      "provider_outcome_reconciliation_required",
+    ],
+  });
+  assert.equal(explanation.title, "Delivery needs review");
+  assert.equal(explanation.canRecheck, false);
+  assert.doesNotMatch(explanation.text, /Skip this recipient/);
+});
+
 function fixture() {
   const item = {
     itemId: "held-recipient",

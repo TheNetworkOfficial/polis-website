@@ -5,6 +5,8 @@ const operationalErrors = {
     "This request could not be completed. Your campaign stays saved. Check its saved status before trying again.",
   texting_operation_unavailable:
     "This request could not be completed. Your campaign stays saved. Check its saved status before trying again.",
+  ballot_register_destination_not_eligible:
+    "This voter no longer meets this campaign’s current eligibility checks.",
   prompt_queue_uncertain_capacity:
     "Unconfirmed send outcomes have filled the texting assignment limit. Ask an organization texting manager to review them.",
 };
@@ -177,6 +179,12 @@ export function queueBlockExplanation(item) {
     return {
       title: "Delivery needs review",
       text: "A send may already have been attempted for this recipient. An administrator must check the saved outcome before any further action.",
+      canRecheck: false,
+    };
+  if (codes.has("ballot_register_destination_not_eligible"))
+    return {
+      title: "Recipient no longer eligible",
+      text: "This voter no longer meets this campaign’s current checks, for example after a ballot is returned. Skip this recipient and continue with the other ready recipients.",
       canRecheck: false,
     };
   if ([...codes].some((code) => personalizationBlocks.has(code)))
