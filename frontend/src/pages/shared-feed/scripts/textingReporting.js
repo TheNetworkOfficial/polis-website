@@ -50,7 +50,7 @@ export function renderTextingReport(report, { compact = false } = {}) {
   const c = report.counts;
   if (compact)
     return `<p class="pt-muted">${e(c.delivered)} delivered · ${e(report.unreadReplies)} unread messages (includes opt-outs)${report.coverage === "partial" ? " · Partial history" : ""}</p>`;
-  return `<section class="pt-card" aria-label="Campaign reporting"><h2>Campaign activity</h2><div class="pt-grid pt-grid--three">${stat("Accepted", c.accepted)}${stat("Sent · awaiting delivery", c.sent)}${stat("Delivered", c.delivered)}${stat("Failed", c.failed)}${stat("Status pending", c.pending)}${stat("Needs review", c.needsReview)}${stat("Replies received", c.inbound)}${stat("Unread messages · includes opt-outs", report.unreadReplies)}</div><p class="pt-muted">Accepted does not mean delivered. Counts reflect recorded message evidence.${report.coverage === "partial" ? " Earlier activity may be missing." : ""}</p>${Number.isSafeInteger(report.asOfMs) ? `<p class="pt-muted">Updated ${e(new Date(report.asOfMs).toLocaleString())}</p>` : ""}</section>`;
+  return `<section class="pt-card" aria-label="Campaign reporting"><h2>Campaign activity</h2><div class="pt-grid pt-grid--three">${stat("Accepted", c.accepted)}${stat("Sent · awaiting delivery", c.sent)}${stat("Delivered", c.delivered)}${stat("Failed", c.failed)}${stat("Status pending", c.pending)}${stat("Needs review", c.needsReview)}${stat("Incoming messages · includes opt-outs", c.inbound)}${stat("Unread messages · includes opt-outs", report.unreadReplies)}</div><p class="pt-muted">Accepted does not mean delivered. Outbound totals include follow-up replies. Incoming and unread totals include opt-outs; they are not counts of unique people or opt-outs. Counts reflect recorded message evidence.${report.coverage === "partial" ? " Earlier activity may be missing." : ""}</p>${Number.isSafeInteger(report.asOfMs) ? `<p class="pt-muted">Updated ${e(new Date(report.asOfMs).toLocaleString())}</p>` : ""}</section>`;
 }
 
 /** Current scoped reads only. No queue allocation, confirmation or financial
@@ -271,7 +271,7 @@ export function createTextingHistory(r, state) {
     acknowledgeVisibleHistory();
     const options = (name, values, selected) =>
       `<label class="pt-field">${e(name)}<select data-workspace-history-filter="${e(name)}"${r.busy() ? " disabled" : ""}>${values.map(([value, label]) => `<option value="${e(value)}"${value === (selected || "") ? " selected" : ""}>${e(label)}</option>`).join("")}</select></label>`;
-    return `${h.readError ? notice("Unread status could not be saved", "Refresh history to try again.") : ""}${renderTextingReport(s.reports?.[s.campaign.campaignId])}<section class="pt-card"><div class="pt-row"><h2>Message history</h2>${button("report-history-refresh", "Refresh history", { secondary: true })}</div><p class="pt-muted">Saved messages across sessions. Pending outcomes remain visible until evidence resolves them.</p><div class="pt-fields">${options(
+    return `${h.readError ? notice("Unread status could not be saved", "Refresh history to try again.") : ""}${renderTextingReport(s.reports?.[s.campaign.campaignId])}<section class="pt-card"><div class="pt-row"><h2>Message history</h2>${button("report-history-refresh", "Refresh history", { secondary: true })}</div><p class="pt-muted">Individual messages across sessions. Campaign totals are shown above. Expand a sent message to review its exact text. Pending outcomes remain visible until evidence resolves them.</p><div class="pt-fields">${options(
       "Direction",
       [
         ["outbound", "Sent history"],
@@ -305,7 +305,7 @@ export function createTextingHistory(r, state) {
             .sort((a, b) => b.createdAtMs - a.createdAtMs)
             .map(
               (item) =>
-                `<article class="pt-row" data-texting-history-entry="${e(item.entryId)}"><div><strong>${e(item.displayName || "Recipient")}</strong><p class="pt-muted">${e(textingHistoryStatus(item.status))} · ${e(new Date(item.createdAtMs).toLocaleString())}</p><p>${e(item.content)}</p>${item.hasMedia ? '<p class="pt-muted">Includes an attachment</p>' : ""}</div>${item.conversationId ? go("conversation", "Open conversation", item.conversationId, true) : '<span class="pt-muted">Conversation updating</span>'}</article>`,
+                `<article class="pt-row" data-texting-history-entry="${e(item.entryId)}"><div><strong>${e(item.displayName || "Recipient")}</strong><p class="pt-muted">${e(textingHistoryStatus(item.status))} · ${e(new Date(item.createdAtMs).toLocaleString())}</p>${item.direction === "outbound" ? `<details><summary>View sent message</summary><p>${e(item.content)}</p>${item.hasMedia ? '<p class="pt-muted">Includes an attachment</p>' : ""}</details>` : `<p>${e(item.content)}</p>${item.hasMedia ? '<p class="pt-muted">Includes an attachment</p>' : ""}`}</div>${item.conversationId ? go("conversation", "Open conversation", item.conversationId, true) : '<span class="pt-muted">Conversation updating</span>'}</article>`,
             )
             .join("")
         : '<p class="pt-muted">No recorded messages on this page match these filters.</p>'

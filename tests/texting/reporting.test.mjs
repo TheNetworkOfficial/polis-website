@@ -29,11 +29,54 @@ test("reporting rejects unavailable counts and distinguishes acceptance, deliver
   assert.match(html, /Accepted does not mean delivered/);
   assert.match(html, /Earlier activity may be missing/);
   assert.match(html, /Unread messages · includes opt-outs/);
+  assert.match(html, /Incoming messages · includes opt-outs/);
+  assert.match(html, /Outbound totals include follow-up replies/);
+  assert.match(html, /not counts of unique people or opt-outs/);
   assert.doesNotMatch(html, /budget|balance|charge|\$/i);
   assert.throws(() =>
     checkedTextingReport({ ...report(), counts: {} }, "campaign"),
   );
   assert.throws(() => checkedTextingReport(report(), "another"));
+});
+
+test("history collapses outbound content while incoming content stays visible for read acknowledgement", () => {
+  const s = {
+    campaign: { campaignId: "campaign" },
+    history: {
+      items: [
+        {
+          entryId: "sent",
+          direction: "outbound",
+          content: "Exact sent text",
+          createdAtMs: 2,
+        },
+        {
+          entryId: "reply",
+          direction: "inbound",
+          content: "Incoming reply",
+          createdAtMs: 1,
+        },
+      ],
+    },
+  };
+  const h = createTextingHistory(
+    { can: () => true, busy: () => false },
+    () => s,
+  );
+  const html = h.render();
+  assert.match(
+    html,
+    /<details><summary>View sent message<\/summary><p>Exact sent text<\/p>/,
+  );
+  assert.match(
+    html,
+    /data-texting-history-entry="reply"[\s\S]*?<p>Incoming reply<\/p>/,
+  );
+  assert.doesNotMatch(
+    html,
+    /<details>[^<]*<summary>[^<]*<\/summary><p>Incoming reply/,
+  );
+  h.dispose();
 });
 
 test("saved history survives new views, preserves sparse pagination and never dispatches a send", async () => {

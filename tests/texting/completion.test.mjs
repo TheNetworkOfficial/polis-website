@@ -91,6 +91,38 @@ function fixture(t, { admin = false, response = proof(), api } = {}) {
   };
 }
 
+test("a changing-results read explains refresh without claiming partial history or allowing archive", async (t) => {
+  let reads = 0;
+  const f = fixture(t, {
+    admin: true,
+    api: async () => {
+      if (++reads === 1)
+        throw Object.assign(new Error("Changed"), {
+          status: 409,
+          payload: { error: "prompt_campaign_completion_changed" },
+        });
+      return { completion: proof() };
+    },
+  });
+  await f.page.load();
+  const failed = f.page.results();
+  assert.match(failed, /Delivery results changed while this page was loading/);
+  assert.doesNotMatch(
+    failed,
+    /\$\{|does not mean your sending history is missing/,
+  );
+  assert.doesNotMatch(failed, /Partial history|Recorded so far/);
+  assert.match(
+    failed,
+    /data-workspace-action="completion-archive"[^>]*disabled/,
+  );
+  await f.page.action("completion-refresh");
+  assert.equal(f.state.completionChanged, false);
+  assert.match(f.page.results(), /pt-completion-sent/);
+  assert.equal(f.calls.length, 2);
+  assert.ok(f.calls.every((call) => call.body === undefined));
+});
+
 test("completion validates actor, campaign, proof and allocation independently of history coverage", () => {
   const p = proof();
   p.personal.counts = null;
@@ -326,12 +358,12 @@ test("personal replies and hourly series are shown only with authoritative attri
   ];
   const f = fixture(t, { response: p });
   await f.page.load();
-  assert.doesNotMatch(f.page.finish(), /Reply messages/);
+  assert.doesNotMatch(f.page.finish(), /Incoming messages/);
   assert.doesNotMatch(f.page.results(), /pt-completion-replies|Your momentum/);
   f.page.localAction("completion-scope", "campaign");
   assert.match(
     f.page.results(),
-    /Reply messages|Team momentum|Volunteers who sent/,
+    /Incoming messages|Team momentum|Volunteers who sent/,
   );
   assert.match(f.page.results(), /[AP]M/);
 });
