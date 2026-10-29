@@ -189,6 +189,64 @@ test("manual recovery rereads current status then uses its preparation identity 
   h.controller.dispose();
 });
 
+test("a proven unsubmitted timeout continues only after a manual fresh read of the same approved attempt", async () => {
+  const held = campaign("needs_attention", {
+    stage: "provider_transfer",
+    canResume: true,
+    automaticResume: false,
+    errorCode: "prompt_preparation_authorization_timeout",
+    recoveryAction: "resume_unsubmitted",
+    recoveryProof: "known_unsubmitted_batch_v1",
+  });
+  const h = harness([
+    { ...held, revision: 9 },
+    { ...campaign(), revision: 10 },
+  ]);
+  h.controller.observe(held);
+  assert.equal(h.calls.length, 0);
+  assert.equal(h.timers.size, 0);
+  await h.controller.refresh({ manual: true, resume: true });
+  assert.deepEqual(h.calls, [
+    ["/campaigns/campaign-one"],
+    [
+      "/campaigns/campaign-one/preparation/resume",
+      {
+        preparationId: "approved-attempt-one",
+        expectedRevision: 9,
+      },
+    ],
+  ]);
+  h.controller.dispose();
+});
+
+test("fresh proof loss or operator review cannot resume even if an earlier view allowed it", async () => {
+  const held = campaign("needs_attention", {
+    stage: "provider_transfer",
+    canResume: true,
+    automaticResume: false,
+    errorCode: "prompt_preparation_authorization_timeout",
+    recoveryAction: "resume_unsubmitted",
+    recoveryProof: "known_unsubmitted_batch_v1",
+  });
+  for (const changed of [
+    { recoveryProof: undefined },
+    { recoveryAction: "operator_review" },
+    { canResume: false },
+  ]) {
+    const fresh = {
+      ...held,
+      revision: 9,
+      preparation: { ...held.preparation, ...changed },
+    };
+    const h = harness([fresh]);
+    h.controller.observe(held);
+    await h.controller.refresh({ manual: true, resume: true });
+    assert.deepEqual(h.calls, [["/campaigns/campaign-one"]]);
+    assert.equal(h.state.campaign.revision, 9);
+    h.controller.dispose();
+  }
+});
+
 test("read errors and lost resume responses stop automatic writes until saved status is checked", async () => {
   const ready = campaign("ready_to_finalize", {
     canResume: true,

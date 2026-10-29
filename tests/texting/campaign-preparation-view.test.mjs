@@ -100,6 +100,64 @@ test("resume is offered only to an authorized manager when the server permits it
   assert.doesNotMatch(render(preparation()), /campaign-preparation-resume/);
 });
 
+test("a server-proven unsubmitted authorization timeout offers Continue preparing without another approval", () => {
+  const html = render(
+    preparation({
+      errorCode: "prompt_preparation_authorization_timeout",
+      canResume: true,
+      automaticResume: false,
+      recoveryAction: "resume_unsubmitted",
+      recoveryProof: "known_unsubmitted_batch_v1",
+      selectedContactCount: 609,
+      progress: {
+        totalContactCount: 609,
+        submittedContactCount: 0,
+        verifiedContactCount: 0,
+      },
+    }),
+  );
+  assert.match(html, /Recipient preparation is ready to continue/);
+  assert.match(html, /before this batch reached the texting service/);
+  assert.match(html, /Continue preparing/);
+  assert.match(html, /Submitted for preparation: 0 of 609 recipients/);
+  assert.match(html, /Confirmed ready: 0 of 609 recipients/);
+  assert.doesNotMatch(
+    html,
+    /Polis support|administrator|prompt_preparation|known_unsubmitted/,
+  );
+});
+
+test("missing or contradictory timeout proof stays blocked and another approver is guided correctly", () => {
+  const safe = preparation({
+    errorCode: "prompt_preparation_authorization_timeout",
+    canResume: true,
+    automaticResume: false,
+    recoveryAction: "resume_unsubmitted",
+    recoveryProof: "known_unsubmitted_batch_v1",
+  });
+  for (const changed of [
+    { recoveryProof: undefined },
+    { recoveryAction: "operator_review" },
+    { automaticResume: true },
+    { stage: "message" },
+    { errorCode: "provider_outcome_unknown" },
+  ]) {
+    const html = render({ ...safe, ...changed });
+    assert.doesNotMatch(
+      html,
+      /Continue preparing|data-workspace-action="campaign-preparation-resume"/,
+    );
+  }
+  assert.doesNotMatch(render(safe, {}, false), /Continue preparing/);
+  const another = render({
+    ...safe,
+    canResume: false,
+    recoveryAction: "original_approver",
+  });
+  assert.match(another, /person who approved this selection needs to continue/);
+  assert.doesNotMatch(another, /Polis support|Continue preparing/);
+});
+
 test("paused and failed checks describe checking rather than claiming work stopped", () => {
   const p = preparation({ status: "preparing" });
   assert.match(

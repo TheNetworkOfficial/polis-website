@@ -5,6 +5,35 @@ export const campaignPreparationPending = (campaign) =>
     (campaign.status === "activating" &&
       campaign.preparation.stage === "campaign_activation"));
 
+/** Only an explicit server proof permits continuing a known unsubmitted batch. */
+export function campaignPreparationResumeKind(preparation) {
+  if (
+    preparation?.canResume !== true ||
+    preparation.recoveryAction === "operator_review"
+  )
+    return null;
+  const authorizationTimeout = [
+    "prompt_preparation_authorization_timeout",
+    "preparation_authorization_timeout",
+  ].includes(preparation.errorCode);
+  if (
+    authorizationTimeout &&
+    preparation.status === "needs_attention" &&
+    preparation.stage === "provider_transfer" &&
+    preparation.recoveryAction === "resume_unsubmitted" &&
+    preparation.recoveryProof === "known_unsubmitted_batch_v1" &&
+    preparation.automaticResume === false
+  )
+    return "unsubmitted";
+  if (
+    authorizationTimeout ||
+    preparation.recoveryAction === "resume_unsubmitted" ||
+    preparation.recoveryProof
+  )
+    return null;
+  return "saved";
+}
+
 /** Poll durable preparation only. New recipient/provider approval is never created here. */
 export function createCampaignPreparation(
   r,
@@ -167,7 +196,7 @@ export function createCampaignPreparation(
         ) {
           recoveringWrite = false;
           s.preparationPollingPaused = true;
-          s.preparationPollError = p.canResume
+          s.preparationPollError = campaignPreparationResumeKind(p)
             ? "The saved campaign still needs completion. Resume this approved preparation when you are ready."
             : "The saved preparation still needs review before it can continue. Check its saved status after the issue has been resolved.";
           return;
@@ -178,7 +207,7 @@ export function createCampaignPreparation(
           pending(saved) &&
           p?.status === "ready_to_finalize" &&
           p.automaticResume === true &&
-          p.canResume === true &&
+          campaignPreparationResumeKind(p) === "saved" &&
           !automaticAttempts.has(p.preparationId);
         if (resume || automatic) {
           if (
@@ -186,7 +215,7 @@ export function createCampaignPreparation(
             saved.status === "activating" ||
             !pending(saved) ||
             !p?.preparationId ||
-            p.canResume !== true
+            !campaignPreparationResumeKind(p)
           )
             throw new Error(
               "This saved preparation cannot be resumed. Refresh its status before continuing.",
