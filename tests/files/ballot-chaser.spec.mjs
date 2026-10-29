@@ -14,6 +14,16 @@ const model = await import(
 );
 
 test("daily sent errors explain recovery while protecting the published voter list", () => {
+  const processing = model.ballotPreparationMessage(
+    "ballot_preparation_processing_failed",
+  );
+  assert.match(processing, /uploaded file and review are saved/);
+  assert.match(processing, /do not upload the same file again/);
+  assert.doesNotMatch(processing, /administrator|processing safety limit/);
+  assert.match(
+    model.ballotPreparationMessage("ballot_preparation_work_limit"),
+    /processing safety limit.*Polis support.*Retrying does not reset/,
+  );
   assert.match(
     model.ballotPreparationMessage("ballot_sent_updates_unavailable"),
     /Refresh Ballot Chaser/,

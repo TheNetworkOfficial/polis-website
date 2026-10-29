@@ -93,7 +93,10 @@ const countyFile = () =>
     { type: "text/csv" },
   );
 
-function fixture(t, { initialJob = null } = {}) {
+function fixture(
+  t,
+  { initialJob = null, outcomes = [], rowCursor = null } = {},
+) {
   const savedGlobals = new Map(
     ["document", "FormData", "Worker", "fetch"].map((name) => [
       name,
@@ -275,6 +278,8 @@ function fixture(t, { initialJob = null } = {}) {
       }
       if (suffix === "/imports/existing-county-upload")
         return response({ import: job });
+      if (suffix === "/imports/existing-county-upload/rows")
+        return response({ items: outcomes, nextCursor: rowCursor });
       if (
         suffix === "/elections/c4d-election/exports" ||
         suffix === "/exports/private-ids"
@@ -380,6 +385,75 @@ const buttonFor = (html, caption) => {
       };
   assert.fail(`Expected visible ${caption} action`);
 };
+
+test("a failed 251-row publication shows staged counts and an honest empty conflict report", async (t) => {
+  const h = fixture(t, {
+    initialJob: {
+      ...savedJob("needs_review"),
+      boundedHeld: true,
+      reason: "ballot_preparation_processing_failed",
+      processingPhase: "applying",
+      appliedRows: 0,
+      counts: { rows: 251, newVoters: 251, updatedVoters: 0, conflicts: 0 },
+    },
+  });
+  await h.controller.load();
+  await h.controller.action("ballot-job", "existing-county-upload");
+  await h.controller.action("ballot-rows");
+  const html = h.controller.render();
+  assert.match(html, /251 new records staged/);
+  assert.doesNotMatch(html, /251 records added/);
+  assert.match(html, /Update processing paused/);
+  assert.match(html, /No row conflicts recorded/);
+  assert.match(html, /not processing failures/);
+  assert.match(html, /uploaded file and review are saved/);
+  assert.doesNotMatch(
+    html,
+    /administrator's review|Continue \/ retry update|Apply reviewed county update/,
+  );
+  assert.deepEqual(admissions(h), []);
+  assert.ok(h.calls.every((call) => call.method === "GET"));
+});
+
+test("an actual work limit stays distinct and record conflicts remain visible", async (t) => {
+  const h = fixture(t, {
+    initialJob: {
+      ...savedJob("needs_review"),
+      boundedHeld: true,
+      reason: "ballot_preparation_work_limit",
+      counts: { rows: 251, newVoters: 250, conflicts: 1 },
+    },
+    outcomes: [
+      {
+        row: 17,
+        status: "review_required",
+        error: "ballot_duplicate_id_conflict",
+      },
+    ],
+  });
+  await h.controller.load();
+  await h.controller.action("ballot-job", "existing-county-upload");
+  await h.controller.action("ballot-rows");
+  const html = h.controller.render();
+  assert.match(html, /Processing safety limit reached/);
+  assert.match(html, /Retrying does not reset the limit/);
+  assert.match(html, /Record 17/);
+  assert.doesNotMatch(
+    html,
+    /No row conflicts recorded|Apply reviewed county update|Exclude this record/,
+  );
+});
+
+test("a completed sent update reports published additions and a clean conflict result", async (t) => {
+  const h = fixture(t, { initialJob: savedJob("complete") });
+  await h.controller.load();
+  await h.controller.action("ballot-job", "existing-county-upload");
+  await h.controller.action("ballot-rows");
+  const html = h.controller.render();
+  assert.match(html, /1 records added/);
+  assert.doesNotMatch(html, /new records staged|These are staged results/);
+  assert.match(html, /No row conflicts recorded/);
+});
 
 test("an uploaded county file awaiting mapping resumes its existing column review without another import or export", async (t) => {
   const h = fixture(t, { initialJob: savedJob() });

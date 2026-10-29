@@ -82,7 +82,9 @@ export function ballotPreparationMessage(error) {
     ballot_preparation_admission_changed:
       "County-file activity changed. Check current progress before trying this action again.",
     ballot_preparation_work_limit:
-      "This update stopped at its processing limit and needs an organization administrator's review. Retrying does not reset the limit. The last published list remains available.",
+      "This saved update reached its processing safety limit. Polis support must review it before processing can continue. Retrying does not reset the limit. Keep this upload in place; the last published list remains available.",
+    ballot_preparation_processing_failed:
+      "Processing stopped before this update could be published. Your uploaded file and review are saved. Keep this upload in place for Polis support to recover; do not upload the same file again. The last published list remains available.",
     ballot_preparation_cohort_limit:
       "This change exceeds this organization's controlled election, retained-voter or storage capacity. The published list remains available. Ask an organization administrator to review capacity before another update.",
     ballot_sent_updates_unavailable:
