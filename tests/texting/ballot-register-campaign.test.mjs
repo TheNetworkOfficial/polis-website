@@ -134,6 +134,202 @@ function harness(options = {}) {
   };
 }
 
+test("recipient preview shows all ten saved examples grouped without hiding eligible rows", async () => {
+  const h = harness();
+  const samples = [
+    ...Array.from({ length: 6 }, (_, index) => ({
+      displayName: `Held example ${index + 1}`,
+      maskedPhone: "••• 0000",
+      eligibility: { status: "held", reasons: ["invalid_phone"] },
+    })),
+    ...Array.from({ length: 4 }, (_, index) => ({
+      displayName: `Eligible example ${index + 1}`,
+      maskedPhone: "••• 0123",
+      eligibility: { status: "eligible", reasons: [] },
+    })),
+  ];
+  h.job(
+    ready({
+      count: 1216,
+      eligibleCount: 609,
+      recipientCount: 609,
+      excludedCount: 607,
+      samples,
+    }),
+  );
+  await h.controller.load({ selection: seed });
+  await h.controller.action("ballot-recipients-review");
+  const before = h.calls.length;
+  const html = h.controller.render();
+  for (const row of samples) assert.ok(html.includes(row.displayName));
+  assert.match(html, /Eligible examples/);
+  assert.match(html, /Held examples — excluded from campaign/);
+  assert.match(html, /Invalid or placeholder phone number/);
+  assert.match(
+    html,
+    /Up to 10 examples; totals above cover everyone reviewed\./,
+  );
+  assert.match(html, /<strong>609<\/strong>/);
+  assert.match(html, /<strong>607<\/strong>/);
+  assert.ok(
+    html.indexOf("Eligible example 1") < html.indexOf("Held example 1"),
+  );
+  assert.equal(h.calls.length, before);
+  assert.deepEqual(h.controller.selection().samples, samples);
+  assert.equal(h.controller.reviewed(), false);
+});
+
+test("saved example preview stays capped and explains when eligible examples are absent", async () => {
+  const h = harness();
+  h.job(
+    ready({
+      samples: [
+        ...Array.from({ length: 10 }, (_, index) => ({
+          displayName: `Saved held ${index}`,
+          eligibility: { status: "held", reasons: ["duplicate_phone"] },
+        })),
+        {
+          displayName: "Outside saved preview cap",
+          eligibility: { status: "eligible" },
+        },
+      ],
+    }),
+  );
+  await h.controller.load({ selection: seed });
+  await h.controller.action("ballot-recipients-review");
+  let html = h.controller.render();
+  assert.doesNotMatch(html, /Outside saved preview cap/);
+  assert.match(html, /Shared phone number/);
+  assert.match(
+    html,
+    /This small preview does not include an eligible example\. 390,000 recipients are eligible in total\./,
+  );
+  h.job(ready({ samples: [] }));
+  await h.controller.action("ballot-recipients-refresh");
+  html = h.controller.render();
+  assert.match(html, /No recipient examples were saved for this review/);
+  assert.match(html, /390,000 recipients are eligible in total/);
+  assert.doesNotMatch(html, /No recipients ready/);
+  assert.equal(h.controller.selection().eligibleCount, 390000);
+});
+
+test("preview keeps consent review, held restrictions and unknown statuses distinct and escaped", async () => {
+  const h = harness();
+  h.job(
+    ready({
+      count: 5,
+      eligibleCount: 1,
+      consentReviewableCount: 1,
+      recipientCount: 2,
+      excludedCount: 3,
+      heldCounts: { source_prohibits_sms: 1, unknown_internal_code: 1 },
+      samples: [
+        { displayName: "Eligible", eligibility: { status: "eligible" } },
+        {
+          displayName: "Consent example",
+          eligibility: {
+            status: "held",
+            reasons: [
+              "sender_consent_verification_required",
+              "sender_consent_verification_required",
+            ],
+          },
+        },
+        {
+          displayName: "Restricted example",
+          eligibility: {
+            status: "suppressed",
+            reasons: ["source_prohibits_sms"],
+          },
+        },
+        {
+          displayName: '<img src=x onerror="run()">',
+          maskedPhone: "<script>phone()</script>",
+          eligibility: {
+            status: "held",
+            reasons: [
+              "sender_consent_verification_required",
+              "<script>reason()</script>",
+              "__proto__",
+            ],
+          },
+        },
+        {
+          displayName: "Unknown status example",
+          eligibility: {
+            status: "future_status",
+            reasons: ["unknown_internal_code"],
+          },
+        },
+      ],
+    }),
+  );
+  await h.controller.load({ selection: seed });
+  await h.controller.action("ballot-recipients-review");
+  const html = h.controller.render();
+  assert.match(html, /Consent review examples/);
+  assert.match(html, /Sender consent must be verified/);
+  assert.match(html, /Source does not permit texting/);
+  assert.match(html, /Additional review examples/);
+  assert.match(html, /Additional eligibility review required/);
+  assert.match(html, /&lt;img src=x onerror=&quot;run\(\)&quot;&gt;/);
+  assert.match(html, /&lt;script&gt;phone\(\)&lt;\/script&gt;/);
+  assert.doesNotMatch(
+    html,
+    /<img|<script|unknown_internal_code|future_status|__proto__|reason\(\)|Opted out/,
+  );
+  const consent = html.slice(
+    html.indexOf('<section aria-label="Consent review examples">'),
+    html.indexOf('<section aria-label="Held examples'),
+  );
+  assert.match(consent, /Consent example/);
+  assert.doesNotMatch(consent, /Restricted example|&lt;img/);
+});
+
+test("saved row reasons cover county, contact, source and opt-out codes without raw labels", async () => {
+  const reasons = {
+    missing_phone: "No phone number",
+    usable_phone_required: "No usable phone number",
+    ballot_no_longer_outstanding: "Ballot no longer outstanding",
+    personalization_invalid: "Name or personalization needs review",
+    contact_archived: "Contact is archived or unavailable",
+    contact_endpoint_not_owned:
+      "Phone number is no longer linked to this contact",
+    source_review_required: "Source use needs review",
+    household_not_sms_recipient: "Household records cannot receive texts",
+    do_not_contact: "Do not contact",
+    opted_out: "Opted out",
+    STOP: "Opted out",
+    stop: "Opted out",
+    imported_opt_out: "Opted out",
+    consent_evidence: "Opted out",
+    prompt_inbound_stop: "Opted out",
+    prompt_message_opt_out: "Opted out",
+    prompt_contact_readback: "Opted out",
+    prompt_opt_out: "Opted out",
+  };
+  const h = harness();
+  await h.controller.load({ selection: seed });
+  for (const [reason, expected] of Object.entries(reasons)) {
+    h.job(
+      ready({
+        samples: [
+          {
+            displayName: "Saved example",
+            eligibility: { status: "held", reasons: [reason] },
+          },
+        ],
+      }),
+    );
+    await h.controller.action(
+      h.controller.selection()
+        ? "ballot-recipients-refresh"
+        : "ballot-recipients-review",
+    );
+    assert.ok(h.controller.render().includes(expected), reason);
+  }
+});
+
 test("500k filtered handoff freezes opaque all-matching selection and reviews before bind without contacts/provider writes", async () => {
   const h = harness();
   await h.controller.load({ selection: seed });

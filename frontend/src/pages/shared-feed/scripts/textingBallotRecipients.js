@@ -21,13 +21,98 @@ const heldLabels = {
   invalid_phone: "Invalid phone",
   missing_phone: "No phone number",
   blank_phone: "No phone number",
+  usable_phone_required: "No usable phone number",
   duplicate_phone: "Shared phone numbers",
   opted_out: "Opted out",
-  suppressed: "Opted out",
+  STOP: "Opted out",
+  stop: "Opted out",
+  imported_opt_out: "Opted out",
+  consent_evidence: "Opted out",
+  prompt_inbound_stop: "Opted out",
+  prompt_message_opt_out: "Opted out",
+  prompt_contact_readback: "Opted out",
+  prompt_opt_out: "Opted out",
+  suppressed: "Contact restricted",
+  do_not_contact: "Do not contact",
   consent_required: "Consent needed",
+  sender_consent_verification_required: "Sender consent must be verified",
   source_policy: "Source use needs review",
+  source_review_required: "Source use needs review",
+  source_prohibits_sms: "Source does not permit texting",
   not_outstanding: "Ballot no longer outstanding",
+  ballot_no_longer_outstanding: "Ballot no longer outstanding",
+  personalization_invalid: "Name or personalization needs review",
+  contact_archived: "Contact is archived or unavailable",
+  contact_endpoint_not_owned:
+    "Phone number is no longer linked to this contact",
+  household_not_sms_recipient: "Household records cannot receive texts",
 };
+
+function ballotRecipientReasonLabel(reason) {
+  if (reason === "invalid_phone") return "Invalid or placeholder phone number";
+  if (reason === "duplicate_phone") return "Shared phone number";
+  return Object.hasOwn(heldLabels, reason)
+    ? heldLabels[reason]
+    : "Additional eligibility review required";
+}
+
+/** Display the saved classification without changing recipient eligibility. */
+function ballotRecipientPreviewGroup(row) {
+  if (row?.eligibility?.status === "eligible") return "eligible";
+  const reasons = row?.eligibility?.reasons;
+  if (
+    Array.isArray(reasons) &&
+    reasons.length > 0 &&
+    reasons.every((reason) => reason === "sender_consent_verification_required")
+  )
+    return "consent";
+  return ["held", "suppressed"].includes(row?.eligibility?.status)
+    ? "held"
+    : "review";
+}
+
+/** Only the existing saved examples are shown; totals cover the full review. */
+function renderBallotRecipientPreview(job) {
+  const samples = Array.isArray(job.samples) ? job.samples.slice(0, 10) : [],
+    groups = [
+      ["eligible", "Eligible examples"],
+      ["consent", "Consent review examples"],
+      ["held", "Held examples — excluded from campaign"],
+      ["review", "Additional review examples"],
+    ];
+  return `<section aria-label="Recipient examples"><h3>Recipient examples</h3><p class="pt-muted">Up to 10 examples; totals above cover everyone reviewed.</p>${
+    job.eligibleCount > 0 &&
+    !samples.some((row) => ballotRecipientPreviewGroup(row) === "eligible")
+      ? notice(
+          "Eligible recipients",
+          `This small preview does not include an eligible example. ${count(job.eligibleCount)} recipients are eligible in total.`,
+        )
+      : ""
+  }${
+    samples.length
+      ? groups
+          .map(([key, title]) => {
+            const rows = samples.filter(
+              (row) => ballotRecipientPreviewGroup(row) === key,
+            );
+            if (!rows.length) return "";
+            return `<section aria-label="${e(title)}"><h4>${e(title)}</h4>${rows
+              .map((row) => {
+                const reasons = Array.isArray(row?.eligibility?.reasons)
+                  ? [
+                      ...new Set(
+                        row.eligibility.reasons.map(ballotRecipientReasonLabel),
+                      ),
+                    ]
+                  : [];
+                return `<div class="pt-row"><div><strong>${e(row?.displayName || "Selected voter")}</strong>${key !== "eligible" ? `<p class="pt-muted">${e(reasons.length ? reasons.join(" · ") : "Additional eligibility review required")}</p>` : ""}</div><span>${e(row?.maskedPhone || "")}</span></div>`;
+              })
+              .join("")}</section>`;
+          })
+          .join("")
+      : '<p class="pt-muted">No recipient examples were saved for this review.</p>'
+  }</section>`;
+}
 const submissionFor = (seed, phoneFieldId, operationId) => ({
   operationId,
   ...seed.query,
@@ -490,28 +575,7 @@ export function createTextingBallotRecipients(
               )
               .join(
                 "",
-              )}</div>${held.length ? `<dl>${held.map(([key, value]) => `<div class="pt-row"><dt>${e(heldLabels[key] || "Other eligibility checks")}</dt><dd>${count(value)}</dd></div>`).join("")}</dl>` : ""}${
-              Array.isArray(job.samples)
-                ? job.samples
-                    .slice(0, 5)
-                    .map((row) => {
-                      const status =
-                        row.eligibility?.status === "eligible"
-                          ? "Eligible"
-                          : row.eligibility?.reasons?.length === 1 &&
-                              row.eligibility.reasons[0] ===
-                                "sender_consent_verification_required"
-                            ? "Consent review"
-                            : ["held", "suppressed"].includes(
-                                  row.eligibility?.status,
-                                )
-                              ? "Held"
-                              : "";
-                      return `<div class="pt-row"><div><strong>${e(row.displayName || "Selected voter")}</strong>${status ? `<p class="pt-muted">${status}</p>` : ""}</div><span>${e(row.maskedPhone || "")}</span></div>`;
-                    })
-                    .join("")
-                : ""
-            }`
+              )}</div>${held.length ? `<dl>${held.map(([key, value]) => `<div class="pt-row"><dt>${e(Object.hasOwn(heldLabels, key) ? heldLabels[key] : "Additional eligibility review required")}</dt><dd>${count(value)}</dd></div>`).join("")}</dl>` : ""}${renderBallotRecipientPreview(job)}`
           : ""
       }
       ${job?.status === "ready" ? `<label class="pt-workspace-check"><input type="checkbox" data-workspace-ballot-reviewed${reviewed() ? " checked" : ""}${!capable() || state.loading ? " disabled" : ""}>I reviewed these recipients</label><p class="pt-muted">${job.consentReviewableCount ? "Sender consent must be verified before preparation. " : "Held voters are excluded. "}Saving creates a draft.</p>` : job?.status === "needs_review" ? reviewFailureNotice(job) : ""}
