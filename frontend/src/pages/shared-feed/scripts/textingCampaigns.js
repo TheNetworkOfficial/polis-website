@@ -19,6 +19,7 @@ import {
   messagePrice,
   queueCanConfirm,
   queueCanRefreshPreview,
+  queueCanRefreshContent,
   queueCanSkip,
   queueBlockExplanation,
   protectedMediaData,
@@ -355,7 +356,7 @@ export function createCampaigns(r) {
     const c = s.campaign,
       manage = r.can("createCampaigns"),
       image = mediaData(s.media);
-    return `${preparationNotice(s)}${r.can("manageBilling") ? `<div class="pt-grid pt-grid--three">${stat("Campaign limit", money(c.budgetMicros))}${stat("Pending charges", money(c.reservedMicros))}${stat("Completed usage", money(c.settledMicros))}</div>` : ""}<div class="pt-grid pt-grid--two"><section class="pt-card"><div class="pt-row"><h2>Your message</h2>${manage && ["draft", "prepared"].includes(c.status) ? button("campaign-edit", "Edit", { secondary: true }) : ""}</div><div class="pt-workspace-bubble">${image ? `<img src="${e(image)}" alt="Saved campaign attachment">${s.media?.providerReady === true ? "<p>Image verified</p>" : ""}` : ""}<p>${e(c.templateText)}</p></div>${attachmentPreparation(s)}<p class="pt-muted">${dateText(c.deliveryNotBeforeMs)} – ${dateText(c.deliveryBeforeMs)}</p></section><section class="pt-card"><h2>Ready to begin?</h2><div class="pt-row"><span>Campaign</span><strong>${e(label(c.status))}</strong></div>${c.routingSummary ? `<div class="pt-row"><span>Opt-in contacts</span><strong>${count(c.routingSummary.optInCount)}</strong></div><div class="pt-row"><span>Standard contacts</span><strong>${count(c.routingSummary.standardCount)}</strong></div><div class="pt-row"><span>Excluded contacts</span><strong>${count(c.routingSummary.excludedCount)}</strong></div>${r.can("manageBilling") && Number.isSafeInteger(c.estimatedCostMicros) ? `<div class="pt-row"><span>Estimated campaign cost</span><strong>${money(c.estimatedCostMicros)}</strong></div>` : ""}` : ""}<div class="pt-row"><span>Assigned volunteers</span><strong>${count(list(c.assignedUserIds).length)}</strong></div>${reasons(list(c.blockedReasons).map((reason) => (reason === "content_not_prepared" || reason === "prompt_content_not_prepared" ? (s.preparingRecipients ? "Message will be checked when recipient preparation finishes" : "Message needs campaign preparation") : reason)))}<div class="pt-actions">${manage ? `${go("team", "Manage team", c.campaignId, true)}${["draft", "prepared"].includes(c.status) && !campaignPreparationPending(c) ? button("transition-prepare", "Prepare selected recipients", { secondary: true }) : ""}${c.canActivate && (!c.mediaId || (c.mediaReady === true && !s.mediaNeedsRead)) ? button("transition-activate", c.status === "paused" ? "Resume campaign" : "Open campaign") : ""}${c.status === "active" ? button("transition-pause", "Pause campaign", { secondary: true }) : ""}${c.status !== "archived" ? button("transition-archive", "Archive", { secondary: true }) : ""}` : ""}${c.canFetchQueue && r.can("manualQueue") ? go("send", c.queueRecoveryRequired ? "Review held recipients" : "Start texting", c.campaignId) : ""}${go("results", "View results", c.campaignId, true)}</div>${c.status === "paused" ? notice("Sending paused", "This stops new sends from Polis. Any vendor-side work already accepted keeps its recorded status.") : ""}</section></div>`;
+    return `${preparationNotice(s)}${r.can("manageBilling") ? `<div class="pt-grid pt-grid--three">${stat("Campaign limit", money(c.budgetMicros))}${stat("Pending charges", money(c.reservedMicros))}${stat("Completed usage", money(c.settledMicros))}</div>` : ""}<div class="pt-grid pt-grid--two"><section class="pt-card"><div class="pt-row"><h2>Your message</h2>${manage && ["draft", "prepared"].includes(c.status) ? button("campaign-edit", "Edit", { secondary: true }) : ""}</div><div class="pt-workspace-bubble">${image ? `<img src="${e(image)}" alt="Saved campaign attachment">${s.media?.providerReady === true ? "<p>Image verified</p>" : ""}` : ""}<p>${e(c.templateText)}</p></div>${attachmentPreparation(s)}<p class="pt-muted">${dateText(c.deliveryNotBeforeMs)} – ${dateText(c.deliveryBeforeMs)}</p></section><section class="pt-card"><h2>Ready to begin?</h2><div class="pt-row"><span>Campaign</span><strong>${e(label(c.status))}</strong></div>${c.routingSummary ? `<div class="pt-row"><span>Opt-in contacts</span><strong>${count(c.routingSummary.optInCount)}</strong></div><div class="pt-row"><span>Standard contacts</span><strong>${count(c.routingSummary.standardCount)}</strong></div><div class="pt-row"><span>Excluded contacts</span><strong>${count(c.routingSummary.excludedCount)}</strong></div>${r.can("manageBilling") && Number.isSafeInteger(c.estimatedCostMicros) ? `<div class="pt-row"><span>Estimated campaign cost</span><strong>${money(c.estimatedCostMicros)}</strong></div>` : ""}` : ""}<div class="pt-row"><span>Assigned volunteers</span><strong>${count(list(c.assignedUserIds).length)}</strong></div>${reasons(list(c.blockedReasons).map((reason) => (reason === "content_not_prepared" || reason === "prompt_content_not_prepared" ? (s.preparingRecipients ? "Message will be checked when recipient preparation finishes" : "Message needs campaign preparation") : reason)))}<div class="pt-actions">${manage ? `${go("team", "Manage team", c.campaignId, true)}${["draft", "prepared"].includes(c.status) && !campaignPreparationPending(c) ? button("transition-prepare", "Prepare selected recipients", { secondary: true }) : ""}${c.canActivate && (!c.mediaId || (c.mediaReady === true && !s.mediaNeedsRead)) ? button("transition-activate", c.status === "paused" ? "Resume campaign" : "Open campaign") : ""}${c.status === "active" ? button("transition-pause", "Pause campaign", { secondary: true }) : ""}${c.status !== "archived" ? button("transition-archive", "Close & archive", { secondary: true }) : ""}` : ""}${c.canFetchQueue && r.can("manualQueue") ? go("send", c.queueRecoveryRequired ? "Review held recipients" : "Start texting", c.campaignId) : ""}${go("results", "View results", c.campaignId, true)}</div>${c.status === "paused" ? notice("Sending paused", "This stops new sends from Polis. Any vendor-side work already accepted keeps its recorded status.") : ""}</section></div>`;
   }
   function team(s) {
     const c = s.campaign;
@@ -580,10 +581,7 @@ export function createCampaigns(r) {
       state().completionResults = false;
     }
     if (name === "transition-archive") {
-      await completion.load();
-      state().completionScope = "campaign";
-      state().completionResults = true;
-      completion.localAction("completion-archive");
+      await completion.openArchive();
       return true;
     }
     if (await management.action(name, value)) return true;
@@ -897,19 +895,24 @@ export function createCampaigns(r) {
       r.armExpiry(queueItem(s)?.expiresAtMs);
       return true;
     }
-    if (name === "queue-recover-preview") {
+    if (["queue-recover-preview", "queue-refresh-content"].includes(name)) {
       const item = queueItem(s, value),
-        key = `queue:${c?.campaignId}:${item?.itemId}`;
+        key = `queue:${c?.campaignId}:${item?.itemId}`,
+        refreshContent = name === "queue-refresh-content";
       if (
         !r.can("queueItemRecovery") ||
-        !r.sendHeld(key) ||
+        (refreshContent
+          ? r.sendHeld(key) || !queueCanRefreshContent(item)
+          : !r.sendHeld(key)) ||
         s.pendingItemId ||
         item?.state !== "awaiting_confirmation"
       )
         throw new Error("This recipient's outcome must remain under review.");
       const requests = (s.queueRecoveryRequests ||= {});
-      const requestId = (requests[item.itemId] ||=
-        r.recoveryRequestId?.(key) || uuid());
+      if (refreshContent) r.holdSend(key);
+      const requestId = refreshContent
+        ? (requests[item.itemId] = r.recoveryRequestId?.(key) || uuid())
+        : (requests[item.itemId] ||= r.recoveryRequestId?.(key) || uuid());
       const response = await r.api(
         `/campaigns/${id(c.campaignId)}/queue/${id(item.itemId)}/recover-preview`,
         { requestId },
@@ -930,7 +933,11 @@ export function createCampaigns(r) {
       );
       s.imageLoaded = null;
       r.armExpiry(next.expiresAtMs);
-      r.toast("Unsent preview recovered. Review it before choosing Send.");
+      r.toast(
+        refreshContent
+          ? "Preview refreshed. Review the updated message before choosing Send."
+          : "Unsent preview recovered. Review it before choosing Send.",
+      );
       return true;
     }
     if (name === "queue-status") {

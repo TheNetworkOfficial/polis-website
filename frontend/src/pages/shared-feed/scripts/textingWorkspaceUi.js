@@ -1,6 +1,10 @@
 import { personalizationError } from "./textingPersonalization";
 
 const operationalErrors = {
+  prompt_operation_unavailable:
+    "This request could not be completed. Your campaign stays saved. Check its saved status before trying again.",
+  texting_operation_unavailable:
+    "This request could not be completed. Your campaign stays saved. Check its saved status before trying again.",
   prompt_queue_uncertain_capacity:
     "Unconfirmed send outcomes have filled the texting assignment limit. Ask an organization texting manager to review them.",
 };
@@ -291,6 +295,20 @@ export function queueCanRefreshPreview(item, now = Date.now()) {
     Number.isSafeInteger(item.expiresAtMs) &&
     item.expiresAtMs <= now &&
     list(item.blockedReasons).length === 0
+  );
+}
+
+/** An explicit refresh replaces only an untouched preview; the server fences
+ * its old receipt and rechecks the original recipient before issuing a new one. */
+export function queueCanRefreshContent(item) {
+  return (
+    item?.state === "awaiting_confirmation" &&
+    item.stream !== "opt_in" &&
+    !!item.humanConfirmation &&
+    typeof item.humanConfirmation === "object" &&
+    Number.isSafeInteger(item.expiresAtMs) &&
+    list(item.blockedReasons).length === 0 &&
+    !item.sendError
   );
 }
 

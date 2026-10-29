@@ -412,7 +412,10 @@ test("multipart resume rejects a mismatched already-uploaded checksum", async ()
 });
 
 function documentStub() {
-  globalThis.document = { addEventListener: () => {} };
+  globalThis.document = {
+    addEventListener: () => {},
+    querySelectorAll: () => [],
+  };
 }
 test("entry and refresh issue reads only and never allocate recipients", async () => {
   documentStub();
@@ -1166,6 +1169,7 @@ test("sending feedback remains pending until confirmation, then refreshes pilot 
   const listeners = new Map();
   globalThis.document = {
     addEventListener: (name, handler) => listeners.set(name, handler),
+    querySelectorAll: () => [],
   };
   const campaign = {
     campaignId: "campaign-one",
@@ -1341,4 +1345,67 @@ test("read-only queue status clears only exact terminal evidence and prepares op
     "provider_outcome_unknown",
   );
   page.dispose();
+});
+test("unexpected operation failures explain the saved-status check without promising a safe resend", async () => {
+  for (const code of [
+    "prompt_operation_unavailable",
+    "texting_operation_unavailable",
+  ]) {
+    const message = ui.customerText(code);
+    assert.match(message, /campaign stays saved/);
+    assert.match(message, /Check its saved status/);
+    assert.doesNotMatch(
+      message,
+      /operation_unavailable|no messages|resend|safe to retry/i,
+    );
+  }
+});
+
+test("campaign archive action uses independent closure review before any status write", async (t) => {
+  const calls = [],
+    view = {
+      campaigns: {
+        campaign: {
+          campaignId: "campaign-one",
+          name: "Old campaign",
+          status: "active",
+          revision: 7,
+        },
+      },
+    };
+  const page = createCampaigns({
+    view: () => view,
+    context: () => ({
+      userId: "admin",
+      organizationId: "org",
+      resourceId: "campaign-one",
+    }),
+    can: (key) => key === "createCampaigns",
+    guard() {},
+    changed() {},
+    busy: () => false,
+    contactApi: async () => {},
+    api: async (path, body) => {
+      calls.push({ path, body });
+      assert.equal(body, undefined);
+      assert.equal(path, "/campaigns/campaign-one/archive-preview");
+      return {
+        closure: {
+          version: 1,
+          campaignId: "campaign-one",
+          campaignRevision: 7,
+          status: "active",
+          asOfMs: Date.now(),
+          proofId: "archive-seven",
+          canArchive: true,
+          blockedReasons: [],
+        },
+      };
+    },
+  });
+  t.after(() => page.dispose());
+  await page.action("transition-archive");
+  assert.equal(calls.length, 1);
+  assert.equal(view.campaigns.completionDialog, true);
+  assert.equal(view.campaigns.campaign.status, "active");
 });

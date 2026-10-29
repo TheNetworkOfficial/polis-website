@@ -27,6 +27,7 @@ function fixture(
     addEventListener: (name, fn) => listeners.set(name, fn),
     removeEventListener() {},
     querySelector: () => null,
+    querySelectorAll: () => [],
   };
   globalThis.window = { addEventListener() {}, removeEventListener() {} };
   globalThis.FormData = class {
@@ -374,6 +375,58 @@ test("legacy queue recovery persists its request across response loss and requir
   );
   await f.click("queue-confirm");
   assert.equal(f.calls.filter((c) => c.url.endsWith("/confirm")).length, 1);
+});
+
+test("explicit preview refresh fences the old receipt without sending and survives response loss", async (t) => {
+  const f = fixture(t),
+    key = "polis.texting.uncertain.admin:org:queue:campaign:item-1";
+  await f.page.load();
+  await f.click("queue-load");
+  assert.match(
+    f.page.render(),
+    /data-workspace-action="queue-refresh-content"/,
+  );
+  f.setRecoveryMode("lost_response");
+  await f.click("queue-refresh-content", "item-1");
+  const requestId = JSON.parse(f.storage.get(key)).recoveryRequestId;
+  assert.ok(requestId);
+  assert.equal(f.calls.filter((c) => c.url.endsWith("/confirm")).length, 0);
+  await f.page.load({ force: true });
+  await f.click("queue-load");
+  await f.click("queue-recover-preview", "item-1");
+  assert.deepEqual(
+    f.calls
+      .filter((c) => c.url.endsWith("/recover-preview"))
+      .map((c) => c.body.requestId),
+    [requestId, requestId],
+  );
+  assert.equal(f.storage.has(key), false);
+  assert.equal(f.calls.filter((c) => c.url.endsWith("/confirm")).length, 0);
+  assert.match(f.page.render(), /data-workspace-action="queue-confirm"/);
+});
+
+test("content refresh cannot replace an uncertain send", async (t) => {
+  const f = fixture(t);
+  await f.page.load();
+  await f.click("queue-load");
+  await f.click("queue-confirm", "item-1");
+  await f.click("queue-refresh-content", "item-1");
+  assert.equal(
+    f.calls.filter((c) => c.url.endsWith("/recover-preview")).length,
+    0,
+  );
+  assert.equal(f.calls.filter((c) => c.url.endsWith("/confirm")).length, 1);
+});
+
+test("content refresh cannot replace an opt-in preview", async (t) => {
+  const optIn = fixture(t, { stream: "opt_in" });
+  await optIn.page.load();
+  await optIn.click("queue-load");
+  await optIn.click("queue-refresh-content", "item-1");
+  assert.equal(
+    optIn.calls.filter((c) => c.url.endsWith("/recover-preview")).length,
+    0,
+  );
 });
 
 for (const mode of ["unknown", "unverified"])

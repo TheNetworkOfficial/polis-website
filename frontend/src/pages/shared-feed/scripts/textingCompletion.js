@@ -75,6 +75,33 @@ export function checkedTextingCompletion(
   return value;
 }
 
+/** Intentional closure has its own proof; incomplete work is never completion. */
+export function checkedTextingArchivePreview(value, campaignId) {
+  if (
+    value?.version !== 1 ||
+    value.campaignId !== campaignId ||
+    !known(value.campaignRevision) ||
+    !known(value.asOfMs) ||
+    typeof value.canArchive !== "boolean" ||
+    ![
+      "draft",
+      "prepared",
+      "activating",
+      "active",
+      "paused",
+      "provider_outcome_unknown",
+      "archived",
+    ].includes(value.status) ||
+    !Array.isArray(value.blockedReasons) ||
+    (value.canArchive &&
+      (value.status === "archived" ||
+        typeof value.proofId !== "string" ||
+        !value.proofId))
+  )
+    throw new Error("Campaign closure could not be verified.");
+  return value;
+}
+
 const mark = (name) =>
   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${{ check: '<path d="m5 12 4 4L19 6"/>', chat: '<path d="M20 11a7 7 0 0 1-7 7H8l-5 3V7a4 4 0 0 1 4-4h9a4 4 0 0 1 4 4Z"/>', archive: '<path d="M4 9h16v11H4zM3 4h18v5H3zM9 13h6"/>', clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>', send: '<path d="m3 10 18-7-7 18-3-8-8-3Zm8 3L21 3"/>', team: '<circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2m1-15a3 3 0 0 1 0 6m2 3a5 5 0 0 1 3 4v2"/>' }[name] || '<circle cx="12" cy="12" r="9"/>'}</svg>`;
 export const completionScene = (celebrate) =>
@@ -85,6 +112,7 @@ const celebrated = new Set();
 export function createTextingCompletion(r, state) {
   let disposed = false,
     generation = 0,
+    archiveGeneration = 0,
     pendingRead = null,
     focusTimer;
   function focusConfirmation() {
@@ -159,6 +187,104 @@ export function createTextingCompletion(r, state) {
     known(state().completion?.asOfMs) &&
     Date.now() - state().completion.asOfMs <= 120000 &&
     state().completion.asOfMs <= Date.now() + 30000;
+  const archiveFresh = () =>
+    !state().completionArchiveError &&
+    !state().completionArchiveLoading &&
+    known(state().completionArchivePreview?.asOfMs) &&
+    Date.now() - state().completionArchivePreview.asOfMs <= 120000 &&
+    state().completionArchivePreview.asOfMs <= Date.now() + 30000;
+  const archiveReady = () =>
+    r.can("createCampaigns") &&
+    !state().completionArchiveUnknown &&
+    (state().completionArchivePreview
+      ? archiveFresh() && state().completionArchivePreview.canArchive === true
+      : !state().completionArchiveRequested &&
+        state().completion?.canArchive === true &&
+        fresh() &&
+        !blockedLocally());
+  async function loadArchivePreview() {
+    const s = state(),
+      campaignId = s.campaign?.campaignId;
+    if (!campaignId || !r.context?.()?.userId) return;
+    const version = ++archiveGeneration;
+    s.completionArchiveLoading = true;
+    s.completionArchiveError = false;
+    s.completionArchivePreview = null;
+    const archiveCurrent = () => {
+      r.guard();
+      return (
+        !disposed &&
+        version === archiveGeneration &&
+        state().campaign?.campaignId === campaignId
+      );
+    };
+    try {
+      const response = await r.api(
+        `/campaigns/${id(campaignId)}/archive-preview`,
+      );
+      if (!archiveCurrent()) return;
+      s.completionArchivePreview = checkedTextingArchivePreview(
+        response.closure,
+        campaignId,
+      );
+      if (s.completionArchivePreview.status === "archived") {
+        s.campaign.status = "archived";
+        s.completionArchiveUnknown = false;
+        s.completionDialog = false;
+      }
+    } catch (error) {
+      if (!archiveCurrent()) return;
+      s.completionArchiveError = true;
+      s.completionDialog = false;
+      if ([401, 403].includes(error?.status)) throw error;
+    } finally {
+      if (archiveCurrent()) s.completionArchiveLoading = false;
+    }
+  }
+  async function openArchive() {
+    r.guard();
+    const s = state();
+    s.completionScope = "campaign";
+    s.completionResults = true;
+    s.completionArchiveRequested = true;
+    s.completionDialog = false;
+    s.completionArchiveChanged = false;
+    if (!r.can("createCampaigns")) return false;
+    await loadArchivePreview();
+    r.guard();
+    if (archiveReady()) {
+      s.completionDialog = true;
+      focusConfirmation();
+    }
+    r.changed?.();
+    return Boolean(s.completionDialog);
+  }
+  function archiveNotice() {
+    const s = state();
+    if (s.completionArchiveChanged)
+      return "This campaign changed. Choose Close & archive again to review the current campaign before confirming.";
+    if (s.completionArchiveLoading)
+      return "Checking whether this campaign can be closed.";
+    if (s.completionArchiveError)
+      return "Closure could not be checked. Try Close & archive again. No campaign status was changed.";
+    if (
+      s.completionArchivePreview?.blockedReasons?.includes(
+        "permission_required",
+      )
+    )
+      return "Only a current campaign manager can close this campaign.";
+    if (
+      s.completionArchivePreview?.blockedReasons?.includes(
+        "campaign_status_unavailable",
+      )
+    )
+      return "This campaign status needs review before closure. No campaign status was changed.";
+    return archiveReady()
+      ? s.completionArchivePreview
+        ? "Close this campaign to stop further work. Unfinished work and uncertain outcomes remain in its history."
+        : "Sending finished. Results stay saved."
+      : "Campaign work may still need attention.";
+  }
   async function load({ finish = false } = {}) {
     const s = state(),
       campaignId = s.campaign?.campaignId;
@@ -240,7 +366,7 @@ export function createTextingCompletion(r, state) {
     const title = saved
       ? "Your latest saved results."
       : status === "archived"
-        ? "A good finish. All saved."
+        ? "Campaign closed. History saved."
         : complete
           ? team
             ? "You did this. Together."
@@ -278,13 +404,8 @@ export function createTextingCompletion(r, state) {
       metrics = personal ? c?.personal : c?.results?.campaign,
       data = metrics?.counts;
     const admin = r.can("createCampaigns"),
-      canArchive =
-        admin &&
-        c?.canArchive === true &&
-        fresh() &&
-        !blockedLocally() &&
-        !s.completionArchiveUnknown;
-    return `<section class="pt-completion pt-completion--results" aria-label="Campaign results"><header class="pt-completion-heading"><div><h1>${personal ? "Your impact" : "Look what we did."}</h1><p class="pt-muted">${e(s.campaign.name)}</p></div>${button("completion-refresh", "Refresh results", { secondary: true, disabled: r.busy() })}</header><nav class="pt-completion-tabs" aria-label="Results scope">${["personal", "campaign"].map((scope) => button("completion-scope", scope === "personal" ? "Your impact" : "Campaign", { value: scope, secondary: s.completionScope !== scope }).replace("<button ", `<button aria-pressed="${(s.completionScope || "personal") === scope}" `)).join("")}</nav>${s.completionError && c ? '<p class="pt-notice" role="status">Previous results · Unable to refresh. Close & archive is held.</p>' : ""}${!c || !data ? `<div class="pt-notice" role="status"><strong>Results unavailable</strong><p>${s.completionChanged ? "Delivery results changed while this page was loading. Refresh results to try again." : "Refresh results to try again. This does not mean your sending history is missing."}</p></div>` : `<div class="pt-completion-grid"><section class="pt-card pt-completion-sent"><span>${mark("send")}Texts sent</span><strong>${count(data.accepted)}</strong><p class="pt-muted">${metrics.coverage === "partial" ? "Recorded so far · partial history" : personal ? "Your part in a team effort." : "One team. A lot of good work."}</p></section>${delivery(metrics)}${!personal || c.personal.inboundAvailable !== false ? `<section class="pt-card pt-completion-replies"><span>${mark("chat")}Incoming messages</span><strong>${count(data.inbound)}</strong><p class="pt-muted">Includes opt-outs and replies, not unique people.</p></section>` : ""}${c.results.team?.contributorCount !== undefined && known(c.results.team.contributorCount) ? `<section class="pt-card pt-completion-team"><span>${mark("team")}Team</span><strong>${count(c.results.team.contributorCount)}</strong><p class="pt-muted">${c.results.campaign.coverage === "partial" ? "Recorded contributors" : "Volunteers who sent"}</p></section>` : ""}${renderSeries(c, personal)}${renderShare(c)}${(known(data.needsReview) && data.needsReview > 0) || c.state === "review_required" ? `<section class="pt-notice pt-completion-review"><strong>${known(data.needsReview) ? `${count(data.needsReview)} messages need review` : "Some sends need review"}</strong><p>Send outcomes aren’t confirmed yet.</p>${button("completion-review", "Review sends", { secondary: true })}</section>` : ""}</div>`}<details class="pt-completion-about"><summary>About these results</summary><p class="pt-muted">Sent counts accepted submissions, not delivery. Incoming counts include opt-outs and reply messages, not unique people. Outbound totals include follow-up replies. Delivery can update after texting finishes.</p></details><p class="pt-muted pt-completion-updated">${c ? `Updated ${e(new Date(c.asOfMs).toLocaleString(undefined, { hour12: true }))}` : ""}</p>${s.completionArchiveUnknown ? '<div class="pt-notice" role="alert"><strong>Closure needs checking</strong><p>The saved campaign status could not be confirmed. Refresh before closing again.</p></div>' : ""}<footer class="pt-completion-actions">${admin && s.campaign.status !== "archived" ? `<p class="pt-muted">${canArchive ? "Sending finished. Results stay saved." : "Campaign work may still need attention."}</p>${button("completion-archive", "Close & archive", { disabled: !canArchive || r.busy() })}` : s.campaign.status === "archived" ? '<p class="pt-completion-badge">Archived · Sending and replies closed</p>' : ""}${exit()}${button("completion-finish", "Back to your finish", { secondary: true })}</footer>${s.completionDialog ? dialog(canArchive) : ""}</section>`;
+      canArchive = archiveReady();
+    return `<section class="pt-completion pt-completion--results" aria-label="Campaign results"><header class="pt-completion-heading"><div><h1>${personal ? "Your impact" : c?.state === "campaign_complete" ? "Look what we did." : "Campaign results"}</h1><p class="pt-muted">${e(s.campaign.name)}</p></div>${button("completion-refresh", "Refresh results", { secondary: true, disabled: r.busy() })}</header><nav class="pt-completion-tabs" aria-label="Results scope">${["personal", "campaign"].map((scope) => button("completion-scope", scope === "personal" ? "Your impact" : "Campaign", { value: scope, secondary: s.completionScope !== scope }).replace("<button ", `<button aria-pressed="${(s.completionScope || "personal") === scope}" `)).join("")}</nav>${s.completionError && c ? '<p class="pt-notice" role="status">Previous results · Unable to refresh.</p>' : ""}${!c || !data ? `<div class="pt-notice" role="status"><strong>Results unavailable</strong><p>${s.completionChanged ? "Delivery results changed while this page was loading. Refresh results to try again." : "Refresh results to try again. This does not mean your sending history is missing."}</p></div>` : `<div class="pt-completion-grid"><section class="pt-card pt-completion-sent"><span>${mark("send")}Texts sent</span><strong>${count(data.accepted)}</strong><p class="pt-muted">${metrics.coverage === "partial" ? "Recorded so far · partial history" : personal ? "Your part in a team effort." : "One team. A lot of good work."}</p></section>${delivery(metrics)}${!personal || c.personal.inboundAvailable !== false ? `<section class="pt-card pt-completion-replies"><span>${mark("chat")}Incoming messages</span><strong>${count(data.inbound)}</strong><p class="pt-muted">Includes opt-outs and replies, not unique people.</p></section>` : ""}${c.results.team?.contributorCount !== undefined && known(c.results.team.contributorCount) ? `<section class="pt-card pt-completion-team"><span>${mark("team")}Team</span><strong>${count(c.results.team.contributorCount)}</strong><p class="pt-muted">${c.results.campaign.coverage === "partial" ? "Recorded contributors" : "Volunteers who sent"}</p></section>` : ""}${renderSeries(c, personal)}${renderShare(c)}${(known(data.needsReview) && data.needsReview > 0) || c.state === "review_required" ? `<section class="pt-notice pt-completion-review"><strong>${known(data.needsReview) ? `${count(data.needsReview)} messages need review` : "Some sends need review"}</strong><p>Send outcomes aren’t confirmed yet.</p>${button("completion-review", "Review sends", { secondary: true })}</section>` : ""}</div>`}<details class="pt-completion-about"><summary>About these results</summary><p class="pt-muted">Sent counts accepted submissions, not delivery. Incoming counts include opt-outs and reply messages, not unique people. Outbound totals include follow-up replies. Delivery can update after texting finishes.</p></details><p class="pt-muted pt-completion-updated">${c ? `Updated ${e(new Date(c.asOfMs).toLocaleString(undefined, { hour12: true }))}` : ""}</p>${s.completionArchiveUnknown ? '<div class="pt-notice" role="alert"><strong>Closure needs checking</strong><p>The saved campaign status could not be confirmed. Refresh before closing again.</p></div>' : ""}<footer class="pt-completion-actions">${admin && s.campaign.status !== "archived" ? `<p class="pt-muted">${e(archiveNotice())}</p>${button(s.completionArchiveRequested || !canArchive ? "completion-open-archive" : "completion-archive", "Close & archive", { disabled: r.busy() || s.completionArchiveLoading || s.completionArchiveUnknown })}` : s.campaign.status === "archived" ? '<p class="pt-completion-badge">Archived · Sending and replies closed</p>' : ""}${exit()}${button("completion-finish", "Back to your finish", { secondary: true })}</footer>${s.completionDialog ? dialog(canArchive) : ""}</section>`;
   }
   function renderSeries(c, personal) {
     const series = c.results.series;
@@ -311,12 +432,17 @@ export function createTextingCompletion(r, state) {
     return `<section class="pt-card pt-completion-share"><h2>Your part</h2><p class="pt-muted">${count(own)} of ${count(total)} texts</p><progress value="${own}" max="${total}" aria-label="Your share of campaign texts"></progress><strong>${Math.round((own / total) * 100)}%</strong></section>`;
   }
   function dialog(canArchive) {
-    return `<div class="pt-completion-scrim"><section class="pt-completion-confirm pt-card" role="dialog" aria-modal="true" aria-labelledby="pt-completion-close-title"><div>${mark("archive")}</div><h2 id="pt-completion-close-title">Close this campaign?</h2><p>${e(state().campaign.name)}</p><ul><li>New texts stop</li><li>Replies close</li><li>Results & history stay saved</li></ul><p class="pt-muted">This campaign can’t be reopened. You can still read its conversations.</p><div class="pt-actions">${button("completion-confirm-archive", "Close & archive", { disabled: !canArchive || r.busy() })}${button("completion-cancel-archive", "Keep open", { secondary: true, disabled: state().completionSubmitting })}</div></section></div>`;
+    return `<div class="pt-completion-scrim"><section class="pt-completion-confirm pt-card" role="dialog" aria-modal="true" aria-labelledby="pt-completion-close-title"><div>${mark("archive")}</div><h2 id="pt-completion-close-title">Close this campaign?</h2><p>${e(state().campaign.name)}</p><ul><li>New texts stop</li><li>Replies close</li><li>Unfinished preparation and recipient additions stop</li><li>Results, sending history and uncertain outcomes stay saved</li></ul><p class="pt-muted">Messages already being submitted may still finish. Reserved funds are not automatically released. This campaign can’t be reopened. You can still read its conversations.</p><div class="pt-actions">${button("completion-confirm-archive", "Close & archive", { disabled: !canArchive || r.busy() })}${button("completion-cancel-archive", "Keep open", { secondary: true, disabled: state().completionSubmitting })}</div></section></div>`;
   }
   async function action(name) {
     const s = state();
+    if (name === "completion-open-archive") {
+      await openArchive();
+      return true;
+    }
     if (name === "completion-refresh") {
       await load();
+      if (s.completionArchiveRequested) await loadArchivePreview();
       if (s.completion?.state === "archived") {
         s.campaign.status = "archived";
         s.completionArchiveUnknown = false;
@@ -326,22 +452,23 @@ export function createTextingCompletion(r, state) {
     if (name === "completion-confirm-archive") {
       if (
         !r.can("createCampaigns") ||
-        blockedLocally() ||
+        (!s.completionArchivePreview && blockedLocally()) ||
         !s.completionDialog ||
         s.completionArchiveUnknown
       )
         return true;
-      await load();
+      const intentional = Boolean(s.completionArchivePreview),
+        confirmedProof = s.completionArchivePreview?.proofId;
+      if (intentional) await loadArchivePreview();
+      else await load();
       r.guard();
       if (
         !s.completionDialog ||
-        !r.can("createCampaigns") ||
-        blockedLocally() ||
-        !fresh() ||
-        s.completion?.canArchive !== true ||
-        s.completion.state !== "campaign_complete"
+        !archiveReady() ||
+        (intentional && s.completionArchivePreview.proofId !== confirmedProof)
       ) {
         s.completionDialog = false;
+        if (intentional && archiveReady()) s.completionArchiveChanged = true;
         return true;
       }
       const campaignId = s.campaign.campaignId,
@@ -353,9 +480,13 @@ export function createTextingCompletion(r, state) {
         const response = await r.api(
           `/campaigns/${id(campaignId)}/transition`,
           {
-            expectedRevision: s.completion.campaignRevision,
+            expectedRevision: intentional
+              ? s.completionArchivePreview.campaignRevision
+              : s.completion.campaignRevision,
             action: "archive",
-            completionProofId: s.completion.proofId,
+            ...(intentional
+              ? { archiveProofId: s.completionArchivePreview.proofId }
+              : { completionProofId: s.completion.proofId }),
           },
         );
         if (!current(version, campaignId)) return true;
@@ -370,8 +501,21 @@ export function createTextingCompletion(r, state) {
       } catch (error) {
         if (!current(version, campaignId)) return true;
         s.completionDialog = false;
-        s.completionError = true;
-        s.completionArchiveUnknown = true;
+        const code = error?.payload?.error || error?.code;
+        const rejected =
+          intentional &&
+          error?.status === 409 &&
+          [
+            "prompt_campaign_archive_changed",
+            "prompt_campaign_revision_conflict",
+          ].includes(code);
+        if (rejected) {
+          s.completionArchiveChanged = true;
+          s.completionArchivePreview = null;
+        } else {
+          s.completionError = true;
+          s.completionArchiveUnknown = true;
+        }
         if ([401, 403].includes(error?.status)) throw error;
       } finally {
         s.completionSubmitting = false;
@@ -412,13 +556,7 @@ export function createTextingCompletion(r, state) {
       return true;
     }
     if (name === "completion-archive") {
-      if (
-        r.can("createCampaigns") &&
-        s.completion?.canArchive === true &&
-        fresh() &&
-        !blockedLocally() &&
-        !s.completionArchiveUnknown
-      ) {
+      if (archiveReady()) {
         s.completionDialog = true;
         focusConfirmation();
       }
@@ -432,6 +570,7 @@ export function createTextingCompletion(r, state) {
   }
   return {
     load,
+    openArchive,
     action,
     localAction,
     finish,
@@ -439,6 +578,7 @@ export function createTextingCompletion(r, state) {
     dispose() {
       disposed = true;
       generation++;
+      archiveGeneration++;
       clearTimeout(focusTimer);
       globalThis.document?.removeEventListener?.("keydown", onKey);
     },

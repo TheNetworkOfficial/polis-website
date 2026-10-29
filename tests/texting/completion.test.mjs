@@ -1,9 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { moduleUrl } from "./module-fixture.mjs";
-const { checkedTextingCompletion, createTextingCompletion } = await import(
-  await moduleUrl("textingCompletion")
-);
+const {
+  checkedTextingCompletion,
+  checkedTextingArchivePreview,
+  createTextingCompletion,
+} = await import(await moduleUrl("textingCompletion"));
 
 const counts = () => ({
   accepted: 37,
@@ -91,7 +93,7 @@ function fixture(t, { admin = false, response = proof(), api } = {}) {
   };
 }
 
-test("a changing-results read explains refresh without claiming partial history or allowing archive", async (t) => {
+test("a changing-results read explains refresh and offers a separate intentional-closure check", async (t) => {
   let reads = 0;
   const f = fixture(t, {
     admin: true,
@@ -112,9 +114,10 @@ test("a changing-results read explains refresh without claiming partial history 
     /\$\{|does not mean your sending history is missing/,
   );
   assert.doesNotMatch(failed, /Partial history|Recorded so far/);
-  assert.match(
+  assert.match(failed, /data-workspace-action="completion-open-archive"/);
+  assert.doesNotMatch(
     failed,
-    /data-workspace-action="completion-archive"[^>]*disabled/,
+    /data-workspace-action="completion-confirm-archive"/,
   );
   await f.page.action("completion-refresh");
   assert.equal(f.state.completionChanged, false);
@@ -188,7 +191,7 @@ test("unknown counts stay unknown and unsupported time series/team graphics are 
   );
 });
 
-test("refresh keeps good cards, coalesces reads and holds archive until verified", async (t) => {
+test("refresh keeps good cards, coalesces reads and offers only a closure check until verified", async (t) => {
   let resolve,
     reads = 0;
   const f = fixture(t, {
@@ -208,7 +211,11 @@ test("refresh keeps good cards, coalesces reads and holds archive until verified
   assert.match(f.page.results(), />37<\/strong>/);
   assert.match(
     f.page.results(),
-    /data-workspace-action="completion-archive"[^>]*disabled/,
+    /data-workspace-action="completion-open-archive"/,
+  );
+  assert.doesNotMatch(
+    f.page.results(),
+    /data-workspace-action="completion-confirm-archive"/,
   );
   assert.doesNotMatch(
     f.page.results(),
@@ -411,4 +418,174 @@ test("authorization loss after archive response is propagated and clears private
   );
   assert.equal(f.state.completion, null);
   assert.equal(f.calls.filter((call) => call.body).length, 1);
+});
+
+function closure(overrides = {}) {
+  return {
+    version: 1,
+    campaignId: "campaign",
+    campaignRevision: 7,
+    status: "paused",
+    asOfMs: Date.now(),
+    proofId: "stop-seven",
+    canArchive: true,
+    blockedReasons: [],
+    ...overrides,
+  };
+}
+
+test("intentional archive validates a distinct preview without inventing completion", () => {
+  const preview = closure();
+  assert.equal(checkedTextingArchivePreview(preview, "campaign"), preview);
+  for (const change of [
+    { campaignId: "other" },
+    { campaignRevision: -1 },
+    { status: "unsupported" },
+    { status: "archived" },
+    { proofId: "" },
+    { blockedReasons: null },
+  ])
+    assert.throws(
+      () => checkedTextingArchivePreview(closure(change), "campaign"),
+      /closure could not be verified/,
+    );
+});
+
+test("unfinished archive opens independently of failed results and retains unknown sends until explicit confirmation", async (t) => {
+  let archived = false;
+  const f = fixture(t, {
+    admin: true,
+    api: async (path, body) => {
+      if (body) {
+        archived = true;
+        return {
+          campaign: {
+            campaignId: "campaign",
+            name: "Neighborhood",
+            status: "archived",
+          },
+        };
+      }
+      if (path.endsWith("/archive-preview")) return { closure: closure() };
+      if (!archived) throw Error("progress unavailable");
+      return { completion: proof("archived") };
+    },
+  });
+  f.state.pendingItems = new Map([["uncertain", "provider_outcome_unknown"]]);
+  f.state.queue = {
+    items: [{ itemId: "uncertain" }],
+    allocationId: "allocation",
+  };
+  await f.page.load();
+  assert.equal(f.state.completionError, true);
+  assert.equal(await f.page.openArchive(), true);
+  assert.equal(f.calls.filter((call) => call.body).length, 0);
+  const html = f.page.results();
+  assert.match(html, /Campaign results/);
+  assert.match(html, /Unfinished preparation and recipient additions stop/);
+  assert.match(html, /uncertain outcomes stay saved/);
+  assert.match(html, /Messages already being submitted may still finish/);
+  assert.doesNotMatch(
+    html,
+    /Sending finished|Campaign texting finished|Look what we did/,
+  );
+  await f.page.action("completion-confirm-archive");
+  assert.deepEqual(
+    f.calls.filter((call) => call.body).map((call) => call.body),
+    [{ expectedRevision: 7, action: "archive", archiveProofId: "stop-seven" }],
+  );
+  assert.equal(f.state.campaign.status, "archived");
+  assert.equal(
+    f.state.pendingItems.get("uncertain"),
+    "provider_outcome_unknown",
+  );
+  assert.equal(f.state.queue.items.length, 1);
+});
+
+test("changed archive proof requires a new explicit review before a status mutation", async (t) => {
+  let reads = 0;
+  const f = fixture(t, {
+    admin: true,
+    api: async () => ({
+      closure: closure({
+        proofId: ++reads === 1 ? "old-source" : "new-source",
+      }),
+    }),
+  });
+  assert.equal(await f.page.openArchive(), true);
+  await f.page.action("completion-confirm-archive");
+  assert.equal(f.state.completionDialog, false);
+  assert.equal(f.calls.filter((call) => call.body).length, 0);
+  assert.match(f.page.results(), /This campaign changed/);
+  assert.equal(await f.page.openArchive(), true);
+  assert.equal(f.state.completionArchiveChanged, false);
+});
+
+test("archive preview failure is actionable, retryable and never falls back to a stale completion proof", async (t) => {
+  let failed = true;
+  const f = fixture(t, {
+    admin: true,
+    api: async (path) => {
+      if (!path.endsWith("/archive-preview")) return { completion: proof() };
+      if (failed) throw Error("read failed");
+      return { closure: closure() };
+    },
+  });
+  await f.page.load();
+  assert.equal(await f.page.openArchive(), false);
+  await f.page.action("completion-confirm-archive");
+  assert.equal(f.calls.filter((call) => call.body).length, 0);
+  assert.match(f.page.results(), /Closure could not be checked/);
+  assert.match(
+    f.page.results(),
+    /data-workspace-action="completion-open-archive"/,
+  );
+  failed = false;
+  await f.page.action("completion-open-archive");
+  assert.equal(f.state.completionDialog, true);
+});
+
+test("intentional archive checks current manager and holds an unknown ACK without replay", async (t) => {
+  const volunteer = fixture(t);
+  assert.equal(await volunteer.page.openArchive(), false);
+  assert.equal(volunteer.calls.length, 0);
+  const f = fixture(t, {
+    admin: true,
+    api: async (_path, body) => {
+      if (body) throw Error("lost ACK");
+      return { closure: closure() };
+    },
+  });
+  await f.page.openArchive();
+  await f.page.action("completion-confirm-archive");
+  assert.equal(f.state.completionArchiveUnknown, true);
+  assert.equal(await f.page.openArchive(), false);
+  await f.page.action("completion-confirm-archive");
+  assert.equal(f.calls.filter((call) => call.body).length, 1);
+});
+
+test("a server-rejected archive race permits a new explicit check while unknown failures stay held", async (t) => {
+  const f = fixture(t, {
+    admin: true,
+    api: async (_path, body) => {
+      if (body)
+        throw Object.assign(Error("campaign changed"), {
+          status: 409,
+          payload: { error: "prompt_campaign_archive_changed" },
+        });
+      return { closure: closure() };
+    },
+  });
+  await f.page.openArchive();
+  await f.page.action("completion-confirm-archive");
+  assert.ok(!f.state.completionArchiveUnknown);
+  assert.equal(f.state.completionDialog, false);
+  assert.equal(f.calls.filter((call) => call.body).length, 1);
+  assert.match(f.page.results(), /This campaign changed/);
+  assert.equal(await f.page.openArchive(), true);
+  assert.equal(
+    f.calls.filter((call) => call.body).length,
+    1,
+    "a new preview never replays the prior mutation",
+  );
 });
