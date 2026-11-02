@@ -9,6 +9,20 @@ const operationalErrors = {
     "This voter no longer meets this campaign’s current eligibility checks.",
   prompt_queue_uncertain_capacity:
     "Unconfirmed send outcomes have filled the texting assignment limit. Ask an organization texting manager to review them.",
+  prompt_campaign_revision_conflict:
+    "The saved campaign changed. Refresh its status and review the next action before continuing.",
+  texting_campaign_revision_conflict:
+    "The saved campaign changed. Refresh its status and review the next action before continuing.",
+  prompt_other_campaign_queue_held:
+    "You still have recipients assigned in another campaign. Review that campaign’s saved assignment before requesting another batch here.",
+  texting_other_campaign_queue_held:
+    "You still have recipients assigned in another campaign. Review that campaign’s saved assignment before requesting another batch here.",
+  queue_reconciliation_required:
+    "The saved recipient request needs review. Check its saved status before requesting another batch.",
+  prompt_queue_reconciliation_required:
+    "The saved recipient request needs review. Check its saved status before requesting another batch.",
+  texting_queue_reconciliation_required:
+    "The saved recipient request needs review. Check its saved status before requesting another batch.",
 };
 
 export const escapeText = (value) =>

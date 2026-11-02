@@ -259,7 +259,10 @@ test("explicit queue loading continues only bounded saved checkpoints and stops 
       };
     };
     if (mode === "error")
-      await assert.rejects(page.action("queue-load"), /Read unavailable/);
+      await assert.rejects(
+        page.action("queue-load"),
+        /recipient request could not be confirmed/,
+      );
     else if (mode === "changed")
       await assert.rejects(page.action("queue-load"), /assignment changed/);
     else await page.action("queue-load");
@@ -274,6 +277,13 @@ test("explicit queue loading continues only bounded saved checkpoints and stops 
             : 1,
     );
     assert.equal(state.campaigns.sent, undefined);
+    if (["error", "changed"].includes(mode)) {
+      assert.equal(state.campaigns.queueRequestNeedsRead, true);
+      await assert.rejects(
+        page.action("queue-load"),
+        /Check saved recipient status/,
+      );
+    }
   }
 });
 

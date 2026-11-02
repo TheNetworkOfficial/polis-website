@@ -273,6 +273,166 @@ export function createCampaigns(r) {
       throw new Error("Campaign status could not be verified.");
     s.campaign = campaign;
   }
+  /** A stale revision triggers a read, never a replay of the manager's write. */
+  async function refreshCampaignStatus(prior) {
+    const s = state();
+    s.campaignStatusNeedsRead = true;
+    try {
+      const saved = (await r.api(`/campaigns/${id(prior.campaignId)}`))
+        .campaign;
+      r.guard?.();
+      if (
+        state() !== s ||
+        s.campaign?.campaignId !== prior.campaignId ||
+        saved?.campaignId !== prior.campaignId ||
+        !Number.isSafeInteger(saved.revision) ||
+        saved.revision < Math.max(prior.revision, s.campaign.revision)
+      )
+        throw new Error("Campaign status could not be verified.");
+      // Keep unsaved edits and approved content intact. Existing preparation
+      // polling keeps its own proof/attempt guards and is not retried here.
+      s.campaign = saved;
+      s.preparingRecipients = campaignPreparationPending(saved);
+      s.campaignStatusNeedsRead = false;
+      s.campaignStatusMessage =
+        saved.status === "active"
+          ? saved.canFetchQueue
+            ? "This campaign is active. Choose Start texting to continue."
+            : "This campaign is active. Review its current sending requirements before continuing."
+          : saved.status === "activating"
+            ? "This campaign is still opening. Wait a moment, then refresh campaign status."
+            : saved.status === "archived"
+              ? "This campaign is archived. Its messages and history are kept."
+              : "The latest campaign status is shown. Review it, then choose the next action when ready.";
+      r.toast?.(s.campaignStatusMessage);
+    } catch (error) {
+      if ([401, 403].includes(error?.status)) throw error;
+      throw new Error(
+        "The campaign changed, but its latest status could not be checked. Your work is kept. Choose Refresh campaign status before trying another action.",
+      );
+    }
+  }
+  function campaignStatusNotice(s) {
+    return s.campaignStatusNeedsRead || s.campaignStatusMessage
+      ? notice(
+          s.campaignStatusNeedsRead
+            ? "Check the saved campaign"
+            : "Campaign status updated",
+          s.campaignStatusNeedsRead
+            ? "Refresh the saved status before taking another campaign action."
+            : s.campaignStatusMessage,
+        ) +
+          button("campaign-status-refresh", "Refresh campaign status", {
+            secondary: true,
+            disabled: r.busy(),
+          })
+      : "";
+  }
+  /** Status reads can explain a refusal; they never repeat a queue allocation. */
+  async function checkQueueRequest(campaign) {
+    const s = state(),
+      campaignId = campaign.campaignId;
+    s.queueRequestNeedsRead = true;
+    try {
+      const saved = await r.api(`/campaigns/${id(campaignId)}/queue`);
+      r.guard?.();
+      if (
+        state() !== s ||
+        s.campaign?.campaignId !== campaignId ||
+        saved.campaignId !== campaignId ||
+        saved.readOnly !== true ||
+        saved.resendPermitted !== false ||
+        !Array.isArray(saved.items)
+      )
+        throw new Error(
+          "The saved recipient status could not be verified. Check again before requesting another batch.",
+        );
+      const terminalHistory = saved.items.every(
+        (item) =>
+          typeof item?.itemId === "string" &&
+          item.itemId.length > 0 &&
+          item.resendPermitted === false &&
+          (["confirmed", "skipped", "released_unused"].includes(item.state) ||
+            (item.state === "rejected_not_accepted" &&
+              item.nonAcceptanceVerified === true)),
+      );
+      const noAllocation =
+        saved.parked === false &&
+        saved.canResumeAllocation === false &&
+        saved.queueSession?.campaignId !== campaignId &&
+        ((saved.state === "none" &&
+          saved.items.length === 0 &&
+          saved.allocationToken == null) ||
+          (saved.state === "complete" && terminalHistory));
+      const noLocalWork =
+        !s.queue?.allocationId &&
+        !s.queue?.allocationToken &&
+        !list(s.queue?.items).length &&
+        !s.pendingItemId &&
+        (!s.queue || ["none", "complete"].includes(s.queue.state));
+      if (!noAllocation || !noLocalWork) {
+        // Once an owned, uncertain or resumable assignment is observed, the
+        // original preallocation refusal cannot authorize any later retry.
+        s.queueRequestKnownRefusal = false;
+        s.queueRequestWasFresh = false;
+        s.queuePreviousCampaign = null;
+      }
+      const noLocalAllocation =
+        s.queueRequestKnownRefusal && s.queueRequestWasFresh && noLocalWork;
+      if (!noLocalAllocation || !noAllocation) {
+        s.queueRequestMessage =
+          !s.queueRequestKnownRefusal &&
+          ["none", "complete"].includes(saved.state)
+            ? "The result of the recipient request is still unconfirmed. Check saved status again or ask a texting manager for help before requesting another batch."
+            : saved.state === "allocation_unknown"
+              ? "The server still needs to reconcile this recipient request. Ask an organization texting manager to review the saved assignment. Do not request another batch."
+              : "Your saved recipient assignment is kept. Reopen this campaign to review or resume that assignment before requesting another batch.";
+        return;
+      }
+      const previousId = saved.queueSession?.campaignId;
+      if (previousId && previousId !== campaignId) {
+        const previous = (await r.api(`/campaigns/${id(previousId)}`)).campaign;
+        r.guard?.();
+        if (
+          state() !== s ||
+          s.campaign?.campaignId !== campaignId ||
+          previous?.campaignId !== previousId
+        )
+          throw new Error(
+            "The previous campaign could not be verified. Check the saved recipient status again.",
+          );
+        s.queuePreviousCampaign = {
+          campaignId: previousId,
+          name: previous.name || "Previous campaign",
+        };
+        s.queueRequestMessage = `You still have recipients assigned in ${s.queuePreviousCampaign.name}. Review that saved assignment before requesting another batch here.`;
+      } else {
+        s.queuePreviousCampaign = null;
+        s.queueRequestNeedsRead = false;
+        s.queueRequestMessage =
+          "No unfinished recipient request is saved for this campaign. Choose Get next recipients when ready.";
+      }
+    } catch (error) {
+      if ([401, 403].includes(error?.status)) throw error;
+      throw new Error(
+        "The saved recipient status could not be checked. Your existing assignment is kept. Choose Check saved recipient status before requesting another batch.",
+      );
+    }
+  }
+  function queueRequestNotice(s) {
+    return s.queueRequestNeedsRead || s.queueRequestMessage
+      ? notice(
+          s.queuePreviousCampaign
+            ? "Previous campaign needs attention"
+            : s.queueRequestNeedsRead
+              ? "Check the saved recipient request"
+              : "Recipient status checked",
+          s.queueRequestMessage ||
+            "Check the saved status before requesting another batch. Your existing recipients and message history are kept.",
+        ) +
+          `<div class="pt-actions">${s.queuePreviousCampaign ? go("send", "Review previous campaign", s.queuePreviousCampaign.campaignId, true) : ""}${button("queue-check-request", "Check saved recipient status", { secondary: true, disabled: r.busy() })}</div>`
+      : "";
+  }
   function campaignViews(s) {
     return `<div class="pt-actions" aria-label="Campaign views">${["active", "paused", "archived"].map((value) => button("campaigns-view", value[0].toUpperCase() + value.slice(1), { value, secondary: value !== (s.listView || "active"), disabled: r.busy() })).join("")}</div><p class="pt-muted">${s.listView === "archived" ? "Archived campaigns keep their messages, results and history." : s.listView === "paused" ? "Paused campaigns keep their history and can be resumed when ready." : "Active campaigns and drafts ready for your next step."}</p>`;
   }
@@ -356,7 +516,7 @@ export function createCampaigns(r) {
     const c = s.campaign,
       manage = r.can("createCampaigns"),
       image = mediaData(s.media);
-    return `${preparationNotice(s)}${r.can("manageBilling") ? `<div class="pt-grid pt-grid--three">${stat("Campaign limit", money(c.budgetMicros))}${stat("Pending charges", money(c.reservedMicros))}${stat("Completed usage", money(c.settledMicros))}</div>` : ""}<div class="pt-grid pt-grid--two"><section class="pt-card"><div class="pt-row"><h2>Your message</h2>${manage && ["draft", "prepared"].includes(c.status) ? button("campaign-edit", "Edit", { secondary: true }) : ""}</div><div class="pt-workspace-bubble">${image ? `<img src="${e(image)}" alt="Saved campaign attachment">${s.media?.providerReady === true ? "<p>Image verified</p>" : ""}` : ""}<p>${e(c.templateText)}</p></div>${attachmentPreparation(s)}<p class="pt-muted">${dateText(c.deliveryNotBeforeMs)} – ${dateText(c.deliveryBeforeMs)}</p></section><section class="pt-card"><h2>Ready to begin?</h2><div class="pt-row"><span>Campaign</span><strong>${e(label(c.status))}</strong></div>${c.routingSummary ? `<div class="pt-row"><span>Opt-in contacts</span><strong>${count(c.routingSummary.optInCount)}</strong></div><div class="pt-row"><span>Standard contacts</span><strong>${count(c.routingSummary.standardCount)}</strong></div><div class="pt-row"><span>Excluded contacts</span><strong>${count(c.routingSummary.excludedCount)}</strong></div>${r.can("manageBilling") && Number.isSafeInteger(c.estimatedCostMicros) ? `<div class="pt-row"><span>Estimated campaign cost</span><strong>${money(c.estimatedCostMicros)}</strong></div>` : ""}` : ""}<div class="pt-row"><span>Assigned volunteers</span><strong>${count(list(c.assignedUserIds).length)}</strong></div>${reasons(list(c.blockedReasons).map((reason) => (reason === "content_not_prepared" || reason === "prompt_content_not_prepared" ? (s.preparingRecipients ? "Message will be checked when recipient preparation finishes" : "Message needs campaign preparation") : reason)))}<div class="pt-actions">${manage ? `${go("team", "Manage team", c.campaignId, true)}${["draft", "prepared"].includes(c.status) && !campaignPreparationPending(c) ? button("transition-prepare", "Prepare selected recipients", { secondary: true }) : ""}${c.canActivate && (!c.mediaId || (c.mediaReady === true && !s.mediaNeedsRead)) ? button("transition-activate", c.status === "paused" ? "Resume campaign" : "Open campaign") : ""}${c.status === "active" ? button("transition-pause", "Pause campaign", { secondary: true }) : ""}${c.status !== "archived" ? button("transition-archive", "Close & archive", { secondary: true }) : ""}` : ""}${c.canFetchQueue && r.can("manualQueue") ? go("send", c.queueRecoveryRequired ? "Review held recipients" : "Start texting", c.campaignId) : ""}${go("results", "View results", c.campaignId, true)}</div>${c.status === "paused" ? notice("Sending paused", "This stops new sends from Polis. Any vendor-side work already accepted keeps its recorded status.") : ""}</section></div>`;
+    return `${preparationNotice(s)}${r.can("manageBilling") ? `<div class="pt-grid pt-grid--three">${stat("Campaign limit", money(c.budgetMicros))}${stat("Pending charges", money(c.reservedMicros))}${stat("Completed usage", money(c.settledMicros))}</div>` : ""}<div class="pt-grid pt-grid--two"><section class="pt-card"><div class="pt-row"><h2>Your message</h2>${manage && ["draft", "prepared"].includes(c.status) ? button("campaign-edit", "Edit", { secondary: true }) : ""}</div><div class="pt-workspace-bubble">${image ? `<img src="${e(image)}" alt="Saved campaign attachment">${s.media?.providerReady === true ? "<p>Image verified</p>" : ""}` : ""}<p>${e(c.templateText)}</p></div>${attachmentPreparation(s)}<p class="pt-muted">${dateText(c.deliveryNotBeforeMs)} – ${dateText(c.deliveryBeforeMs)}</p></section><section class="pt-card"><h2>Ready to begin?</h2><div class="pt-row"><span>Campaign</span><strong>${e(label(c.status))}</strong></div>${c.routingSummary ? `<div class="pt-row"><span>Opt-in contacts</span><strong>${count(c.routingSummary.optInCount)}</strong></div><div class="pt-row"><span>Standard contacts</span><strong>${count(c.routingSummary.standardCount)}</strong></div><div class="pt-row"><span>Excluded contacts</span><strong>${count(c.routingSummary.excludedCount)}</strong></div>${r.can("manageBilling") && Number.isSafeInteger(c.estimatedCostMicros) ? `<div class="pt-row"><span>Estimated campaign cost</span><strong>${money(c.estimatedCostMicros)}</strong></div>` : ""}` : ""}<div class="pt-row"><span>Assigned volunteers</span><strong>${count(list(c.assignedUserIds).length)}</strong></div>${reasons(list(c.blockedReasons).map((reason) => (reason === "content_not_prepared" || reason === "prompt_content_not_prepared" ? (s.preparingRecipients ? "Message will be checked when recipient preparation finishes" : "Message needs campaign preparation") : reason)))}<div class="pt-actions">${manage ? `${go("team", "Manage team", c.campaignId, true)}${["draft", "prepared"].includes(c.status) && !campaignPreparationPending(c) ? button("transition-prepare", "Prepare selected recipients", { secondary: true, disabled: s.campaignStatusNeedsRead }) : ""}${c.canActivate && (!c.mediaId || (c.mediaReady === true && !s.mediaNeedsRead)) ? button("transition-activate", c.status === "paused" ? "Resume campaign" : "Open campaign", { disabled: s.campaignStatusNeedsRead }) : ""}${c.status === "active" ? button("transition-pause", "Pause campaign", { secondary: true, disabled: s.campaignStatusNeedsRead }) : ""}${c.status !== "archived" ? button("transition-archive", "Close & archive", { secondary: true }) : ""}` : ""}${c.canFetchQueue && r.can("manualQueue") ? go("send", c.queueRecoveryRequired ? "Review held recipients" : "Start texting", c.campaignId) : ""}${go("results", "View results", c.campaignId, true)}</div>${c.status === "paused" ? notice("Sending paused", "This stops new sends from Polis. Any vendor-side work already accepted keeps its recorded status.") : ""}</section></div>`;
   }
   function team(s) {
     const c = s.campaign;
@@ -392,7 +552,13 @@ export function createCampaigns(r) {
     );
   function queue(s) {
     return s.campaign
-      ? renderTextingQueue(s, r, queueNeedsReview, outcomes)
+      ? queueRequestNotice(s) +
+          renderTextingQueue(
+            s,
+            s.queueRequestNeedsRead ? { ...r, busy: () => true } : r,
+            queueNeedsReview,
+            outcomes,
+          )
       : head("TEXTING", "Choose a campaign") + listCards(s);
   }
   function render(section) {
@@ -479,6 +645,7 @@ export function createCampaigns(r) {
           label(s.campaign.status),
           go("campaigns", "All campaigns", "", true),
         ) +
+          campaignStatusNotice(s) +
           renderTextingReport(s.reports?.[s.campaign.campaignId]) +
           campaignDetail(s) +
           management.render() +
@@ -592,6 +759,17 @@ export function createCampaigns(r) {
     if (await recipients.action(name, value)) return true;
     const s = state();
     let c = s.campaign;
+    if (name === "campaign-status-refresh") {
+      if (!c?.campaignId) throw new Error("Choose a campaign first.");
+      await refreshCampaignStatus(c);
+      return true;
+    }
+    if (name === "queue-check-request") {
+      if (!c?.campaignId || !r.can("queueStatus"))
+        throw new Error("Saved recipient status is unavailable.");
+      await checkQueueRequest(c);
+      return true;
+    }
     if (name === "queue-refresh-status") {
       await r.refreshSendStatus();
       return true;
@@ -755,6 +933,10 @@ export function createCampaigns(r) {
         !["prepare", "activate", "pause", "archive"].includes(action)
       )
         return false;
+      if (s.campaignStatusNeedsRead)
+        throw new Error(
+          "Refresh campaign status before taking another action.",
+        );
       if (
         action === "activate" &&
         (!c.canActivate ||
@@ -787,6 +969,16 @@ export function createCampaigns(r) {
         await additions.load();
       } catch (error) {
         const code = error?.payload?.error || error?.code || error?.message;
+        if (
+          error?.status === 409 &&
+          [
+            "prompt_campaign_revision_conflict",
+            "texting_campaign_revision_conflict",
+          ].includes(code)
+        ) {
+          await refreshCampaignStatus(c);
+          return true;
+        }
         const uncertain = !error?.status || error.status >= 500;
         if (
           action !== "prepare" ||
@@ -802,6 +994,14 @@ export function createCampaigns(r) {
     if (
       ["queue-load", "queue-recheck", "queue-refresh-preview"].includes(name)
     ) {
+      if (s.queueRequestNeedsRead)
+        throw new Error(
+          "Check saved recipient status before requesting another batch.",
+        );
+      if (s.queue?.state === "allocation_unknown")
+        throw new Error(
+          "The saved recipient request still needs review. Do not request another batch.",
+        );
       if (name === "queue-load" && s.pendingItemId)
         throw new Error(
           "Wait for the active sends before changing this assignment.",
@@ -824,48 +1024,85 @@ export function createCampaigns(r) {
       if (name === "queue-load" && !c.queueRecoveryRequired)
         await prepareTextingAccess(r, s, c.campaignId);
       let allocationId = materializationId(s.queue);
-      for (let attempt = 0; attempt < 8; attempt++) {
-        const next = await r.api(`/campaigns/${id(c.campaignId)}/queue`, {
-          ...(allocationId ? { allocationId } : {}),
-          ...(r.queueSessionId ? { sessionId: r.queueSessionId } : {}),
-        });
-        const nextId = materializationId(next);
-        if (
-          allocationId &&
-          next.state === "preparing" &&
-          nextId !== allocationId
-        )
-          throw new Error(
-            "The saved recipient assignment changed. Refresh before continuing.",
+      s.queueRequestKnownRefusal = false;
+      s.queueRequestWasFresh =
+        !allocationId &&
+        !s.queue?.allocationId &&
+        !s.queue?.allocationToken &&
+        !list(s.queue?.items).length &&
+        (!s.queue || ["none", "complete"].includes(s.queue.state));
+      try {
+        for (let attempt = 0; attempt < 8; attempt++) {
+          const next = await r.api(`/campaigns/${id(c.campaignId)}/queue`, {
+            ...(allocationId ? { allocationId } : {}),
+            ...(r.queueSessionId ? { sessionId: r.queueSessionId } : {}),
+          });
+          const nextId = materializationId(next);
+          if (
+            allocationId &&
+            next.state === "preparing" &&
+            nextId !== allocationId
+          )
+            throw new Error(
+              "The saved recipient assignment changed. Refresh before continuing.",
+            );
+          const retained = list(s.queue?.items).filter(
+            (item) =>
+              queueNeedsReview(s, item) ||
+              item.state === "rejected_not_accepted",
           );
-        const retained = list(s.queue?.items).filter(
-          (item) =>
-            queueNeedsReview(s, item) || item.state === "rejected_not_accepted",
-        );
-        const merged = new Map(retained.map((item) => [item.itemId, item]));
-        for (const item of list(next.items)) {
-          const retained = merged.get(item.itemId);
-          // A fresh queue DTO does not prove an earlier send's outcome.
-          // Keep its diagnostic until explicit recovery or terminal readback.
-          merged.set(
-            item.itemId,
-            retained?.sendError
-              ? { ...item, sendError: retained.sendError }
-              : item,
-          );
+          const merged = new Map(retained.map((item) => [item.itemId, item]));
+          for (const item of list(next.items)) {
+            const retained = merged.get(item.itemId);
+            // A fresh queue DTO does not prove an earlier send's outcome.
+            // Keep its diagnostic until explicit recovery or terminal readback.
+            merged.set(
+              item.itemId,
+              retained?.sendError
+                ? { ...item, sendError: retained.sendError }
+                : item,
+            );
+          }
+          s.queue = { ...next, items: [...merged.values()] };
+          // Continue only a saved materialization checkpoint, never an unknown
+          // allocation or a generic preparation response. Errors stop this loop.
+          if (!nextId || list(next.items).length || attempt === 7) break;
+          allocationId = nextId;
+          r.changed?.();
+          const delay = Number.isSafeInteger(s.queue.retryAfterMs)
+            ? Math.max(0, Math.min(2000, s.queue.retryAfterMs))
+            : 1000;
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          r.guard?.();
         }
-        s.queue = { ...next, items: [...merged.values()] };
-        // Continue only a saved materialization checkpoint, never an unknown
-        // allocation or a generic preparation response. Errors stop this loop.
-        if (!nextId || list(next.items).length || attempt === 7) break;
-        allocationId = nextId;
-        r.changed?.();
-        const delay = Number.isSafeInteger(s.queue.retryAfterMs)
-          ? Math.max(0, Math.min(2000, s.queue.retryAfterMs))
-          : 1000;
-        await new Promise((resolve) => setTimeout(resolve, delay));
+      } catch (error) {
         r.guard?.();
+        if ([401, 403].includes(error?.status)) throw error;
+        s.queueRequestNeedsRead = true;
+        s.queueRequestMessage =
+          error?.message ===
+          "The saved recipient assignment changed. Refresh before continuing."
+            ? "The saved recipient assignment changed. Check its saved status before continuing. Your existing recipients are kept."
+            : "The recipient request could not be confirmed. Check its saved status before requesting another batch. Existing message and sending records are kept.";
+        const code = error?.payload?.error || error?.code || error?.message;
+        if (
+          s.queueRequestWasFresh &&
+          !allocationId &&
+          error?.status === 409 &&
+          [
+            "prompt_other_campaign_queue_held",
+            "texting_other_campaign_queue_held",
+          ].includes(code)
+        ) {
+          s.queueRequestKnownRefusal = true;
+          await checkQueueRequest(c);
+          return true;
+        }
+        throw new Error(s.queueRequestMessage);
       }
+      s.queueRequestNeedsRead = false;
+      s.queueRequestMessage = "";
+      s.queuePreviousCampaign = null;
       s.imageLoaded = null;
       s.queueImagesLoaded = new Set();
       s.queueMedia = {};
