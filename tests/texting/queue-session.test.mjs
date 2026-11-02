@@ -213,13 +213,14 @@ test("exit uses current valid authentication synchronously with keepalive", () =
   assert.equal(calls.length, 1);
 });
 
-function workspaceFixture({ delayAllocation = false } = {}) {
+function workspaceFixture({ delayAllocation = false, requestQueue } = {}) {
   const listeners = new Map(),
     calls = [],
     exits = [],
     saved = new Map();
   globalThis.document = {
     addEventListener: (name, handler) => listeners.set(name, handler),
+    querySelectorAll: () => [],
   };
   globalThis.sessionStorage = {
     getItem: (key) => saved.get(key) || null,
@@ -252,7 +253,11 @@ function workspaceFixture({ delayAllocation = false } = {}) {
             manualOnly: true,
             status: "configured",
             canSend: true,
-            capabilities: { manualQueue: true, queueRelease: true },
+            capabilities: {
+              manualQueue: true,
+              queueRelease: true,
+              queueStatus: true,
+            },
           },
         };
       if (path.endsWith("/summary"))
@@ -261,6 +266,7 @@ function workspaceFixture({ delayAllocation = false } = {}) {
           billing: { canManageBilling: false, sendingBlocked: false },
         };
       if (path.endsWith("/queue")) {
+        if (requestQueue) return requestQueue(path, options);
         const result = {
           ok: true,
           queueSession: {
@@ -385,6 +391,78 @@ test("same-sender refresh retains ownership; moving to Home releases once and Ho
   f.setContext({ ...actor, section: "inbox", resourceId: "" });
   await f.page.load();
   assert.equal(f.exits.length, 1);
+});
+
+test("reopening a verified saved assignment only reloads reads and preserves session send fences", async () => {
+  let queuePosts = 0;
+  const f = workspaceFixture({
+    requestQueue: (path, options) => {
+      if (!options.body)
+        return {
+          ok: true,
+          campaignId: "previous-campaign",
+          state: "held",
+          readOnly: true,
+          resendPermitted: false,
+          parked: false,
+          canResumeAllocation: true,
+          queueSession: { campaignId: "previous-campaign" },
+          items: [
+            {
+              itemId: "item-one",
+              state: "awaiting_confirmation",
+              resendPermitted: false,
+            },
+          ],
+        };
+      queuePosts++;
+      if (queuePosts === 2) throw new TypeError("Lost next-batch response");
+      return {
+        ok: true,
+        state: "held",
+        campaignId: "previous-campaign",
+        queueSession: {
+          ...assignment(options.body.sessionId),
+          campaignId: "previous-campaign",
+        },
+        items: [],
+      };
+    },
+  });
+  await f.page.load();
+  f.click("queue-load");
+  await drain();
+  f.click("queue-load");
+  await drain();
+  f.click("queue-check-request");
+  await drain();
+  assert.match(
+    f.page.render(),
+    /data-workspace-action="reload"[^>]*>Reopen campaign<\/button>/,
+  );
+  const holdKey =
+    "polis.texting.uncertain.volunteer:org-one:queue:previous-campaign:item-one";
+  f.saved.set(holdKey, "uncertain-attempt-remains-held");
+  const before = f.calls.length;
+  f.click("reload");
+  await drain();
+  assert.ok(
+    f.calls.length > before,
+    "Reopening must refresh the campaign view",
+  );
+  assert.ok(
+    f.calls.slice(before).every(({ options }) => !options.method),
+    "Reopening only performs reads",
+  );
+  assert.equal(queuePosts, 2, "No allocation retry is dispatched by reopening");
+  assert.equal(
+    f.exits.length,
+    0,
+    "The same-route reload must not release the saved assignment",
+  );
+  assert.equal(f.saved.get(holdKey), "uncertain-attempt-remains-held");
+  assert.doesNotMatch(f.page.render(), />Reopen campaign<\/button>/);
+  f.page.reset();
 });
 
 test("an internal auxiliary-page reset releases the sender while preserving send holds", async () => {

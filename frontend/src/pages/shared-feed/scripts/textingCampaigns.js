@@ -319,6 +319,7 @@ export function createCampaigns(r) {
     const s = state(),
       campaignId = campaign.campaignId;
     s.queueRequestNeedsRead = true;
+    s.queueRequestReopenCampaignId = null;
     try {
       const saved = await r.api(`/campaigns/${id(campaignId)}/queue`);
       r.guard?.();
@@ -333,6 +334,16 @@ export function createCampaigns(r) {
         throw new Error(
           "The saved recipient status could not be verified. Check again before requesting another batch.",
         );
+      // A verified resumable assignment permits reopening its campaign view,
+      // never adoption of this read-only DTO or an automatic allocation retry.
+      if (
+        saved.canResumeAllocation === true &&
+        saved.parked === false &&
+        ["held", "materializing"].includes(saved.state) &&
+        (!saved.queueSession || saved.queueSession.campaignId === campaignId) &&
+        s.queue?.state !== "allocation_unknown"
+      )
+        s.queueRequestReopenCampaignId = campaignId;
       const terminalHistory = saved.items.every(
         (item) =>
           typeof item?.itemId === "string" &&
@@ -1051,6 +1062,7 @@ export function createCampaigns(r) {
       if (name === "queue-load" && !c.queueRecoveryRequired)
         await prepareTextingAccess(r, s, c.campaignId);
       let allocationId = materializationId(s.queue);
+      s.queueRequestReopenCampaignId = null;
       s.queueRequestKnownRefusal = false;
       s.queueRequestWasFresh =
         !allocationId &&
@@ -1128,6 +1140,7 @@ export function createCampaigns(r) {
         throw new Error(s.queueRequestMessage);
       }
       s.queueRequestNeedsRead = false;
+      s.queueRequestReopenCampaignId = null;
       s.queueRequestMessage = "";
       s.queuePreviousCampaign = null;
       s.imageLoaded = null;

@@ -716,6 +716,83 @@ test("existing held or partially materialized work cannot be cleared by an empty
   }
 });
 
+for (const state of ["held", "materializing"])
+  test(`a validated resumable ${state} assignment offers read-only campaign reopening`, async (t) => {
+    const h = fixture(
+      t,
+      () =>
+        emptyStatus({
+          state,
+          canResumeAllocation: true,
+          allocationToken: "saved-assignment",
+          queueSession: { campaignId: "campaign-one" },
+        }),
+      "send",
+    );
+    h.holds.add("queue:campaign-one:uncertain-recipient");
+    await h.page.action("queue-check-request");
+    assert.equal(h.state.queueRequestReopenCampaignId, "campaign-one");
+    assert.match(
+      h.page.render("send"),
+      /data-workspace-action="reload"[^>]*>Reopen campaign<\/button>/,
+    );
+    assert.equal(
+      h.state.queue,
+      undefined,
+      "The read-only status must not become a sendable queue",
+    );
+    assert.equal(mutations(h).length, 0);
+    assert.equal(h.holds.has("queue:campaign-one:uncertain-recipient"), true);
+  });
+
+test("unverified or nonresumable status never offers campaign reopening", async (t) => {
+  const valid = emptyStatus({ state: "held", canResumeAllocation: true });
+  for (const saved of [
+    { ...valid, state: "allocation_unknown" },
+    { ...valid, state: "none" },
+    { ...valid, state: "complete" },
+    { ...valid, parked: true },
+    { ...valid, canResumeAllocation: false },
+    { ...valid, campaignId: "foreign-campaign" },
+    { ...valid, queueSession: { campaignId: "foreign-campaign" } },
+    { ...valid, readOnly: false },
+    { ...valid, resendPermitted: true },
+    { ...valid, items: null },
+  ]) {
+    const h = fixture(t, () => saved, "send");
+    await h.page.action("queue-check-request").catch(() => {});
+    assert.equal(h.state.queueRequestReopenCampaignId, null);
+    assert.doesNotMatch(h.page.render("send"), />Reopen campaign<\/button>/);
+    assert.equal(mutations(h).length, 0);
+  }
+});
+
+test("a failed status recheck revokes prior reopening proof and local allocation uncertainty stays protected", async (t) => {
+  let failed = false;
+  const h = fixture(
+    t,
+    () => {
+      if (failed) throw new Error("Read failed");
+      return emptyStatus({ state: "held", canResumeAllocation: true });
+    },
+    "send",
+  );
+  await h.page.action("queue-check-request");
+  assert.equal(h.state.queueRequestReopenCampaignId, "campaign-one");
+  failed = true;
+  await assert.rejects(
+    h.page.action("queue-check-request"),
+    /saved recipient status could not be checked/,
+  );
+  assert.equal(h.state.queueRequestReopenCampaignId, null);
+  assert.doesNotMatch(h.page.render("send"), />Reopen campaign<\/button>/);
+  failed = false;
+  h.state.queue = { state: "allocation_unknown", items: [] };
+  await h.page.action("queue-check-request");
+  assert.equal(h.state.queueRequestReopenCampaignId, null);
+  assert.doesNotMatch(h.page.render("send"), />Reopen campaign<\/button>/);
+});
+
 test("operational conflicts display guidance instead of technical codes", () => {
   for (const code of [
     "prompt_campaign_revision_conflict",
