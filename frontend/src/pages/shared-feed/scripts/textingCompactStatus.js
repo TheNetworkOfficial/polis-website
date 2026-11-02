@@ -15,7 +15,25 @@ export function createTextingCompactStatus(r, state) {
     acknowledged = "",
     focusAction = "compact-details",
     focusValue = "",
-    focusedPanel = "";
+    focusedPanel = "",
+    pauseApproval = null;
+  const pauseIdentity = (campaign) =>
+    JSON.stringify([
+      r.context?.().organizationId,
+      r.context?.().userId,
+      campaign?.campaignId,
+      campaign?.revision,
+    ]);
+  function consumePause(campaign) {
+    const approval = pauseApproval;
+    pauseApproval = null;
+    return Boolean(
+      approval &&
+        Number.isSafeInteger(campaign?.revision) &&
+        approval.expiresAt > Date.now() &&
+        approval.identity === pauseIdentity(campaign),
+    );
+  }
   const icon = (name) => {
     const paths = {
       back: "M15 18l-6-6 6-6",
@@ -332,14 +350,19 @@ export function createTextingCompactStatus(r, state) {
     return `<section class="pt-compact-texting" data-texting-compact="${e(c.campaignId)}"><div class="pt-compact-main" ${open ? "inert" : ""}><div class="pt-compact-toolbar">${`<button type="button" class="pt-compact-back" data-workspace-action="${section === "send" ? "queue-leave" : "navigate"}" data-value="${e(section === "send" ? c.campaignId : JSON.stringify(["campaigns", ""]))}">${icon("back")}<span>Back to campaigns</span></button>`}<span>Text banking</span>${control("compact-activity", "Recent activity")}${control("compact-more", "Campaign options")}</div><header class="pt-compact-head"><div class="pt-compact-title"><h1>${e(c.name || "Campaign")}</h1><button type="button" class="pt-compact-status-chip${warning ? " is-attention" : ""}${["checking", "processing"].includes(m.kind) ? " is-checking" : ""}" data-workspace-action="compact-details" aria-label="${e(m.chip)}: open status details">${icon(symbol)}${e(m.chip)}${warning && m.count > 1 ? ` · ${m.count}` : ""}</button></div><div class="pt-compact-context" role="status" aria-live="polite"><span>${icon(symbol)}${e(m.text)}</span>${m.info && !warning && !["checking", "processing"].includes(m.kind) ? button("compact-ack", "Got it", { secondary: true }) : button("compact-details", "Details", { secondary: true })}</div></header><div class="pt-compact-content">${body}</div><div class="pt-compact-action-zone">${m.kind === "processing" ? m.action : m.kind === "previous" ? button("compact-details", "Review assignment") : m.kind === "uncertain" ? button("queue-check-request", "Check saved status", { disabled: r.busy() || !r.can("queueStatus") }) : m.kind === "refresh" || m.kind === "checking" ? button("campaign-status-refresh", m.kind === "checking" ? "Checking status…" : "Refresh campaign status", { disabled: r.busy() }) : primary}<p>${e(m.kind === "previous" ? "Your current assignment stays saved." : m.kind === "uncertain" ? "Sending stays paused until this request is resolved." : ["checking", "processing"].includes(m.kind) ? "Your saved work stays in place." : caption || (warning ? "Your campaign and history stay saved." : "Review your recipients before sending."))}</p></div></div>${open ? `<div class="pt-compact-scrim" data-workspace-action="compact-overlay-close"><section class="pt-compact-sheet" role="dialog" aria-modal="true" aria-labelledby="pt-compact-title" data-contact-dialog="compact" data-workspace-action="compact-noop" tabindex="-1"><div class="pt-compact-grip"></div><div class="pt-compact-sheet-head"><div class="pt-compact-sheet-symbol">${icon(symbol)}</div><div><h2 id="pt-compact-title" tabindex="-1">${e(title)}</h2><small>${panel === "details" && warning ? "One thing needs your attention" : e(c.name)}</small></div>${control("compact-overlay-close", "Close details")}</div><div class="pt-compact-sheet-body">${panelBody}</div>${panel === "details" && warning ? button("compact-overlay-close", "Stay on this campaign", { secondary: true }) : ""}</section></div>` : ""}</section>`;
   }
   function localAction(name, value, target) {
-    if (
-      name === "queue-outcome-open" ||
-      (name === "transition-pause" && panel === "pause")
-    )
+    if (name === "transition-pause" && panel === "pause") {
+      pauseApproval = {
+        identity: pauseIdentity(state().campaign),
+        expiresAt: Date.now() + 15000,
+      };
       panel = "";
+    }
+    if (name === "queue-outcome-open") panel = "";
     if (!name.startsWith("compact-")) return false;
-    if (name === "compact-overlay-close") panel = "";
-    else if (name === "compact-ack") {
+    if (name === "compact-overlay-close") {
+      panel = "";
+      pauseApproval = null;
+    } else if (name === "compact-ack") {
       acknowledged = model().infoKey;
       panel = "";
     } else if (
@@ -362,8 +385,10 @@ export function createTextingCompactStatus(r, state) {
     render,
     localAction,
     model,
+    consumePause,
     dispose() {
       panel = "";
+      pauseApproval = null;
     },
   };
 }

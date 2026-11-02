@@ -978,7 +978,13 @@ export function createCampaigns(r) {
         pause: "Pause new sends from this campaign in Polis?",
         archive: "Archive this campaign and stop new sends?",
       }[action];
-      if (!window.confirm(question)) return true;
+      // The scoped sheet already confirms Pause. Consume that one-use intent;
+      // all other actions and legacy entry points retain their original prompt.
+      if (
+        !(action === "pause" && compact.consumePause(c)) &&
+        !window.confirm(question)
+      )
+        return true;
       try {
         s.campaign = (
           await r.api(`/campaigns/${id(c.campaignId)}/transition`, {

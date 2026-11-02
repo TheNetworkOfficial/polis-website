@@ -5,6 +5,38 @@ import { moduleUrl } from "./module-fixture.mjs";
 const { createTextingCompactStatus } = await import(
   await moduleUrl("textingCompactStatus")
 );
+
+test("the custom Pause confirmation is single-use and cannot authorize a changed actor or campaign revision", () => {
+  const h = fixture();
+  h.controller.localAction("compact-panel", "pause");
+  h.controller.localAction("compact-overlay-close");
+  assert.equal(h.controller.consumePause(h.state.campaign), false);
+  h.controller.localAction("compact-panel", "pause");
+  assert.equal(
+    h.controller.localAction("transition-pause"),
+    false,
+    "the original guarded action still owns the mutation",
+  );
+  assert.equal(h.controller.consumePause(h.state.campaign), true);
+  assert.equal(
+    h.controller.consumePause(h.state.campaign),
+    false,
+    "one click cannot confirm another operation",
+  );
+  h.controller.localAction("compact-panel", "pause");
+  h.controller.localAction("transition-pause");
+  h.state.campaign.revision++;
+  assert.equal(h.controller.consumePause(h.state.campaign), false);
+  h.controller.localAction("compact-panel", "pause");
+  h.controller.localAction("transition-pause");
+  h.context.userId = "another-volunteer";
+  assert.equal(h.controller.consumePause(h.state.campaign), false);
+  assert.equal(
+    h.calls.length,
+    0,
+    "confirmation presentation never calls a backend",
+  );
+});
 function fixture({ manage = true } = {}) {
   const state = {
     campaign: {
