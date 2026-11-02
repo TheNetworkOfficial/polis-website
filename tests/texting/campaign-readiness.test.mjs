@@ -90,10 +90,13 @@ function fixture({ funded = false, uncertain = false } = {}) {
     fund: (value) => {
       funded = value;
     },
-    click: async (action) => {
+    click: async (action, value) => {
       const target = {
         disabled: false,
-        dataset: { workspaceAction: action },
+        dataset: {
+          workspaceAction: action,
+          ...(value === undefined ? {} : { value }),
+        },
         closest: () => ({
           dataset: {
             workspaceKey: "volunteer:example-org:send:campaign-one",
@@ -115,6 +118,8 @@ for (const refresh of ["focus", "button"])
         h.page.render(),
         /data-workspace-action="queue-load"[^>]*disabled/,
       );
+      await h.click("compact-more");
+      await h.click("compact-panel", "campaign");
       assert.match(h.page.render(), /Refresh sending status/);
       h.fund(true);
       if (refresh === "focus") await h.page.refresh();
@@ -146,12 +151,15 @@ test("funding refresh keeps the exact held recipient and receipt until deliberat
     await h.click("queue-load");
     h.fund(false);
     await h.page.refresh();
+    await h.click("compact-more");
+    await h.click("compact-panel", "campaign");
     assert.match(h.page.render(), /Refresh sending status/);
     h.fund(true);
     await h.click("queue-refresh-status");
+    await h.click("compact-overlay-close");
     assert.match(
       h.page.render(),
-      /aria-label="Send to Example Recipient"[^>]*data-workspace-action="queue-confirm"[^>]*>Send</,
+      /aria-label="Send to Example Recipient"[^>]*data-workspace-action="queue-confirm"[^>]*>Send to Example Recipient</,
     );
     assert.equal(
       h.calls.filter((call) => call.url.endsWith("/queue")).length,
@@ -177,11 +185,17 @@ test("funding refresh never releases or resends an uncertain held recipient", as
     await h.page.load();
     await h.click("queue-load");
     await h.click("queue-confirm");
+    await h.click("compact-more");
+    await h.click("compact-panel", "recipients");
     assert.match(h.page.render(), /Delivery needs review/);
     h.fund(false);
     await h.page.refresh();
     h.fund(true);
+    await h.click("compact-more");
+    await h.click("compact-panel", "campaign");
     await h.click("queue-refresh-status");
+    await h.click("compact-more");
+    await h.click("compact-panel", "recipients");
     assert.match(h.page.render(), /Delivery needs review/);
     assert.match(
       h.page.render(),

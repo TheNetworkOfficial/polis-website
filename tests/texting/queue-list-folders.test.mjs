@@ -60,8 +60,12 @@ function queueHarness(api, { recordOutcome = false } = {}) {
   };
   return { page: createCampaigns(r), view, holds, calls };
 }
+function openSavedRecipients(page) {
+  page.localAction("compact-more");
+  page.localAction("compact-panel", "recipients");
+}
 
-test("accepted recipients retain an exact outcome shortcut below the remaining queue", async () => {
+test("accepted recipients retain an exact outcome shortcut in campaign options", async () => {
   const h = queueHarness(
     async (path) =>
       path.endsWith("/confirm")
@@ -78,10 +82,11 @@ test("accepted recipients retain an exact outcome shortcut below the remaining q
     { recordOutcome: true },
   );
   await h.page.action("queue-confirm", "recipient-1");
+  h.page.localAction("compact-more");
   const html = h.page.render("send");
   assert.ok(
     html.indexOf("Record previous recipient outcome") >
-      html.indexOf('data-texting-recipient="recipient-3"'),
+      html.indexOf('data-texting-recipient="recipient-2"'),
   );
   const match =
     /data-workspace-action="queue-outcome-open" data-value="([^"]+)"[^>]*>Record previous recipient outcome/.exec(
@@ -104,6 +109,11 @@ test("batch exposes every explicit recipient Send and moves pending and unknown 
         pendingResults.set(path, done);
       }),
   );
+  assert.equal(
+    (h.page.render("send").match(/>Send to Person 1<\/button>/g) || []).length,
+    1,
+  );
+  openSavedRecipients(h.page);
   assert.equal(
     (h.page.render("send").match(/>Send<\/button>/g) || []).length,
     3,
@@ -158,14 +168,12 @@ test("batch exposes every explicit recipient Send and moves pending and unknown 
     /data-texting-recipient="recipient-2"/,
   );
   assert.equal(h.calls.length, 2);
+  h.page.localAction("compact-overlay-close");
   h.page.localAction("queue-folder", "sent");
   const sent = h.page.render("send");
   assert.match(sent, /data-texting-sent="recipient-2"/);
   assert.doesNotMatch(sent, /data-texting-sent="recipient-1"/);
-  assert.match(
-    sent,
-    /Accepted in this session. Delivery is tracked separately/,
-  );
+  assert.match(sent, /Accepted · delivery tracked separately/);
 });
 
 test("definite rejection stays in To send with its actual error code; HTTP uncertainty remains held", async () => {
@@ -188,6 +196,7 @@ test("definite rejection stays in To send with its actual error code; HTTP uncer
   h.view.campaigns.queue.items[0].stream = "opt_in";
   await h.page.action("queue-confirm", "recipient-1");
   await assert.rejects(h.page.action("queue-confirm", "recipient-2"));
+  openSavedRecipients(h.page);
   const html = h.page.render("send");
   assert.match(html, /Error code: RECIPIENT_BLOCKED/);
   assert.match(html, /Error code: texting_send_outcome_unknown/);
@@ -258,9 +267,12 @@ test("personalized final text stays visible and each MMS Send needs its displaye
   ];
   const html = h.page.render("send");
   assert.match(html, /Hello neighbor/);
-  assert.match(html, /Hello Robin/);
+  assert.doesNotMatch(html, /Hello Robin/);
+  openSavedRecipients(h.page);
+  const recipients = h.page.render("send");
+  assert.match(recipients, /Hello Robin/);
   assert.match(
-    html,
+    recipients,
     /data-workspace-action="queue-confirm" data-value="recipient-2" disabled/,
   );
   await assert.rejects(h.page.action("queue-confirm", "recipient-2"));
@@ -286,6 +298,7 @@ test("loading another batch retains uncertain rows and never repeats their confi
   h.holds.add("queue:campaign:recipient-1");
   await h.page.action("queue-load");
   assert.equal(h.view.campaigns.queue.items.length, 2);
+  openSavedRecipients(h.page);
   assert.ok(
     h.page.render("send").indexOf('data-texting-recipient="recipient-3"') <
       h.page.render("send").indexOf('data-texting-recipient="recipient-1"'),
@@ -321,6 +334,7 @@ test("same-recipient queue readback retains its error until verified terminal st
   });
   await h.page.action("queue-confirm", "recipient-1");
   await h.page.action("queue-load");
+  openSavedRecipients(h.page);
   assert.match(
     h.page.render("send"),
     /Error code: texting_send_outcome_unknown/,

@@ -525,6 +525,8 @@ test("uncertain initial sends stay fenced and never auto-retry", async () => {
   await assert.rejects(page.action("queue-confirm"), /not ready/);
   assert.equal(calls.length, 1);
   assert.equal(state.campaigns.queue.items.length, 1);
+  page.localAction("compact-more");
+  page.localAction("compact-panel", "recipients");
   assert.match(page.render("send"), /Delivery needs review/);
   assert.doesNotMatch(page.render("send"), /Sending…/);
 });
@@ -1224,12 +1226,15 @@ test("sending feedback remains pending until confirmation, then refreshes pilot 
       return { ok: true, campaign };
     },
   });
-  const click = (action) => {
+  const click = (action, value) => {
     const target = {
       disabled: false,
       dataset: {
         workspaceAction: action,
-        value: action === "queue-confirm" ? "item-one" : undefined,
+        value:
+          value === undefined && action === "queue-confirm"
+            ? "item-one"
+            : value,
       },
       closest: () => ({
         dataset: { workspaceKey: "admin:org-one:send:campaign-one" },
@@ -1242,6 +1247,8 @@ test("sending feedback remains pending until confirmation, then refreshes pilot 
   await flush();
   click("queue-confirm");
   await flush();
+  click("compact-more");
+  click("compact-panel", "recipients");
   assert.match(page.render(), /Sending…/);
   assert.doesNotMatch(
     page.render(),
@@ -1255,7 +1262,9 @@ test("sending feedback remains pending until confirmation, then refreshes pilot 
   assert.equal(calls.filter((call) => call.url.endsWith("/confirm")).length, 1);
   releaseSend();
   await flush();
+  click("compact-activity");
   assert.match(page.render(), /Message accepted/);
+  click("compact-details");
   assert.match(page.render(), /5 messages and \$0.465 remain/);
   assert.match(page.render(), /\$0.965/);
   assert.doesNotMatch(page.render(), /Delivery needs review|Sending…/);
@@ -1335,6 +1344,8 @@ test("read-only queue status clears only exact terminal evidence and prepares op
   assert.ok(held.has("queue:campaign-one:unknown"));
   assert.ok(held.has("queue:campaign-one:missing"));
   assert.ok(!held.has("queue:campaign-one:rejected"));
+  page.localAction("compact-more");
+  page.localAction("compact-panel", "recipients");
   assert.match(page.render("send"), /Prepare another attempt/);
   await page.action("queue-retry-preview");
   assert.equal(calls.filter((c) => c.body).length, 1);

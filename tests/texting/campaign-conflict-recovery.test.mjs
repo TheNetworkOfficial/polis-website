@@ -254,6 +254,8 @@ for (const code of [
     assert.equal(h.calls.length, 2);
     assert.equal(h.state.campaign.status, "active");
     assert.equal(h.state.draft, h.draft);
+    assert.match(h.page.render("campaigns"), /Campaign status updated/);
+    h.page.localAction("compact-details");
     assert.match(h.page.render("campaigns"), /This campaign is active/);
     assert.match(h.page.render("campaigns"), /Start texting/);
     assert.equal(h.state.campaignStatusNeedsRead, false);
@@ -277,7 +279,8 @@ test("pending activation shows its saved state and explicit refresh performs onl
     };
   });
   await h.page.action("transition-activate");
-  assert.match(h.page.render("campaigns"), /still opening/);
+  h.page.localAction("compact-details");
+  assert.match(h.page.render("campaigns"), /Campaign is opening/);
   assert.doesNotMatch(h.page.render("campaigns"), /Start texting/);
   pending = false;
   await h.page.action("campaign-status-refresh");
@@ -306,6 +309,9 @@ test("failed revision read keeps the draft and blocks another mutation until exp
   );
   assert.equal(h.state.draft, h.draft);
   assert.equal(h.state.campaignStatusNeedsRead, true);
+  assert.match(h.page.render("campaigns"), /Refresh campaign status/);
+  h.page.localAction("compact-more");
+  h.page.localAction("compact-panel", "campaign");
   assert.match(
     h.page.render("campaigns"),
     /data-workspace-action="transition-activate"[^>]*disabled/,
@@ -396,11 +402,13 @@ for (const code of [
       mutations(h).filter((call) => call.path.endsWith("/queue")).length,
       1,
     );
+    assert.match(h.page.render("send"), /Review assignment/);
+    h.page.localAction("compact-details");
     assert.match(h.page.render("send"), /Earlier precinct campaign/);
-    assert.match(h.page.render("send"), /Review previous campaign/);
-    assert.match(
+    assert.match(h.page.render("send"), /Open previous campaign/);
+    assert.doesNotMatch(
       h.page.render("send"),
-      /data-workspace-action="queue-load"[^>]*disabled/,
+      /data-workspace-action="queue-load"/,
     );
     await assert.rejects(
       h.page.action("queue-load"),
@@ -541,6 +549,7 @@ test("sealed terminal history alone does not strand a definitively refused fresh
   h.state.campaign = campaign({ status: "active", canFetchQueue: true });
   await h.page.action("queue-load");
   assert.equal(h.state.queueRequestNeedsRead, false);
+  h.page.localAction("compact-details");
   assert.match(h.page.render("send"), /No unfinished recipient request/);
   assert.equal(
     mutations(h).filter((call) => call.path.endsWith("/queue")).length,
@@ -623,6 +632,8 @@ test("an uncertain allocation waits for explicit status read and keeps real serv
   );
   await h.page.action("queue-check-request");
   assert.equal(h.state.queueRequestNeedsRead, true);
+  assert.match(h.page.render("send"), /Unconfirmed/);
+  h.page.localAction("compact-details");
   assert.match(h.page.render("send"), /server still needs to reconcile/);
   await assert.rejects(
     h.page.action("queue-load"),
@@ -650,6 +661,8 @@ test("an empty status read after a lost allocation response is not proof that th
   );
   await h.page.action("queue-check-request");
   assert.equal(h.state.queueRequestNeedsRead, true);
+  assert.match(h.page.render("send"), /Unconfirmed/);
+  h.page.localAction("compact-details");
   assert.match(
     h.page.render("send"),
     /result of the recipient request is still unconfirmed/,

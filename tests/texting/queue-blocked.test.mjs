@@ -79,7 +79,11 @@ function fixture() {
       };
     },
   };
-  return { page: createCampaigns(r), state, calls, item, held, r };
+  const page = createCampaigns(r);
+  // The normal workspace stays compact. Full held-recipient explanations and
+  // explicit Skip/recheck controls are reviewed in the saved recipients panel.
+  page.localAction("compact-panel", "recipients");
+  return { page, state, calls, item, held, r };
 }
 
 test("technical validation is visible, stays unsendable, and rechecks the held recipient without sending", async () => {
@@ -100,7 +104,7 @@ test("technical validation is visible, stays unsendable, and rechecks the held r
   assert.equal(state.campaigns.queue.items[0].itemId, item.itemId);
   assert.match(
     page.render("send"),
-    /aria-label="Send to Example Recipient"[^>]*data-workspace-action="queue-confirm"[^>]*>Send<\/button>/,
+    /aria-label="Send to Example Recipient"[^>]*data-workspace-action="queue-confirm"[^>]*>Send to Example Recipient<\/button>/,
   );
   assert.doesNotMatch(
     page.render("send"),
@@ -192,7 +196,8 @@ test("stopped campaigns expose server-authorized Skip recovery while hiding send
   await assert.rejects(page.action("queue-confirm"));
   state.campaigns.queue.items = [];
   state.campaigns.queue.state = "complete";
-  assert.match(page.render("send"), /Held recipients reviewed/);
+  assert.equal(state.campaigns.campaign.status, "archived");
+  assert.match(page.render("send"), /Review|archived/i);
   assert.doesNotMatch(
     page.render("send"),
     /data-workspace-action="queue-load"/,

@@ -3,6 +3,12 @@ import assert from "node:assert/strict";
 import { moduleUrl } from "./module-fixture.mjs";
 
 const { createCampaigns } = await import(await moduleUrl("textingCampaigns"));
+// Attachment preparation now lives in the on-demand campaign details panel.
+// Opening it remains presentation-only; every old provider/readback guard stays.
+function review(page) {
+  assert.equal(page.localAction("compact-panel", "campaign"), true);
+  return page.render("campaigns");
+}
 function fixture(t, options = {}) {
   const previous = globalThis.window;
   globalThis.window = { confirm: () => true };
@@ -45,6 +51,8 @@ function fixture(t, options = {}) {
       section: "campaigns",
     }),
     view: () => view,
+    workspace: () => ({ canSend: true }),
+    billing: () => ({ sendingBlocked: false }),
     can: (key) => ["createCampaigns", "canPrepareProviderMedia"].includes(key),
     contactApi: { invalidate() {} },
     busy: () => false,
@@ -89,13 +97,10 @@ function fixture(t, options = {}) {
 
 test("prepared campaign exposes attachment preparation and refreshes frozen readiness without recipient preparation", async (t) => {
   const f = fixture(t);
-  assert.match(f.page.render("campaigns"), /Attachment needs preparation/);
-  assert.match(
-    f.page.render("campaigns"),
-    /data-workspace-action="media-prepare"/,
-  );
+  assert.match(review(f.page), /Attachment needs preparation/);
+  assert.match(review(f.page), /data-workspace-action="media-prepare"/);
   assert.doesNotMatch(
-    f.page.render("campaigns"),
+    review(f.page),
     /data-workspace-action="transition-activate"/,
   );
   await assert.rejects(
@@ -108,17 +113,14 @@ test("prepared campaign exposes attachment preparation and refreshes frozen read
     { path: "/campaigns/campaign-one", body: undefined },
   ]);
   assert.equal(f.view.campaigns.campaign.revision, 4);
-  assert.match(f.page.render("campaigns"), /Attachment ready/);
-  assert.match(
-    f.page.render("campaigns"),
-    /data-workspace-action="transition-activate"/,
-  );
+  assert.match(review(f.page), /Attachment ready/);
+  assert.match(review(f.page), /data-workspace-action="transition-activate"/);
 });
 
 test("verified asset can explicitly repair missing frozen campaign linkage", async (t) => {
   const f = fixture(t);
   f.view.campaigns.media = { state: "provider_verified", providerReady: true };
-  assert.match(f.page.render("campaigns"), /Attachment needs preparation/);
+  assert.match(review(f.page), /Attachment needs preparation/);
   await f.page.action("media-prepare");
   assert.equal(f.view.campaigns.campaign.mediaReady, true);
   assert.equal(f.calls.filter((c) => c.body).length, 1);
@@ -129,9 +131,9 @@ for (const failure of ["failSync", "failRead"]) {
     const f = fixture(t, { [failure]: true });
     await assert.rejects(f.page.action("media-prepare"));
     assert.equal(f.view.campaigns.mediaNeedsRead, true);
-    assert.match(f.page.render("campaigns"), /Refresh attachment/);
+    assert.match(review(f.page), /Refresh attachment/);
     assert.doesNotMatch(
-      f.page.render("campaigns"),
+      review(f.page),
       /data-workspace-action="transition-activate"/,
     );
     await assert.rejects(f.page.action("media-prepare"), /Refresh attachment/);
@@ -148,18 +150,12 @@ for (const failure of ["failSync", "failRead"]) {
 test("attachment preparation respects capability and text-only campaigns keep activation", async (t) => {
   const f = fixture(t);
   f.r.can = () => false;
-  assert.doesNotMatch(
-    f.page.render("campaigns"),
-    /data-workspace-action="media-prepare"/,
-  );
+  assert.doesNotMatch(review(f.page), /data-workspace-action="media-prepare"/);
   await assert.rejects(f.page.action("media-prepare"));
   assert.equal(f.calls.length, 0);
   f.r.can = () => true;
   f.view.campaigns.campaign.mediaId = null;
-  assert.match(
-    f.page.render("campaigns"),
-    /data-workspace-action="transition-activate"/,
-  );
+  assert.match(review(f.page), /data-workspace-action="transition-activate"/);
 });
 
 test("reopening a neutral API campaign uses its authorized attachment metadata to enable preparation", async (t) => {
@@ -219,11 +215,11 @@ test("reopening a neutral API campaign uses its authorized attachment metadata t
   await page.load("campaign-one", "campaigns");
   assert.ok(calls.includes("/campaigns/campaign-one/media/image-one/content"));
   assert.match(
-    page.render("campaigns"),
+    review(page),
     /data-workspace-action="media-prepare"[^>]*>Prepare attachment/,
   );
   assert.doesNotMatch(
-    page.render("campaigns"),
+    review(page),
     /data-workspace-action="media-prepare"[^>]* disabled/,
   );
 });

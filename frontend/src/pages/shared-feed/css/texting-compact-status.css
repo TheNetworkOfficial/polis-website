@@ -1,0 +1,491 @@
+/* Approved compact Text Banking workspace. All color roles inherit the
+ * canonical Polis Civic Neon theme; this file never changes other routes. */
+.pt-compact-texting {
+  color: var(--polis-text);
+  background: var(--polis-background);
+  font-size: 14px;
+  line-height: 1.55;
+  position: relative;
+  isolation: isolate;
+  min-width: 0;
+}
+.pt-compact-main {
+  height: calc(100dvh - 80px);
+  min-height: calc(100dvh - 80px);
+  max-width: 870px;
+  margin-inline: auto;
+  display: flex;
+  flex-direction: column;
+}
+.pt-compact-texting svg {
+  width: 21px;
+  height: 21px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex: none;
+}
+.pt-compact-toolbar {
+  height: 56px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding-inline: 10px;
+  gap: 6px;
+}
+.pt-compact-toolbar > span {
+  flex: 1;
+  font-size: 12px;
+  color: var(--polis-text-muted);
+}
+.pt-compact-icon,
+.pt-compact-back {
+  width: 44px;
+  height: 44px;
+  border: 0;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  color: var(--polis-text-muted);
+  border-radius: 12px;
+  padding: 0;
+  cursor: pointer;
+}
+.pt-compact-back span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+.pt-compact-head,
+.pt-compact-content,
+.pt-compact-action-zone {
+  width: min(100%, 680px);
+  margin-inline: auto;
+  padding-inline: 20px;
+  box-sizing: border-box;
+}
+.pt-compact-head {
+  padding-top: 7px;
+  flex: none;
+}
+.pt-compact-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+#shared-feed-app .pt-compact-title h1 {
+  font-family: var(--polis-font-body);
+  font-size: 20px;
+  line-height: 1.2;
+  letter-spacing: -0.6px;
+  font-weight: 720;
+  text-wrap: wrap;
+  overflow-wrap: anywhere;
+  margin: 0;
+}
+.pt-compact-status-chip {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  min-height: 30px;
+  border: 0;
+  border-radius: 99px;
+  white-space: nowrap;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--polis-success);
+  background: color-mix(
+    in srgb,
+    var(--polis-success) 12%,
+    var(--polis-surface)
+  );
+  cursor: pointer;
+}
+.pt-compact-status-chip::after {
+  content: "";
+  position: absolute;
+  inset: -7px 0;
+}
+.pt-compact-status-chip svg {
+  width: 13px;
+  height: 13px;
+}
+.pt-compact-status-chip.is-attention {
+  color: var(--polis-warning);
+  background: color-mix(
+    in srgb,
+    var(--polis-warning) 13%,
+    var(--polis-surface)
+  );
+}
+.pt-compact-status-chip.is-checking {
+  color: var(--polis-text-muted);
+  background: var(--polis-surface-raised);
+}
+.pt-compact-context {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--polis-text-muted);
+}
+.pt-compact-context > span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pt-compact-context svg {
+  width: 13px;
+  height: 13px;
+}
+.pt-compact-context .pt-btn,
+.pt-compact-under .pt-btn {
+  border: 0;
+  background: transparent;
+  color: var(--polis-primary);
+  min-height: 44px;
+  padding: 0 6px;
+  margin: 0;
+  font-size: 11px;
+  box-shadow: none;
+}
+.pt-compact-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-bottom: 12px;
+}
+.pt-compact-filter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 49px;
+  border-top: 1px solid var(--pt-line);
+  font-size: 12px;
+  margin-bottom: 4px;
+  gap: 12px;
+}
+.pt-compact-filter > span {
+  color: var(--polis-text-muted);
+  font-size: 11px;
+}
+.texting-workspace .pt-compact-folder {
+  position: relative;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  color: var(--polis-text);
+  font-size: 12px;
+}
+.pt-compact-folder summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 44px;
+  list-style: none;
+  cursor: pointer;
+  font-weight: 650;
+}
+.pt-compact-folder summary::-webkit-details-marker {
+  display: none;
+}
+.pt-compact-folder .pt-texting-folders {
+  position: absolute;
+  top: 40px;
+  left: 0;
+  z-index: 3;
+  min-width: 180px;
+  display: flex;
+  flex-direction: column;
+  padding: 8px;
+  background: var(--polis-surface);
+  border: 1px solid var(--polis-border);
+  border-radius: 12px;
+  box-shadow: var(--polis-shadow-raised);
+}
+.pt-compact-message,
+.pt-compact-content > .pt-texting-recipient {
+  background: var(--polis-surface);
+  border: 1px solid var(--pt-line);
+  border-radius: 16px;
+  overflow: hidden;
+  padding: 0;
+  margin: 0 0 12px;
+}
+.pt-compact-message-head,
+.pt-compact-content .pt-texting-recipient-head {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 16px;
+  border-bottom: 1px solid var(--pt-line);
+}
+.pt-compact-message-head strong {
+  display: block;
+  font-size: 13px;
+}
+.pt-compact-message-head small {
+  display: block;
+  margin-top: 4px;
+  color: var(--polis-text-muted);
+  font-size: 11px;
+}
+.pt-compact-avatar {
+  width: 37px;
+  height: 37px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  color: var(--polis-primary);
+  background: var(--polis-primary-container);
+  font-size: 12px;
+  font-weight: 700;
+}
+.pt-compact-message-body,
+.pt-compact-content .pt-texting-final-message {
+  padding: 18px 17px 19px;
+  font-size: 14px;
+  line-height: 1.68;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+.texting-workspace .pt-compact-message-body p,
+.texting-workspace .pt-compact-content .pt-texting-final-message p {
+  color: var(--polis-text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0;
+}
+.pt-compact-message img {
+  max-width: 100%;
+  border-radius: 12px;
+  max-height: 280px;
+  object-fit: contain;
+}
+.pt-compact-content .pt-texting-row-tools {
+  padding: 0 16px 8px;
+}
+.pt-compact-under {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--polis-text-muted);
+  font-size: 11px;
+}
+.pt-compact-action-zone {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  background: var(--polis-background);
+  padding-top: 12px;
+  padding-bottom: max(13px, env(safe-area-inset-bottom));
+  flex: none;
+}
+.pt-compact-action-zone > .pt-btn,
+.pt-compact-sheet-body > .pt-btn {
+  min-height: 49px;
+  width: 100%;
+  justify-content: center;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 650;
+  margin: 0;
+}
+.pt-compact-action-zone p {
+  font-size: 11px;
+  text-align: center;
+  color: var(--polis-text-muted);
+  margin: 9px 0 0;
+}
+.pt-compact-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: flex-end;
+  background: rgb(7 18 36 / 38%);
+  backdrop-filter: blur(2px);
+  overflow: hidden;
+}
+.pt-compact-sheet {
+  color: var(--polis-text);
+  background: var(--polis-surface);
+  width: 100%;
+  max-height: 78dvh;
+  border-radius: 24px 24px 0 0;
+  padding: 12px 22px max(23px, env(safe-area-inset-bottom));
+  box-sizing: border-box;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  box-shadow: var(--polis-shadow-raised);
+  animation: pt-compact-sheet-in 200ms ease-out;
+}
+.pt-compact-grip {
+  height: 4px;
+  width: 33px;
+  border-radius: 3px;
+  background: var(--polis-border);
+  margin: 0 auto 10px;
+}
+.pt-compact-sheet-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 15px;
+}
+.pt-compact-sheet-head > div:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+}
+#shared-feed-app .pt-compact-sheet-head h2 {
+  font-family: var(--polis-font-body);
+  font-size: 18px;
+  line-height: 1.25;
+  letter-spacing: -0.4px;
+  margin: 0;
+}
+.pt-compact-sheet-head h2:focus {
+  outline: none;
+}
+.pt-compact-sheet-head small {
+  display: block;
+  color: var(--polis-text-muted);
+  font-size: 11px;
+  margin-top: 5px;
+}
+.pt-compact-sheet-symbol {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  color: var(--polis-primary);
+  background: var(--polis-primary-container);
+}
+.pt-compact-sheet-body > p {
+  color: var(--polis-text-muted);
+  font-size: 12px;
+  line-height: 1.65;
+  margin: 0 0 16px;
+}
+.pt-compact-sheet-body > p:last-child {
+  margin-bottom: 0;
+}
+.pt-compact-sheet .pt-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+.pt-compact-assignment {
+  border: 1px solid var(--pt-line);
+  border-radius: 12px;
+  padding: 13px;
+  margin: 15px 0 20px;
+}
+.pt-compact-assignment strong {
+  display: block;
+  font-size: 12px;
+}
+.pt-compact-assignment span {
+  display: block;
+  color: var(--polis-text-muted);
+  font-size: 11px;
+  margin-top: 4px;
+}
+.pt-compact-menu {
+  display: flex;
+  flex-direction: column;
+}
+.pt-compact-menu .pt-btn,
+.pt-compact-sheet > .pt-btn--secondary {
+  background: transparent;
+  color: var(--polis-text);
+  border: 0;
+  border-radius: 0;
+  border-bottom: 1px solid var(--pt-line);
+  justify-content: flex-start;
+  min-height: 49px;
+  margin: 0;
+  box-shadow: none;
+}
+.pt-compact-sheet > .pt-btn--secondary {
+  width: 100%;
+  justify-content: center;
+  font-size: 11px;
+  color: var(--polis-text-muted);
+  border: 0;
+}
+.pt-compact-status-chip.is-checking svg,
+.pt-compact-head:has(.is-checking) .pt-compact-context svg {
+  animation: pt-compact-spin 1600ms linear infinite;
+}
+.texting-workspace:has([data-texting-compact]) .pt-content {
+  padding: 0;
+  max-width: none;
+}
+@keyframes pt-compact-sheet-in {
+  from {
+    transform: translateY(20px);
+    opacity: 0.6;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+@keyframes pt-compact-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (min-width: 800px) {
+  .pt-compact-scrim {
+    align-items: stretch;
+    justify-content: flex-end;
+  }
+  .pt-compact-sheet {
+    width: 360px;
+    max-height: 100dvh;
+    border-radius: 0;
+    padding-top: 24px;
+  }
+  .pt-compact-grip {
+    display: none;
+  }
+  .pt-compact-title h1 {
+    font-size: 23px;
+  }
+}
+@media (max-width: 799px) {
+  .texting-workspace:has([data-texting-compact]) .pt-topbar,
+  .texting-workspace:has([data-texting-compact]) .pt-sidebar {
+    display: none;
+  }
+  .texting-workspace:has([data-texting-compact]) .pt-layout {
+    display: block;
+    min-height: 100dvh;
+  }
+  .pt-compact-main {
+    min-height: 100dvh;
+    height: 100dvh;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pt-compact-sheet,
+  .pt-compact-status-chip.is-checking svg,
+  .pt-compact-head:has(.is-checking) .pt-compact-context svg,
+  .pt-compact-context svg {
+    animation: none;
+  }
+}

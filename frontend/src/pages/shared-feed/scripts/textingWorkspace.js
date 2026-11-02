@@ -1,4 +1,5 @@
 import "../css/texting-messaging.css";
+import "../css/texting-compact-status.css";
 import {
   escapeText as e,
   label,
@@ -614,17 +615,21 @@ export function createTextingWorkspacePage({
         html = modules.conversations.render();
       else if (section === "recovery") html = modules.recovery.render();
       else html = home();
-      html =
-        renderTextingSetup(w.setup) +
-        renderTextingRenewals(
-          w.renewalDeadlines || view.billing?.renewalDeadlines,
-          can("manageBilling"),
-        ) +
-        financialNotice() +
-        html;
-      if (!w.canSend)
+      const compact = html.includes(
+        '<section class="pt-compact-texting" data-texting-compact="',
+      );
+      if (!compact)
+        html =
+          renderTextingSetup(w.setup) +
+          renderTextingRenewals(
+            w.renewalDeadlines || view.billing?.renewalDeadlines,
+            can("manageBilling"),
+          ) +
+          financialNotice() +
+          html;
+      if (!compact && !w.canSend)
         html += `<section class="pt-card"><strong>Sending is paused</strong><p class="pt-muted">You can prepare your work while the remaining setup is completed.</p>${reasons(w.blockedReasons)}</section>`;
-      if (w.sendingMode === "pilot" && w.pilot)
+      if (!compact && w.sendingMode === "pilot" && w.pilot)
         html += notice(
           "Controlled test",
           `${count(w.pilot.remainingMessages)} messages${can("manageBilling") ? ` and ${money(w.pilot.remainingSpendMicros)}` : ""} remain. Only approved test recipients can be contacted.`,
@@ -646,7 +651,10 @@ export function createTextingWorkspacePage({
     const contactDialogOpen = [view.contactBook, view.recipientBook].some(
       (book) => book?.overlay || book?.detail || book?.detailNew,
     );
-    return `<div data-workspace-key="${e(view.key)}" aria-busy="${view.busy ? "true" : "false"}">${view.error && !contactDialogOpen ? `<div class="pt-notice" role="alert">${e(view.error)}</div>` : ""}${view.message && section !== "send" ? notice(view.message) : ""}${view.busy && section !== "send" && !view.contacts?.starting ? `<div class="pt-workspace-working" role="status">${busyLabel}</div>` : ""}${html}</div>`;
+    const compact = html.includes(
+      '<section class="pt-compact-texting" data-texting-compact="',
+    );
+    return `<div data-workspace-key="${e(view.key)}" aria-busy="${view.busy ? "true" : "false"}">${view.error && !contactDialogOpen && !compact ? `<div class="pt-notice" role="alert">${e(view.error)}</div>` : ""}${view.message && section !== "send" && !compact ? notice(view.message) : ""}${view.busy && section !== "send" && !view.contacts?.starting && !compact ? `<div class="pt-workspace-working" role="status">${busyLabel}</div>` : ""}${html}</div>`;
   }
   function owned(target) {
     return (
@@ -809,7 +817,10 @@ export function createTextingWorkspacePage({
   document.addEventListener("keydown", (event) => {
     const dialog = document.querySelector("[data-contact-dialog]");
     if (!dialog || !owned(dialog)) return;
-    if (event.key === "Escape" && !view.busy) {
+    if (
+      event.key === "Escape" &&
+      (!view.busy || dialog.dataset.contactDialog === "compact")
+    ) {
       event.preventDefault();
       for (const module of Object.values(modules))
         if (

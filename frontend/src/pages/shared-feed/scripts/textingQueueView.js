@@ -31,7 +31,7 @@ export const queueHasPending = (s) =>
   Boolean(s.pendingItems?.size || s.pendingItemId);
 
 /** Keep the exact final preview visible before each human's recipient-bound Send. */
-export function renderTextingQueue(s, r, needsReview, outcomes) {
+export function renderTextingQueue(s, r, needsReview, outcomes, compact) {
   const c = s.campaign,
     q = s.queue,
     items = list(q?.items);
@@ -66,7 +66,7 @@ export function renderTextingQueue(s, r, needsReview, outcomes) {
       image = imageUrl(item);
     return `<div class="pt-workspace-bubble pt-texting-final-message">${p.attachmentUrl || p.mediaId ? (image ? `<img data-workspace-queue-image="${e(item.itemId)}" data-workspace-queue-images="${e(sharedItems.map((row) => row.itemId).join(","))}" src="${e(image)}" alt="Final message attachment" referrerpolicy="no-referrer">` : notice("Attachment unavailable")) : ""}<p>${e(p.message || "Final text unavailable")}</p></div>`;
   };
-  const row = (item) => {
+  const row = (item, docked = false) => {
     const p = item.preview || {},
       pending = queuePendingAction(s, item.itemId);
     const review = needsReview(s, item),
@@ -96,11 +96,133 @@ export function renderTextingQueue(s, r, needsReview, outcomes) {
         : failed
           ? "Not sent"
           : block?.title || "";
-    return `<article class="pt-texting-recipient${attempted(item) ? " pt-texting-recipient--held" : ""}" data-texting-recipient="${e(item.itemId)}"><div class="pt-texting-recipient-head"><div class="pt-texting-person"><strong>${e(recipient)}</strong>${p.contactDisplayName ? `<span class="pt-muted">${e(p.contactPhone)}</span>` : ""}${status ? `<span class="pt-tag">${e(status)}</span>` : ""}</div>${item.state === "lease_expired" || c.queueRecoveryRequired ? "" : control("queue-confirm", pending === "sending" ? "Sending…" : "Send", { disabled: disabled || review || !queueCanConfirm(item, r.workspace(), r.billing(), queueMediaReady(s, item)) }).replace("<button ", `<button aria-label="${e(`Send to ${recipient}`)}" `)}</div>${!shared || attempted(item) ? preview(item) : ""}${review && !pending && !item.sendError ? notice("Delivery needs review", "Do not send again. You can continue with other ready recipients.") : ""}${block && !review && !pending ? notice(block.title, block.text) + (block.canRecheck ? control("queue-recheck", "Check recipient again", { secondary: true, disabled: mutationDisabled || !r.can("manualQueue") || !c.canFetchQueue }) : "") : ""}${item.sendError && !pending ? `<div class="pt-notice" role="alert"><strong>${review ? "Delivery needs review" : "Not sent"}</strong><p>${e(item.sendError.message)}</p><small>Error code: ${e(customerText(item.sendError.code))}</small></div>` : ""}${reasons(item.blockedReasons)}${item.state === "lease_expired" ? notice("Recipient assignment expired", "This unsent recipient needs provider release before reassignment.") : expired ? notice("Preview expired", "Refresh these message previews, then review them before sending.") + (queueCanRefreshPreview(item) && !review && !pending ? control(r.can("queueItemRecovery") ? "queue-refresh-content" : "queue-refresh-preview", "Refresh message previews", { secondary: true, disabled: mutationDisabled }) : "") : ""}${failed && !item.sendError ? notice("Message was not accepted", "No resend was authorized. This recipient remains visible for review.") : ""}<div class="pt-texting-row-tools">${r.can("manageBilling") && price !== null ? `<span class="pt-muted">${p.attachmentUrl || p.mediaId ? "MMS" : "SMS"} · ${rateMoney(price)}</span>` : ""}${!pending && !review && queueCanSkip(item) ? control("queue-skip", "Skip recipient", { secondary: true, disabled: mutationDisabled || !r.can("manualQueue") || !c.canFetchQueue }) : ""}${!expired && !review && !pending && r.can("queueItemRecovery") && queueCanRefreshContent(item) ? control("queue-refresh-content", "Refresh preview", { secondary: true, disabled: mutationDisabled }) : ""}${review && !pending && item.state === "awaiting_confirmation" && r.can("queueItemRecovery") ? control("queue-recover-preview", "Check unsent preview", { secondary: true, disabled: mutationDisabled }) : ""}${failed && item.stream === "opt_in" && r.can("optionalRetryPreview") ? control("queue-retry-preview", "Prepare another attempt", { secondary: true, disabled: mutationDisabled }) : ""}${failed ? control("queue-next", "Continue to next recipient", { secondary: true, disabled: mutationDisabled }) : ""}${outcomes?.trigger({ campaignId: c.campaignId, itemId: item.itemId }) || ""}</div></article>`;
+    if (compact && docked) {
+      const heldPreview =
+        review ||
+        block ||
+        expired ||
+        failed ||
+        item.state === "lease_expired" ||
+        item.sendError;
+      return `<article class="pt-texting-recipient${heldPreview ? " pt-texting-recipient--held" : ""}" data-texting-recipient="${e(item.itemId)}"><div class="pt-compact-message-head"><div class="pt-compact-avatar" aria-hidden="true">${e(
+        recipient
+          .split(/\s+/)
+          .slice(0, 2)
+          .map((part) => part[0])
+          .join(""),
+      )}</div><div><strong>${e(recipient)}</strong><small>${e(status || (expired ? "Preview expired" : p.contactPhone || "Next recipient"))}</small></div></div>${preview(item)}${!heldPreview && !pending && queueCanSkip(item) ? `<div class="pt-texting-row-tools">${control("queue-skip", "Skip recipient", { secondary: true, disabled: mutationDisabled || !r.can("manualQueue") || !c.canFetchQueue })}</div>` : ""}</article>`;
+    }
+    return `<article class="pt-texting-recipient${attempted(item) ? " pt-texting-recipient--held" : ""}" data-texting-recipient="${e(item.itemId)}"><div class="pt-texting-recipient-head"><div class="pt-texting-person"><strong>${e(recipient)}</strong>${p.contactDisplayName ? `<span class="pt-muted">${e(p.contactPhone)}</span>` : ""}${status ? `<span class="pt-tag">${e(status)}</span>` : ""}</div>${docked || item.state === "lease_expired" || c.queueRecoveryRequired ? "" : control("queue-confirm", pending === "sending" ? "Sending…" : "Send", { disabled: disabled || review || !queueCanConfirm(item, r.workspace(), r.billing(), queueMediaReady(s, item)) }).replace("<button ", `<button aria-label="${e(`Send to ${recipient}`)}" `)}</div>${compact || !shared || attempted(item) ? preview(item) : ""}${review && !pending && !item.sendError ? notice("Delivery needs review", "Do not send again. You can continue with other ready recipients.") : ""}${block && !review && !pending ? notice(block.title, block.text) + (block.canRecheck ? control("queue-recheck", "Check recipient again", { secondary: true, disabled: mutationDisabled || !r.can("manualQueue") || !c.canFetchQueue }) : "") : ""}${item.sendError && !pending ? `<div class="pt-notice" role="alert"><strong>${review ? "Delivery needs review" : "Not sent"}</strong><p>${e(item.sendError.message)}</p><small>Error code: ${e(customerText(item.sendError.code))}</small></div>` : ""}${reasons(item.blockedReasons)}${item.state === "lease_expired" ? notice("Recipient assignment expired", "This unsent recipient needs provider release before reassignment.") : expired ? notice("Preview expired", "Refresh these message previews, then review them before sending.") + (queueCanRefreshPreview(item) && !review && !pending ? control(r.can("queueItemRecovery") ? "queue-refresh-content" : "queue-refresh-preview", "Refresh message previews", { secondary: true, disabled: mutationDisabled }) : "") : ""}${failed && !item.sendError ? notice("Message was not accepted", "No resend was authorized. This recipient remains visible for review.") : ""}<div class="pt-texting-row-tools">${r.can("manageBilling") && price !== null ? `<span class="pt-muted">${p.attachmentUrl || p.mediaId ? "MMS" : "SMS"} · ${rateMoney(price)}</span>` : ""}${!pending && !review && queueCanSkip(item) ? control("queue-skip", "Skip recipient", { secondary: true, disabled: mutationDisabled || !r.can("manualQueue") || !c.canFetchQueue }) : ""}${!expired && !review && !pending && r.can("queueItemRecovery") && queueCanRefreshContent(item) ? control("queue-refresh-content", "Refresh preview", { secondary: true, disabled: mutationDisabled }) : ""}${review && !pending && item.state === "awaiting_confirmation" && r.can("queueItemRecovery") ? control("queue-recover-preview", "Check unsent preview", { secondary: true, disabled: mutationDisabled }) : ""}${failed && item.stream === "opt_in" && r.can("optionalRetryPreview") ? control("queue-retry-preview", "Prepare another attempt", { secondary: true, disabled: mutationDisabled }) : ""}${failed ? control("queue-next", "Continue to next recipient", { secondary: true, disabled: mutationDisabled }) : ""}${outcomes?.trigger({ campaignId: c.campaignId, itemId: item.itemId }) || ""}</div></article>`;
   };
   const sentItems = [...(s.sentItems?.values() || [])];
   const sentFolder = s.queueFolder === "sent";
   const tabs = `<nav class="pt-texting-folders" aria-label="Campaign messages">${button("queue-folder", `To send${items.length ? ` (${items.length})` : ""}`, { value: "to-send", secondary: sentFolder }).replace("<button ", `<button${!sentFolder ? ' aria-current="page"' : ""} `)}${button("queue-folder", `Sent${sentItems.length ? ` (${sentItems.length})` : ""}`, { value: "sent", secondary: !sentFolder }).replace("<button ", `<button${sentFolder ? ' aria-current="page"' : ""} `)}${go("inbox", "Replies", textingFolderRoute("replies", c.campaignId), true)}${go("inbox", "All messages", textingFolderRoute("all", c.campaignId), true)}</nav>`;
+  if (compact) {
+    const item =
+      ordered.find(
+        (entry) =>
+          !attempted(entry) &&
+          entry.state === "awaiting_confirmation" &&
+          !list(entry.blockedReasons).length &&
+          entry.expiresAtMs > Date.now(),
+      ) || ordered[0];
+    const pending = item && queuePendingAction(s, item.itemId);
+    const recipient =
+      item?.preview?.contactDisplayName ||
+      item?.preview?.contactPhone ||
+      "recipient";
+    const moreAllowed =
+      !items.some((entry) => !attempted(entry)) && !s.pendingItemId;
+    const next =
+      moreAllowed &&
+      q?.state !== "allocation_unknown" &&
+      (!c.queueRecoveryRequired || !q || q.state === "preparing")
+        ? button(
+            "queue-load",
+            s.preparingAccess
+              ? "Preparing your texting access…"
+              : q?.state === "preparing"
+                ? "Check recipients"
+                : c.queueRecoveryRequired
+                  ? "Review held recipients"
+                  : "Get next recipients",
+            { disabled: !c.canFetchQueue || !r.can("manualQueue") || r.busy() },
+          )
+        : "";
+    const send =
+      item && item.state !== "lease_expired" && !c.queueRecoveryRequired
+        ? button(
+            "queue-confirm",
+            pending === "sending" ? "Sending…" : `Send to ${recipient}`,
+            {
+              value: item.itemId,
+              disabled:
+                r.busy() ||
+                Boolean(pending) ||
+                needsReview(s, item) ||
+                !queueCanConfirm(
+                  item,
+                  r.workspace(),
+                  r.billing(),
+                  queueMediaReady(s, item),
+                ),
+            },
+          ).replace(
+            "<button ",
+            `<button aria-label="${e(`Send to ${recipient}`)}" `,
+          )
+        : "";
+    const folder = `<div class="pt-compact-filter"><details class="pt-compact-folder"><summary>${sentFolder ? "Sent" : "To send"}<span aria-hidden="true">⌄</span></summary>${tabs}</details><span>${sentFolder ? `${sentItems.length} accepted` : items.length ? `${items.length} assigned` : "Individual outreach"}</span></div>`;
+    const empty = `<article class="pt-compact-message"><div class="pt-compact-message-head"><strong>Your message</strong><small>Saved campaign preview</small></div><div class="pt-compact-message-body"><p>${e(c.templateText || "Your saved assignment stays available.")}</p></div></article>`;
+    const heldFocus =
+      item &&
+      !pending &&
+      (needsReview(s, item) ||
+        queueBlockExplanation(item) ||
+        item.state === "lease_expired" ||
+        item.state === "rejected_not_accepted" ||
+        item.sendError ||
+        (item.state === "awaiting_confirmation" &&
+          item.expiresAtMs <= Date.now()));
+    const sent = sentItems.length
+      ? sentItems
+          .slice(0, s.sentVisible || 20)
+          .map(
+            (entry) =>
+              `<article class="pt-compact-message" data-texting-sent="${e(entry.itemId)}"><div class="pt-compact-message-head"><strong>${e(entry.preview?.contactDisplayName || entry.preview?.contactPhone || "Recipient")}</strong><small>Accepted · delivery tracked separately</small></div>${preview(entry)}</article>`,
+          )
+          .join("")
+      : '<p class="pt-muted">No accepted sends in this session yet.</p>';
+    return compact.render({
+      section: "send",
+      body:
+        folder +
+        (sentFolder ? sent : item ? row(item, true) : empty) +
+        `<div class="pt-compact-under"><span>${e(queueHasPending(s) ? `${s.pendingItems?.size || 1} sending…` : `${s.sent || 0} accepted this session`)}</span>${button("compact-panel", "Message details", { value: "campaign", secondary: true })}</div>`,
+      primary: sentFolder
+        ? button("queue-folder", "Back to recipients", { value: "to-send" })
+        : (heldFocus
+            ? button("compact-panel", "Review recipient", {
+                value: "recipients",
+                secondary: true,
+              })
+            : send) ||
+          next ||
+          button("compact-details", "Review saved status", { secondary: true }),
+      caption:
+        item && !sentFolder
+          ? "One press sends to one person."
+          : "Review your recipients before sending.",
+      recipients: ordered.length
+        ? ordered.map((entry) => row(entry)).join("")
+        : "",
+      details: `<p>${e(c.templateText || "Message not yet prepared")}</p>${reasons(q?.blockedReasons || c.blockedReasons)}${!c.canFetchQueue || r.workspace()?.canSend !== true || r.billing()?.sendingBlocked !== false ? button("queue-refresh-status", "Refresh sending status", { secondary: true, disabled: r.busy() }) : ""}`,
+      more: `${held.length && r.can("queueStatus") ? button("queue-status", "Check saved recipient outcomes", { secondary: true, disabled: r.busy() || Boolean(s.pendingItemId) }) : ""}${s.lastOutcomeTarget?.campaignId === c.campaignId ? outcomes?.trigger(s.lastOutcomeTarget, "Record previous recipient outcome") || "" : ""}${sentFolder && sentItems.length > (s.sentVisible || 20) ? button("queue-sent-more", "Show more sent", { secondary: true }) : ""}`,
+      activity: r.can("readReporting")
+        ? go("results", "View campaign history", c.campaignId, true)
+        : "",
+    });
+  }
   if (sentFolder)
     return (
       head(
@@ -157,7 +279,7 @@ export function renderTextingQueue(s, r, needsReview, outcomes) {
       ? `<section class="pt-card"><div class="pt-eyebrow">FINAL MESSAGE</div>${preview(ready[0], ready)}</section>`
       : "") +
     (ordered.length
-      ? `<section class="pt-card pt-texting-queue" aria-label="Assigned recipients">${ordered.map(row).join("")}</section>`
+      ? `<section class="pt-card pt-texting-queue" aria-label="Assigned recipients">${ordered.map((entry) => row(entry)).join("")}</section>`
       : `<section class="pt-card"><h2>${!q ? "Your next recipients" : q.state === "preparing" ? "Preparing held recipients" : q.state === "allocation_unknown" ? "Session needs review" : q.state === "lease_expired" ? "Recipient assignment expired" : c.queueRecoveryRequired ? "Held recipients reviewed" : "You’re caught up"}</h2><p class="pt-muted">${q?.state === "allocation_unknown" ? "Your assigned messages could not be confirmed. Ask an administrator to check the saved status." : q?.state === "preparing" ? "Your saved assignment is being checked. Check again to continue." : "Get a group of assigned recipients, then send each message individually."}</p></section>`) +
     (held.length && r.can("queueStatus")
       ? button("queue-status", "Check saved recipient outcomes", {

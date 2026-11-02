@@ -36,6 +36,7 @@ import {
 } from "./textingQueueView";
 import { prepareTextingAccess, saveAssignmentChanges } from "./textingAccess";
 import { textingRequestWasNotDispatched } from "./textingSession";
+import { createTextingCompactStatus } from "./textingCompactStatus";
 import { createOrganizationContactBook } from "./organizationContactBook";
 import { estimateContactCampaign } from "./textingCampaignEstimate";
 import {
@@ -141,6 +142,7 @@ export function createCampaigns(r) {
   const registerRecipients = createTextingBallotRecipients(recipientRuntime);
   let recipients = contactRecipients;
   const state = () => (r.view().campaigns ||= {});
+  const compact = createTextingCompactStatus(r, state);
   const preparation = createCampaignPreparation(r, state);
   const volunteerPicker = createVolunteerPicker(r, state);
   const outcomes = createRecipientOutcomes(r, "queue-outcome");
@@ -312,22 +314,6 @@ export function createCampaigns(r) {
       );
     }
   }
-  function campaignStatusNotice(s) {
-    return s.campaignStatusNeedsRead || s.campaignStatusMessage
-      ? notice(
-          s.campaignStatusNeedsRead
-            ? "Check the saved campaign"
-            : "Campaign status updated",
-          s.campaignStatusNeedsRead
-            ? "Refresh the saved status before taking another campaign action."
-            : s.campaignStatusMessage,
-        ) +
-          button("campaign-status-refresh", "Refresh campaign status", {
-            secondary: true,
-            disabled: r.busy(),
-          })
-      : "";
-  }
   /** Status reads can explain a refusal; they never repeat a queue allocation. */
   async function checkQueueRequest(campaign) {
     const s = state(),
@@ -418,20 +404,6 @@ export function createCampaigns(r) {
         "The saved recipient status could not be checked. Your existing assignment is kept. Choose Check saved recipient status before requesting another batch.",
       );
     }
-  }
-  function queueRequestNotice(s) {
-    return s.queueRequestNeedsRead || s.queueRequestMessage
-      ? notice(
-          s.queuePreviousCampaign
-            ? "Previous campaign needs attention"
-            : s.queueRequestNeedsRead
-              ? "Check the saved recipient request"
-              : "Recipient status checked",
-          s.queueRequestMessage ||
-            "Check the saved status before requesting another batch. Your existing recipients and message history are kept.",
-        ) +
-          `<div class="pt-actions">${s.queuePreviousCampaign ? go("send", "Review previous campaign", s.queuePreviousCampaign.campaignId, true) : ""}${button("queue-check-request", "Check saved recipient status", { secondary: true, disabled: r.busy() })}</div>`
-      : "";
   }
   function campaignViews(s) {
     return `<div class="pt-actions" aria-label="Campaign views">${["active", "paused", "archived"].map((value) => button("campaigns-view", value[0].toUpperCase() + value.slice(1), { value, secondary: value !== (s.listView || "active"), disabled: r.busy() })).join("")}</div><p class="pt-muted">${s.listView === "archived" ? "Archived campaigns keep their messages, results and history." : s.listView === "paused" ? "Paused campaigns keep their history and can be resumed when ready." : "Active campaigns and drafts ready for your next step."}</p>`;
@@ -551,15 +523,84 @@ export function createCampaigns(r) {
           ].includes(item.state)),
     );
   function queue(s) {
+    const outcome = outcomes.render();
+    if (s.campaign && outcome)
+      return compact.render({
+        section: "send",
+        body: outcome,
+        primary: button("queue-outcome-close", "Back to messages", {
+          secondary: true,
+          disabled: r.busy(),
+        }),
+        caption: "Recording an outcome does not send a message.",
+        details:
+          "<p>Your saved recipient and sending history stay unchanged.</p>",
+      });
     return s.campaign
-      ? queueRequestNotice(s) +
-          renderTextingQueue(
-            s,
-            s.queueRequestNeedsRead ? { ...r, busy: () => true } : r,
-            queueNeedsReview,
-            outcomes,
-          )
+      ? renderTextingQueue(
+          s,
+          s.queueRequestNeedsRead ? { ...r, busy: () => true } : r,
+          queueNeedsReview,
+          outcomes,
+          compact,
+        )
       : head("TEXTING", "Choose a campaign") + listCards(s);
+  }
+  function renderCompactCampaign(s) {
+    const c = s.campaign,
+      manage = r.can("createCampaigns"),
+      image = mediaData(s.media),
+      disabled = r.busy() || s.campaignStatusNeedsRead;
+    let primary = "";
+    if (c.canFetchQueue && r.can("manualQueue"))
+      primary = go(
+        "send",
+        c.queueRecoveryRequired ? "Review held recipients" : "Start texting",
+        c.campaignId,
+      );
+    else if (
+      manage &&
+      c.canActivate &&
+      (!c.mediaId || (c.mediaReady === true && !s.mediaNeedsRead))
+    )
+      primary = button(
+        "transition-activate",
+        c.status === "paused" ? "Resume campaign" : "Open campaign",
+        { disabled },
+      );
+    else if (
+      manage &&
+      ["draft", "prepared"].includes(c.status) &&
+      !campaignPreparationPending(c)
+    )
+      primary = button("transition-prepare", "Prepare selected recipients", {
+        disabled,
+      });
+    else if (campaignPreparationPending(c))
+      primary = button("campaign-refresh", "Check preparation", {
+        disabled: r.busy(),
+      });
+    else
+      primary = button("compact-panel", "Review campaign details", {
+        value: "campaign",
+        secondary: true,
+      });
+    return compact.render({
+      section: "campaigns",
+      body: `<div class="pt-compact-filter"><strong>Your message</strong><span>Saved campaign</span></div><article class="pt-compact-message"><div class="pt-compact-message-head"><span class="pt-compact-avatar" aria-hidden="true">${e((c.name || "C").slice(0, 2))}</span><div><strong>Message preview</strong><small>Personalization is applied per recipient</small></div></div><div class="pt-compact-message-body">${image ? `<img src="${e(image)}" alt="Saved campaign attachment">` : ""}<p>${e(c.templateText || "Message not yet prepared")}</p></div></article><div class="pt-compact-under"><span>${e(label(c.status))}</span>${button("compact-panel", "Message details", { value: "campaign", secondary: true })}</div>`,
+      primary,
+      details:
+        campaignDetail(s) +
+        management.render() +
+        additions.overview() +
+        campaignHours(s),
+      activity:
+        renderTextingReport(s.reports?.[c.campaignId]) +
+        (r.can("readReporting")
+          ? go("results", "View campaign history", c.campaignId, true)
+          : ""),
+      more: `${manage && ["draft", "prepared"].includes(c.status) ? button("campaign-edit", "Edit message", { secondary: true }) : ""}${manage && c.status === "active" ? button("compact-panel", "Pause campaign", { value: "pause", secondary: true, disabled }) : ""}${manage && c.status !== "archived" ? button("transition-archive", "Close & archive", { secondary: true, disabled }) : ""}`,
+    });
   }
   function render(section) {
     persistDraft();
@@ -579,14 +620,7 @@ export function createCampaigns(r) {
       (!s.queue || s.queue.state !== "preparing")
     )
       return completion.finish();
-    if (section === "send")
-      return (
-        queue(s) +
-        (r.can("readReporting")
-          ? `<section class="pt-card">${go("results", "Sent history", s.campaign.campaignId, true)}</section>`
-          : "") +
-        outcomes.render()
-      );
+    if (section === "send") return queue(s);
     if (section === "results") {
       const c = s.campaign;
       if (!c)
@@ -638,20 +672,7 @@ export function createCampaigns(r) {
               ? recipientStep(s)
               : draftForm(s))
         : notice("Campaign editing is restricted");
-    return s.campaign
-      ? head(
-          "CAMPAIGNS",
-          s.campaign.name,
-          label(s.campaign.status),
-          go("campaigns", "All campaigns", "", true),
-        ) +
-          campaignStatusNotice(s) +
-          renderTextingReport(s.reports?.[s.campaign.campaignId]) +
-          campaignDetail(s) +
-          management.render() +
-          additions.overview() +
-          campaignHours(s)
-      : "";
+    return s.campaign ? renderCompactCampaign(s) : "";
   }
   function readDraft(form) {
     const d = new FormData(form),
@@ -1541,6 +1562,7 @@ export function createCampaigns(r) {
     clearStoredDraft: () => draftStore.clear(),
     avatarError: volunteerPicker.avatarError,
     localAction(name, value, target) {
+      if (compact.localAction(name, value, target)) return true;
       if (completion.localAction(name, value)) return true;
       if (name === "queue-folder" && ["sent", "to-send"].includes(value)) {
         state().queueFolder = value;
@@ -1553,6 +1575,7 @@ export function createCampaigns(r) {
       return recipients.localAction?.(name, value, target) || false;
     },
     dispose() {
+      compact.dispose();
       completion.dispose();
       reporting.dispose();
       preparation.dispose();
