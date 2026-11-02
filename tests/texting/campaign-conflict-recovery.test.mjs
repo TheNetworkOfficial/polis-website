@@ -20,7 +20,7 @@ const campaign = (extra = {}) => ({
   mediaId: null,
   ...extra,
 });
-function fixture(t, handler, section = "campaigns") {
+function fixture(t, handler, section = "campaigns", extraCapabilities = []) {
   const priorWindow = globalThis.window;
   globalThis.window = { confirm: () => true };
   t.after(() => {
@@ -49,9 +49,18 @@ function fixture(t, handler, section = "campaigns") {
       if (!current) throw new Error("Workspace changed");
     },
     can: (name) =>
-      ["createCampaigns", "manualQueue", "queueStatus"].includes(name),
+      [
+        "createCampaigns",
+        "manualQueue",
+        "queueStatus",
+        ...extraCapabilities,
+      ].includes(name),
     busy: () => false,
-    workspace: () => ({ canSend: true }),
+    workspace: () => ({
+      contractVersion: 2,
+      canSend: true,
+      capabilities: { manualQueue: true },
+    }),
     billing: () => ({ sendingBlocked: false }),
     contactApi: { invalidate() {} },
     changed() {},
@@ -62,13 +71,50 @@ function fixture(t, handler, section = "campaigns") {
     toast: (message) => toasts.push(message),
     navigate() {},
     api: async (path, body, method) => {
+      const wireMethod = body === undefined ? "GET" : method || "POST";
       calls.push({
         path,
         body,
-        method: body === undefined ? "GET" : method || "POST",
+        method: wireMethod,
       });
-      if (path.endsWith("/texter/ensure"))
+      if (path === "/texter/ensure") {
+        assert.equal(wireMethod, "POST");
+        assert.deepEqual(body, { campaignId: "campaign-one" });
         return { texter: { state: "ready" } };
+      }
+      if (body !== undefined) {
+        assert.equal(
+          wireMethod,
+          "POST",
+          "recovery must never change the mutation method",
+        );
+        assert.equal(
+          path,
+          section === "send"
+            ? "/campaigns/campaign-one/queue"
+            : "/campaigns/campaign-one/transition",
+          "a different mutation cannot masquerade as the refused campaign/queue request",
+        );
+        if (section === "campaigns")
+          assert.deepEqual(body, { expectedRevision: 3, action: "activate" });
+        else
+          assert.ok(
+            Object.keys(body).every((key) =>
+              ["allocationId", "sessionId"].includes(key),
+            ),
+          );
+      } else {
+        assert.equal(wireMethod, "GET");
+        assert.ok(
+          [
+            "/campaigns/campaign-one",
+            "/campaigns/campaign-one/queue",
+            "/campaigns/campaign-one/recipient-batches?limit=20",
+            "/campaigns/previous-campaign",
+          ].includes(path),
+          `unexpected recovery read: ${path}`,
+        );
+      }
       return handler({
         path,
         body,
@@ -95,6 +141,96 @@ const emptyStatus = (extra = {}) => ({
   parked: false,
   allocationToken: null,
   ...extra,
+});
+
+test("a successful fresh queue request renders its saved recipients without sending or reallocating", async (t) => {
+  const item = {
+    itemId: "ready-recipient",
+    state: "awaiting_confirmation",
+    expiresAtMs: Date.now() + 60000,
+    humanConfirmation: { recordId: "exact-saved-receipt" },
+    blockedReasons: [],
+    preview: {
+      contactPhone: "+12025550124",
+      contactDisplayName: "Example Recipient",
+      message: "Example organization says hello. Reply STOP.",
+    },
+  };
+  const queue = {
+    campaignId: "campaign-one",
+    state: "held",
+    allocationId: "a1111111-1111-4111-8111-111111111111",
+    items: [item],
+  };
+  const h = fixture(
+    t,
+    ({ path, body }) => {
+      assert.equal(path, "/campaigns/campaign-one/queue");
+      assert.deepEqual(body, {});
+      return structuredClone(queue);
+    },
+    "send",
+  );
+  h.state.campaign = campaign({ status: "active", canFetchQueue: true });
+  await h.page.action("queue-load");
+  assert.deepEqual(h.state.queue, queue);
+  const html = h.page.render("send");
+  assert.match(html, /Example Recipient/);
+  assert.match(html, /Example organization says hello/);
+  const sendButton = html.match(
+    /<button[^>]*data-workspace-action="queue-confirm"[^>]*>/,
+  )?.[0];
+  assert.ok(sendButton);
+  assert.doesNotMatch(sendButton, /disabled/);
+  assert.deepEqual(
+    h.calls.map(({ path, method }) => ({ path, method })),
+    [
+      { path: "/texter/ensure", method: "POST" },
+      { path: "/campaigns/campaign-one/queue", method: "POST" },
+    ],
+  );
+  assert.equal(h.state.queueRequestNeedsRead, false);
+  assert.equal(h.holds.size, 0);
+});
+
+test("successful activation observes the active campaign and reads its recipient additions without another mutation", async (t) => {
+  const active = campaign({
+    revision: 4,
+    status: "active",
+    canActivate: false,
+    canFetchQueue: true,
+  });
+  const h = fixture(
+    t,
+    ({ path, body }) => {
+      if (path === "/campaigns/campaign-one/transition") {
+        assert.deepEqual(body, { expectedRevision: 3, action: "activate" });
+        return { campaign: structuredClone(active) };
+      }
+      assert.equal(path, "/campaigns/campaign-one/recipient-batches?limit=20");
+      assert.equal(body, undefined);
+      return { items: [], nextCursor: null };
+    },
+    "campaigns",
+    ["appendCampaignRecipients"],
+  );
+  await h.page.action("transition-activate");
+  assert.deepEqual(h.state.campaign, active);
+  assert.equal(h.state.preparingRecipients, false);
+  assert.deepEqual(h.state.additionBatches, []);
+  assert.equal(h.state.additionError, "");
+  assert.equal(h.state.draft, h.draft);
+  assert.match(h.page.render("campaigns"), /Start texting/);
+  assert.deepEqual(
+    h.calls.map(({ path, method }) => ({ path, method })),
+    [
+      { path: "/campaigns/campaign-one/transition", method: "POST" },
+      {
+        path: "/campaigns/campaign-one/recipient-batches?limit=20",
+        method: "GET",
+      },
+    ],
+  );
 });
 
 for (const code of [
