@@ -739,3 +739,124 @@
     flex: 1;
   }
 }
+.organization-join {
+  display: grid;
+  gap: 20px;
+}
+
+.organization-join__directory,
+.organization-join__form {
+  display: grid;
+  gap: 12px;
+  max-width: 42rem;
+}
+
+.organization-join :is(h2, p, ul) {
+  margin: 0;
+}
+
+.organization-join h2 {
+  font-size: 1.125rem;
+}
+
+.organization-join__directory ul {
+  padding: 0;
+  list-style: none;
+}
+
+.organization-join__directory li {
+  border-block-end: 1px solid var(--coalition-border);
+}
+
+.organization-join__row {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 60px;
+  padding: 8px 4px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.organization-join__row:hover {
+  background: var(--coalition-surface);
+}
+
+.organization-join__row :is(img, .organization-join__avatar) {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.organization-join__avatar {
+  display: grid;
+  place-items: center;
+  background: var(--coalition-primary-soft);
+  font-weight: 700;
+}
+
+.organization-join__row small {
+  display: block;
+  color: var(--coalition-muted);
+}
+
+.organization-join__form label {
+  display: grid;
+  gap: 6px;
+}
+
+.organization-join__form :is(input, textarea) {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--coalition-border);
+  border-radius: 8px;
+  background: var(--coalition-surface);
+  color: inherit;
+  font: inherit;
+}
+
+.organization-join__form textarea {
+  resize: vertical;
+}
+
+.organization-join__form small,
+.organization-join__form p {
+  color: var(--coalition-muted);
+}
+
+.organization-join__code {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.coalition-application-review {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.coalition-application-review summary {
+  min-height: 44px;
+  align-content: center;
+  cursor: pointer;
+}
+
+.coalition-application-review dt {
+  font-weight: 700;
+}
+
+.coalition-application-review dd {
+  margin: 0 0 8px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

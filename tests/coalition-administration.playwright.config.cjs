@@ -3,7 +3,7 @@ const path = require("node:path");
 
 module.exports = defineConfig({
   testDir: path.join(__dirname, "administration"),
-  testMatch: ["coalition-administration.pw.spec.cjs"],
+  testMatch: ["*.pw.spec.cjs"],
   outputDir:
     process.env.POLIS_ADMINISTRATION_OUTPUT_DIR ||
     path.join(__dirname, "../test-results/administration"),
