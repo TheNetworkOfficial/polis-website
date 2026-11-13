@@ -104,6 +104,7 @@ import {
   createOrganizationSignup,
   renderOrganizationSignup,
 } from "./scripts/organizationCreationSignup.js";
+import { createOrganizationJoin } from "./scripts/organizationJoin.js";
 import { createTerritoryBuilder } from "./scripts/territoryBuilder.js";
 import {
   createTerritoryAuthoringAccess,
@@ -540,6 +541,14 @@ const organizationSignup = createOrganizationSignup({
     setItem: (key, value) => window.sessionStorage.setItem(key, value),
     removeItem: (key) => window.sessionStorage.removeItem(key),
   },
+});
+const organizationJoin = createOrganizationJoin({
+  request: fetchJsonRaw,
+  actorId: () =>
+    getCurrentRoute().routeKey === ROUTE_KEY_COALITION_JOIN
+      ? getAuthenticatedUser(state.auth.session)?.userId
+      : null,
+  changed: scheduleRender,
 });
 const organizationDashboardPage = createOrganizationDashboard({
   request: fetchJson,
@@ -4417,6 +4426,10 @@ function createCoalitionAccessWorkspaceState() {
     catalog: null,
     invitations: [],
     joinRequests: [],
+    joinRequestsActorId: "",
+    joinRequestsCursor: "",
+    joinRequestsLoading: false,
+    joinRequestsError: "",
     invitationStatus: "pending",
     requestStatus: "pending",
     inviteSearch: createCoalitionInviteSearchState(),
@@ -4680,12 +4693,8 @@ function createCoalitionProposalDraftState() {
 function createCoalitionOnboardingState() {
   return {
     actionPendingKey: "",
-    error: "",
-    createdCoalitionId: "",
-    requestedCoalitionId: "",
     imageUpload: createCoalitionImageUploadState(),
     startDraft: createCoalitionProfileDraftState(),
-    joinDraft: "",
   };
 }
 
@@ -7003,7 +7012,7 @@ function getCoalitionDocumentTitle(route = state.route) {
     return "Organization signup";
   }
   if (routeKey === ROUTE_KEY_COALITION_JOIN) {
-    return "Join Coalition";
+    return "Join an Organization";
   }
   const parts = coalitionRouteKeywordParts(route);
   if (!parts.length) {
@@ -25120,49 +25129,6 @@ async function createCoalitionFromForm(formData) {
   return organizationSignup.submit(formData);
 }
 
-async function requestJoinCoalitionFromForm(formData) {
-  const onboarding = state.pages.coalitions.onboarding;
-  if (onboarding.actionPendingKey) {
-    return false;
-  }
-  const coalitionId = normalizeString(formData.get("coalitionId"));
-  if (!coalitionId) {
-    onboarding.error = "Enter the coalition ID.";
-    showToast(onboarding.error);
-    return false;
-  }
-
-  onboarding.actionPendingKey = "join";
-  onboarding.error = "";
-  onboarding.requestedCoalitionId = "";
-  scheduleRender();
-  try {
-    await fetchJson(`/api/coalitions/${encodeURIComponent(coalitionId)}/join`, {
-      auth: true,
-      method: "POST",
-      body: {},
-    });
-    onboarding.requestedCoalitionId = coalitionId;
-    onboarding.joinDraft = "";
-    showToast("Request sent for approval.");
-    await loadCoalitionsList({ refresh: true });
-    navigateTo("/coalitions");
-    return true;
-  } catch (error) {
-    onboarding.error = settingsErrorMessage(
-      error,
-      "Join request could not be sent.",
-    );
-    showToast(onboarding.error);
-    return false;
-  } finally {
-    if (onboarding.actionPendingKey === "join") {
-      onboarding.actionPendingKey = "";
-    }
-    scheduleRender();
-  }
-}
-
 function coalitionSelectedPermissionsFromForm(formData, prefix = "permission") {
   return normalizeCoalitionPermissionsForWrite(formData.getAll(prefix));
 }
@@ -25344,87 +25310,73 @@ async function updateCoalitionMemberAccess(formData) {
   }
 }
 
-async function approveCoalitionJoinRequest(userId) {
+async function decideCoalitionJoinRequest(decision, userId, applicationId) {
   const coalitionId = currentCoalitionDetailId();
-  const normalizedUserId = normalizeString(userId);
-  if (!coalitionId || !normalizedUserId) {
-    return;
-  }
-  const workspace = coalitionWorkspace();
-  const actionKey = `request-approve:${normalizedUserId}`;
+  const detail = state.pages.coalitions.detail;
+  const workspace = detail.accessWorkspace;
+  const actor = getAuthenticatedUser(state.auth.session)?.userId;
+  const path = window.location.pathname;
+  const request = workspace.joinRequests.find(
+    (item) =>
+      item.isPending && item.userId === userId && item.applicationId === applicationId,
+  );
+  const isCurrent = () =>
+    actor &&
+    workspace.joinRequestsActorId === actor &&
+    getAuthenticatedUser(state.auth.session)?.userId === actor &&
+    currentCoalitionDetailId() === coalitionId &&
+    window.location.pathname === path &&
+    coalitionWorkspace() === workspace &&
+    canManageCoalitionJoinRequests(detail.membership) &&
+    workspace.joinRequests.includes(request);
+  if (!request || !isCurrent() || workspace.actionPendingKey) return;
+
+  const actionKey = `request-${decision}:${userId}`;
   workspace.actionPendingKey = actionKey;
   workspace.error = "";
   scheduleRender();
   try {
-    await fetchJson(
-      `/api/coalitions/${encodeURIComponent(coalitionId)}/join_requests/${encodeURIComponent(normalizedUserId)}/approve`,
-      { auth: true, method: "POST", body: {} },
+    const reason = decision === "reject"
+      ? await requestTextPrompt({
+          eyebrow: "Organization access",
+          title: "Reject join request?",
+          message: "You can include a reason for the decision.",
+          inputLabel: "Optional rejection reason",
+          confirmLabel: "Reject request",
+          icon: "close",
+          tone: "danger",
+        })
+      : "";
+    if (reason === null || !isCurrent()) return;
+    await fetchJsonRaw(
+      `/api/coalitions/${encodeURIComponent(coalitionId)}/join_requests/${encodeURIComponent(userId)}/${decision}`,
+      {
+        auth: true,
+        method: "POST",
+        body: { ...(applicationId ? { applicationId } : {}), ...(reason ? { reason } : {}) },
+        beforeDispatch: () => {
+          if (!isCurrent()) throw new Error("join_review_context_changed");
+        },
+      },
     );
-    showToast("Join request approved.");
+    if (!isCurrent()) return;
+    showToast(decision === "approve" ? "Join request approved." : "Join request rejected.");
     await loadCoalitionDetail(coalitionId, { refresh: true });
   } catch (error) {
-    workspace.error = settingsErrorMessage(
-      error,
-      "Join request could not be approved.",
-    );
-    showToast(workspace.error);
-  } finally {
-    if (workspace.actionPendingKey === actionKey) {
-      workspace.actionPendingKey = "";
+    if (!isCurrent()) return;
+    if (error.payload?.error === "join_application_state_changed") {
+      showToast("The application changed. Review the latest version before making a decision.");
+      await loadCoalitionDetail(coalitionId, { refresh: true });
+    } else {
+      workspace.error = decision === "approve" ? "Join request could not be approved." : "Join request could not be rejected.";
+      showToast(workspace.error);
     }
+  } finally {
+    if (workspace.actionPendingKey === actionKey) workspace.actionPendingKey = "";
     scheduleRender();
   }
 }
 
-async function rejectCoalitionJoinRequest(userId) {
-  const coalitionId = currentCoalitionDetailId();
-  const normalizedUserId = normalizeString(userId);
-  if (!coalitionId || !normalizedUserId) {
-    return;
-  }
-  const reason = await requestTextPrompt({
-    eyebrow: "Coalition access",
-    title: "Reject join request?",
-    message: "Add an optional note so the rejection has clear review context.",
-    inputLabel: "Optional rejection reason",
-    placeholder:
-      "Explain what needs to change before they request access again.",
-    confirmLabel: "Reject request",
-    icon: "close",
-    tone: "danger",
-  });
-  if (reason === null) {
-    return;
-  }
-  const workspace = coalitionWorkspace();
-  const actionKey = `request-reject:${normalizedUserId}`;
-  workspace.actionPendingKey = actionKey;
-  workspace.error = "";
-  scheduleRender();
-  try {
-    await fetchJson(
-      `/api/coalitions/${encodeURIComponent(coalitionId)}/join_requests/${encodeURIComponent(normalizedUserId)}/reject`,
-      {
-        auth: true,
-        method: "POST",
-        body: reason ? { reason } : {},
-      },
-    );
-    showToast("Join request rejected.");
-    await loadCoalitionDetail(coalitionId, { refresh: true });
-  } catch (error) {
-    workspace.error = settingsErrorMessage(
-      error,
-      "Join request could not be rejected.",
-    );
-    showToast(workspace.error);
-  } finally {
-    if (workspace.actionPendingKey === actionKey) {
-      workspace.actionPendingKey = "";
-    }
-    scheduleRender();
-  }
-}
 
 async function cancelCoalitionInvitation(userId) {
   const coalitionId = currentCoalitionDetailId();
@@ -35377,6 +35329,8 @@ function normalizeCoalitionJoinRequest(raw = {}) {
     ) || "Member";
   return {
     userId: normalizeString(raw.userId || raw.id) || "unknown",
+    applicationId: normalizeString(raw.applicationId),
+    application: raw.application || null,
     status,
     origin,
     isInvite: origin === "admin_invite",
@@ -37122,6 +37076,12 @@ async function loadCoalitionDetail(coalitionId, { refresh = false } = {}) {
   }
   detail.loading = true;
   detail.accessWorkspace.loading = true;
+  const reviewWorkspace = detail.accessWorkspace;
+  const reviewActor = getAuthenticatedUser(state.auth.session)?.userId;
+  reviewWorkspace.joinRequests = [];
+  reviewWorkspace.joinRequestsActorId = "";
+  reviewWorkspace.joinRequestsCursor = "";
+  reviewWorkspace.joinRequestsError = "";
   detail.error = "";
   detail.accessWorkspace.error = "";
   scheduleRender();
@@ -37140,7 +37100,7 @@ async function loadCoalitionDetail(coalitionId, { refresh = false } = {}) {
       `/api/coalitions/${encodedId}/invitations?status=${encodeURIComponent(detail.accessWorkspace.invitationStatus || "pending")}`,
       { auth: true },
     ),
-    joinRequests: fetchJson(
+    joinRequests: fetchJsonRaw(
       `/api/coalitions/${encodedId}/join_requests?status=${encodeURIComponent(detail.accessWorkspace.requestStatus || "pending")}`,
       { auth: true },
     ),
@@ -37207,11 +37167,23 @@ async function loadCoalitionDetail(coalitionId, { refresh = false } = {}) {
       ["items", "invitations", "requests"],
     ).map(normalizeCoalitionJoinRequest);
   }
-  if (byKey.joinRequests.status === "fulfilled") {
-    detail.accessWorkspace.joinRequests = readArrayPayload(
-      byKey.joinRequests.value,
-      ["items", "requests", "joinRequests"],
-    ).map(normalizeCoalitionJoinRequest);
+  if (
+    reviewActor &&
+    getAuthenticatedUser(state.auth.session)?.userId === reviewActor &&
+    currentCoalitionDetailId() === normalizedCoalitionId &&
+    detail.accessWorkspace === reviewWorkspace &&
+    canManageCoalitionJoinRequests(detail.membership)
+  ) {
+    reviewWorkspace.joinRequestsActorId = reviewActor;
+    if (byKey.joinRequests.status === "fulfilled") {
+      reviewWorkspace.joinRequests = readArrayPayload(
+        byKey.joinRequests.value,
+        ["items", "requests", "joinRequests"],
+      ).map(normalizeCoalitionJoinRequest);
+      reviewWorkspace.joinRequestsCursor = normalizeString(byKey.joinRequests.value?.nextCursor);
+    } else {
+      reviewWorkspace.joinRequestsError = "Could not load join requests. Try again.";
+    }
   }
   if (byKey.missions.status === "fulfilled") {
     detail.missions = readArrayPayload(byKey.missions.value, [
@@ -64013,6 +63985,8 @@ async function loadCurrentRoute({ refresh = false } = {}) {
   );
   if (route.routeKey !== ROUTE_KEY_COALITION_START || !state.auth.session)
     organizationSignup.reset();
+  if (route.routeKey !== ROUTE_KEY_COALITION_JOIN || !state.auth.session)
+    organizationJoin.reset();
   if (!currentOrganizationDashboardContext()) organizationDashboardPage.reset();
   if (route.routeKey !== "organization-ballot-chaser") ballotChaserPage.reset();
   state.renderError = "";
@@ -64261,10 +64235,12 @@ async function loadCurrentRoute({ refresh = false } = {}) {
     await organizationSignup.load({ force: refresh });
     return;
   }
+  if (routeKey === ROUTE_KEY_COALITION_JOIN) {
+    await organizationJoin.loadDirectory({ refresh });
+    return;
+  }
   if (
     routeKey === ROUTE_KEY_COALITIONS ||
-    routeKey === ROUTE_KEY_COALITION_START ||
-    routeKey === ROUTE_KEY_COALITION_JOIN ||
     routeKey === ROUTE_KEY_COALITION_DETAIL ||
     routeKey === ROUTE_KEY_COALITION_SECTION
   ) {
@@ -88142,115 +88118,6 @@ function renderCoalitionImageUploadField(
   </section>`;
 }
 
-function renderCoalitionOnboardingAccessList() {
-  const items = state.pages.coalitions.list.items.slice(0, 4);
-  if (!items.length) {
-    return `<div class="shared-coalition-onboarding-empty">No coalition memberships are attached to this account yet.</div>`;
-  }
-  return `<div class="shared-coalition-onboarding-list">
-    ${items
-      .filter((item) => !item.hidden)
-      .map((item) => {
-        const status = item.membership.isPending
-          ? "Pending"
-          : item.membership.isActive
-            ? "Active"
-            : humanizeLabel(item.membership.status);
-        return `<button class="shared-coalition-onboarding-row" type="button" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(item.coalition.coalitionId))}">
-          ${renderCoalitionAvatar(item.coalition, "shared-coalition-avatar--small")}
-          <span>
-            <strong>${escapeHtml(item.coalition.name)}</strong>
-            <em>${escapeHtml(`${status} - ${item.membership.roleLabel}`)}</em>
-          </span>
-        </button>`;
-      })
-      .join("")}
-  </div>`;
-}
-
-function renderCoalitionOnboardingChecklist(mode) {
-  const items =
-    mode === "start"
-      ? [
-          ["Profile", "Image, name, type, and public contact details."],
-          ["Compliance", "PAC decision and FEC number when required."],
-          [
-            "Workspace",
-            "Rooms, members, missions, voter tools, and governance.",
-          ],
-        ]
-      : [
-          ["Coalition ID", "Request the exact workspace ID from an admin."],
-          ["Approval", "Admins approve requests before tools unlock."],
-          ["Workspace", "Rooms, member access, missions, and coalition tools."],
-        ];
-  return `<section class="shared-coalition-panel shared-coalition-onboarding-checklist">
-    <div class="shared-coalition-panel__header">
-      <div>
-        <h2>${mode === "start" ? "Creation path" : "Access path"}</h2>
-        <p>${mode === "start" ? "Set the public profile first, then open the workspace tools." : "Send the request, then return here after approval."}</p>
-      </div>
-    </div>
-    <ol>
-      ${items
-        .map(
-          ([label, copy], index) => `<li>
-            <span>${escapeHtml(String(index + 1))}</span>
-            <div>
-              <strong>${escapeHtml(label)}</strong>
-              <em>${escapeHtml(copy)}</em>
-            </div>
-          </li>`,
-        )
-        .join("")}
-    </ol>
-  </section>`;
-}
-
-function renderCoalitionOnboardingSide(mode) {
-  const onboarding = state.pages.coalitions.onboarding;
-  const requestedId = normalizeString(onboarding.requestedCoalitionId);
-  const createdId = normalizeString(onboarding.createdCoalitionId);
-  return `<aside class="shared-coalition-onboarding-side">
-    ${
-      requestedId && mode === "join"
-        ? `<div class="shared-coalition-onboarding-status">
-            <strong>Request sent for approval</strong>
-            <span>${escapeHtml(requestedId)}</span>
-            <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="/coalitions">Review memberships</button>
-          </div>`
-        : ""
-    }
-    ${
-      createdId && mode === "start"
-        ? `<div class="shared-coalition-onboarding-status">
-            <strong>Coalition created</strong>
-            <span>${escapeHtml(createdId)}</span>
-            <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(createdId))}">Open workspace</button>
-          </div>`
-        : ""
-    }
-    <details class="coalition-ui-disclosure"><summary>Setup guide</summary>${renderCoalitionOnboardingChecklist(mode)}</details>
-    <section class="shared-coalition-panel">
-      <div class="shared-coalition-panel__header">
-        <div>
-          <h2>Your coalitions</h2>
-          <p>Open an existing workspace or keep building this one.</p>
-        </div>
-      </div>
-      ${renderCoalitionOnboardingAccessList()}
-      <div class="shared-card__actions">
-        <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/coalitions">All coalitions</button>
-        ${
-          mode === "start"
-            ? `<button class="shared-feed-chip" type="button" data-action="navigate" data-route="/coalitions/join">Join one</button>`
-            : ``
-        }
-      </div>
-    </section>
-  </aside>`;
-}
-
 function renderCoalitionStartPage() {
   const view = organizationSignup.state();
   const onboarding = state.pages.coalitions.onboarding;
@@ -88273,52 +88140,82 @@ function renderCoalitionStartPage() {
   )}</div></section>`;
 }
 
-function renderCoalitionJoinPage() {
-  const onboarding = state.pages.coalitions.onboarding;
-  const pending = onboarding.actionPendingKey === "join";
-  const coalitionIdValue = normalizeString(onboarding.joinDraft);
-  return `<section class="shared-page shared-coalition-workspace">
-    ${renderTopChrome()}
-    <div class="shared-page__content">
-      <div class="shared-page__back-row">
-        <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/coalitions">All coalitions</button>
-      </div>
-      <div class="shared-page__header shared-coalition-onboarding-header">
-        <div>
-          <h1>Join coalition</h1>
-          <p>Request access with a coalition ID and return to the full coalition workspace after approval.</p>
-        </div>
-        <div class="shared-card__actions">
+function renderOrganizationJoinDirectory(view) {
+  const disabled = disabledAttr(Boolean(view?.busy));
+  return `<section class="organization-join__directory" aria-labelledby="organization-join-public">
+    <h2 id="organization-join-public">Public organizations</h2>
+    ${view?.directoryError ? `<p class="shared-page__error" role="alert">${escapeHtml(view.directoryError)}</p>` : ""}
+    ${view?.items.length ? `<ul>${view.items.map((item) => {
+      const image = /^https?:\/\//iu.test(item.imageUrl || "") ? item.imageUrl : "";
+      const name = item.name || "Organization";
+      const kind = item.orgKind ? humanizeLabel(item.orgKind) : "";
+      const count = Number.isInteger(item.memberCount)
+        ? `${formatCount(item.memberCount)} ${item.memberCount === 1 ? "member" : "members"}`
+        : "";
+      return `<li>
+        <button class="organization-join__row" type="button" data-action="organization-join-open" data-coalition-id="${escapeHtml(item.coalitionId)}"${disabled}>
+          ${image ? `<img src="${escapeHtml(image)}" alt="" loading="lazy" />` : `<span class="organization-join__avatar" aria-hidden="true">${escapeHtml([...name][0])}</span>`}
+          <span><strong>${escapeHtml(name)}</strong><small>${escapeHtml([kind, count].filter(Boolean).join(" · "))}</small></span>
+          <span class="organization-join__chevron" aria-hidden="true">${renderIcon("arrowRight")}</span>
+        </button>
+      </li>`;
+    }).join("")}</ul>` : view?.loaded ? '<p>No public organizations are listed.</p>' : ""}
+    ${view?.loading ? '<p role="status">Loading organizations…</p>' : view?.directoryError || view?.cursor ? `<button class="shared-feed-chip" type="button" data-action="organization-join-load" data-more="${Boolean(view.cursor)}"${disabled}>${view.directoryError ? "Retry" : "Load more"}</button>` : ""}
+  </section>
+  <form class="organization-join__form" data-route-form="coalition-join-code">
+    <h2>Have a private code?</h2>
+    <label for="organization-join-code">Organization code</label>
+    <div class="organization-join__code">
+      <input id="organization-join-code" name="code" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="64" value="${escapeHtml(view?.code || "")}" required${disabled} />
+      <button class="shared-feed-chip" type="submit"${disabled}>Find organization</button>
+    </div>
+  </form>`;
+}
 
-          <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/messages">Messages</button>
-        </div>
-      </div>
-      ${onboarding.error ? `<div class="shared-page__error">${escapeHtml(onboarding.error)}</div>` : ""}
-      <div class="shared-coalition-onboarding shared-coalition-onboarding--join">
-        <form class="shared-coalition-join-form shared-coalition-panel" data-route-form="coalition-join-request">
-          <div class="shared-coalition-panel__header">
-            <div>
-              <h2>Request membership</h2>
-              <p>The coalition admin will review the request before workspace access opens.</p>
-            </div>
-          </div>
-          <label>
-            <span>Coalition ID</span>
-            <input name="coalitionId" placeholder="coalition-id" autocomplete="off" value="${escapeHtml(coalitionIdValue)}" required${disabledAttr(pending)} />
-          </label>
-          <div class="shared-coalition-join-help">
-            <span>${renderIcon("messages")}</span>
-            <div>
-              <strong>Ask a coalition admin for the ID.</strong>
-              <em>After approval, the web workspace unlocks the same rooms, member access, missions, voter map, calendar, governance, and amplify areas.</em>
-            </div>
-          </div>
-          <div class="shared-card__actions">
-            <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabledAttr(pending)}>${pending ? "Sending..." : "Send request"}</button>
-          </div>
-        </form>
-        ${renderCoalitionOnboardingSide("join")}
-      </div>
+function renderOrganizationJoinApplication(view) {
+  const { form, draft, busy } = view;
+  const status = {
+    pending: "Your application is awaiting review.",
+    invited: "You already have an invitation from this organization.",
+    member: "You are already a member of this organization.",
+  }[form.requestStatus];
+  const name = escapeHtml(form.organization.name || "Organization");
+  const disabled = disabledAttr(Boolean(busy));
+  const back = `<button class="shared-feed-chip" type="button" data-action="organization-join-close"${disabled}>Back to organizations</button>`;
+  if (status) {
+    return `<section class="organization-join__form"><h2>${name}</h2><p role="status">${status}</p>${back}</section>`;
+  }
+  return `<form class="organization-join__form" data-route-form="coalition-join-application">
+    <h2>${name}</h2>
+    <p>Submit an application for an administrator to review.</p>
+    <label>Full name <input name="fullName" autocomplete="name" maxlength="120" required value="${escapeHtml(draft.fullName)}"${disabled} /></label>
+    <label>Email <input name="email" type="email" autocomplete="email" maxlength="254" required value="${escapeHtml(draft.email)}"${disabled} /></label>
+    <label>Why do you want to join? <textarea name="reason" maxlength="2000" rows="4" required${disabled}>${escapeHtml(draft.reason)}</textarea></label>
+    ${form.questions.map(({ id, label, required }) => `<label>
+      ${escapeHtml(label)}${required ? "" : ' <small>(optional)</small>'}
+      <textarea name="question:${escapeHtml(id)}" rows="3" maxlength="1000"${required ? " required" : ""}${disabled}>${escapeHtml(draft.answers.get(id) || "")}</textarea>
+    </label>`).join("")}
+    <p>Polis stores this application with your account and shares your answers with authorized reviewers at ${name}. <a href="/privacy-policy#organization-membership-applications">Privacy Policy</a></p>
+    <div class="shared-card__actions">
+      <button class="shared-feed-chip shared-feed-chip--primary" type="submit"${disabled}>${busy ? "Submitting…" : "Submit application"}</button>
+      ${back}
+    </div>
+  </form>`;
+}
+
+function renderCoalitionJoinPage() {
+  const view = organizationJoin.state();
+  return `<section class="shared-page shared-coalition-workspace">${renderTopChrome()}
+    <div class="shared-page__content organization-join">
+      <div class="shared-page__back-row"><button class="shared-feed-chip" type="button" data-action="navigate" data-route="/coalitions">Your organizations</button></div>
+      <div class="shared-page__header"><div>
+        <h1>Join an organization</h1>
+        <p>Apply here in your browser or use an updated Polis app that supports membership applications.</p>
+      </div></div>
+      ${view?.error ? `<p class="shared-page__error" role="alert">${escapeHtml(view.error)}</p>` : ""}
+      ${view?.notice ? `<p role="status">${escapeHtml(view.notice)}</p>` : ""}
+      ${view?.busy === "opening" ? '<p role="status">Opening application…</p>' : ""}
+      ${view?.form ? renderOrganizationJoinApplication(view) : renderOrganizationJoinDirectory(view)}
     </div>
   </section>`;
 }
@@ -88862,7 +88759,7 @@ function renderCoalitionsRootFallback() {
       { value: "Rooms + votes", label: "web surface" },
     ],
     actions: [
-      { label: "Join coalition", route: "/coalitions/join" },
+      { label: "Join an organization", route: "/coalitions/join" },
       { label: "Messages", route: "/messages" },
     ],
     groups: [
@@ -88920,7 +88817,7 @@ function renderCoalitionsRootEmpty() {
     </div>
     <div class="shared-card__actions">
 
-      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/coalitions/join">Join coalition</button>
+      <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/coalitions/join">Join an organization</button>
       <button class="shared-feed-chip" type="button" data-action="navigate" data-route="/messages">Open messages</button>
     </div>
   </section>`;
@@ -88938,7 +88835,7 @@ function renderCoalitionsRootPage() {
         </div>
         <div class="shared-card__actions">
 
-          <button class="shared-feed-chip" data-action="navigate" data-route="/coalitions/join">Join coalition</button>
+          <button class="shared-feed-chip" data-action="navigate" data-route="/coalitions/join">Join an organization</button>
           <button class="shared-feed-chip" data-action="navigate" data-route="/messages">Messages</button>
         </div>
       </div>
@@ -88947,7 +88844,7 @@ function renderCoalitionsRootPage() {
         title: "Coalition access could not be loaded",
         body: "Coalition workspaces could not sync from Polis services right now.",
         secondaryRoute: "/coalitions/join",
-        secondaryLabel: "Join coalition",
+        secondaryLabel: "Join an organization",
       })}
       ${
         list.error && !list.items.length && !list.loading
@@ -89282,7 +89179,7 @@ function renderCoalitionAdminOverview(detail, coalition, membership) {
       <div><span>Profile</span><strong>${escapeHtml(canProfile ? "Can edit" : "View only")}</strong></div>
       <div><span>Members</span><strong>${escapeHtml(canMembers ? "Can manage" : "View only")}</strong></div>
       <div><span>Roles</span><strong>${escapeHtml(canRoles ? "Can manage" : "View only")}</strong></div>
-      <div><span>Pending requests</span><strong>${escapeHtml(formatCount(detail.accessWorkspace?.joinRequests?.length || 0))}</strong></div>
+      <div><span>Pending requests</span><strong>${escapeHtml(formatCount(currentCoalitionJoinRequests(detail.accessWorkspace).length))}</strong></div>
     </div>
     <div class="shared-card__actions">
       <button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="navigate" data-route="${escapeHtml(coalitionSectionPath(coalition.coalitionId, "admin/edit"))}">Edit profile</button>
@@ -89297,7 +89194,7 @@ function renderCoalitionAdminSection(detail, coalition, membership) {
   return `<div class="shared-coalition-section shared-coalition-admin">
     <div class="shared-coalition-metrics">
       ${renderCoalitionMetric("Members", formatCount(detail.members.length), "cyan")}
-      ${renderCoalitionMetric("Requests", formatCount(detail.accessWorkspace?.joinRequests?.length || 0))}
+      ${renderCoalitionMetric("Requests", formatCount(currentCoalitionJoinRequests(detail.accessWorkspace).length))}
       ${renderCoalitionMetric("Invitations", formatCount(detail.accessWorkspace?.invitations?.length || 0))}
       ${renderCoalitionMetric("Profile", canManageCoalitionProfile(membership) ? "Editable" : "View")}
     </div>
@@ -89798,6 +89695,16 @@ function renderCoalitionAccessRequestRow(
     resource.actionPendingKey === `request-approve:${request.userId}`;
   const pendingReject =
     resource.actionPendingKey === `request-reject:${request.userId}`;
+  const application = request.application;
+  const applicationFields = application
+    ? [
+        ["Full name", application.fullName],
+        ["Email", application.email],
+        ["Reason for joining", application.reason],
+        ...(application.answers || []).map((answer) => [answer.label, answer.value]),
+      ]
+    : [];
+  const decisionAttributes = `data-user-id="${escapeHtml(request.userId)}" data-application-id="${escapeHtml(request.applicationId)}"${disabledAttr(Boolean(resource.actionPendingKey))}`;
   return `<article class="shared-campaign-staff-invite-row shared-coalition-access-request-row">
     <div class="shared-campaign-staff-person">
       ${renderCoalitionAccessAvatar(request)}
@@ -89814,11 +89721,15 @@ function renderCoalitionAccessRequestRow(
       ${renderCoalitionPermissionChips(request.permissions)}
       ${
         request.isPending && canManage
-          ? `<button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="coalition-request-approve" data-user-id="${escapeHtml(request.userId)}"${disabledAttr(pendingApprove || pendingReject)}>${pendingApprove ? "Approving..." : "Approve"}</button>
-             <button class="shared-feed-chip" type="button" data-action="coalition-request-reject" data-user-id="${escapeHtml(request.userId)}"${disabledAttr(pendingApprove || pendingReject)}>${pendingReject ? "Rejecting..." : "Reject"}</button>`
+          ? `<button class="shared-feed-chip shared-feed-chip--primary" type="button" data-action="coalition-request-approve" ${decisionAttributes}>${pendingApprove ? "Approving..." : "Approve"}</button>
+             <button class="shared-feed-chip" type="button" data-action="coalition-request-reject" ${decisionAttributes}>${pendingReject ? "Rejecting..." : "Reject"}</button>`
           : ""
       }
     </div>
+    ${canManage && applicationFields.length ? `<details class="coalition-application-review">
+      <summary>View application</summary>
+      <dl>${applicationFields.map(([label, value]) => `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value || "No answer")}</dd>`).join("")}</dl>
+    </details>` : ""}
   </article>`;
 }
 
@@ -89871,6 +89782,13 @@ function renderCoalitionAccessInvitations(resource, catalog, canManage) {
 }
 
 function renderCoalitionAccessRequests(resource, catalog, canManage) {
+  if (!canManage) {
+    return '<div class="shared-page__hint">Join requests are visible to authorized reviewers.</div>';
+  }
+  const requests = currentCoalitionJoinRequests(resource);
+  const isCurrent = resource.joinRequestsActorId === getAuthenticatedUser(state.auth.session)?.userId;
+  const error = isCurrent ? resource.joinRequestsError : "";
+  const cursor = isCurrent ? resource.joinRequestsCursor : "";
   return `<article class="shared-campaign-panel shared-coalition-access-requests">
     <div class="shared-campaign-panel__header">
       <div>
@@ -89879,13 +89797,13 @@ function renderCoalitionAccessRequests(resource, catalog, canManage) {
       </div>
     </div>
     ${
-      resource.loading && !resource.joinRequests.length
-        ? '<div class="shared-page__loading">Loading requests...</div>'
+      (resource.loading || resource.joinRequestsLoading)
+        ? '<div class="shared-page__loading" role="status">Loading requests…</div>'
         : ""
     }
     ${
-      resource.joinRequests.length
-        ? `<div class="shared-campaign-staff-list">${resource.joinRequests
+      requests.length
+        ? `<div class="shared-campaign-staff-list">${requests
             .map((request) =>
               renderCoalitionAccessRequestRow(
                 request,
@@ -89895,9 +89813,64 @@ function renderCoalitionAccessRequests(resource, catalog, canManage) {
               ),
             )
             .join("")}</div>`
-        : '<div class="shared-page__empty">No pending join requests.</div>'
+        : resource.loading || resource.joinRequestsLoading || error
+          ? ""
+          : '<div class="shared-page__empty">No pending join requests.</div>'
     }
+    ${error ? `<p class="shared-page__error" role="alert">${escapeHtml(error)}</p>` : ""}
+    ${(cursor || error) && !resource.joinRequestsLoading ? `<button class="shared-feed-chip" type="button" data-action="coalition-request-load-more"${disabledAttr(Boolean(resource.actionPendingKey))}>${error ? "Retry" : "Load more requests"}</button>` : ""}
   </article>`;
+}
+
+function currentCoalitionJoinRequests(workspace) {
+  const actor = getAuthenticatedUser(state.auth.session)?.userId;
+  return actor && workspace?.joinRequestsActorId === actor
+    ? workspace.joinRequests
+    : [];
+}
+
+async function loadMoreCoalitionJoinRequests() {
+  const coalitionId = currentCoalitionDetailId();
+  const detail = state.pages.coalitions.detail;
+  const workspace = detail.accessWorkspace;
+  const actor = getAuthenticatedUser(state.auth.session)?.userId;
+  const isCurrent = () =>
+    actor &&
+    workspace.joinRequestsActorId === actor &&
+    getAuthenticatedUser(state.auth.session)?.userId === actor &&
+    currentCoalitionDetailId() === coalitionId &&
+    coalitionWorkspace() === workspace &&
+    canManageCoalitionJoinRequests(detail.membership);
+  if (!isCurrent() || workspace.joinRequestsLoading || workspace.actionPendingKey) return;
+  const params = new URLSearchParams({ status: workspace.requestStatus });
+  if (workspace.joinRequestsCursor) params.set("cursor", workspace.joinRequestsCursor);
+  workspace.joinRequestsLoading = true;
+  workspace.joinRequestsError = "";
+  scheduleRender();
+  try {
+    const payload = await fetchJsonRaw(
+      `/api/coalitions/${encodeURIComponent(coalitionId)}/join_requests?${params}`,
+      {
+        auth: true,
+        beforeDispatch: () => {
+          if (!isCurrent()) throw new Error("join_review_context_changed");
+        },
+      },
+    );
+    if (!isCurrent()) return;
+    const requests = new Map(workspace.joinRequests.map((item) => [item.userId, item]));
+    for (const item of readArrayPayload(payload, ["items", "requests", "joinRequests"])) {
+      const request = normalizeCoalitionJoinRequest(item);
+      requests.set(request.userId, request);
+    }
+    workspace.joinRequests = [...requests.values()];
+    workspace.joinRequestsCursor = normalizeString(payload.nextCursor);
+  } catch {
+    if (isCurrent()) workspace.joinRequestsError = "Could not load join requests. Try again.";
+  } finally {
+    workspace.joinRequestsLoading = false;
+    if (isCurrent()) scheduleRender();
+  }
 }
 
 function renderCoalitionMemberFilterControls(
@@ -90119,7 +90092,7 @@ function renderCoalitionMembers(detail, coalition, membership) {
   const canManageMembers = canManageCoalitionMembers(membership);
   const canManageRequests = canManageCoalitionJoinRequests(membership);
   const canManageRoles = canManageCoalitionRoles(membership, catalog);
-  const pendingRequestCount = resource.joinRequests.filter(
+  const pendingRequestCount = (canManageRequests ? currentCoalitionJoinRequests(resource) : []).filter(
     (request) => request.isPending,
   ).length;
   const pendingInviteCount = resource.invitations.filter(
@@ -132014,17 +131987,33 @@ async function handleRootClick(event) {
     return;
   }
 
-  if (action === "coalition-request-approve") {
-    approveCoalitionJoinRequest(target.getAttribute("data-user-id")).catch(
-      () => {},
+  if (action === "organization-join-open") {
+    void organizationJoin.open("directory", target.dataset.coalitionId);
+    return;
+  }
+
+  if (action === "organization-join-load") {
+    const more = target.dataset.more === "true";
+    void organizationJoin.loadDirectory({ more, refresh: !more });
+    return;
+  }
+
+  if (action === "organization-join-close") {
+    organizationJoin.close();
+    return;
+  }
+
+  if (action === "coalition-request-approve" || action === "coalition-request-reject") {
+    void decideCoalitionJoinRequest(
+      action.endsWith("-reject") ? "reject" : "approve",
+      target.dataset.userId,
+      target.dataset.applicationId,
     );
     return;
   }
 
-  if (action === "coalition-request-reject") {
-    rejectCoalitionJoinRequest(target.getAttribute("data-user-id")).catch(
-      () => {},
-    );
+  if (action === "coalition-request-load-more") {
+    void loadMoreCoalitionJoinRequests();
     return;
   }
 
@@ -135963,16 +135952,8 @@ function handleRootInput(event) {
     return;
   }
 
-  const coalitionJoinForm = event.target.closest(
-    '[data-route-form="coalition-join-request"]',
-  );
-  if (
-    coalitionJoinForm &&
-    normalizeString(event.target.name) === "coalitionId"
-  ) {
-    state.pages.coalitions.onboarding.joinDraft = normalizeString(
-      event.target.value,
-    );
+  if (event.target.closest(".organization-join__form") && event.target.name) {
+    organizationJoin.update(event.target.name, event.target.value);
     return;
   }
 
@@ -137523,8 +137504,12 @@ function handleCommentSubmit(event) {
       createCoalitionFromForm(formData).catch(() => {});
       return;
     }
-    if (formKind === "coalition-join-request") {
-      requestJoinCoalitionFromForm(formData).catch(() => {});
+    if (formKind === "coalition-join-code") {
+      void organizationJoin.open("code", formData.get("code"));
+      return;
+    }
+    if (formKind === "coalition-join-application") {
+      void organizationJoin.submit(formData);
       return;
     }
     if (formKind === "coalition-amplify-create") {
